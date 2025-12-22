@@ -1,0 +1,9 @@
+cyee/
+**/node_modules/
+**/.firebase/
+**/build/
+**/dist/
+.DS_Store
+Thumbs.db
+*.log
+**/oracleJdk-25/

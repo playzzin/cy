@@ -1,0 +1,21 @@
+[
+  {
+    "origin": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "https://cyee-9c1e4.web.app",
+      "https://cyee-9c1e4.firebaseapp.com"
+    ],
+    "method": ["GET", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Disposition",
+      "Content-Length",
+      "ETag",
+      "Cache-Control",
+      "Accept-Ranges",
+      "Range"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

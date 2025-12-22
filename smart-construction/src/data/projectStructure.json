@@ -1,0 +1,1141 @@
+{
+  "id": "src",
+  "name": "src",
+  "type": "folder",
+  "description": "폴더",
+  "children": [
+    {
+      "id": "components",
+      "name": "components",
+      "type": "folder",
+      "description": "재사용 가능한 컴포넌트들이 모여있는 폴더입니다.",
+      "children": [
+        {
+          "id": "components\\admin",
+          "name": "admin",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\admin\\UserManagement.tsx",
+              "name": "UserManagement.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\auth",
+          "name": "auth",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\auth\\Login.tsx",
+              "name": "Login.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\auth\\PrivateRoute.tsx",
+              "name": "PrivateRoute.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\auth\\ProfileSetup.tsx",
+              "name": "ProfileSetup.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\common",
+          "name": "common",
+          "type": "folder",
+          "description": "폴더",
+          "children": []
+        },
+        {
+          "id": "components\\company",
+          "name": "company",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\company\\CompanyForm.tsx",
+              "name": "CompanyForm.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\company\\CompanyManagement.tsx",
+              "name": "CompanyManagement.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\company\\CompanyModal.tsx",
+              "name": "CompanyModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\company\\CompanyTable.tsx",
+              "name": "CompanyTable.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\grid",
+          "name": "grid",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\grid\\ExcelGrid.tsx",
+              "name": "ExcelGrid.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\layout",
+          "name": "layout",
+          "type": "folder",
+          "description": "페이지 레이아웃 관련 컴포넌트입니다.",
+          "children": [
+            {
+              "id": "components\\layout\\AdminPanel.tsx",
+              "name": "AdminPanel.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\BottomPanel.tsx",
+              "name": "BottomPanel.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\DashboardLayout.css",
+              "name": "DashboardLayout.css",
+              "type": "file",
+              "description": "스타일 시트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\DashboardLayout.tsx",
+              "name": "DashboardLayout.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\Header.tsx",
+              "name": "Header.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\RightPanel.tsx",
+              "name": "RightPanel.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\Sidebar.tsx",
+              "name": "Sidebar.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\layout\\SubmenuPanel.tsx",
+              "name": "SubmenuPanel.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\manpower",
+          "name": "manpower",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\manpower\\AccountLinkingModal.tsx",
+              "name": "AccountLinkingModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\BulkEditTeamModal.tsx",
+              "name": "BulkEditTeamModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\BulkEditWorkerModal.tsx",
+              "name": "BulkEditWorkerModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\BulkProgressModal.tsx",
+              "name": "BulkProgressModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\BulkUpdateModal.tsx",
+              "name": "BulkUpdateModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\ColumnConfig.tsx",
+              "name": "ColumnConfig.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\SettingsModal.tsx",
+              "name": "SettingsModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\SiteForm.tsx",
+              "name": "SiteForm.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\SiteManagement.tsx",
+              "name": "SiteManagement.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\TeamForm.tsx",
+              "name": "TeamForm.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\TeamManagement.tsx",
+              "name": "TeamManagement.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\WorkerForm.tsx",
+              "name": "WorkerForm.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\WorkerManagement.tsx",
+              "name": "WorkerManagement.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "components\\manpower\\WorkerTable.tsx",
+              "name": "WorkerTable.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "components\\widgets",
+          "name": "widgets",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "components\\widgets\\WeatherWidget.tsx",
+              "name": "WeatherWidget.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "config",
+      "name": "config",
+      "type": "folder",
+      "description": "폴더",
+      "children": [
+        {
+          "id": "config\\firebase.js",
+          "name": "firebase.js",
+          "type": "file",
+          "description": "파일"
+        },
+        {
+          "id": "config\\firebase.ts",
+          "name": "firebase.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "contexts",
+      "name": "contexts",
+      "type": "folder",
+      "description": "폴더",
+      "children": [
+        {
+          "id": "contexts\\AuthContext.tsx",
+          "name": "AuthContext.tsx",
+          "type": "file",
+          "description": "React 컴포넌트 파일입니다."
+        },
+        {
+          "id": "contexts\\MenuContext.tsx",
+          "name": "MenuContext.tsx",
+          "type": "file",
+          "description": "React 컴포넌트 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "firebase",
+      "name": "firebase",
+      "type": "folder",
+      "description": "폴더",
+      "children": [
+        {
+          "id": "firebase\\config.ts",
+          "name": "config.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "hooks",
+      "name": "hooks",
+      "type": "folder",
+      "description": "커스텀 React Hooks가 있습니다.",
+      "children": [
+        {
+          "id": "hooks\\useMenu.ts",
+          "name": "useMenu.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "pages",
+      "name": "pages",
+      "type": "folder",
+      "description": "애플리케이션의 각 페이지 컴포넌트들이 있습니다.",
+      "children": [
+        {
+          "id": "pages\\admin",
+          "name": "admin",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\admin\\ModuleStructureViewer.tsx",
+              "name": "ModuleStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\admin\\ProjectFileStructureViewer.tsx",
+              "name": "ProjectFileStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\assignment",
+          "name": "assignment",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\assignment\\CompanyAssignmentPage.tsx",
+              "name": "CompanyAssignmentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\assignment\\DailyDispatchPage.tsx",
+              "name": "DailyDispatchPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\assignment\\SiteAssignmentPage.tsx",
+              "name": "SiteAssignmentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\assignment\\SupportAssignmentPage.tsx",
+              "name": "SupportAssignmentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\assignment\\TeamAssignmentPage.tsx",
+              "name": "TeamAssignmentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\company",
+          "name": "company",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\company\\CompanyManagementPage.tsx",
+              "name": "CompanyManagementPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\company\\CompanyRegistrationPage.tsx",
+              "name": "CompanyRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\dashboard",
+          "name": "dashboard",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\dashboard\\IntegratedStatusBoard.tsx",
+              "name": "IntegratedStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\IntegratedSupportStatusBoard.tsx",
+              "name": "IntegratedSupportStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\SiteStatusBoard.tsx",
+              "name": "SiteStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\SupportOutStatusBoard.tsx",
+              "name": "SupportOutStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\SupportTeamStatusBoard.tsx",
+              "name": "SupportTeamStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\TeamStatusBoard.tsx",
+              "name": "TeamStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\dashboard\\WhiteboardStatusBoard.tsx",
+              "name": "WhiteboardStatusBoard.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\database",
+          "name": "database",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\database\\FirestoreStructureViewer.tsx",
+              "name": "FirestoreStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\database\\ManpowerDatabase.tsx",
+              "name": "ManpowerDatabase.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\database\\SmartCompanyRegistrationPage.tsx",
+              "name": "SmartCompanyRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\database\\WorkerDatabaseInput.tsx",
+              "name": "WorkerDatabaseInput.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\hr",
+          "name": "hr",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\hr\\PositionAssignmentPage.tsx",
+              "name": "PositionAssignmentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\hr\\PositionManagementPage.tsx",
+              "name": "PositionManagementPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\hr\\RateChangePage.tsx",
+              "name": "RateChangePage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\jeonkuk",
+          "name": "jeonkuk",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\jeonkuk\\StatusManagementPage.tsx",
+              "name": "StatusManagementPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\jeonkuk\\TestDataGeneratorPage.tsx",
+              "name": "TestDataGeneratorPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\jeonkuk\\TotalLaborHistoryPage.tsx",
+              "name": "TotalLaborHistoryPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\jeonkuk\\TotalPersonnelHistoryPage.tsx",
+              "name": "TotalPersonnelHistoryPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\manpower",
+          "name": "manpower",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\manpower\\ManpowerInputPage.tsx",
+              "name": "ManpowerInputPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\SiteRegistrationPage.tsx",
+              "name": "SiteRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\SmartSiteRegistrationPage.tsx",
+              "name": "SmartSiteRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\SmartTeamRegistrationPage.tsx",
+              "name": "SmartTeamRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\SmartWorkerRegistrationPage.tsx",
+              "name": "SmartWorkerRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\TeamRegistrationPage.tsx",
+              "name": "TeamRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\WorkerModal.tsx",
+              "name": "WorkerModal.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\manpower\\WorkerRegistrationPage.tsx",
+              "name": "WorkerRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\manual",
+          "name": "manual",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\manual\\ManualPage.tsx",
+              "name": "ManualPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\payroll",
+          "name": "payroll",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\payroll\\DailyWagePaymentPage.tsx",
+              "name": "DailyWagePaymentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\MonthlyWagePaymentPage.tsx",
+              "name": "MonthlyWagePaymentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\PayslipPage.tsx",
+              "name": "PayslipPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\SiteInvoicePage.tsx",
+              "name": "SiteInvoicePage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\SiteLaborCostInvoice.tsx",
+              "name": "SiteLaborCostInvoice.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\StatementManagementPage.tsx",
+              "name": "StatementManagementPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\TeamInvoicePage.tsx",
+              "name": "TeamInvoicePage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\TeamLaborCostInvoice.tsx",
+              "name": "TeamLaborCostInvoice.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\WagePaymentPage.tsx",
+              "name": "WagePaymentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\WeeklyWagePaymentPage.tsx",
+              "name": "WeeklyWagePaymentPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\payroll\\WorkerLaborCostInvoice.tsx",
+              "name": "WorkerLaborCostInvoice.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\profile",
+          "name": "profile",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\profile\\ProfilePage.tsx",
+              "name": "ProfilePage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\report",
+          "name": "report",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\report\\DailyReportDirectInput.tsx",
+              "name": "DailyReportDirectInput.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportDragDropPage.tsx",
+              "name": "DailyReportDragDropPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportDragDropV1.tsx",
+              "name": "DailyReportDragDropV1.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportExcelPage.tsx",
+              "name": "DailyReportExcelPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportGridInput.tsx",
+              "name": "DailyReportGridInput.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportInput.tsx",
+              "name": "DailyReportInput.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportList.tsx",
+              "name": "DailyReportList.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportPage.tsx",
+              "name": "DailyReportPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportTyping.tsx",
+              "name": "DailyReportTyping.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\DailyReportV2Page.tsx",
+              "name": "DailyReportV2Page.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\SmartDailyReportRegistrationPage.tsx",
+              "name": "SmartDailyReportRegistrationPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\TestDailyReportPage.tsx",
+              "name": "TestDailyReportPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\report\\TypingTable.tsx",
+              "name": "TypingTable.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\reports",
+          "name": "reports",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\reports\\DailyReportPage.tsx",
+              "name": "DailyReportPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\settings",
+          "name": "settings",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\settings\\AIConfigurationSection.tsx",
+              "name": "AIConfigurationSection.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\settings\\DataManagementSection.tsx",
+              "name": "DataManagementSection.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\settings\\TestSettingsPage.tsx",
+              "name": "TestSettingsPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\structure",
+          "name": "structure",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\structure\\FileStructureViewer.tsx",
+              "name": "FileStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\InstalledLibraryViewer.tsx",
+              "name": "InstalledLibraryViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\LibraryGuideViewer.tsx",
+              "name": "LibraryGuideViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\LibraryStructureViewer.tsx",
+              "name": "LibraryStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\MenuManagementDesignViewer.tsx",
+              "name": "MenuManagementDesignViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\PayrollDesignViewer.tsx",
+              "name": "PayrollDesignViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\ReactStructureViewer.tsx",
+              "name": "ReactStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\SchemaDesignViewer.tsx",
+              "name": "SchemaDesignViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\SystemArchitectureViewer.tsx",
+              "name": "SystemArchitectureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\TechStackViewer.tsx",
+              "name": "TechStackViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            },
+            {
+              "id": "pages\\structure\\TestStructureViewer.tsx",
+              "name": "TestStructureViewer.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\system",
+          "name": "system",
+          "type": "folder",
+          "description": "폴더",
+          "children": [
+            {
+              "id": "pages\\system\\SystemManagementPage.tsx",
+              "name": "SystemManagementPage.tsx",
+              "type": "file",
+              "description": "React 컴포넌트 파일입니다."
+            }
+          ]
+        },
+        {
+          "id": "pages\\DashboardPage.tsx",
+          "name": "DashboardPage.tsx",
+          "type": "file",
+          "description": "React 컴포넌트 파일입니다."
+        },
+        {
+          "id": "pages\\SettingsPage.tsx",
+          "name": "SettingsPage.tsx",
+          "type": "file",
+          "description": "React 컴포넌트 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "services",
+      "name": "services",
+      "type": "folder",
+      "description": "API 호출 및 비즈니스 로직을 담당하는 파일들입니다.",
+      "children": [
+        {
+          "id": "services\\auditService.ts",
+          "name": "auditService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\authService.ts",
+          "name": "authService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\companyService.ts",
+          "name": "companyService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\dailyReportService.ts",
+          "name": "dailyReportService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\dispatchService.ts",
+          "name": "dispatchService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\geminiService.ts",
+          "name": "geminiService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\manpowerService.ts",
+          "name": "manpowerService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\payrollService.ts",
+          "name": "payrollService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\positionService.ts",
+          "name": "positionService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\rolePermissionService.ts",
+          "name": "rolePermissionService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\settlementService.ts",
+          "name": "settlementService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\siteService.ts",
+          "name": "siteService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\teamService.ts",
+          "name": "teamService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\userService.ts",
+          "name": "userService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "services\\vehicleService.ts",
+          "name": "vehicleService.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "types",
+      "name": "types",
+      "type": "folder",
+      "description": "TypeScript 타입 정의 파일들입니다.",
+      "children": [
+        {
+          "id": "types\\dailyReport.ts",
+          "name": "dailyReport.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "types\\roles.ts",
+          "name": "roles.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "types\\settlement.ts",
+          "name": "settlement.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "types\\worker.ts",
+          "name": "worker.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "utils",
+      "name": "utils",
+      "type": "folder",
+      "description": "공통적으로 사용되는 유틸리티 함수들입니다.",
+      "children": [
+        {
+          "id": "utils\\excelUtils.ts",
+          "name": "excelUtils.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        },
+        {
+          "id": "utils\\swal.ts",
+          "name": "swal.ts",
+          "type": "file",
+          "description": "TypeScript 로직 파일입니다."
+        }
+      ]
+    },
+    {
+      "id": "App.css",
+      "name": "App.css",
+      "type": "file",
+      "description": "스타일 시트 파일입니다."
+    },
+    {
+      "id": "App.tsx",
+      "name": "App.tsx",
+      "type": "file",
+      "description": "React 컴포넌트 파일입니다."
+    },
+    {
+      "id": "declarations.d.ts",
+      "name": "declarations.d.ts",
+      "type": "file",
+      "description": "TypeScript 로직 파일입니다."
+    },
+    {
+      "id": "index.css",
+      "name": "index.css",
+      "type": "file",
+      "description": "스타일 시트 파일입니다."
+    },
+    {
+      "id": "index.tsx",
+      "name": "index.tsx",
+      "type": "file",
+      "description": "React 컴포넌트 파일입니다."
+    },
+    {
+      "id": "react-app-env.d.ts",
+      "name": "react-app-env.d.ts",
+      "type": "file",
+      "description": "TypeScript 로직 파일입니다."
+    },
+    {
+      "id": "react-to-print.d.ts",
+      "name": "react-to-print.d.ts",
+      "type": "file",
+      "description": "TypeScript 로직 파일입니다."
+    }
+  ]
+}
