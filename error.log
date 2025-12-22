@@ -1,0 +1,6 @@
+src/pages/payroll/SupportTeamPaymentPage.tsx(415,32): error TS1005: ';' expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(416,33): error TS1005: ';' expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(417,30): error TS1005: ';' expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(420,13): error TS1128: Declaration or statement expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(422,5): error TS1128: Declaration or statement expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(816,1): error TS1128: Declaration or statement expected.

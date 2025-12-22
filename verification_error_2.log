@@ -1,0 +1,14 @@
+src/pages/payroll/SupportTeamPaymentPage.tsx(854,38): error TS17008: JSX element 'table' has no corresponding closing tag.
+src/pages/payroll/SupportTeamPaymentPage.tsx(868,26): error TS1005: ')' expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(868,84): error TS1382: Unexpected token. Did you mean `{'>'}` or `&gt;`?
+src/pages/payroll/SupportTeamPaymentPage.tsx(868,89): error TS17002: Expected corresponding JSX closing tag for 'div'.
+src/pages/payroll/SupportTeamPaymentPage.tsx(870,11): error TS17002: Expected corresponding JSX closing tag for 'div'.
+src/pages/payroll/SupportTeamPaymentPage.tsx(871,29): error TS1005: ')' expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(884,25): error TS1128: Declaration or statement expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(885,21): error TS1109: Expression expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(886,17): error TS1109: Expression expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(887,13): error TS1109: Expression expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(887,14): error TS1128: Declaration or statement expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(967,9): error TS1128: Declaration or statement expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(968,5): error TS1109: Expression expected.
+src/pages/payroll/SupportTeamPaymentPage.tsx(969,1): error TS1128: Declaration or statement expected.
