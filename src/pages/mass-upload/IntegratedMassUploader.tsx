@@ -253,8 +253,6 @@ const IntegratedMassUploader: React.FC = () => {
                         companyName: companyNameVal || existing.companyName,
                         responsibleTeamId: responsibleTeamId || existing.responsibleTeamId,
                         responsibleTeamName: responsibleTeamName || existing.responsibleTeamName,
-                        startDate: startDate || existing.startDate,
-                        endDate: endDate || existing.endDate,
                         code: row['현장코드'] || existing.code,
                         status: existing.status
                     });
@@ -265,8 +263,6 @@ const IntegratedMassUploader: React.FC = () => {
                         companyName: companyNameVal,
                         responsibleTeamId: responsibleTeamId,
                         responsibleTeamName: responsibleTeamName,
-                        startDate: startDate || '',
-                        endDate: endDate || '',
                         code: row['현장코드'] || '',
                         status: 'active',
                         address: row['주소'] || ''
@@ -381,8 +377,6 @@ const IntegratedMassUploader: React.FC = () => {
                                 name: siteName,
                                 address: '',
                                 code: '',
-                                startDate: '',
-                                endDate: '',
                                 status: 'active',
                                 responsibleTeamName: '',
                                 companyName: ''

@@ -7,7 +7,7 @@ import {
 import { companyService, Company } from '../../services/companyService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
-import { manpowerService } from '../../services/manpowerService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import { statisticsService } from '../../services/statisticsService';
 import CompanyForm from '../../components/company/CompanyForm';
 import { Timestamp } from 'firebase/firestore';
@@ -18,8 +18,10 @@ import MultiSelectPopover from '../../components/common/MultiSelectPopover';
 
 const COMPANY_COLUMNS = [
     { key: 'name', label: '회사명' },
+    { key: 'ceoName', label: '대표자' },
     { key: 'totalGongsu', label: '누적공수' }, // Added
     { key: 'code', label: '사업자번호' },
+    { key: 'idNumber', label: '주민번호' }, // 노무신고용
     { key: 'type', label: '구분' }, // Construction, Builder
     { key: 'siteCount', label: '배정 현장' },
     { key: 'status', label: '상태' }
@@ -47,6 +49,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     const [companies, setCompanies] = useState<Company[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
     const [companyStats, setCompanyStats] = useState<{ [id: string]: number }>({});
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -89,15 +92,17 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     const loadData = async () => {
         setLoading(true);
         try {
-            const [companiesData, sitesData, teamsData, statsData] = await Promise.all([
+            const [companiesData, sitesData, teamsData, workersData, statsData] = await Promise.all([
                 companyService.getCompanies(),
                 siteService.getSites(),
                 teamService.getTeams(),
+                manpowerService.getWorkers(),
                 statisticsService.getCumulativeManpower() // Fetch stats
             ]);
             setCompanies(applyTypeScope(companiesData));
             setSites(sitesData);
             setTeams(teamsData);
+            setWorkers(workersData);
             setCompanyStats(statsData.companyStats); // Set stats
         } catch (error) {
             console.error("Failed to load company data:", error);
@@ -114,6 +119,15 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                     {gongsu.toFixed(1)}공수
                 </span>
             );
+        }
+
+        if (key === 'idNumber') {
+            // 작업자 테이블에서 대표자/팀장의 주민번호 찾기
+            const ceo = workers.find(w =>
+                w.companyId === company.id &&
+                (w.role === '대표' || w.role === '팀장')
+            );
+            return ceo?.idNumber || '';
         }
 
         if (key === 'status') {

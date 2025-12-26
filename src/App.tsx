@@ -17,6 +17,12 @@ import RateChangePage from './pages/hr/RateChangePage';
 import SupportSettingsPage from './pages/support/SupportSettingsPage';
 import SupportStatusPage from './pages/support/SupportStatusPage';
 import AccommodationManager from './pages/support/AccommodationManager';
+import MaterialMasterPage from './pages/materials/MaterialMasterPage';
+import MaterialInboundPage from './pages/materials/MaterialInboundPage';
+import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
+import MaterialTransactionsPage from './pages/materials/MaterialTransactionsPage';
+import MaterialInventoryPage from './pages/materials/MaterialInventoryPage';
+import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage';
 import CompanyDatabase from './pages/database/CompanyDatabase';
 import ManpowerInputPage from './pages/manpower/ManpowerInputPage';
 import WorkerDatabase from './pages/database/WorkerDatabase';
@@ -42,6 +48,7 @@ import WorkerBulkRegistrationPage from './pages/manpower/WorkerBulkRegistrationP
 import SignManagementPage from './pages/payroll/SignManagementPage';
 import SignatureGeneratorPage from './pages/payroll/SignatureGeneratorPage';
 import DelegationLetterPage from './pages/payroll/DelegationLetterPage';
+import DelegationLetterV2Page from './pages/payroll/DelegationLetterV2Page';
 import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
 import TeamBasedPaymentDraftPageV2 from './pages/payroll/TeamBasedPaymentDraftPageV2';
 
@@ -80,6 +87,7 @@ import DataBackupPage from './pages/admin/DataBackupPage';
 import StatusGraphPage from './pages/jeonkuk/StatusGraphPage';
 import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
 import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
+import AgentPlayground from './pages/developer/AgentPlayground';
 
 import TeamPersonnelStatusReportPage from './pages/report/TeamPersonnelStatusReportPage';
 
@@ -105,6 +113,8 @@ import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPag
 import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
 import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
 import TaxInvoiceLedgerPage from './pages/taxinvoice/TaxInvoiceLedgerPage';
+import ReceivablesManagementPage from './pages/taxinvoice/ReceivablesManagementPage';
+import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 
@@ -198,9 +208,15 @@ const App: React.FC = () => {
               <Route path="team-payment-draft-legacy" element={<TeamBasedPaymentDraftPage />} />
               <Route path="tax-invoice" element={<TaxInvoicePage />} />
               <Route path="tax-invoice-ledger" element={<TaxInvoiceLedgerPage />} />
+              {/* Taxinvoice new routes */}
+              <Route path="taxinvoice/issue" element={<TaxInvoicePage />} />
+              <Route path="taxinvoice/ledger" element={<TaxInvoiceLedgerPage />} />
+              <Route path="taxinvoice/receivables" element={<ReceivablesManagementPage />} />
+              <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
+              <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
             </Route>
 
             <Route
@@ -208,11 +224,7 @@ const App: React.FC = () => {
               element={<Navigate to="/payroll/advance-payment?tab=register" replace />}
             />
 
-            {/* Materials Management */}
-            <Route path="/materials">
-              <Route index element={<div>자재 관리</div>} />
-              <Route path="inventory" element={<div>재고 현황</div>} />
-            </Route>
+
 
             {/* Homepage Request Management (Internal) */}
             <Route path="/homepage">
@@ -251,6 +263,14 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<AccommodationManager />} />
+
+            {/* Materials Management */}
+            <Route path="/materials/master" element={<MaterialMasterPage />} />
+            <Route path="/materials/inbound" element={<MaterialInboundPage />} />
+            <Route path="/materials/outbound" element={<MaterialOutboundPage />} />
+            <Route path="/materials/transactions" element={<MaterialTransactionsPage />} />
+            <Route path="/materials/inventory" element={<MaterialInventoryPage />} />
+            <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} />
 
             {/* Company DB */}
             <Route path="/database/company-db" element={<CompanyDatabase />} />
@@ -292,6 +312,7 @@ const App: React.FC = () => {
               <Route path="integrity" element={<AdminDataIntegrityPage />} />
               <Route path="data-backup" element={<DataBackupPage />} />
               <Route path="accommodation-design" element={<AccommodationDesignViewer />} />
+              <Route path="agent-playground" element={<AgentPlayground />} />
             </Route>
 
             {/* Design System */}

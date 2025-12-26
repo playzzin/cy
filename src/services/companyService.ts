@@ -22,6 +22,7 @@ export interface Company {
     code: string;
     businessNumber: string; // 사업자번호
     ceoName: string; // 대표자명
+    idNumber?: string; // 주민번호 (노무신고용)
     address: string; // 주소
     phone: string; // 전화번호
     email?: string; // 이메일
@@ -56,6 +57,7 @@ export const companyService = {
             assignedClientCompanyIds: company.assignedClientCompanyIds || [],
             status: company.status || 'active', // Default to active
             iconKey: company.iconKey || '',
+            idNumber: company.idNumber || '', // 주민번호
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
         });

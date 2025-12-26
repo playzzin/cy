@@ -69,12 +69,12 @@ const WorkerDatabaseInput: React.FC = () => {
     // 테이블 데이터 복사
     const copyTableData = () => {
         const headers = ['현장명', '팀명', '이름', '공수', '단가', '담당팀'];
-        const rows = tableData.map(row => 
+        const rows = tableData.map(row =>
             [row.현장명, row.팀명, row.이름, row.공수, row.단가, row.담당팀].join('\t')
         );
-        
+
         const clipboardData = [headers.join('\t'), ...rows].join('\n');
-        
+
         navigator.clipboard.writeText(clipboardData).then(() => {
             alert('테이블 데이터가 복사되었습니다. 엑셀에 붙여넣으세요.');
         });
@@ -85,18 +85,18 @@ const WorkerDatabaseInput: React.FC = () => {
         try {
             const text = await navigator.clipboard.readText();
             const lines = text.trim().split('\n');
-            
+
             if (lines.length < 2) {
                 alert('붙여넣을 데이터가 없습니다.');
                 return;
             }
 
             const newData: TableData[] = [];
-            
+
             // 첫 줄은 헤더이므로 건너뛰기
             for (let i = 1; i < lines.length; i++) {
                 const columns = lines[i].split('\t');
-                
+
                 if (columns.length >= 6) {
                     newData.push({
                         현장명: columns[0] || '',
@@ -121,7 +121,7 @@ const WorkerDatabaseInput: React.FC = () => {
     // 데이터 등록
     const handleRegister = async () => {
         const validData = tableData.filter(row => row.이름.trim() !== '');
-        
+
         if (validData.length === 0) {
             alert('등록할 데이터가 없습니다.');
             return;
@@ -133,7 +133,7 @@ const WorkerDatabaseInput: React.FC = () => {
             for (const row of validData) {
                 // 기존 작업자 찾기
                 const existingWorker = workers.find(w => w.name === row.이름);
-                
+
                 if (existingWorker) {
                     // 기존 작업자 업데이트
                     await manpowerService.updateWorker(existingWorker.id!, {
@@ -160,7 +160,7 @@ const WorkerDatabaseInput: React.FC = () => {
             for (const row of validData) {
                 if (row.팀명.trim() !== '') {
                     const existingTeam = teams.find(t => t.name === row.팀명);
-                    
+
                     if (!existingTeam) {
                         await teamService.addTeam({
                             name: row.팀명,
@@ -176,14 +176,12 @@ const WorkerDatabaseInput: React.FC = () => {
             for (const row of validData) {
                 if (row.현장명.trim() !== '') {
                     const existingSite = sites.find(s => s.name === row.현장명);
-                    
+
                     if (!existingSite) {
                         await siteService.addSite({
                             name: row.현장명,
                             code: 'AUTO', // 필수 필드
                             address: '미등록', // 필수 필드
-                            startDate: new Date().toISOString().slice(0, 10), // 필수 필드
-                            endDate: '9999-12-31', // 필수 필드
                             status: 'active'
                         });
                     }
@@ -191,10 +189,10 @@ const WorkerDatabaseInput: React.FC = () => {
             }
 
             alert(`${validData.length}건의 데이터가 등록되었습니다.`);
-            
+
             // 데이터 다시 불러오기
             await fetchInitialData();
-            
+
             // 테이블 초기화
             setTableData([
                 { 현장명: '', 팀명: '', 이름: '', 공수: '1.0', 단가: '', 담당팀: '' },
@@ -203,7 +201,7 @@ const WorkerDatabaseInput: React.FC = () => {
                 { 현장명: '', 팀명: '', 이름: '', 공수: '1.0', 단가: '', 담당팀: '' },
                 { 현장명: '', 팀명: '', 이름: '', 공수: '1.0', 단가: '', 담당팀: '' }
             ]);
-            
+
         } catch (error) {
             console.error("등록 실패:", error);
             alert("데이터 등록에 실패했습니다.");

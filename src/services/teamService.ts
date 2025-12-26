@@ -63,7 +63,7 @@ export const teamService = {
 
         const normalizedUpdates: Partial<Team> = { ...team };
         if (typeof normalizedUpdates.iconKey !== 'string') {
-            normalizedUpdates.iconKey = undefined;
+            delete normalizedUpdates.iconKey; // undefined 대신 삭제
         }
         if (!normalizedUpdates.iconKey && typeof normalizedUpdates.icon === 'string') {
             normalizedUpdates.iconKey = normalizedUpdates.icon;
@@ -80,8 +80,17 @@ export const teamService = {
             }
         }
 
+        // undefined 필드 제거
+        const cleanUpdates: any = {};
+        Object.keys(normalizedUpdates).forEach(key => {
+            const value = (normalizedUpdates as any)[key];
+            if (value !== undefined) {
+                cleanUpdates[key] = value;
+            }
+        });
+
         await updateDoc(docRef, {
-            ...normalizedUpdates,
+            ...cleanUpdates,
             updatedAt: Timestamp.now()
         });
         toast.updated('팀');

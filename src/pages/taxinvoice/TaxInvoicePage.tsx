@@ -35,6 +35,8 @@ import {
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
 import { taxInvoiceFirestoreService } from '../../services/taxInvoiceFirestoreService';
+import { receivableService } from '../../services/receivableService';
+import { ReceivableStatus } from '../../types/receivable';
 
 // 빈 품목 템플릿
 const emptyItem: TaxInvoiceItem = {
@@ -293,7 +295,7 @@ const TaxInvoicePage: React.FC = () => {
                 // Firestore에 저장
                 try {
                     const selectedSite = sites.find(s => s.id === selectedSiteId);
-                    await taxInvoiceFirestoreService.addTaxInvoice({
+                    const taxInvoiceId = await taxInvoiceFirestoreService.addTaxInvoice({
                         invoiceNum: response.invoiceNum || `INV-${Date.now()}`,
                         invoiceDate: writeDate,
                         type: 'sales',
@@ -318,6 +320,25 @@ const TaxInvoicePage: React.FC = () => {
                         memo: remark,
                         source: 'barobill', // 바로빌 API 연동
                     });
+
+                    // 미수금 자동 생성
+                    await receivableService.create({
+                        taxInvoiceId,
+                        issueYear: new Date(writeDate).getFullYear(),
+                        issueDate: writeDate,
+                        customerName: invoicee.corpName,
+                        totalAmount,
+                        supplyAmount: supplyCostTotal,
+                        taxAmount: taxTotal,
+                        payments: [],
+                        totalPaid: 0,
+                        balance: totalAmount,
+                        status: ReceivableStatus.UNPAID,
+                        note: remark,
+                        manager: invoicer.ceoName
+                    });
+
+                    console.log('미수금 자동 생성 완료');
                 } catch (saveError) {
                     console.error('Firestore 저장 실패:', saveError);
                 }

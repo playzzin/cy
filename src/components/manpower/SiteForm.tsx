@@ -107,24 +107,6 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">시작일</label>
-                        <input
-                            type="date"
-                            value={currentSite.startDate || ''}
-                            onChange={(e) => setCurrentSite({ ...currentSite, startDate: e.target.value })}
-                            className="w-full border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 text-sm p-2.5 border"
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">종료일</label>
-                        <input
-                            type="date"
-                            value={currentSite.endDate || ''}
-                            onChange={(e) => setCurrentSite({ ...currentSite, endDate: e.target.value })}
-                            className="w-full border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 text-sm p-2.5 border"
-                        />
-                    </div>
-                    <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">상태</label>
                         <select
                             value={currentSite.status || 'active'}

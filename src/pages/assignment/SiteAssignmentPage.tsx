@@ -67,10 +67,7 @@ const SortableItem: React.FC<SortableItemProps> = ({ site }) => {
                 <FontAwesomeIcon icon={faMapMarkerAlt} />
                 {site.address}
             </div>
-            <div className="text-xs text-slate-500 flex items-center gap-1">
-                <FontAwesomeIcon icon={faCalendarAlt} />
-                {site.startDate} ~ {site.endDate}
-            </div>
+
             {site.responsibleTeamName && (
                 <div className="mt-2 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded inline-block">
                     담당: {site.responsibleTeamName}

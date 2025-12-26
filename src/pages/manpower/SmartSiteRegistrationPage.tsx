@@ -9,8 +9,6 @@ const FIELD_MAPPING: { [key: string]: string[] } = {
     name: ['현장명', '공사명', '현장'],
     code: ['현장코드', '코드'],
     address: ['주소', '현장주소'],
-    startDate: ['시작일', '착공일', '공사시작'],
-    endDate: ['종료일', '준공일', '공사종료'],
     companyName: ['발주처', '건설사', '시공사'],
     responsibleTeamName: ['담당팀', '관리팀']
 };
@@ -19,8 +17,6 @@ const FIELD_LABELS: { [key: string]: string } = {
     name: '현장명',
     code: '현장코드',
     address: '주소',
-    startDate: '시작일',
-    endDate: '종료일',
     companyName: '발주처',
     responsibleTeamName: '담당팀'
 };
@@ -99,8 +95,6 @@ const SmartSiteRegistrationPage: React.FC = () => {
                         name: row.name,
                         code: row.code || `S${Date.now()}${Math.floor(Math.random() * 100)}`,
                         address: row.address || '',
-                        startDate: row.startDate || new Date().toISOString().slice(0, 10),
-                        endDate: row.endDate || '',
                         status: 'active',
                         companyName: row.companyName || '',
                         responsibleTeamName: row.responsibleTeamName || ''
@@ -155,7 +149,7 @@ const SmartSiteRegistrationPage: React.FC = () => {
                     <ul className="list-disc list-inside text-sm text-blue-700 space-y-1">
                         <li>엑셀에서 <strong>헤더(항목 이름)를 포함하여</strong> 데이터를 복사한 후 아래 입력창에 붙여넣으세요.</li>
                         <li><strong>필수 항목:</strong> 현장명</li>
-                        <li><strong>지원 항목:</strong> 현장명, 현장코드, 주소, 시작일, 종료일, 발주처, 담당팀</li>
+                        <li><strong>지원 항목:</strong> 현장명, 현장코드, 주소, 발주처, 담당팀</li>
                     </ul>
                 </div>
 

@@ -38,6 +38,23 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 서명 관리
     "서명생성기": "/payroll/signature-generator",
     "서명위임장": "/payroll/delegation-letter",
+    "위임장v2": "/payroll/delegation-letter-v2",
+
+    // 세금계산서
+    "세금계산서 발행": "/payroll/taxinvoice/issue",
+    "세금계산서 거래장": "/payroll/taxinvoice/ledger",
+    "미수금 대시보드": "/payroll/taxinvoice/dashboard",
+    "미수금 관리": "/payroll/taxinvoice/receivables",
+    "숙소 관리": "/support/accommodation",
+    "가불 및 공제": "/payroll/advance-payment",
+
+    // 자재관리
+    "자재 마스터": "/materials/master",
+    "입고 등록": "/materials/inbound",
+    "출고 등록": "/materials/outbound",
+    "입출고 내역": "/materials/transactions",
+    "재고 현황": "/materials/inventory",
+    "현장별 재고": "/materials/inventory-by-site",
 
 
 
@@ -70,8 +87,6 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 지원 관리
     "지원비 설정": "/support/settings",
     "지원 현황판": "/support/status",
-    "숙소 관리": "/support/accommodation",
-    "숙소통합관리": "/support/accommodation",
 
     "청연ERP 설명서": "/manual",
     "홈페이지 사용법": "/manual",
@@ -134,4 +149,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "프로젝트 파일 구조": "/admin/project-structure",
     "시스템 관리": "/system-management",
     "데이터 연결 점검": "/admin/integrity",
+
+    // 개발자 도구
+    "에이전트 플레이그라운드": "/admin/agent-playground",
 };

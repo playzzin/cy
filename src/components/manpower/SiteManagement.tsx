@@ -88,8 +88,6 @@ const SiteManagement: React.FC = () => {
             '담당팀': site.responsibleTeamName || '',
             '현장코드': site.code || '',
             '주소': site.address || '',
-            '시작일': site.startDate || '',
-            '종료일': site.endDate || '',
             '상태': site.status === 'active' ? '진행중' : site.status === 'completed' ? '완료' : '예정'
         }));
 
@@ -99,8 +97,6 @@ const SiteManagement: React.FC = () => {
                 '담당팀': '예시팀',
                 '현장코드': 'SITE-001',
                 '주소': '서울시 강남구',
-                '시작일': '2024-01-01',
-                '종료일': '2024-12-31',
                 '상태': '진행중'
             });
         }
@@ -157,8 +153,6 @@ const SiteManagement: React.FC = () => {
                         responsibleTeamName: responsibleTeamName,
                         code: row['현장코드'],
                         address: row['주소'],
-                        startDate: row['시작일'],
-                        endDate: row['종료일'],
                         status: statusMap[row['상태']] || 'active'
                     };
 
@@ -243,7 +237,7 @@ const SiteManagement: React.FC = () => {
                                     <th className="px-6 py-3 border-b border-slate-200">회사명</th>
                                     <th className="px-6 py-3 border-b border-slate-200">현장코드</th>
                                     <th className="px-6 py-3 border-b border-slate-200">주소</th>
-                                    <th className="px-6 py-3 border-b border-slate-200">기간</th>
+
 
                                     <th className="px-6 py-3 border-b border-slate-200">상태</th>
                                     <th className="px-6 py-3 border-b border-slate-200 text-right">관리</th>
@@ -269,40 +263,38 @@ const SiteManagement: React.FC = () => {
                                                         <span>{site.name}</span>
                                                     </div>
                                                 </td>
-                                            <td className="px-6 py-4 text-slate-600">
-                                                {site.responsibleTeamName ? (
-                                                    <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-bold">
-                                                        {site.responsibleTeamName}
-                                                    </span>
-                                                ) : '-'}
-                                            </td>
-                                            <td className="px-6 py-4 text-slate-600">
-                                                {site.companyName ? (
-                                                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">
-                                                        {site.companyName}
-                                                    </span>
-                                                ) : '-'}
-                                            </td>
-                                            <td className="px-6 py-4 text-slate-600 font-mono">{site.code}</td>
-                                            <td className="px-6 py-4 text-slate-600">{site.address}</td>
-                                            <td className="px-6 py-4 text-slate-600 text-xs">
-                                                {site.startDate} ~ {site.endDate}
-                                            </td>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {site.responsibleTeamName ? (
+                                                        <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-bold">
+                                                            {site.responsibleTeamName}
+                                                        </span>
+                                                    ) : '-'}
+                                                </td>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {site.companyName ? (
+                                                        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">
+                                                            {site.companyName}
+                                                        </span>
+                                                    ) : '-'}
+                                                </td>
+                                                <td className="px-6 py-4 text-slate-600 font-mono">{site.code}</td>
+                                                <td className="px-6 py-4 text-slate-600">{site.address}</td>
 
-                                            <td className="px-6 py-4">
-                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${site.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
-                                                    site.status === 'completed' ? 'bg-slate-100 text-slate-500' :
-                                                        'bg-orange-100 text-orange-700'
-                                                    }`}>
-                                                    {site.status === 'active' ? '진행중' :
-                                                        site.status === 'completed' ? '완료' : '예정'}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button onClick={() => openModal(site)} className="text-slate-400 hover:text-brand-600 mr-2 transition"><FontAwesomeIcon icon={faPenToSquare} /></button>
-                                                <button onClick={() => handleDelete(site.id!)} className="text-slate-400 hover:text-red-600 transition"><FontAwesomeIcon icon={faTrash} /></button>
-                                            </td>
-                                        </tr>
+
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2 py-1 rounded-full text-xs font-bold ${site.status === 'active' ? 'bg-emerald-100 text-emerald-700' :
+                                                        site.status === 'completed' ? 'bg-slate-100 text-slate-500' :
+                                                            'bg-orange-100 text-orange-700'
+                                                        }`}>
+                                                        {site.status === 'active' ? '진행중' :
+                                                            site.status === 'completed' ? '완료' : '예정'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <button onClick={() => openModal(site)} className="text-slate-400 hover:text-brand-600 mr-2 transition"><FontAwesomeIcon icon={faPenToSquare} /></button>
+                                                    <button onClick={() => handleDelete(site.id!)} className="text-slate-400 hover:text-red-600 transition"><FontAwesomeIcon icon={faTrash} /></button>
+                                                </td>
+                                            </tr>
                                         );
                                     })
                                 )}

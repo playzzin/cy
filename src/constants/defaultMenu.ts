@@ -31,7 +31,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "서명관리",
                 icon: "fa-pen-nib",
-                sub: ["서명생성기", "서명위임장"]
+                sub: ["서명생성기", "서명위임장", "위임장v2"]
             }
         ]
     },
@@ -40,33 +40,24 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         icon: "fa-building",
         menu: [
             {
-                text: "현황관리",
-                icon: "fa-chart-simple",
-                sub: ["통합 현황판", "인원전체내역조회"]
+                text: "세금관리",
+                icon: "fa-file-invoice",
+                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리"]
             },
             {
-                text: "통합DB",
-                icon: "fa-circle-info"
+                text: "숙소관리",
+                icon: "fa-home",
+                sub: ["숙소 관리", "가불 및 공제"]
             },
             {
-                text: "출력 관리",
-                icon: "fa-clipboard-list",
-                sub: ["일보작성", "일보목록"]
+                text: "자재관리",
+                icon: "fa-boxes-stacked",
+                sub: ["자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
             },
             {
-                text: "급여관리",
-                icon: "fa-money-bill-wave",
-                sub: [
-                    "일급제",
-                    "월급제",
-                    "지원팀",
-                    { text: "가불관리", sub: ["가불등록", "세금/가불"] }
-                ]
-            },
-            {
-                text: "서명관리",
-                icon: "fa-pen-nib",
-                sub: ["서명생성기", "서명위임장"]
+                text: "개발자 도구",
+                icon: "fa-robot",
+                sub: ["에이전트 플레이그라운드"]
             }
         ]
     },
@@ -94,7 +85,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "서명관리",
                 icon: "fa-pen-nib",
-                sub: ["서명생성기", "서명위임장"]
+                sub: ["서명생성기", "서명위임장", "위임장v2"]
             }
         ]
     },

@@ -72,8 +72,6 @@ const SiteMassUploader: React.FC = () => {
 
             compare('address', row.address, existing.address);
             compare('code', row.code, existing.code);
-            compare('startDate', row.startDate, existing.startDate);
-            compare('endDate', row.endDate, existing.endDate);
             compare('companyName', row.companyName, existing.companyName);
             compare('responsibleTeamName', row.responsibleTeamName, existing.responsibleTeamName);
 
@@ -149,8 +147,6 @@ const SiteMassUploader: React.FC = () => {
                         name: row.name,
                         code: row.code || `SITE-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                         address: row.address || '주소 미입력',
-                        startDate: row.startDate || new Date().toISOString().split('T')[0],
-                        endDate: row.endDate || '2099-12-31',
                         status: 'active',
                         companyId,
                         companyName,

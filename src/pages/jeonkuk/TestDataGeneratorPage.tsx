@@ -171,8 +171,6 @@ const TestDataGeneratorPage: React.FC = () => {
                     address: location.address,
                     code: location.code,
                     status: "active",
-                    startDate: "2024-01-01",
-                    endDate: "2025-12-31",
                     companyId: company.id,
                     companyName: company.name,
                     responsibleTeamId: responsibleTeamId,

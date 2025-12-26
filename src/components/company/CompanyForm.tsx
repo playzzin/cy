@@ -18,6 +18,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({ initialData, onSave, onCancel
         code: '',
         businessNumber: '',
         ceoName: '',
+        idNumber: '', // 주민번호
         address: '',
         phone: '',
         email: '',
@@ -37,6 +38,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({ initialData, onSave, onCancel
                 code: '',
                 businessNumber: '',
                 ceoName: '',
+                idNumber: '', // 주민번호
                 address: '',
                 phone: '',
                 email: '',
@@ -94,6 +96,12 @@ const CompanyForm: React.FC<CompanyFormProps> = ({ initialData, onSave, onCancel
                     <label className="block text-xs font-semibold text-slate-500 mb-1">대표자명</label>
                     <input type="text" name="ceoName" value={formData.ceoName || ''} onChange={handleChange} className="w-full border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 text-sm p-2 border" />
                 </div>
+                {formData.type !== '협력사' && (
+                    <div className="lg:col-span-1">
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">대표자 주민번호 (노무신고용)</label>
+                        <input type="text" name="idNumber" value={formData.idNumber || ''} onChange={handleChange} className="w-full border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 text-sm p-2 border" placeholder="000000-0000000" />
+                    </div>
+                )}
 
                 <div className="lg:col-span-2">
                     <label className="block text-xs font-semibold text-slate-500 mb-1">주소</label>

@@ -8,7 +8,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { positionService, Position } from '../../services/positionService';
-import { userService } from '../../services/userService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import { UserRole } from '../../types/roles';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -50,7 +50,7 @@ const ICONS = [
 const PositionManager: React.FC = () => {
     // State
     const [positions, setPositions] = useState<Position[]>([]);
-    const [users, setUsers] = useState<any[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -86,22 +86,19 @@ const PositionManager: React.FC = () => {
                     }
                 );
 
-                // Subscribe to Users
-                const unsubUsers = onSnapshot(
-                    query(collection(db, 'users'), orderBy('name', 'asc')),
+                // Subscribe to Workers
+                const unsubWorkers = onSnapshot(
+                    query(collection(db, 'workers'), orderBy('name', 'asc')),
                     (snapshot) => {
-                        const loaded = snapshot.docs.map(d => ({
-                            id: d.id,
-                            ...d.data()
-                        }));
-                        setUsers(loaded);
+                        const loaded = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Worker));
+                        setWorkers(loaded);
                         setLoading(false);
                     }
                 );
 
                 return () => {
                     unsubPos();
-                    unsubUsers();
+                    unsubWorkers();
                 };
             } catch (err) {
                 console.error(err);
@@ -170,25 +167,15 @@ const PositionManager: React.FC = () => {
         }
     };
 
-    // --- 3. User Assignment ---
-    const handleUserPositionChange = async (userId: string, positionName: string) => {
+    // --- 3. Worker Assignment ---
+    const handleWorkerPositionChange = async (workerId: string, positionName: string) => {
         try {
-            // Find the full position object to get its systemRole
+            // Find the full position object
             const targetPos = positions.find(p => p.name === positionName);
             if (!targetPos) return;
 
-            // 1. Update User's Field Position (role field usually stores system role? No, typically 'role' is system role.)
-            // Wait, in this app:
-            // 'role' field in 'users' collection often serves as both or logic is mixed.
-            // Let's clarify:
-            // "role" field -> "admin", "manager", "user" (System Role)
-            // But user also wants "Field Position" stored.
-            // Looking at `UserManagement`, it saves "role" as '관리자', '대표' etc.
-            // Ah! The `role` field in Firestore currently stores the KOREAN job title!
-            // And `rolePermissionService` maps that string to ADMIN/MANAGER/GENERAL.
-
-            // So we just update the 'role' field to the Position Name.
-            await userService.updateUserRole(userId, positionName);
+            // Update worker's role field
+            await manpowerService.updateWorker(workerId, { role: positionName });
 
         } catch (error) {
             console.error("Change failed", error);
@@ -196,11 +183,11 @@ const PositionManager: React.FC = () => {
         }
     };
 
-    // Filtered Users
-    const filteredUsers = users.filter(u =>
-        u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.role?.toLowerCase().includes(searchTerm.toLowerCase())
+    // Filtered Workers
+    const filteredWorkers = workers.filter(w =>
+        w.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        w.idNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        w.role?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     if (loading) return <div className="p-10 text-center"><FontAwesomeIcon icon={faRotateLeft} spin /> 로딩중...</div>;
@@ -303,8 +290,8 @@ const PositionManager: React.FC = () => {
                                                                 onClick={() => handleIconChange(pos.id!, ic.id)}
                                                                 title={ic.label}
                                                                 className={`w-9 h-9 rounded-lg flex items-center justify-center border transition-all ${pos.icon === ic.id
-                                                                        ? 'border-blue-500 bg-blue-50 text-blue-600 ring-2 ring-blue-200'
-                                                                        : 'border-gray-200 text-gray-500 hover:border-blue-400 hover:bg-blue-50'
+                                                                    ? 'border-blue-500 bg-blue-50 text-blue-600 ring-2 ring-blue-200'
+                                                                    : 'border-gray-200 text-gray-500 hover:border-blue-400 hover:bg-blue-50'
                                                                     }`}
                                                             >
                                                                 <FontAwesomeIcon icon={ic.icon} />
@@ -341,10 +328,10 @@ const PositionManager: React.FC = () => {
                 </div>
 
 
-                {/* --- Right: User Assignment --- */}
+                {/* --- Right: Worker Assignment --- */}
                 <div className="lg:col-span-8 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
                     <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-                        <h2 className="font-bold text-gray-700">2. 인원 배정</h2>
+                        <h2 className="font-bold text-gray-700">2. 작업자 배정</h2>
                         <div className="relative w-64">
                             <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                             <input
@@ -361,22 +348,22 @@ const PositionManager: React.FC = () => {
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-50 text-gray-500 sticky top-0 z-10">
                                 <tr>
-                                    <th className="px-4 py-3">이름/이메일</th>
-                                    <th className="px-4 py-3">현재 상태</th>
+                                    <th className="px-4 py-3">이름/주민번호</th>
+                                    <th className="px-4 py-3">현재 직책</th>
                                     <th className="px-4 py-3">직책 변경 (자동저장)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {filteredUsers.map(user => {
-                                    const userPosName = user.role || '일반';
-                                    const currentPos = positions.find(p => p.name === userPosName);
+                                {filteredWorkers.map(worker => {
+                                    const workerPosName = worker.role || '일반';
+                                    const currentPos = positions.find(p => p.name === workerPosName);
 
                                     return (
-                                        <tr key={user.id} className="hover:bg-blue-50/30 transition-colors">
-                                            {/* User Info */}
+                                        <tr key={worker.id} className="hover:bg-blue-50/30 transition-colors">
+                                            {/* Worker Info */}
                                             <td className="px-4 py-3">
-                                                <div className="font-medium text-gray-800">{user.name || '이름 없음'}</div>
-                                                <div className="text-xs text-gray-400">{user.email}</div>
+                                                <div className="font-medium text-gray-800">{worker.name || '이름 없음'}</div>
+                                                <div className="text-xs text-gray-400">{worker.idNumber}</div>
                                             </td>
 
                                             {/* Current Badge */}
@@ -387,15 +374,15 @@ const PositionManager: React.FC = () => {
                                                         ? `${COLORS.find(c => c.id === currentPos.color)?.bg.replace('bg-', 'bg-').replace('500', '100')} ${COLORS.find(c => c.id === currentPos.color)?.bg.replace('bg-', 'text-').replace('500', '700')}`
                                                         : 'bg-gray-100 text-gray-800'}
                                                 `}>
-                                                    {userPosName}
+                                                    {workerPosName}
                                                 </span>
                                             </td>
 
                                             {/* Dropdown */}
                                             <td className="px-4 py-3">
                                                 <select
-                                                    value={users.find(u => u.id === user.id)?.role || '일반'} // Optimistic UI or read from live user
-                                                    onChange={(e) => handleUserPositionChange(user.id, e.target.value)}
+                                                    value={worker.role || '일반'}
+                                                    onChange={(e) => handleWorkerPositionChange(worker.id!, e.target.value)}
                                                     className="w-full max-w-[180px] bg-white border border-gray-200 text-gray-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 cursor-pointer hover:border-blue-400 transition-colors"
                                                 >
                                                     <optgroup label="설정된 직책 목록">
@@ -410,7 +397,7 @@ const PositionManager: React.FC = () => {
                                         </tr>
                                     );
                                 })}
-                                {filteredUsers.length === 0 && (
+                                {filteredWorkers.length === 0 && (
                                     <tr>
                                         <td colSpan={3} className="p-8 text-center text-gray-400">
                                             검색 결과가 없습니다.

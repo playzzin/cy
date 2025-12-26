@@ -49,8 +49,6 @@ interface TeamFormState {
 
 interface SiteFormState {
     name: string;
-    startDate: string;
-    endDate: string;
     companyId: string;
     responsibleTeamId: string;
 }
@@ -338,13 +336,14 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
     const [isWorkersLoading, setIsWorkersLoading] = useState(false);
 
     const cheongyeonCompanyId = useMemo(() => {
-        const found = companies.find(c => c.name.includes('청연'));
+        // 시공사 타입의 회사 찾기
+        const found = companies.find(c => c.type === '시공사');
         return found?.id ?? '';
     }, [companies]);
 
     const cheongyeonCompanyName = useMemo(() => {
         const found = companies.find(c => c.id === cheongyeonCompanyId);
-        return found?.name ?? '청연';
+        return found?.name ?? '시공사';
     }, [cheongyeonCompanyId, companies]);
 
     const partnerCompanyIdSet = useMemo(() => {
@@ -390,8 +389,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
 
     const [siteForm, setSiteForm] = useState<SiteFormState>({
         name: '',
-        startDate: today,
-        endDate: today,
         companyId: '',
         responsibleTeamId: ''
     });
@@ -406,11 +403,11 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
         accountHolder: ''
     });
 
-    const [partnerCompanyTeamForm, setPartnerCompanyTeamForm] = useState<PartnerCompanyTeamFormState>({
+    const [partnerCompanyTeamForm, setPartnerCompanyTeamForm] = useState<{ teamName: string }>({
         teamName: ''
     });
-
-    const [isPartnerCompanyTeamNameTouched, setIsPartnerCompanyTeamNameTouched] = useState(false);
+    const [isPartnerCompanyTeamNameTouched, setIsPartnerCompanyTeamNameTouched] = useState<boolean>(false);
+    const [registerCeoAsLeader, setRegisterCeoAsLeader] = useState<boolean>(true); // 대표자를 팀장으로 등록 여부
 
     const [constructionCompanyForm, setConstructionCompanyForm] = useState<CompanyFormState>({
         name: '',
@@ -421,6 +418,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
         accountNumber: '',
         accountHolder: ''
     });
+    const [registerCeoAsRepresentative, setRegisterCeoAsRepresentative] = useState<boolean>(true); // 건설사 대표자를 작업자로 등록 여부
 
     useEffect(() => {
         const loadMasterData = async () => {
@@ -466,24 +464,18 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
         };
     }, [selectedSection, workers.length]);
 
+    // 시공팀 선택 시 시공사가 하나뿐이면 자동 선택
     useEffect(() => {
         if (workerForm.teamType !== '시공팀') return;
-        if (!cheongyeonCompanyId) return;
-        if (workerForm.companyId === cheongyeonCompanyId) return;
-        setWorkerForm(prev => ({ ...prev, companyId: cheongyeonCompanyId }));
-    }, [cheongyeonCompanyId, workerForm.companyId, workerForm.teamType]);
+        if (workerForm.companyId) return; // 이미 선택되어 있으면 스킵
 
-    useEffect(() => {
-        if (teamForm.type !== '시공팀') return;
-        if (!cheongyeonCompanyId) return;
-        if (teamForm.companyId === cheongyeonCompanyId) return;
-        setTeamForm(prev => ({
-            ...prev,
-            companyId: cheongyeonCompanyId,
-            selectedWorkerIds: [],
-            leaderWorkerId: ''
-        }));
-    }, [cheongyeonCompanyId, teamForm.companyId, teamForm.type]);
+        const constructionCompanies = companies.filter(c => c.type === '시공사');
+        if (constructionCompanies.length === 1) {
+            setWorkerForm(prev => ({ ...prev, companyId: constructionCompanies[0].id ?? '' }));
+        }
+    }, [workerForm.teamType, workerForm.companyId, companies]);
+
+    // 팀 등록 시 회사 자동 선택 제거 - 사용자가 직접 선택하도록 변경
 
     const workerSchema = useMemo(() => {
         return z
@@ -577,12 +569,13 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                 };
             }
 
+            // 시공팀 선택 시: companyId 초기화 (사용자가 직접 선택하도록)
             const nextSalaryModel: WorkerSalaryModel = prev.salaryModel === '지원팀' ? '일급제' : prev.salaryModel;
             return {
                 ...prev,
                 teamType: nextTeamType,
                 salaryModel: nextSalaryModel === '월급제' ? '월급제' : '일급제',
-                companyId: cheongyeonCompanyId,
+                companyId: '',  // 초기화 - 사용자가 직접 선택
                 supportTeamId: '',
                 bankName: '',
                 accountNumber: '',
@@ -593,32 +586,56 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
 
     const supportTeamOptionsByCompany = useMemo(() => {
         if (!workerForm.companyId) return [];
-        if (!partnerCompanyIdSet.has(workerForm.companyId)) return [];
+
+        // 선택된 회사 정보 찾기
+        const selectedCompany = companies.find(c => c.id === workerForm.companyId);
+        if (!selectedCompany) return [];
 
         return teams
-            .filter(t => (t.companyId ? t.companyId === workerForm.companyId : false))
+            .filter(t =>
+                t.companyId === workerForm.companyId || // companyId로 매칭
+                t.companyName === selectedCompany.name   // 또는 companyName으로 매칭
+            )
             .map(t => ({
                 value: t.id ?? '',
                 label: `${t.name}${t.companyName ? ` (${t.companyName})` : ''}`
             }))
             .filter(opt => opt.value.length > 0);
-    }, [partnerCompanyIdSet, teams, workerForm.companyId]);
+    }, [teams, workerForm.companyId, companies]);
 
     const constructionCompanyOptions = useMemo(() => {
-        if (!cheongyeonCompanyId) {
-            return [{ value: '', label: '청연(없음)' }];
-        }
+        // 타입이 시공사인 회사들만 필터링
+        const constructionCompanies = companies.filter(c => c.type === '시공사');
 
-        return [{ value: cheongyeonCompanyId, label: cheongyeonCompanyName }];
-    }, [cheongyeonCompanyId, cheongyeonCompanyName]);
-
-    const constructionTeamOptions = useMemo(() => {
-        return teams
-            .filter(t => t.type === '시공팀')
-            .map(t => ({ value: t.id ?? '', label: t.name }))
+        return constructionCompanies
+            .map(c => ({ value: c.id ?? '', label: c.name }))
             .filter(opt => opt.value.length > 0)
             .sort((a, b) => a.label.localeCompare(b.label));
-    }, [teams]);
+    }, [companies]);
+
+    const constructionTeamOptions = useMemo(() => {
+        // 시공팀/시공사이면서 선택된 회사에 소속된 팀만 표시
+        if (!workerForm.companyId) return [];
+
+        // 선택된 회사 정보 찾기
+        const selectedCompany = companies.find(c => c.id === workerForm.companyId);
+        if (!selectedCompany) return [];
+
+        return teams
+            .filter(t =>
+                (t.type === '시공팀' || t.type === '시공사') &&  // 시공팀 또는 시공사
+                (
+                    t.companyId === workerForm.companyId ||    // companyId로 매칭 또는
+                    t.companyName === selectedCompany.name      // companyName으로 매칭
+                )
+            )
+            .map(t => ({
+                value: t.id ?? '',
+                label: `${t.name}${t.companyName ? ` (${t.companyName})` : ''}`
+            }))
+            .filter(opt => opt.value.length > 0)
+            .sort((a, b) => a.label.localeCompare(b.label));
+    }, [teams, workerForm.companyId, companies]);
 
     const teamSchema = useMemo(() => {
         return z
@@ -712,8 +729,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
         return z
             .object({
                 name: z.string().trim().min(1, '현장명을 입력해주세요.'),
-                startDate: z.string().trim().min(1, '시작일을 입력해주세요.'),
-                endDate: z.string().trim().min(1, '종료일을 입력해주세요.'),
                 companyId: z.string(),
                 responsibleTeamId: z.string()
             })
@@ -968,6 +983,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     defaultSalaryModel: validated.type === '지원팀' ? '지원팀' : '일급제',
                     color: '',
                     icon: '',
+                    iconKey: '',
                     role: ''
                 });
 
@@ -1034,8 +1050,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                 const resolvedCode = generateCode('SITE');
                 const validated = siteSchema.parse({
                     name: siteForm.name,
-                    startDate: siteForm.startDate,
-                    endDate: siteForm.endDate,
                     companyId: siteForm.companyId,
                     responsibleTeamId: siteForm.responsibleTeamId
                 });
@@ -1054,8 +1068,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     name: validated.name,
                     code: resolvedCode,
                     address: '',
-                    startDate: validated.startDate,
-                    endDate: validated.endDate,
                     status: 'active',
                     responsibleTeamId: resolvedResponsibleTeam?.id ?? '',
                     responsibleTeamName: resolvedResponsibleTeam?.name ?? '',
@@ -1069,8 +1081,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
 
                 setSiteForm({
                     name: '',
-                    startDate: today,
-                    endDate: today,
                     companyId: '',
                     responsibleTeamId: ''
                 });
@@ -1241,8 +1251,53 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     defaultSalaryModel: '지원팀',
                     color: '',
                     icon: '',
+                    iconKey: '',
                     role: ''
                 });
+
+                // 대표자를 팀장으로 등록
+                if (registerCeoAsLeader && createdCompany.ceoName.trim().length > 0) {
+                    const workerId = await manpowerService.addWorker({
+                        name: createdCompany.ceoName,
+                        idNumber: '',
+                        contact: partnerCompanyForm.phone,
+                        address: '',
+                        companyId: createdCompany.companyId,
+                        companyName: createdCompany.companyName,
+                        teamId: teamId,
+                        teamName: trimmedTeamName,
+                        teamType: '지원팀',
+                        unitPrice: 0,
+                        salaryModel: '지원팀',
+                        bankName: partnerCompanyForm.bankName,
+                        accountNumber: partnerCompanyForm.accountNumber,
+                        accountHolder: partnerCompanyForm.accountHolder || createdCompany.ceoName,
+                        role: '팀장',
+                        status: 'active'
+                    });
+
+                    // 팀장 정보 업데이트 (undefined 필드 제외)
+                    const updateData: any = {
+                        leaderId: workerId,
+                        leaderName: createdCompany.ceoName,
+                        memberIds: [workerId],
+                        memberNames: [createdCompany.ceoName],
+                        memberCount: 1
+                    };
+
+                    // undefined 필드 제거
+                    Object.keys(updateData).forEach(key => {
+                        if (updateData[key] === undefined) {
+                            delete updateData[key];
+                        }
+                    });
+
+                    await teamService.updateTeam(teamId, updateData);
+
+                    toast.success(`${createdCompany.companyName}, ${trimmedTeamName}, ${createdCompany.ceoName}(팀장)을 등록했습니다.`);
+                } else {
+                    toast.success(`${createdCompany.companyName}과 ${trimmedTeamName}을 등록했습니다.`);
+                }
 
                 setTeams(prev => [
                     {
@@ -1271,13 +1326,95 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
 
                 setPartnerCompanyTeamForm({ teamName: '' });
                 setIsPartnerCompanyTeamNameTouched(false);
+                setRegisterCeoAsLeader(true); // 기본값으로 초기화
 
                 emitMasterDataChanged({ companies: true, teams: true });
                 return;
             }
 
             if (selectedSection === 'constructionCompany') {
-                await registerCompany('건설사', constructionCompanyForm);
+                const createdCompany = await registerCompany('건설사', constructionCompanyForm);
+
+                // "발주사" 팀 찾기 또는 생성
+                let clientTeamId = '';
+                let clientTeamName = '발주사';
+
+                const existingClientTeam = teams.find(
+                    t => t.name === '발주사' && t.companyId === createdCompany.companyId
+                );
+
+                if (existingClientTeam && existingClientTeam.id) {
+                    clientTeamId = existingClientTeam.id;
+                } else {
+                    // "발주사" 팀 생성
+                    clientTeamId = await teamService.addTeam({
+                        name: clientTeamName,
+                        type: '시공팀',
+                        leaderId: '',
+                        leaderName: '',
+                        companyId: createdCompany.companyId,
+                        companyName: createdCompany.companyName,
+                        parentTeamId: '',
+                        parentTeamName: '',
+                        memberCount: 0,
+                        assignedWorkers: [],
+                        memberIds: [],
+                        memberNames: [],
+                        assignedSiteId: '',
+                        assignedSiteName: '',
+                        siteIds: [],
+                        siteNames: [],
+                        totalManDay: 0,
+                        status: 'active',
+                        supportRate: 0,
+                        supportModel: 'man_day',
+                        supportDescription: '',
+                        serviceRate: 0,
+                        serviceModel: 'man_day',
+                        serviceDescription: '',
+                        defaultSalaryModel: '월급제',
+                        color: '',
+                        icon: '',
+                        iconKey: '',
+                        role: ''
+                    });
+                }
+
+                // 대표자를 작업자로 등록
+                if (registerCeoAsRepresentative && createdCompany.ceoName.trim().length > 0) {
+                    const workerId = await manpowerService.addWorker({
+                        name: createdCompany.ceoName,
+                        idNumber: '',
+                        contact: constructionCompanyForm.phone,
+                        address: '',
+                        companyId: createdCompany.companyId,
+                        companyName: createdCompany.companyName,
+                        teamId: clientTeamId,
+                        teamName: clientTeamName,
+                        teamType: '시공팀',
+                        unitPrice: 0,
+                        salaryModel: '월급제',
+                        bankName: constructionCompanyForm.bankName,
+                        accountNumber: constructionCompanyForm.accountNumber,
+                        accountHolder: constructionCompanyForm.accountHolder || createdCompany.ceoName,
+                        role: '대표',
+                        status: 'active'
+                    });
+
+                    // 팀에 대표 설정
+                    await teamService.updateTeam(clientTeamId, {
+                        leaderId: workerId,
+                        leaderName: createdCompany.ceoName,
+                        memberIds: [workerId],
+                        memberNames: [createdCompany.ceoName],
+                        memberCount: 1
+                    } as any);
+
+                    toast.success(`${createdCompany.companyName}, 발주사팀, ${createdCompany.ceoName}(대표)을 등록했습니다.`);
+                } else {
+                    toast.success(`${createdCompany.companyName}을 등록했습니다.`);
+                }
+
                 setConstructionCompanyForm({
                     name: '',
                     businessNumber: '',
@@ -1287,8 +1424,9 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     accountNumber: '',
                     accountHolder: ''
                 });
+                setRegisterCeoAsRepresentative(true); // 기본값으로 초기화
 
-                emitMasterDataChanged({ companies: true });
+                emitMasterDataChanged({ companies: true, teams: true });
             }
         } catch (error) {
             if (error instanceof z.ZodError) {
@@ -1446,11 +1584,17 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                 />
                                 {workerForm.teamType === '시공팀' ? (
                                     <Select
-                                        label="회사"
+                                        label="시공사 회사"
                                         value={workerForm.companyId}
-                                        onChange={() => undefined}
-                                        disabled
+                                        onChange={(v) =>
+                                            setWorkerForm(prev => ({
+                                                ...prev,
+                                                companyId: v,
+                                                supportTeamId: ''
+                                            }))
+                                        }
                                         options={[
+                                            { value: '', label: '시공사 선택...' },
                                             ...constructionCompanyOptions
                                         ]}
                                     />
@@ -1475,11 +1619,19 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
 
                             {workerForm.teamType === '시공팀' && (
                                 <Select
-                                    label="시공팀 선택"
+                                    label="시공사 팀 선택"
                                     value={workerForm.supportTeamId}
-                                    onChange={(v) => setWorkerForm(prev => ({ ...prev, supportTeamId: v }))}
+                                    onChange={(v) => {
+                                        const selectedTeam = teams.find(t => t.id === v);
+                                        setWorkerForm(prev => ({
+                                            ...prev,
+                                            supportTeamId: v,
+                                            companyId: selectedTeam?.companyId || prev.companyId // 팀의 소속 회사 자동 설정
+                                        }));
+                                    }}
+                                    disabled={!workerForm.companyId}
                                     options={[
-                                        { value: '', label: '선택 (미지정 가능)' },
+                                        { value: '', label: workerForm.companyId ? '선택 (미지정 가능)' : '시공사 회사 먼저 선택' },
                                         ...constructionTeamOptions
                                     ]}
                                 />
@@ -1489,7 +1641,14 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                 <Select
                                     label="협력사 팀"
                                     value={workerForm.supportTeamId}
-                                    onChange={(v) => setWorkerForm(prev => ({ ...prev, supportTeamId: v }))}
+                                    onChange={(v) => {
+                                        const selectedTeam = teams.find(t => t.id === v);
+                                        setWorkerForm(prev => ({
+                                            ...prev,
+                                            supportTeamId: v,
+                                            companyId: selectedTeam?.companyId || prev.companyId // 팀의 소속 회사 자동 설정
+                                        }));
+                                    }}
                                     disabled={!workerForm.companyId}
                                     options={[
                                         { value: '', label: workerForm.companyId ? '선택' : '협력사 회사 먼저 선택' },
@@ -1577,11 +1736,20 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                 />
                                 {teamForm.type === '시공팀' ? (
                                     <Select
-                                        label="회사"
+                                        label="시공사 회사"
                                         value={teamForm.companyId}
-                                        onChange={() => undefined}
-                                        disabled
+                                        onChange={(v) => {
+                                            // 선택된 회사 정보 찾기
+                                            const selectedCompany = companies.find(c => c.id === v);
+                                            setIsTeamNameTouched(false);
+                                            setTeamForm(prev => ({
+                                                ...prev,
+                                                companyId: v,
+                                                name: selectedCompany ? `${selectedCompany.name}팀` : '' // 회사명+팀
+                                            }));
+                                        }}
                                         options={[
+                                            { value: '', label: '시공사 선택...' },
                                             ...constructionCompanyOptions
                                         ]}
                                     />
@@ -1590,13 +1758,15 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                         label="협력사 회사"
                                         value={teamForm.companyId}
                                         onChange={(v) => {
+                                            // 선택된 회사 정보 찾기
+                                            const selectedCompany = companies.find(c => c.id === v);
                                             setIsTeamNameTouched(false);
                                             setTeamForm(prev => ({
                                                 ...prev,
                                                 companyId: v,
                                                 selectedWorkerIds: [],
                                                 leaderWorkerId: '',
-                                                name: ''
+                                                name: selectedCompany ? `${selectedCompany.name}팀` : '' // 회사명+팀
                                             }));
                                         }}
                                         options={[
@@ -1701,21 +1871,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                     ]}
                                 />
                             </div>
-
-                            <div className="grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                                <Input
-                                    label="시작일"
-                                    type="date"
-                                    value={siteForm.startDate}
-                                    onChange={(v) => setSiteForm(prev => ({ ...prev, startDate: v }))}
-                                />
-                                <Input
-                                    label="종료일"
-                                    type="date"
-                                    value={siteForm.endDate}
-                                    onChange={(v) => setSiteForm(prev => ({ ...prev, endDate: v }))}
-                                />
-                            </div>
                         </div>
                     )}
 
@@ -1806,6 +1961,15 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                     placeholder="예: 홍길동"
                                 />
                             </div>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={registerCeoAsLeader}
+                                    onChange={(e) => setRegisterCeoAsLeader(e.target.checked)}
+                                    className="w-4 h-4 text-brand-600 bg-slate-700 border-slate-600 rounded focus:ring-brand-500 focus:ring-2"
+                                />
+                                <span className="text-sm text-slate-300">대표자를 팀장으로 등록</span>
+                            </label>
                         </div>
                     )}
 
@@ -1858,6 +2022,15 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                     placeholder="예: 홍길동"
                                 />
                             </div>
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={registerCeoAsRepresentative}
+                                    onChange={(e) => setRegisterCeoAsRepresentative(e.target.checked)}
+                                    className="w-4 h-4 text-brand-600 bg-slate-700 border-slate-600 rounded focus:ring-brand-500 focus:ring-2"
+                                />
+                                <span className="text-sm text-slate-300">대표자를 작업자로 등록 (직책: 대표)</span>
+                            </label>
                         </div>
                     )}
                 </div>

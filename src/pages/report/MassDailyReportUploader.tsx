@@ -167,8 +167,6 @@ const MassDailyReportUploader: React.FC = () => {
                             name: siteName,
                             code: 'AUTO',
                             address: '',
-                            startDate: '2025-01-01',
-                            endDate: '2025-12-31',
                             status: 'active'
                         });
                         const newSite: any = { id: newId, name: siteName };

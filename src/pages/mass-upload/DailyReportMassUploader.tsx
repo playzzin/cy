@@ -191,8 +191,6 @@ const DailyReportMassUploader: React.FC = () => {
                         name: row.siteName,
                         code: `SITE-${Date.now()}-${Math.floor(Math.random() * 100)}`,
                         address: '일괄생성',
-                        startDate: new Date().toISOString().split('T')[0],
-                        endDate: '2099-12-31',
                         status: 'active'
                     });
                     const newSiteObj: Site = {
@@ -201,7 +199,6 @@ const DailyReportMassUploader: React.FC = () => {
                         code: `SITE-${Date.now()}-${Math.floor(Math.random() * 100)}`,
                         address: '일괄생성',
                         status: 'active',
-                        startDate: '', endDate: '',
                         companyName: row.companyName // Add company info if from Excel
                     };
                     tempSites.set(row.siteName, newSiteObj);

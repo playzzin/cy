@@ -262,9 +262,7 @@ const DailyReportDirectInput: React.FC = () => {
                         name: siteName,
                         code: 'AUTO-' + Math.floor(Math.random() * 10000),
                         status: 'active',
-                        address: '',
-                        startDate: new Date().toISOString().split('T')[0],
-                        endDate: '2099-12-31'
+                        address: ''
                     });
 
                     siteMap.set(siteName, newId);

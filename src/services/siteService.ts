@@ -7,8 +7,6 @@ export interface Site {
     name: string;
     code: string;
     address: string;
-    startDate: string;
-    endDate: string;
     status: 'active' | 'completed' | 'planned';
     responsibleTeamId?: string; // ID of the team managing this site
     responsibleTeamName?: string; // Denormalized name for display
@@ -24,13 +22,11 @@ export interface Site {
 const COLLECTION_NAME = 'sites';
 
 export const siteService = {
-    addSite: async (site: Partial<Site> & Pick<Site, 'name' | 'code' | 'address' | 'startDate' | 'endDate' | 'status'>): Promise<string> => {
+    addSite: async (site: Partial<Site> & Pick<Site, 'name' | 'code' | 'address' | 'status'>): Promise<string> => {
         const docRef = await addDoc(collection(db, COLLECTION_NAME), {
             name: site.name,
             code: site.code,
             address: site.address,
-            startDate: site.startDate,
-            endDate: site.endDate,
             status: site.status,
             responsibleTeamId: site.responsibleTeamId || '',
             responsibleTeamName: site.responsibleTeamName || '',

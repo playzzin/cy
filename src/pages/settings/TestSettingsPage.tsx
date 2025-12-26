@@ -269,8 +269,6 @@ const TestSettingsPage: React.FC = () => {
                     ...s,
                     code: Math.random().toString(36).substr(2, 5).toUpperCase(),
                     address: '주소 미정',
-                    startDate: '2024-01-01',
-                    endDate: '2024-12-31',
                     status: 'active',
                     responsibleTeamId: s.responsibleTeamId,
                     responsibleTeamName: s.responsibleTeamName
