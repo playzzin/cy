@@ -5,6 +5,8 @@ export interface MenuItem {
     sub?: (string | MenuItem)[];
     id?: string;
     roles?: string[]; // Added for dynamic role handling
+    iconColor?: string; // Custom icon color
+    activeColor?: string; // Background/Text color when active
     hoverColor?: string; // Color for hover/active state
     hide?: boolean;
 }

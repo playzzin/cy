@@ -9,6 +9,9 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
         id: z.string().optional(), // ID might be missing in legacy data, but we encourage it
         roles: z.array(z.string()).optional(),
         hoverColor: z.string().optional(), // Rollover Color
+        iconColor: z.string().optional(),
+        activeColor: z.string().optional(),
+        hide: z.boolean().optional(),
         sub: z.array(z.string().or(MenuItemSchema)).optional()
     })
 );
@@ -16,6 +19,7 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
 export const SiteDataSchema = z.object({
     name: z.string(),
     icon: z.string(),
+    order: z.number().optional(),
     menu: z.array(MenuItemSchema),
     trash: z.array(MenuItemSchema).optional(),
     deletedItems: z.array(z.string()).optional(),

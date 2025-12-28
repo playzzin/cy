@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     DndContext,
     DragOverlay,
@@ -100,7 +100,69 @@ const AdvancedMenuManager: React.FC = () => {
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
-    const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    // Derived state: Get actual item objects from IDs
+    const selectedItems = useMemo(() => {
+        if (!menuData) return [];
+        const items: MenuItem[] = [];
+        selectedIds.forEach(id => {
+            const item = findMenuItemInTree(menuData[selectedSite]?.menu || [], id);
+            if (item) items.push(item);
+        });
+        return items;
+    }, [menuData, selectedSite, selectedIds]);
+
+    const activeItem = selectedItems.length === 1 ? selectedItems[0] : undefined;
+
+    // Actions
+    const handleNodeSelect = useCallback((id: string, multiSelect: boolean = false) => {
+        if (multiSelect) {
+            setSelectedIds(prev => {
+                if (prev.includes(id)) {
+                    return prev.filter(item => item !== id);
+                } else {
+                    return [...prev, id];
+                }
+            });
+        } else {
+            setSelectedIds([id]);
+        }
+        setLeftPanelOpen(false);
+    }, []);
+
+    const handleBatchUpdate = (updates: Partial<MenuItem>) => {
+        if (!menuData) return;
+
+        const updateRecursive = (nodes: (MenuItem | string)[]): (MenuItem | string)[] => {
+            return nodes.map(node => {
+                if (typeof node === 'string') return node;
+
+                let newNode = { ...node };
+                if (selectedIds.includes(node.id || '')) {
+                    newNode = { ...newNode, ...updates };
+                }
+
+                if (newNode.sub) {
+                    newNode.sub = updateRecursive(newNode.sub);
+                }
+                return newNode;
+            });
+        };
+
+        const newMenu = updateRecursive(menuData[selectedSite].menu);
+        const newData = { ...menuData };
+        newData[selectedSite].menu = newMenu as MenuItem[];
+        updateMenuData(newData);
+    };
+
+    const handleInspectorUpdate = (updatedItem: MenuItem) => {
+        if (!menuData) return;
+        const newMenu = updateMenuItemInTree(menuData[selectedSite].menu, updatedItem);
+        const newData = { ...menuData };
+        newData[selectedSite].menu = newMenu as MenuItem[];
+        updateMenuData(newData);
+    };
+
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
     const [isSiteManagerOpen, setIsSiteManagerOpen] = useState(false);
@@ -162,7 +224,7 @@ const AdvancedMenuManager: React.FC = () => {
 
     // Reset selection when site changes (Fix for: "Menu structure doesn't seem to change")
     useEffect(() => {
-        setSelectedNodeId(null);
+        setSelectedIds([]);
     }, [selectedSite]);
 
     // --- Actions ---
@@ -235,8 +297,8 @@ const AdvancedMenuManager: React.FC = () => {
             newData[selectedSite].menu = newMenu;
             updateMenuData(newData);
 
-            if (selectedNodeId === itemId) {
-                setSelectedNodeId(null);
+            if (selectedIds.includes(itemId)) {
+                setSelectedIds(prev => prev.filter(id => id !== itemId));
             }
         }
     };
@@ -308,6 +370,8 @@ const AdvancedMenuManager: React.FC = () => {
             const dst = findRef(newMenu, overId);
             if (dst) {
                 dst.list.splice(dst.index, 0, newItem);
+            } else if (overId === 'root-drop-zone') {
+                newMenu.push(newItem);
             } else {
                 newMenu.push(newItem);
             }
@@ -473,23 +537,19 @@ const AdvancedMenuManager: React.FC = () => {
                                 newData[selectedSite].menu = newItems;
                                 updateMenuData(newData);
                             }}
-                            selectedId={selectedNodeId}
-                            onSelect={setSelectedNodeId}
+                            selectedIds={selectedIds}
+                            onSelect={handleNodeSelect}
                             onDelete={handleDeleteItem}
                         />
                     </main>
 
                     {/* 3. Inspector Panel (Right) */}
                     <InspectorPanel
-                        isOpen={rightPanelOpen}
-                        toggle={() => setRightPanelOpen(!rightPanelOpen)}
-                        selectedItem={findMenuItemInTree(menuData[selectedSite]?.menu || [], selectedNodeId) || undefined}
-                        onUpdate={(updatedItem: MenuItem) => {
-                            const newMenu = updateMenuItemInTree(menuData[selectedSite]?.menu || [], updatedItem) as MenuItem[];
-                            const newData = { ...menuData };
-                            newData[selectedSite].menu = newMenu;
-                            updateMenuData(newData);
-                        }}
+                        isOpen={selectedIds.length > 0}
+                        toggle={() => setSelectedIds([])}
+                        selectedItems={selectedItems}
+                        onUpdate={handleInspectorUpdate}
+                        onBatchUpdate={handleBatchUpdate}
                     />
                 </div>
 

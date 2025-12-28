@@ -45,6 +45,7 @@ import { rolePermissionService } from '../../services/rolePermissionService';
 import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
 
+import * as AllIcons from '@fortawesome/free-solid-svg-icons';
 import { iconMap } from '../../constants/iconMap';
 
 interface SidebarProps {
@@ -297,7 +298,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="sidebar-header">
                     <div className="logo-group" onClick={handleLogoClick} style={{ cursor: 'pointer' }}>
                         <FontAwesomeIcon
-                            icon={iconMap[currentSiteData.icon] || faShieldHalved}
+                            icon={(AllIcons as any)[currentSiteData.icon] || faShieldHalved}
                             id="sidebar-logo-icon"
                             style={{ color: '#1abc9c', fontSize: '24px', marginRight: '10px' }}
                         />
@@ -311,14 +312,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <ul className="menu-list" style={{ paddingBottom: '20px' }}>
                         {finalMenu.map((item: MenuItem, index: number) => {
                             const hasSub = item.sub && item.sub.length > 0;
-                            // Use ID for key if available, fallback to index for legacy compatibility
                             const uniqueKey = item.id || `menu-${index}`;
                             const itemId = uniqueKey;
-                            const isExpanded = activeMenuItems[itemId]; // This might break if itemId format changes? 
-                            // Wait, toggleSubmenu uses itemId. If we change itemId schema, we reset state. That is fine.
-
+                            const isExpanded = activeMenuItems[itemId];
                             const isChildActive = isParentActive(item);
-                            const showColor = isExpanded || isChildActive;
+
+                            // Determine Active Color (Default: #1abc9c)
+                            const activeColor = item.activeColor || '#1abc9c';
+                            // Determine Icon Color (Default: inherit or specific logic)
+                            // If active/expanded, we might want to force activeColor or keep iconColor?
+                            // Usually active state overrides icon color to activeColor.
+                            // Let's use iconColor if set, UNLESS active/expanded where we might want high contrast or activeColor.
+                            // Current design: Active item text/icon becomes activeColor (green #1abc9c).
+
+                            const isItemActive = isExpanded || isChildActive;
+                            const effectiveIconColor = isItemActive ? activeColor : (item.iconColor || undefined);
+                            const effectiveTextStyle = isItemActive ? { color: activeColor, fontWeight: 'bold' } : {};
 
                             return (
                                 <li
@@ -341,11 +350,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 }
                                             }}
                                             data-tooltip={item.text}
+                                            style={effectiveTextStyle}
                                         >
                                             <FontAwesomeIcon
-                                                icon={iconMap[item.icon || 'fa-chart-pie'] || faChartPie}
+                                                icon={(AllIcons as any)[item.icon || 'faChartPie'] || faChartPie}
                                                 className="menu-icon"
-                                                style={showColor ? { color: '#1abc9c' } : {}}
+                                                style={{ color: effectiveIconColor }}
                                             />
                                             <span className="menu-text">{item.text}</span>
                                             <FontAwesomeIcon
@@ -366,13 +376,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 }
                                                 handleMenuItemClick(item);
                                             }}
-                                            onMouseEnter={() => isSidebarCollapsed && setHoveredMenuItem(null)} // Close panel if hovering non-sub item
+                                            onMouseEnter={() => isSidebarCollapsed && setHoveredMenuItem(null)}
                                             data-tooltip={item.text}
+                                            style={isActiveCheck(item.path || menuPaths[item.text]) ? { color: activeColor, fontWeight: 'bold' } : {}}
                                         >
                                             <FontAwesomeIcon
-                                                icon={iconMap[item.icon || 'fa-chart-pie'] || faChartPie}
+                                                icon={(AllIcons as any)[item.icon || 'faChartPie'] || faChartPie}
                                                 className="menu-icon"
-                                                style={showColor ? { color: '#1abc9c' } : {}}
+                                                style={{
+                                                    color: isActiveCheck(item.path || menuPaths[item.text]) ? activeColor : (item.iconColor || undefined)
+                                                }}
                                             />
                                             <span className="menu-text">{item.text}</span>
                                         </a>
@@ -380,20 +393,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {hasSub && (
                                         <ul className="submenu-list">
                                             {item.sub?.map((subItem: string | MenuItem, subIndex: number) => {
-                                                // Determine if it's a Leaf Node (Link) or Nested Group
                                                 let isLeaf = false;
                                                 let linkText = '';
                                                 let linkPath = '';
                                                 let subUniqueKey = `sub-${uniqueKey}-${subIndex}`;
+                                                let subItemIconColor = undefined;
+                                                let subItemActiveColor = '#1abc9c';
 
                                                 if (typeof subItem === 'string') {
                                                     isLeaf = true;
                                                     linkText = subItem;
                                                     linkPath = menuPaths[subItem] || '';
-                                                    subUniqueKey = `sub-${linkText}`; // Stable key for strings
+                                                    subUniqueKey = `sub-${linkText}`;
                                                 } else {
                                                     const menuItem = subItem as MenuItem;
                                                     subUniqueKey = menuItem.id || `sub-${uniqueKey}-${subIndex}`;
+                                                    subItemIconColor = menuItem.iconColor;
+                                                    subItemActiveColor = menuItem.activeColor || '#1abc9c';
+
                                                     if (!menuItem.sub || menuItem.sub.length === 0) {
                                                         isLeaf = true;
                                                         linkText = menuItem.text;
@@ -422,8 +439,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                     }
                                                                 }}
                                                                 className={isSubActive ? 'active' : ''}
-                                                                style={isSubActive ? { color: '#1abc9c', fontWeight: 'bold' } : {}}
+                                                                style={{
+                                                                    color: isSubActive ? subItemActiveColor : undefined,
+                                                                    fontWeight: isSubActive ? 'bold' : 'normal'
+                                                                }}
                                                             >
+                                                                {/* Optional Icon for Subitems if needed, typically text only on this level in this design, but if desired: */}
+                                                                {/* {item has iconColor logic?} */}
                                                                 {linkText}
                                                             </a>
                                                         </li>
@@ -432,6 +454,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                     const menuItem = subItem as MenuItem;
                                                     const nestedItemId = menuItem.id || `nested-${index}-${subIndex}`;
                                                     const isNestedActive = activeNestedMenuItems[nestedItemId];
+                                                    const nestedActiveColor = menuItem.activeColor || '#1abc9c';
+                                                    const nestedIconColor = menuItem.iconColor;
 
                                                     return (
                                                         <li key={subUniqueKey} className="nested-submenu">
@@ -443,10 +467,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                             >
                                                                 <div style={{ display: 'flex', alignItems: 'center' }}>
                                                                     <FontAwesomeIcon
-                                                                        icon={iconMap[menuItem.icon || 'fa-circle'] || faChartPie}
-                                                                        style={{ marginRight: '8px', fontSize: '12px', color: isNestedActive ? '#1abc9c' : 'inherit' }}
+                                                                        icon={(AllIcons as any)[menuItem.icon || 'faCircle'] || faChartPie}
+                                                                        style={{
+                                                                            marginRight: '8px',
+                                                                            fontSize: '12px',
+                                                                            color: isNestedActive ? nestedActiveColor : (nestedIconColor || 'inherit')
+                                                                        }}
                                                                     />
-                                                                    {menuItem.text}
+                                                                    <span style={isNestedActive ? { color: nestedActiveColor } : {}}>
+                                                                        {menuItem.text}
+                                                                    </span>
                                                                 </div>
                                                                 <FontAwesomeIcon
                                                                     icon={faChevronRight}
@@ -458,6 +488,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                 <ul className="nested-submenu-list" style={{ paddingLeft: '15px' }}>
                                                                     {menuItem.sub?.map((nestedItem: string | MenuItem, nestedIndex: number) => {
                                                                         let nestedUniqueKey = `nested-${subUniqueKey}-${nestedIndex}`;
+                                                                        let nestedDeepActiveColor = '#1abc9c';
+
                                                                         if (typeof nestedItem === 'string') {
                                                                             nestedUniqueKey = `nested-leaf-${nestedItem}`;
                                                                             const path = menuPaths[nestedItem];
@@ -477,7 +509,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                             handleSubMenuClick(nestedItem as string);
                                                                                         }}
                                                                                         className={isSubActive ? 'active' : ''}
-                                                                                        style={isSubActive ? { color: '#1abc9c', fontWeight: 'bold' } : {}}
+                                                                                        style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
                                                                                     >
                                                                                         {nestedItem}
                                                                                     </a>
@@ -486,6 +518,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                         } else {
                                                                             const nestedObj = nestedItem as MenuItem;
                                                                             nestedUniqueKey = nestedObj.id || nestedUniqueKey;
+                                                                            nestedDeepActiveColor = nestedObj.activeColor || '#1abc9c';
+
                                                                             if (!nestedObj.sub || nestedObj.sub.length === 0) {
                                                                                 const linkPath = nestedObj.path || menuPaths[nestedObj.text];
                                                                                 const isSubActive = isActiveCheck(linkPath);
@@ -505,7 +539,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                                 else handleSubMenuClick(nestedObj.text);
                                                                                             }}
                                                                                             className={isSubActive ? 'active' : ''}
-                                                                                            style={isSubActive ? { color: '#1abc9c', fontWeight: 'bold' } : {}}
+                                                                                            style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
                                                                                         >
                                                                                             {nestedObj.text}
                                                                                         </a>
@@ -531,23 +565,26 @@ const Sidebar: React.FC<SidebarProps> = ({
             </nav>
 
             {/* Hover Submenu Panel for Collapsed Mode (Portal to body) */}
-            {/* Hover Submenu Panel for Collapsed Mode (Portal to body) */}
             {isSidebarCollapsed && hoveredMenuItem && createPortal(
                 <div
                     className={`submenu-panel ${hoveredMenuItem ? 'open' : ''}`}
                     onMouseEnter={handlePanelMouseEnter}
                     onMouseLeave={handlePanelMouseLeave}
                     style={{
-                        position: 'fixed', // Ensure fixed positioning relative to viewport
-                        zIndex: 9999, // Ensure it's on top
-                        top: Math.min(hoveredItemTop, window.innerHeight - 300) + 'px', // Prevent going off-screen
-                        left: '60px', // Explicitly set left position
-                        transformOrigin: 'left top'
+                        position: 'fixed',
+                        zIndex: 9999,
+                        top: Math.min(hoveredItemTop, window.innerHeight - 300) + 'px',
+                        left: '60px',
+                        transformOrigin: 'left top',
+                        borderColor: hoveredMenuItem.activeColor // Optional border color?
                     }}
                 >
-                    <div className="submenu-panel-header">
-                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <FontAwesomeIcon icon={iconMap[hoveredMenuItem.icon || 'fa-chart-pie'] || faChartPie} style={{ color: '#1abc9c' }} />
+                    <div className="submenu-panel-header" style={hoveredMenuItem.activeColor ? { borderBottomColor: hoveredMenuItem.activeColor } : {}}>
+                        <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: hoveredMenuItem.activeColor || '#1abc9c' }}>
+                            <FontAwesomeIcon
+                                icon={(AllIcons as any)[hoveredMenuItem.icon || 'faChartPie'] || faChartPie}
+                                style={{ color: hoveredMenuItem.activeColor || hoveredMenuItem.iconColor || '#1abc9c' }}
+                            />
                             {hoveredMenuItem.text}
                         </span>
                         <button className="submenu-close-btn" onClick={() => setHoveredMenuItem(null)}>
@@ -556,11 +593,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                     <div className="submenu-panel-content">
                         {hoveredMenuItem.sub?.map((subItem: string | MenuItem, idx: number) => {
-                            // Determine if this is a Leaf Node (clickable) or a Group (header for nested items)
                             let isLeaf = false;
                             let itemText = '';
                             let itemPath = '';
                             let itemIcon = '';
+                            let itemActiveColor = '#1abc9c';
+                            let itemIconColor = undefined;
 
                             if (typeof subItem === 'string') {
                                 isLeaf = true;
@@ -568,26 +606,31 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 itemPath = menuPaths[subItem];
                             } else {
                                 const mi = subItem as MenuItem;
+                                itemActiveColor = mi.activeColor || '#1abc9c';
+                                itemIconColor = mi.iconColor;
                                 if (!mi.sub || mi.sub.length === 0) {
                                     isLeaf = true;
                                     itemText = mi.text;
                                     itemPath = mi.path || menuPaths[mi.text];
                                     itemIcon = mi.icon || '';
                                 } else {
-                                    isLeaf = false; // It's a group
+                                    isLeaf = false;
                                     itemText = mi.text;
                                     itemIcon = mi.icon || '';
                                 }
                             }
 
                             if (isLeaf) {
-                                // RENDER LEAF NODE (Button)
                                 const isSubActive = isActiveCheck(itemPath);
                                 return (
                                     <button
                                         key={idx}
                                         className={`submenu-item ${isSubActive ? 'active' : ''}`}
-                                        style={{ cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%' }}
+                                        style={{
+                                            cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
+                                            color: isSubActive ? itemActiveColor : undefined,
+                                            fontWeight: isSubActive ? 'bold' : 'normal'
+                                        }}
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             if (itemPath) {
@@ -598,35 +641,33 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             setHoveredMenuItem(null);
                                         }}
                                     >
-                                        {/* Optional Icon for leaf if available */}
                                         {itemIcon && (
                                             <FontAwesomeIcon
-                                                icon={iconMap[itemIcon] || faChartPie}
-                                                style={{ marginRight: '8px', fontSize: '10px', width: '12px' }}
+                                                icon={(AllIcons as any)[itemIcon] || faChartPie}
+                                                style={{ marginRight: '8px', fontSize: '10px', width: '12px', color: itemIconColor }}
                                             />
                                         )}
                                         <span>{itemText}</span>
                                     </button>
                                 );
                             } else {
-                                // RENDER GROUP (Header + Nested Children)
                                 const menuItem = subItem as MenuItem;
                                 return (
                                     <div key={idx}>
                                         <div className="submenu-item nested-header" style={{ userSelect: 'none' }}>
-                                            <span>
+                                            <span style={{ color: itemActiveColor }}>
                                                 <FontAwesomeIcon
-                                                    icon={iconMap[menuItem.icon || 'fa-circle'] || faChartPie}
-                                                    style={{ marginRight: '8px', fontSize: '10px' }}
+                                                    icon={(AllIcons as any)[menuItem.icon || 'faCircle'] || faChartPie}
+                                                    style={{ marginRight: '8px', fontSize: '10px', color: itemIconColor }}
                                                 />
                                                 {menuItem.text}
                                             </span>
                                         </div>
                                         {menuItem.sub?.map((nested: string | MenuItem, nIdx: number) => {
-                                            // 1. Resolve Item Data (Text & Path)
                                             let deepText = '';
                                             let deepPath = '';
                                             let deepPermission = '';
+                                            let deepActiveColor = '#1abc9c';
 
                                             if (typeof nested === 'string') {
                                                 deepText = nested;
@@ -636,24 +677,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 deepText = nested.text;
                                                 deepPath = nested.path || menuPaths[nested.text];
                                                 deepPermission = nested.text;
-                                                if (nested.roles) {
-                                                    // Role check placeholder
-                                                }
+                                                deepActiveColor = nested.activeColor || '#1abc9c';
                                             }
 
-                                            // 2. Permission Check
                                             if (!hasPermission(deepPermission)) return null;
 
-                                            // 3. Render Button
                                             const isNestedActive = isActiveCheck(deepPath);
 
                                             return (
                                                 <button
                                                     key={`${idx}-${nIdx}`}
                                                     className={`submenu-item nested-item ${isNestedActive ? 'active' : ''}`}
-                                                    style={{ cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%' }}
+                                                    style={{
+                                                        cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
+                                                        color: isNestedActive ? deepActiveColor : undefined,
+                                                        fontWeight: isNestedActive ? 'bold' : 'normal'
+                                                    }}
                                                     onClick={(e) => {
-                                                        e.stopPropagation(); // Prevent bubbling
+                                                        e.stopPropagation();
                                                         if (deepPath) {
                                                             openMenuPath(deepPath);
                                                         } else {
