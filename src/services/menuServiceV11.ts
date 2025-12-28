@@ -5,20 +5,17 @@ import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
 import { MENU_PATHS } from '../constants/menuPaths';
 import { SiteDataTypeSchema } from '../types/menuSchema';
 
+export type { MenuItem, SiteDataType };
+
 const COLLECTION_NAME = 'settings';
 const DOC_ID_CONFIG = 'menus_v12';
 
-interface MenuSubscribeOptions {
-    mergeWithDefaults?: boolean;
-}
-
-interface MenuFetchOptions {
-    mergeWithDefaults?: boolean;
-}
+// Options no longer need mergeWithDefaults
+interface MenuSubscribeOptions { }
+interface MenuFetchOptions { }
 
 interface MenuListener {
     callback: (data: SiteDataType) => void;
-    mergeWithDefaults: boolean;
 }
 
 interface AllowedMenuMap {
@@ -37,52 +34,8 @@ const MENU_TEXT_ALIASES: Record<string, string> = {
     '세금/가불 계산': '세금/가불'
 };
 
-const ALLOWED_MENU_TREE: AllowedMenuMap = {
-    '현황관리': {
-        '통합 현황판': true,
-        '인원전체내역조회': true
-    },
-    '통합DB': true,
-    '출력 관리': {
-        '일보작성': true,
-        '일보목록': true
-    },
-    '급여관리': {
-        '일급제': true,
-        '월급제': true,
-        '지원팀': true,
-        '가불관리': {
-            '가불등록': true,
-            '세금/가불': true
-        }
-    },
-    '서명관리': {
-        '서명생성기': true,
-        '서명위임장': true,
-        '위임장v2': true
-    },
-    '세금관리': {
-        '세금계산서 발행': true,
-        '세금계산서 거래장': true,
-        '미수금 대시보드': true,
-        '미수금 관리': true
-    },
-    '숙소관리': {
-        '숙소 관리': true,
-        '가불 및 공제': true
-    },
-    '자재관리': {
-        '자재 마스터': true,
-        '입고 등록': true,
-        '출고 등록': true,
-        '입출고 내역': true,
-        '재고 현황': true,
-        '현장별 재고': true
-    },
-    '개발자 도구': {
-        '에이전트 플레이그라운드': true
-    }
-};
+// ALLOWED_MENU_TREE removed to support dynamic menu management
+
 
 const normalizePayrollMenuItem = (item: MenuItem): MenuItem => {
     if (item.text !== '급여관리') {
@@ -152,49 +105,8 @@ const normalizePayrollStructure = (config: SiteDataType): SiteDataType => {
     return next;
 };
 
-const pruneMenuItemsByAllowTree = (items: MenuItem[], allowTree: AllowedMenuMap): MenuItem[] => {
-    const pruned: MenuItem[] = [];
+// prune functions removed
 
-    items.forEach((item) => {
-        const allowed = allowTree[item.text];
-        if (!allowed) {
-            return;
-        }
-
-        if (allowed === true) {
-            pruned.push(item);
-            return;
-        }
-
-        const next: MenuItem = { ...item };
-        const sub = Array.isArray(item.sub) ? item.sub : [];
-        const children = sub
-            .map((child) => (typeof child === 'string' ? ({ text: child } as MenuItem) : (child as MenuItem)))
-            .filter((child) => Boolean((allowed as AllowedMenuMap)[child.text]));
-
-        next.sub = pruneMenuItemsByAllowTree(children, allowed as AllowedMenuMap);
-
-        if (next.sub.length === 0 && (!next.path || next.path.length === 0)) {
-            return;
-        }
-
-        pruned.push(next);
-    });
-
-    return pruned;
-};
-
-const pruneSiteDataTypeByAllowTree = (config: SiteDataType): SiteDataType => {
-    const result: SiteDataType = {};
-    Object.keys(config).forEach((siteKey) => {
-        const site = config[siteKey];
-        result[siteKey] = {
-            ...site,
-            menu: pruneMenuItemsByAllowTree(site.menu || [], ALLOWED_MENU_TREE)
-        };
-    });
-    return result;
-};
 
 const createDeterministicId = (parts: string[]): string => {
     const input = parts.join('|');
@@ -245,149 +157,40 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
     return normalized;
 };
 
-const mergeSubItems = (
-    currentSub: (string | MenuItem)[] = [],
-    defaultSub: (string | MenuItem)[] = []
-): (string | MenuItem)[] => {
-    const merged = [...currentSub];
+// Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
 
-    defaultSub.forEach((defaultEntry) => {
-        if (typeof defaultEntry === 'string') {
-            const hasString = merged.some((item) => (typeof item === 'string' ? item === defaultEntry : item.text === defaultEntry));
-            if (!hasString) {
-                merged.push(defaultEntry);
-            }
-            return;
+// This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
+// But it DOES NOT merge with defaults.
+const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
+    // 1. Normalize IDs and structure
+    const normalized = normalizeSiteDataType(incomingConfig);
+
+    // 2. Fix Payroll structure specific logic
+    const structured = normalizePayrollStructure(normalized);
+
+    const final = normalizeSiteDataType(structured);
+
+    // 3. Ensure Position Config exists (Migration)
+    if (final['admin'] && !final['admin'].positionConfig) {
+        console.log('[MenuService] Auto-injecting default position config');
+        // Use a safe fallback or import from DEFAULT_MENU_CONFIG
+        // Since we are inside the module, we can use the imported constant if we avoid circular issues or just hardcode/copy.
+        // Copying from DEFAULT_MENU_CONFIG if available, or using hardcoded fallback for safety.
+        if (DEFAULT_MENU_CONFIG.admin?.positionConfig) {
+            final['admin'].positionConfig = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG.admin.positionConfig));
         }
+    }
 
-        const existingIndex = merged.findIndex((item) => typeof item !== 'string' && item.text === defaultEntry.text);
-        if (existingIndex === -1) {
-            merged.push(deepClone(defaultEntry));
-            return;
-        }
-
-        const existingItem = merged[existingIndex] as MenuItem;
-        if ((!existingItem.path || existingItem.path.length === 0) && defaultEntry.path) {
-            existingItem.path = defaultEntry.path;
-        }
-
-        if (defaultEntry.sub && defaultEntry.sub.length > 0) {
-            const existingSub = Array.isArray(existingItem.sub) ? existingItem.sub : [];
-            existingItem.sub = mergeSubItems(existingSub, defaultEntry.sub);
-        }
-    });
-
-    return merged;
-};
-
-const fillMissingPaths = (items: MenuItem[]): MenuItem[] => {
-    const apply = (arr: MenuItem[]): MenuItem[] =>
-        arr.map((item) => {
-            const next: MenuItem = { ...item };
-            if ((!next.path || next.path.length === 0) && MENU_PATHS[next.text]) {
-                next.path = MENU_PATHS[next.text];
-            }
-            if (next.sub && next.sub.length > 0) {
-                next.sub = apply(next.sub as MenuItem[]);
-            }
-            return next;
-        });
-    return apply(items);
-};
-
-const mergeMenuItemsWithDefaults = (currentMenu: MenuItem[], defaultMenu: MenuItem[], deletedItems: string[] = []): MenuItem[] => {
-    const mergedMenu = currentMenu.map((item) => deepClone(item));
-
-    defaultMenu.forEach((defaultItem) => {
-        if (deletedItems.includes(defaultItem.text)) {
-            return;
-        }
-
-        const existingIndex = mergedMenu.findIndex((item) => item.text === defaultItem.text);
-        if (existingIndex === -1) {
-            mergedMenu.push(deepClone(defaultItem));
-            return;
-        }
-
-        const existingItem = mergedMenu[existingIndex];
-
-        if ((!existingItem.path || existingItem.path.length === 0) && defaultItem.path) {
-            existingItem.path = defaultItem.path;
-        }
-
-        if (defaultItem.sub && defaultItem.sub.length > 0) {
-            const existingSub = Array.isArray(existingItem.sub) ? existingItem.sub : [];
-            existingItem.sub = mergeSubItems(existingSub, defaultItem.sub);
-        }
-    });
-
-    return fillMissingPaths(mergedMenu);
-};
-
-const ensureMenuWithDefaults = (incomingConfig: SiteDataType): SiteDataType => {
-    const resultConfig: SiteDataType = {};
-
-    const siteKeys = new Set([...Object.keys(DEFAULT_MENU_CONFIG), ...Object.keys(incomingConfig)]);
-
-    siteKeys.forEach((siteKey) => {
-        const defaultSite = DEFAULT_MENU_CONFIG[siteKey];
-        const incomingSite = incomingConfig[siteKey];
-
-        if (!incomingSite && defaultSite) {
-            resultConfig[siteKey] = deepClone(defaultSite);
-            return;
-        }
-
-        if (incomingSite && !defaultSite) {
-            resultConfig[siteKey] = deepClone(incomingSite);
-            return;
-        }
-
-        if (incomingSite && defaultSite) {
-            resultConfig[siteKey] = {
-                ...deepClone(defaultSite),
-                ...deepClone(incomingSite),
-                menu: mergeMenuItemsWithDefaults(incomingSite.menu, defaultSite.menu, incomingSite.deletedItems || [])
-            };
-            return;
-        }
-
-        if (defaultSite) {
-            resultConfig[siteKey] = deepClone(defaultSite);
-        }
-    });
-
-    const normalized = normalizeSiteDataType(resultConfig);
-    const pruned = pruneSiteDataTypeByAllowTree(normalized);
-    const restructured = normalizePayrollStructure(pruned);
-    return normalizeSiteDataType(restructured);
+    return final;
 };
 
 const notifyListeners = () => {
     listeners.forEach((listener) => {
-        if (listener.mergeWithDefaults) {
-            if (currentConfig) {
-                listener.callback(currentConfig);
-            }
-        } else if (currentRawConfig) {
-            listener.callback(deepClone(currentRawConfig));
-        } else if (currentConfig) {
+        // Always return currentConfig (which is processed)
+        if (currentConfig) {
             listener.callback(deepClone(currentConfig));
         }
     });
-};
-
-const prepareReturnConfig = (mergeWithDefaults: boolean) => {
-    if (mergeWithDefaults) {
-        return currentConfig ?? null;
-    }
-    if (currentRawConfig) {
-        return deepClone(currentRawConfig);
-    }
-    if (currentConfig) {
-        return deepClone(currentConfig);
-    }
-    return null;
 };
 
 const setupSnapshotListener = () => {
@@ -397,9 +200,21 @@ const setupSnapshotListener = () => {
 
     unsubscribeSnapshot = onSnapshot(doc(db, COLLECTION_NAME, DOC_ID_CONFIG), (snapshot) => {
         if (!snapshot.exists()) {
-            const fallback = normalizeSiteDataType(deepClone(DEFAULT_MENU_CONFIG));
-            currentRawConfig = fallback;
-            currentConfig = ensureMenuWithDefaults(fallback);
+            console.warn('[MenuService] Configuration missing. Initializing with defaults...');
+            // Cold Init: Save DEFAULT_MENU_CONFIG to DB so it persists.
+            const initialConfig = deepClone(DEFAULT_MENU_CONFIG);
+
+            // We use the same processing logic to ensure it's valid before saving/using
+            const processedInitial = processIncomingConfig(initialConfig);
+
+            currentRawConfig = processedInitial;
+            currentConfig = processedInitial;
+
+            // Save async (don't block UI)
+            menuServiceV11.saveMenuConfig(processedInitial).catch(err => {
+                console.error('[MenuService] Failed to auto-initialize menu config:', err);
+            });
+
             notifyListeners();
             return;
         }
@@ -408,7 +223,8 @@ const setupSnapshotListener = () => {
         const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
 
         currentRawConfig = deepClone(normalizedIncoming);
-        currentConfig = ensureMenuWithDefaults(normalizedIncoming);
+        // Important: Just process, DO NOT MERGE with local defaults
+        currentConfig = processIncomingConfig(normalizedIncoming);
 
         notifyListeners();
     });
@@ -416,16 +232,14 @@ const setupSnapshotListener = () => {
 
 export const menuServiceV11 = {
     subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
-        const mergeWithDefaults = options.mergeWithDefaults ?? true;
-
-        const listener: MenuListener = { callback, mergeWithDefaults };
+        const listener: MenuListener = { callback };
         listeners.add(listener);
 
         setupSnapshotListener();
 
-        const prepared = prepareReturnConfig(mergeWithDefaults);
-        if (prepared) {
-            callback(prepared);
+        // Immediate return if we have data
+        if (currentConfig) {
+            callback(deepClone(currentConfig));
         }
 
         return () => {
@@ -439,22 +253,23 @@ export const menuServiceV11 = {
 
     getMenuConfig: async (options: MenuFetchOptions = {}): Promise<SiteDataType | null> => {
         try {
-            const mergeWithDefaults = options.mergeWithDefaults ?? true;
             const menuRef = doc(db, COLLECTION_NAME, DOC_ID_CONFIG);
             const docSnapshot = await getDoc(menuRef);
 
             if (!docSnapshot.exists()) {
-                return null;
+                // Same init logic as snapshot listener
+                console.warn('[MenuService] Config missing on fetch. Returning defaults.');
+                const initial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
+                // Optional: We could save here, but let's let the caller or background listener handle persistence if needed.
+                // For consistency with subscribe, let's save.
+                await menuServiceV11.saveMenuConfig(initial);
+                return initial;
             }
 
             const rawData = docSnapshot.data();
             const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
+            return processIncomingConfig(normalizedIncoming);
 
-            if (mergeWithDefaults) {
-                return ensureMenuWithDefaults(normalizedIncoming);
-            }
-
-            return deepClone(normalizedIncoming);
         } catch (error) {
             console.error('Failed to fetch menu configuration:', error);
             return null;
@@ -520,11 +335,70 @@ export const menuServiceV11 = {
     },
 
     resetToDefault: async () => {
+        // Logic: Use Custom Default if exists, otherwise Manual Default
         const customDefault = await menuServiceV11.getCustomDefault();
         if (customDefault) {
             await menuServiceV11.saveMenuConfig(customDefault);
         } else {
+            // Use the local defaultMenu.ts as the "Factory Reset" source
             await menuServiceV11.saveMenuConfig(DEFAULT_MENU_CONFIG);
+        }
+    },
+
+    ensureSystemMenuExists: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+            const adminMenu = config.admin.menu || [];
+
+            // 1. Check if "시스템 관리" exists
+            let systemGroupIndex = adminMenu.findIndex((item) => item.text === '시스템 관리');
+            let systemGroup = systemGroupIndex >= 0 ? adminMenu[systemGroupIndex] : null;
+
+            if (!systemGroup) {
+                // Create new group
+                systemGroup = {
+                    text: '시스템 관리',
+                    icon: 'fa-gears',
+                    sub: []
+                };
+                adminMenu.push(systemGroup);
+                modified = true;
+            }
+
+            // 2. Check sub items
+            // Ensure sub is an array
+            if (!systemGroup.sub) systemGroup.sub = [];
+
+            const requiredSubs = ['메뉴관리', '시스템 메시지 설정', '데이터 연결 점검'];
+            // Normalize existing subs to strings for comparison
+            const existingSubTexts = systemGroup.sub.map((s) => (typeof s === 'string' ? s : s.text));
+
+            requiredSubs.forEach((req) => {
+                if (!existingSubTexts.includes(req)) {
+                    // We can push strings directly, normalize will handle them
+                    (systemGroup!.sub as any[]).push(req);
+                    modified = true;
+                }
+            });
+
+            if (modified) {
+                console.log('[MenuService] Migrating: Adding System Menu to Admin...');
+                // We need to update the admin menu in the config
+                // If we created a new group, it's already pushed. 
+                // If we modified an existing group reference, it should be reflected in adminMenu array.
+                // However, we need to ensure the structure is correct.
+
+                // Note: systemGroup is a reference to an object inside adminMenu array (or pushed to it).
+                // So config.admin.menu is already updated.
+
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Migration Complete: System Menu added.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Migration Failed:', error);
         }
     },
 

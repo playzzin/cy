@@ -49,6 +49,8 @@ import SignManagementPage from './pages/payroll/SignManagementPage';
 import SignatureGeneratorPage from './pages/payroll/SignatureGeneratorPage';
 import DelegationLetterPage from './pages/payroll/DelegationLetterPage';
 import DelegationLetterV2Page from './pages/payroll/DelegationLetterV2Page';
+import LaborExchangePage from './pages/payroll/LaborExchangePage';
+import SupportRateManagementPage from './pages/support/SupportRateManagementPage';
 import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
 import TeamBasedPaymentDraftPageV2 from './pages/payroll/TeamBasedPaymentDraftPageV2';
 
@@ -88,6 +90,7 @@ import StatusGraphPage from './pages/jeonkuk/StatusGraphPage';
 import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
 import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
 import AgentPlayground from './pages/developer/AgentPlayground';
+import AdvancedMenuManager from './pages/admin/menu/AdvancedMenuManager';
 
 import TeamPersonnelStatusReportPage from './pages/report/TeamPersonnelStatusReportPage';
 
@@ -117,6 +120,25 @@ import ReceivablesManagementPage from './pages/taxinvoice/ReceivablesManagementP
 import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
+import { useWorkerTeamIdMigration } from './hooks/useWorkerTeamIdMigration';
+import { menuServiceV11 } from './services/menuServiceV11';
+
+// 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
+const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { status, result } = useWorkerTeamIdMigration();
+
+  // 마이그레이션 결과 로깅 (콘솔에서만)
+  React.useEffect(() => {
+    if (status === 'done' && result && result.updated > 0) {
+      console.log(`[App] Migration completed: ${result.updated} reports updated`);
+    }
+
+    // Auto-migrate menu structure for Admin
+    menuServiceV11.ensureSystemMenuExists().catch(err => console.error(err));
+  }, [status, result]);
+
+  return <>{children}</>;
+};
 
 const DashboardLayoutWrapper = () => (
   <DashboardLayout>
@@ -137,9 +159,11 @@ const App: React.FC = () => {
           {/* Protected Routes */}
           <Route element={
             <PrivateRoute>
-              <MasterDataProvider>
-                <DashboardLayoutWrapper />
-              </MasterDataProvider>
+              <MigrationRunner>
+                <MasterDataProvider>
+                  <DashboardLayoutWrapper />
+                </MasterDataProvider>
+              </MigrationRunner>
             </PrivateRoute>
           }>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -217,6 +241,13 @@ const App: React.FC = () => {
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
               <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
+              <Route path="labor-exchange" element={<LaborExchangePage />} />
+            </Route>
+
+            {/* Support Management */}
+            <Route path="/support">
+              <Route path="rate-management" element={<SupportRateManagementPage />} />
+              <Route path="labor-exchange" element={<LaborExchangePage />} />
             </Route>
 
             <Route
@@ -313,6 +344,7 @@ const App: React.FC = () => {
               <Route path="data-backup" element={<DataBackupPage />} />
               <Route path="accommodation-design" element={<AccommodationDesignViewer />} />
               <Route path="agent-playground" element={<AgentPlayground />} />
+              <Route path="menu-manager" element={<AdvancedMenuManager />} />
             </Route>
 
             {/* Design System */}

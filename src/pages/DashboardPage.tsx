@@ -481,6 +481,20 @@ const DashboardPage: React.FC = () => {
                   <h3 className="font-semibold text-slate-800 mb-1">알림톡 발송</h3>
                   <p className="text-xs text-slate-500">급여/공지 알림톡 빠른 전송</p>
                 </button>
+
+                {/* Menu Manager Button (Admin Only) */}
+                {['admin', '사장', '실장'].includes(displayWorker.role || '') && (
+                  <button
+                    onClick={() => navigate('/admin/menu-manager')}
+                    className="p-6 bg-white rounded-xl border border-slate-200 hover:border-gray-500 hover:shadow-md transition-all text-left group"
+                  >
+                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-gray-200 transition-colors">
+                      <FontAwesomeIcon icon={faCog} className="text-gray-600 text-lg" />
+                    </div>
+                    <h3 className="font-semibold text-slate-800 mb-1">메뉴 관리</h3>
+                    <p className="text-xs text-slate-500">시스템 메뉴 구조 설정</p>
+                  </button>
+                )}
               </div>
             </section>
 

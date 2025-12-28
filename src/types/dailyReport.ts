@@ -13,6 +13,7 @@ export interface DailyReportWorker {
     workerId: string;
     name: string;
     role: string;
+    teamId?: string;
     gongsu: number; // e.g., 1.0, 0.5
     unitPrice: number;
     amount: number; // gongsu * unitPrice

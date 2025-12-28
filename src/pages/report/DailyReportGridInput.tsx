@@ -567,7 +567,7 @@ const DailyReportGridInput: React.FC = () => {
                         status: 'attendance' as const,
                         manDay: r.manDay,
                         workContent: r.description, // User removed individual work content input, but logic remains if needed
-                        teamId: realTeamId,
+                        teamId: r.teamId, // ✅ 작업자의 실제 소속팀 저장 (인력교류 추적용)
                         unitPrice: r.unitPrice
                     }));
 

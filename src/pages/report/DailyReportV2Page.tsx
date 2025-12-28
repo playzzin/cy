@@ -145,6 +145,7 @@ const DailyReportV2Page: React.FC = () => {
                     manDay: parseFloat(row.manDay) || 0,
                     unitPrice: parseInt(row.unitPrice) || 0,
                     workContent: row.note || '',
+                    teamId: worker ? worker.teamId : undefined,
                     salaryModel: worker?.teamType === '지원팀' ? '지원팀' : worker?.teamType === '용역팀' ? '용역팀' : (worker?.salaryModel || '일급제')
                 });
 

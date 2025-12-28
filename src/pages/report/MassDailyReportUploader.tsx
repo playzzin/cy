@@ -11,6 +11,7 @@ import Swal from 'sweetalert2';
 import { dailyReportService } from '../../services/dailyReportService';
 import { siteService } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
+import { manpowerService } from '../../services/manpowerService';
 
 // --- Types ---
 type UploadStep = 'upload' | 'mapping' | 'preview' | 'uploading' | 'complete';
@@ -121,13 +122,15 @@ const MassDailyReportUploader: React.FC = () => {
 
         // --- PRE-FETCH CACHE ---
         setLog(prev => [...prev, "시스템 데이터(현장, 팀) 로딩 중..."]);
-        const [existingSites, existingTeams] = await Promise.all([
+        const [existingSites, existingTeams, existingWorkers] = await Promise.all([
             siteService.getSites(),
-            teamService.getTeams()
+            teamService.getTeams(),
+            manpowerService.getWorkers()
         ]);
 
         const siteMap = new Map(existingSites.map(s => [s.name, s]));
         const teamMap = new Map(existingTeams.map(t => [t.name, t]));
+        const workerMap = new Map(existingWorkers.map(w => [w.name, w]));
 
         const BATCH_SIZE = 50; // Firestore limit 500 writes, safe size 50 docs (writes can assume multiple ops per doc)
         const totalRows = rawExcelData.length;
@@ -195,6 +198,8 @@ const MassDailyReportUploader: React.FC = () => {
                     }
 
                     // 3. Prepare Report Object
+                    const existingWorker = workerMap.get(mapped.workerName);
+
                     batchReports.push({
                         date: mapped.date || new Date().toISOString().split('T')[0], // Need cleaner Logic
                         siteId,
@@ -204,12 +209,13 @@ const MassDailyReportUploader: React.FC = () => {
                         totalManDay: parseFloat(mapped.manDay || '1'),
                         writerId: currentUser?.uid || 'system',
                         workers: [{
-                            workerId: `batch_${Date.now()}_${Math.random()}`,
+                            workerId: existingWorker ? existingWorker.id : `batch_${Date.now()}_${Math.random()}`,
                             name: mapped.workerName,
-                            role: mapped.role || '조공',
+                            role: mapped.role || (existingWorker ? existingWorker.role : '조공'),
                             manDay: parseFloat(mapped.manDay || '1'),
                             workContent: mapped.workContent || '',
                             status: 'attendance',
+                            teamId: existingWorker ? existingWorker.teamId : undefined,
                             payType: mapped.payType || '',
                             salaryModel: (mapped.payType || '일급제').toString().trim() || '일급제'
                         }]

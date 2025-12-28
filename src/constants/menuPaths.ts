@@ -87,6 +87,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 지원 관리
     "지원비 설정": "/support/settings",
     "지원 현황판": "/support/status",
+    "지원비 단가 관리": "/support/rate-management",
+    "인력 교류 정산": "/support/labor-exchange",
 
     "청연ERP 설명서": "/manual",
     "홈페이지 사용법": "/manual",
@@ -104,7 +106,9 @@ export const MENU_PATHS: { [key: string]: string } = {
     "현장 대량 등록": "/manpower/smart-site-registration",
     "회사 등록": "/database/company-db",
     "회사 조직도": "/company/organization",
+    "회사소개": "/cheongyeon/home", // New mapping
     "인사말": "/cheongyeon/greeting",
+    "대표 인사말": "/cheongyeon/greeting", // New alias
     "조직도": "/cheongyeon/organization",
     "오시는 길": "/cheongyeon/directions",
     "회사 대량 등록": "/database/smart-company-registration",
@@ -152,4 +156,5 @@ export const MENU_PATHS: { [key: string]: string } = {
 
     // 개발자 도구
     "에이전트 플레이그라운드": "/admin/agent-playground",
+    "메뉴관리": "/admin/menu-manager",
 };

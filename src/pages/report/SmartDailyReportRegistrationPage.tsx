@@ -6,6 +6,7 @@ import { faPaste, faSave, faCheckCircle, faExclamationTriangle, faSpinner, faArr
 import { dailyReportService } from '../../services/dailyReportService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import Swal from 'sweetalert2';
 
 const FIELD_LABELS: { [key: string]: string } = {
@@ -29,16 +30,19 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
     // Lookups
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
 
     useEffect(() => {
         const fetchLookups = async () => {
             try {
-                const [teamsData, sitesData] = await Promise.all([
+                const [teamsData, sitesData, workersData] = await Promise.all([
                     teamService.getTeams(),
-                    siteService.getSites()
+                    siteService.getSites(),
+                    manpowerService.getWorkers()
                 ]);
                 setTeams(teamsData);
                 setSites(sitesData);
+                setWorkers(workersData);
             } catch (error) {
                 console.error("Error fetching lookups:", error);
             }
@@ -67,6 +71,8 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
                     if (!site) throw new Error(`현장을 찾을 수 없음: ${row.siteName}`);
                     if (!team) throw new Error(`팀을 찾을 수 없음: ${row.teamName}`);
 
+                    const existingWorker = workers.find(w => w.name === row.workerName);
+
                     await dailyReportService.addWorkerToReport(
                         row.date,
                         team.id!,
@@ -74,14 +80,14 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
                         site.id!,
                         site.name,
                         {
-                            workerId: `temp_${Date.now()}_${Math.random()}`,
+                            workerId: existingWorker ? existingWorker.id! : `temp_${Date.now()}_${Math.random()}`,
                             name: row.workerName,
-                            role: '일용직',
+                            role: existingWorker?.role || '일용직',
                             status: 'attendance',
                             manDay: parseFloat(row.manDay),
-                            unitPrice: 0,
+                            unitPrice: existingWorker ? (existingWorker as any).unitPrice || 0 : 0,
                             workContent: row.workContent || '',
-                            teamId: team.id
+                            teamId: existingWorker ? existingWorker.teamId : team.id
                         }
                     );
                     successCount++;

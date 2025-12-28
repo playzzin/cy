@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
-import { ROLE_SITE_MAP } from '../../utils/roleMapping';
+// ROLE_SITE_MAP removed - now fully dynamic
 import './DashboardLayout.css';
 
 import Header from './Header';
@@ -134,8 +134,27 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
                         // 1. Role-Based Site Redirection
                         // 역할에 맞는 사이트가 있는지 확인하고, 현재 사이트와 다르면 이동
-                        const targetSite = ROLE_SITE_MAP[role];
-                        if (targetSite && siteData[targetSite]) { // siteData에 존재하는지 안전장치
+                        // 1. Role-Based Site Redirection (Dynamic)
+                        // 역할에 맞는 사이트가 있는지 확인하고, 현재 사이트와 다르면 이동
+                        let targetSite = '';
+                        // admin check fallback
+                        if (role === 'admin' || role === '관리자') targetSite = 'admin';
+
+                        // Lookup in positionConfig
+                        if (siteData) {
+                            const positions = siteData.admin?.positionConfig || [];
+                            const matchedPos = positions.find(p => p.name === role || p.id === role);
+
+                            if (matchedPos) {
+                                if (matchedPos.id === 'full') {
+                                    targetSite = 'admin';
+                                } else {
+                                    targetSite = matchedPos.id.startsWith('pos_') ? matchedPos.id : `pos_${matchedPos.id}`;
+                                }
+                            }
+                        }
+
+                        if (targetSite && siteData![targetSite]) { // siteData에 존재하는지 안전장치
                             setCurrentSite(prevSite => {
                                 // 이미 같은 사이트면 변경하지 않음
                                 if (prevSite === targetSite) return prevSite;
@@ -251,17 +270,33 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     // Position to Site mapping - 직책별로 전용 메뉴 사용
     // 'full' = 현재 사이트(보통 admin) 전체 메뉴 표시
-    const POSITION_SITE_MAP: { [key: string]: string } = {
-        'full': '',                 // 전체 메뉴 (currentSite 사용)
-        'ceo': 'pos_ceo',           // 대표
-        'manager1': 'pos_manager1', // 메니저1
-        'manager2': 'pos_manager2', // 메니저2
-        'manager3': 'pos_manager3', // 메니저3
-        'teamLead': 'pos_teamLead', // 팀장
-        'foreman': 'pos_foreman',   // 반장
-        'general': 'pos_general',   // 일반
-        'newbie': 'pos_newbie',     // 신규
+    // Dynamic Position Config extraction
+    const positions = (siteData?.['admin']?.positionConfig || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    // Fallback if no config (shouldn't happen due to auto-migration, but safe fallback)
+    // We don't need a hardcoded fallback here if we trust the service migration.
+
+    // Position to Site mapping - 직책별로 전용 메뉴 사용
+    // 'full' = 현재 사이트(보통 admin) 전체 메뉴 표시
+    const getPositionSiteMap = () => {
+        const map: { [key: string]: string } = { 'full': '' };
+        if (positions.length > 0) {
+            positions.forEach(pos => {
+                if (pos.id !== 'full') {
+                    // Convention: pos_ + id if id doesn't already start with pos_
+                    // Actually, the keys in siteData are 'pos_ceo', 'pos_manager1' etc.
+                    // The position IDs in config are 'ceo', 'manager1'.
+                    // So we map id -> 'pos_' + id.
+                    // But if the ID itself is 'pos_ceo', we handle that.
+                    const siteKey = pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`;
+                    map[pos.id] = siteKey;
+                }
+            });
+        }
+        return map;
     };
+
+    const POSITION_SITE_MAP = getPositionSiteMap();
 
     // Use position-based site for left menu
     // 'full' position uses currentSite (full admin menu)
@@ -448,6 +483,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 togglePanel={togglePanel}
                 currentPosition={currentPosition}
                 changePosition={changePosition}
+                positions={positions}
             />
 
             {/* 메인 콘텐츠 영역 */}

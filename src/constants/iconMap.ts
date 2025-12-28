@@ -3,11 +3,12 @@ import {
     faPhotoFilm, faCartShopping, faPenNib, faFlask, faUserGear, faHardDrive, faUserTie,
     faUsers, faUserTag, faWrench, faPersonDigging, faUserPlus, faListCheck, faFileImport,
     faUserGroup, faHandHoldingDollar, faTruckFront, faHelmetSafety, faSitemap, faBookOpen,
-    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown
+    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears
 } from '@fortawesome/free-solid-svg-icons';
 
 export const iconMap: { [key: string]: any } = {
     'fa-shield-halved': faShieldHalved,
+    'fa-gears': faGears,
     'fa-chart-pie': faChartPie,
     'fa-clipboard-list': faClipboardList,
     'fa-file-invoice-dollar': faFileInvoiceDollar,

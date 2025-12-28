@@ -790,5 +790,82 @@ export const dailyReportService = {
             errors.push(`동기화 중 오류 발생: ${error}`);
             return { updated: updatedCount, errors };
         }
+    },
+
+    /**
+     * 일보의 worker.teamId를 작업자 마스터 기준으로 수정하는 마이그레이션 함수
+     * @param startDate 시작일 (YYYY-MM-DD)
+     * @param endDate 종료일 (YYYY-MM-DD)
+     * @param workerMap 작업자 ID -> 작업자 정보 맵
+     */
+    async migrateWorkerTeamIds(
+        startDate: string,
+        endDate: string,
+        workerMap: Map<string, { teamId?: string; teamName?: string }>
+    ): Promise<{ updated: number; skipped: number; errors: string[] }> {
+        let updated = 0;
+        let skipped = 0;
+        const errors: string[] = [];
+
+        try {
+            const reports = await this.getReportsByRange(startDate, endDate);
+            console.log(`[Migration] Found ${reports.length} reports to check`);
+
+            const batch = writeBatch(db);
+            let batchCount = 0;
+            const MAX_BATCH_SIZE = 500;
+
+            for (const report of reports) {
+                if (!report.id) continue;
+
+                let hasChanges = false;
+                const updatedWorkers = report.workers.map(worker => {
+                    const masterWorker = workerMap.get(worker.workerId);
+
+                    // 마스터에서 팀 정보 조회
+                    if (masterWorker?.teamId && masterWorker.teamId !== worker.teamId) {
+                        hasChanges = true;
+                        return {
+                            ...worker,
+                            teamId: masterWorker.teamId
+                        };
+                    }
+                    return worker;
+                });
+
+                if (hasChanges) {
+                    const docRef = doc(db, COLLECTION_NAME, report.id);
+                    batch.update(docRef, {
+                        workers: updatedWorkers,
+                        updatedAt: serverTimestamp()
+                    });
+                    batchCount++;
+                    updated++;
+
+                    // Commit batch if it reaches the limit
+                    if (batchCount >= MAX_BATCH_SIZE) {
+                        await batch.commit();
+                        console.log(`[Migration] Committed batch of ${batchCount} updates`);
+                        batchCount = 0;
+                    }
+                } else {
+                    skipped++;
+                }
+            }
+
+            // Commit remaining
+            if (batchCount > 0) {
+                await batch.commit();
+                console.log(`[Migration] Committed final batch of ${batchCount} updates`);
+            }
+
+            console.log(`[Migration] Complete: ${updated} updated, ${skipped} skipped`);
+            return { updated, skipped, errors };
+
+        } catch (error) {
+            console.error('[Migration] Error:', error);
+            errors.push(String(error));
+            return { updated, skipped, errors };
+        }
     }
 };

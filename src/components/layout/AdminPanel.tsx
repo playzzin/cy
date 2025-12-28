@@ -37,6 +37,13 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
                         <span className="font-bold">시스템 설정</span>
                     </button>
                     <button
+                        onClick={() => handleNavigation('/admin/menu-manager')}
+                        className="flex items-center gap-3 p-3 rounded-lg bg-blue-600/50 hover:bg-blue-600/70 border border-blue-400/30 text-white transition text-left shadow-lg mb-2"
+                    >
+                        <FontAwesomeIcon icon={faCube} className="w-5 text-blue-300" />
+                        <span className="font-bold">통합 메뉴 관리 (Premium)</span>
+                    </button>
+                    <button
                         onClick={() => handleNavigation('/admin/user-management')}
                         className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
                     >

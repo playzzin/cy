@@ -1,42 +1,30 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faXmark,
-    faCrown,
-    faUserTie,
-    faUserGear,
-    faUsers,
-    faUser,
-    faUserPlus,
-    faShieldHalved
+    faXmark
 } from '@fortawesome/free-solid-svg-icons';
-
-// 직책 목록 (full = 전체 메뉴)
-const POSITIONS = [
-    { id: 'full', name: '전체 메뉴', icon: faShieldHalved, color: 'from-red-600 to-red-400' },
-    { id: 'ceo', name: '대표', icon: faCrown, color: 'from-amber-500 to-yellow-400' },
-    { id: 'manager1', name: '메니저1', icon: faUserTie, color: 'from-blue-600 to-blue-400' },
-    { id: 'manager2', name: '메니저2', icon: faUserTie, color: 'from-indigo-600 to-indigo-400' },
-    { id: 'manager3', name: '메니저3', icon: faUserTie, color: 'from-purple-600 to-purple-400' },
-    { id: 'teamLead', name: '팀장', icon: faUserGear, color: 'from-emerald-600 to-emerald-400' },
-    { id: 'foreman', name: '반장', icon: faUsers, color: 'from-teal-600 to-teal-400' },
-    { id: 'general', name: '일반', icon: faUser, color: 'from-slate-500 to-slate-400' },
-    { id: 'newbie', name: '신규', icon: faUserPlus, color: 'from-pink-500 to-rose-400' },
-];
+import { PositionItem } from '../../types/menu';
 
 interface PositionPanelProps {
     isOpen: boolean;
     togglePanel: (type: 'position') => void;
     currentPosition: string;
     changePosition: (positionId: string) => void;
+    positions?: PositionItem[];
 }
 
 const PositionPanel: React.FC<PositionPanelProps> = ({
     isOpen,
     togglePanel,
     currentPosition,
-    changePosition
+    changePosition,
+    positions = []
 }) => {
+
+    const getIconName = (iconClass: string) => {
+        return iconClass.replace('fa-', '');
+    };
+
     return (
         <aside
             id="position-panel"
@@ -59,7 +47,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     직책을 선택하면 해당 직책에 맞는 메뉴가 표시됩니다.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
-                    {POSITIONS.map((pos) => (
+                    {positions.map((pos) => (
                         <button
                             key={pos.id}
                             onClick={() => changePosition(pos.id)}
@@ -72,7 +60,8 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                                 ? 'bg-white/20'
                                 : 'bg-slate-600'
                                 }`}>
-                                <FontAwesomeIcon icon={pos.icon} className="text-lg" />
+                                {/* @ts-ignore - FontAwesome library dynamic loading */}
+                                <FontAwesomeIcon icon={['fas', getIconName(pos.icon)]} className="text-lg" />
                             </div>
                             <span className="text-sm font-medium">{pos.name}</span>
                             {currentPosition === pos.id && (
@@ -95,4 +84,3 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
 };
 
 export default PositionPanel;
-export { POSITIONS };

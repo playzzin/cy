@@ -12,17 +12,6 @@ interface RightPanelProps {
     menuPaths: { [key: string]: string };
 }
 
-const iconMap: { [key: string]: any } = {
-    'fa-shield-halved': faShieldHalved,
-    'fa-chart-pie': faChartPie,
-    'fa-building': faBuilding,
-    'fa-photo-film': faPhotoFilm,
-    'fa-cart-shopping': faCartShopping,
-    'fa-pen-nib': faPenNib,
-    'fa-flask': faFlask,
-    'fa-file-import': faFileImport,
-};
-
 const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, currentSite, changeSite, menuPaths }) => {
     const navigate = useNavigate();
 
@@ -33,6 +22,8 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
 
     // Get System Structure Diagram items from learning menu
     const structureItems = siteData.learning?.menu?.find((m: any) => m.text === "시스템 구조도")?.sub || [];
+
+    const getIconName = (iconClass: string) => iconClass.replace('fa-', '');
 
     return (
         <aside id="right-panel" className={`panel ${isOpen ? 'open' : ''}`}>
@@ -45,7 +36,8 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
             <div className="panel-content">
                 <div className="site-switch-grid" id="site-switcher" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '10px' }}>
                     {Object.keys(siteData)
-                        .filter((key: string) => ['admin', 'test', 'company'].includes(key)) // 청연ENG, 청연SITE, 개발중만 표시
+                        .filter((key: string) => !key.startsWith('pos_')) // Filter out internal position sites
+                        .sort((a, b) => (siteData[a].order || 999) - (siteData[b].order || 999))
                         .map((key: string) => (
                             <button
                                 key={key}
@@ -69,7 +61,8 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
                                 }}
                             >
                                 <FontAwesomeIcon
-                                    icon={iconMap[siteData[key].icon] || faShieldHalved}
+                                    // @ts-ignore
+                                    icon={['fas', getIconName(siteData[key].icon)]}
                                     style={{ fontSize: '20px', marginBottom: '8px' }}
                                 />
                                 <span style={{ fontSize: '12px', textAlign: 'center', fontWeight: currentSite === key ? 'bold' : 'normal' }}>{siteData[key].name}</span>

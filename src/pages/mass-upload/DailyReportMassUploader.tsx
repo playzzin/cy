@@ -13,7 +13,8 @@ const DailyReportMassUploader: React.FC = () => {
     const [workers, setWorkers] = useState<Map<string, Worker>>(new Map()); // Name -> Worker
     const [existingReports, setExistingReports] = useState<Map<string, DailyReportWorker[]>>(new Map()); // Key: Date_SiteId_TeamId -> Workers[]
     const [logs, setLogs] = useState<string[]>([]);
-    const [saving, setSaving] = useState(false);
+    // const [saving, setSaving] = useState(false); // Unused
+    const [_saving, setSaving] = useState(false);
 
     useEffect(() => {
         const loadCache = async () => {

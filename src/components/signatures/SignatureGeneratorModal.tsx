@@ -14,7 +14,7 @@ interface SignatureGeneratorModalProps {
 }
 
 type TabMode = 'manual' | 'auto';
-type AutoStyle = 'celebrity' | 'korean_handwriting' | 'korean_calligraphy' | 'abstract_artistic' | 'initials_fancy';
+type AutoStyle = 'celebrity' | 'korean_handwriting' | 'korean_calligraphy' | 'abstract_artistic' | 'initials_fancy' | 'pencil_sketch';
 
 // 한글 자모 분리 함수
 const getKoreanJamo = (char: string): { cho: string; jung: string; jong: string } | null => {
@@ -416,6 +416,84 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
         ctx.stroke();
     };
 
+    // === 연필 스케치 스타일 (Pencil Sketch) ===
+    const drawPencilSketch = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+        const text = workerName;
+        const fontSize = 70;
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // 연필 느낌의 색상 (진한 회색)
+        const pencilColor = '#4a4a4a';
+
+        const centerX = w / 2;
+        const centerY = h / 2;
+
+        const fonts = ['Nanum Pen Script', 'Gowun Dodum'];
+        const fontName = fonts[Math.floor(Math.random() * fonts.length)];
+        ctx.font = `${fontSize}px "${fontName}"`;
+
+        // 질감 효과를 위한 여러 번 덧칠하기 (Sketch effect)
+        const passes = 15; // 덧칠 횟수 증가
+
+        for (let i = 0; i < passes; i++) {
+            ctx.save();
+
+            // 미세한 떨림 (Jitter) 및 위치 오차
+            const jitterX = (Math.random() - 0.5) * 1.5;
+            const jitterY = (Math.random() - 0.5) * 1.5;
+
+            // 투명도를 낮게 하여 겹치는 효과 연출
+            ctx.globalAlpha = 0.1 + Math.random() * 0.15;
+            ctx.fillStyle = pencilColor;
+
+            // 약간의 회전 (손글씨 불규칙성)
+            const rotation = (Math.random() - 0.5) * 0.02;
+
+            ctx.translate(centerX + jitterX, centerY + jitterY);
+            ctx.rotate(rotation);
+
+            // 텍스트 그리기 (채우기 대신 얇은 선으로 외곽선을 그리거나 채우기를 겹침)
+            // 여기서는 fillText를 여러번 겹쳐서 연필 질감을 냄
+            ctx.fillText(text, 0, 0);
+
+            // 가끔은 선(stroke)으로도 그려서 거친 느낌 추가
+            if (i % 3 === 0) {
+                ctx.strokeStyle = pencilColor;
+                ctx.lineWidth = 0.5 + Math.random();
+                ctx.strokeText(text, 0, 0);
+            }
+
+            ctx.restore();
+        }
+
+        // 연필로 그은 듯한 밑줄이나 장식 (Rough lines)
+        ctx.beginPath();
+        ctx.strokeStyle = pencilColor;
+        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 1; // 얇은 선
+
+        // 여러 개의 선으로 하나의 굵은 선 표현 (해칭)
+        const lineY = centerY + 40;
+        const lineStart = w * 0.2;
+        const lineEnd = w * 0.8;
+
+        for (let k = 0; k < 5; k++) {
+            ctx.beginPath();
+            const yOffset = (Math.random() - 0.5) * 3;
+            ctx.moveTo(lineStart + (Math.random() * 10), lineY + yOffset);
+
+            // 중간 지점 흔들림
+            ctx.bezierCurveTo(
+                w * 0.4, lineY + yOffset + (Math.random() - 0.5) * 5,
+                w * 0.6, lineY + yOffset + (Math.random() - 0.5) * 5,
+                lineEnd - (Math.random() * 10), lineY + yOffset + (Math.random() * 2)
+            );
+            ctx.stroke();
+        }
+    };
+
     // === 메인 생성 함수 ===
     const generateSignature = () => {
         const canvas = autoCanvasRef.current;
@@ -445,6 +523,9 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
                 break;
             case 'initials_fancy':
                 drawInitialsFancy(ctx, width, height);
+                break;
+            case 'pencil_sketch':
+                drawPencilSketch(ctx, width, height);
                 break;
         }
 
@@ -542,6 +623,7 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
         { key: 'korean_calligraphy', label: '붓글씨', icon: faPaintBrush },
         { key: 'abstract_artistic', label: '추상 아트', icon: faFeather },
         { key: 'initials_fancy', label: '이니셜', icon: faMagic },
+        { key: 'pencil_sketch', label: '연필 스케치', icon: faPen },
     ];
 
     return (

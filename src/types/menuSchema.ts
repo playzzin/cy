@@ -18,7 +18,14 @@ export const SiteDataSchema = z.object({
     icon: z.string(),
     menu: z.array(MenuItemSchema),
     trash: z.array(MenuItemSchema).optional(),
-    deletedItems: z.array(z.string()).optional()
+    deletedItems: z.array(z.string()).optional(),
+    positionConfig: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        icon: z.string(),
+        color: z.string(),
+        order: z.number().optional()
+    })).optional()
 });
 
 export const SiteDataTypeSchema = z.record(z.string(), SiteDataSchema);
