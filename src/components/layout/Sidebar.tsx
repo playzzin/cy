@@ -46,9 +46,10 @@ import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
 
 import * as AllIcons from '@fortawesome/free-solid-svg-icons';
-import { iconMap } from '../../constants/iconMap';
+import { iconMap, resolveIcon } from '../../constants/iconMap';
 
 interface SidebarProps {
+    currentSite: string;
     currentSiteData: any;
     closeAll: () => void;
     activeMenuItems: { [key: string]: boolean };
@@ -79,6 +80,7 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
 };
 
 const Sidebar: React.FC<SidebarProps> = ({
+    currentSite,
     currentSiteData,
     closeAll,
     activeMenuItems,
@@ -233,16 +235,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 }
             });
 
-            // If no sub-items remain, we still return the item if it was originally an empty folder (manual creation),
-            // BUT if it became empty because of permissions, maybe we should hide it?
-            // "Exactly the same" implies we should show what is structurally there.
-            // If the user created a folder "New Folder" and it has no children, it should show up.
-            // However, distinguishing "Empty by Permission" vs "Empty by Structure" is hard here without checking original.
-            // For Admin (who sees all), this distinction doesn't matter.
-            // For now, let's SHOW it. Logic: If filteredSub is empty, we return item with empty sub.
-            // But wait, if we return item with empty sub, `hasSub` (item.sub.length > 0) becomes false.
-            // It will render as a Link. If it has no path, it does nothing. This is visually compliant.
-
             return { ...item, sub: filteredSub };
         }
 
@@ -292,19 +284,24 @@ const Sidebar: React.FC<SidebarProps> = ({
         }, 300); // Increased delay
     };
 
+    // Cheongyeon Style Check
+    const isCheongyeon = currentSite === 'cheongyeon';
+    const sidebarStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {};
+    const logoStyle = isCheongyeon ? { color: '#ffffff' } : {};
+
     return (
         <>
-            <nav id="sidebar" onMouseLeave={handleMouseLeaveNav}>
+            <nav id="sidebar" onMouseLeave={handleMouseLeaveNav} style={sidebarStyle} className={isCheongyeon ? 'cheongyeon-sidebar' : ''}>
                 <div className="sidebar-header">
                     <div className="logo-group" onClick={handleLogoClick} style={{ cursor: 'pointer' }}>
                         <FontAwesomeIcon
-                            icon={(AllIcons as any)[currentSiteData.icon] || faShieldHalved}
+                            icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
                             id="sidebar-logo-icon"
                             style={{ color: '#1abc9c', fontSize: '24px', marginRight: '10px' }}
                         />
-                        <span id="sidebar-logo-text" className="logo-text">{currentSiteData.name}</span>
+                        <span id="sidebar-logo-text" className="logo-text" style={logoStyle}>{currentSiteData.name}</span>
                     </div>
-                    <button id="mobile-close-btn" onClick={closeAll}>
+                    <button id="mobile-close-btn" onClick={closeAll} style={isCheongyeon ? { color: 'white' } : {}}>
                         <FontAwesomeIcon icon={faXmark} />
                     </button>
                 </div>
@@ -353,7 +350,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             style={effectiveTextStyle}
                                         >
                                             <FontAwesomeIcon
-                                                icon={(AllIcons as any)[item.icon || 'faChartPie'] || faChartPie}
+                                                icon={resolveIcon(item.icon)}
                                                 className="menu-icon"
                                                 style={{ color: effectiveIconColor }}
                                             />
@@ -381,7 +378,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             style={isActiveCheck(item.path || menuPaths[item.text]) ? { color: activeColor, fontWeight: 'bold' } : {}}
                                         >
                                             <FontAwesomeIcon
-                                                icon={(AllIcons as any)[item.icon || 'faChartPie'] || faChartPie}
+                                                icon={resolveIcon(item.icon)}
                                                 className="menu-icon"
                                                 style={{
                                                     color: isActiveCheck(item.path || menuPaths[item.text]) ? activeColor : (item.iconColor || undefined)
@@ -467,7 +464,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                             >
                                                                 <div style={{ display: 'flex', alignItems: 'center' }}>
                                                                     <FontAwesomeIcon
-                                                                        icon={(AllIcons as any)[menuItem.icon || 'faCircle'] || faChartPie}
+                                                                        icon={resolveIcon(menuItem.icon, faChartPie)}
                                                                         style={{
                                                                             marginRight: '8px',
                                                                             fontSize: '12px',
@@ -582,7 +579,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="submenu-panel-header" style={hoveredMenuItem.activeColor ? { borderBottomColor: hoveredMenuItem.activeColor } : {}}>
                         <span className="submenu-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: hoveredMenuItem.activeColor || '#1abc9c' }}>
                             <FontAwesomeIcon
-                                icon={(AllIcons as any)[hoveredMenuItem.icon || 'faChartPie'] || faChartPie}
+                                icon={resolveIcon(hoveredMenuItem.icon, faChartPie)}
                                 style={{ color: hoveredMenuItem.activeColor || hoveredMenuItem.iconColor || '#1abc9c' }}
                             />
                             {hoveredMenuItem.text}
@@ -643,7 +640,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     >
                                         {itemIcon && (
                                             <FontAwesomeIcon
-                                                icon={(AllIcons as any)[itemIcon] || faChartPie}
+                                                icon={resolveIcon(itemIcon, faChartPie)}
                                                 style={{ marginRight: '8px', fontSize: '10px', width: '12px', color: itemIconColor }}
                                             />
                                         )}
@@ -657,7 +654,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         <div className="submenu-item nested-header" style={{ userSelect: 'none' }}>
                                             <span style={{ color: itemActiveColor }}>
                                                 <FontAwesomeIcon
-                                                    icon={(AllIcons as any)[menuItem.icon || 'faCircle'] || faChartPie}
+                                                    icon={resolveIcon(menuItem.icon || 'faCircle', faChartPie)}
                                                     style={{ marginRight: '8px', fontSize: '10px', color: itemIconColor }}
                                                 />
                                                 {menuItem.text}

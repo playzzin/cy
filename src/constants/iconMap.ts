@@ -1,9 +1,10 @@
+import * as AllIcons from '@fortawesome/free-solid-svg-icons';
 import {
     faShieldHalved, faChartPie, faClipboardList, faFileInvoiceDollar, faDatabase, faBuilding,
     faPhotoFilm, faCartShopping, faPenNib, faFlask, faUserGear, faHardDrive, faUserTie,
     faUsers, faUserTag, faWrench, faPersonDigging, faUserPlus, faListCheck, faFileImport,
     faUserGroup, faHandHoldingDollar, faTruckFront, faHelmetSafety, faSitemap, faBookOpen,
-    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears
+    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears, faUserShield
 } from '@fortawesome/free-solid-svg-icons';
 
 export const iconMap: { [key: string]: any } = {
@@ -44,5 +45,26 @@ export const iconMap: { [key: string]: any } = {
     'fa-clock-rotate-left': faClockRotateLeft,
     'fa-money-bill-wave': faMoneyBillWave,
     'fa-chart-simple': faChartSimple,
-    'fa-book': faBook
+    'fa-book': faBook,
+    'fa-user-shield': faUserShield,
+    'faUserShield': faUserShield
 };
+
+// Helper: Safely resolve icon from string (kebab-case or camelCase)
+export const resolveIcon = (iconName: string | undefined, fallback: any = faChartPie): any => {
+    if (!iconName) return fallback;
+
+    // 1. Try iconMap (preferred for kebab-case)
+    if (iconMap[iconName]) return iconMap[iconName];
+
+    // 2. Try raw FontAwesome import (camelCase)
+    // We assume the consumer passes the 'AllIcons' namespace if needed, 
+    // but since we can't import * inside a function easily without passing it,
+    // let's assume the caller handles the AllIcons lookup if this fails? 
+    // OR we export a lookup that includes basic icons. 
+    // Actually, Sidebar imports AllIcons. better to keep this pure or import AllIcons here?
+    // Importing * as AllIcons here is safe.
+    return (AllIcons as any)[iconName] || fallback;
+};
+
+

@@ -22,7 +22,8 @@ interface GridRow {
     workerId: string;
     name: string;
     manDay: number;
-    unitPrice: number;
+    unitPrice: number | null;
+    payType: string; // 급여구분 (New)
     role: string;
     description: string; // 작업내용
 }
@@ -43,13 +44,15 @@ const DailyReportTable: React.FC<{
     workerMap: Map<string, Worker>;
     onUpdate: (ledgerId: string, updates: Partial<Ledger>) => void;
     onDelete: (ledgerId: string) => void;
-}> = ({ ledger, ledgerIndex, sites, teams, workerMap, onUpdate, onDelete }) => {
+    onAddRow: (ledgerId: string) => void; // Added prop
+}> = ({ ledger, ledgerIndex, sites, teams, workerMap, onUpdate, onDelete, onAddRow }) => {
 
     const hotRef = useRef<any>(null);
 
     // Convert rows to 2D array for Handsontable
     const tableData = useMemo(() => {
-        return ledger.rows.map(row => [row.name, row.manDay, row.teamName]);
+        // Order: [Name, ManDay, TeamName, UnitPrice, PayType]
+        return ledger.rows.map(row => [row.name, row.manDay, row.teamName, row.unitPrice, row.payType]);
     }, [ledger.rows]);
 
     // Handle cell changes
@@ -72,9 +75,8 @@ const DailyReportTable: React.FC<{
                     if (matchedWorker) {
                         newRows[row].workerId = matchedWorker.id || '';
                         newRows[row].unitPrice = matchedWorker.unitPrice || 0;
+                        newRows[row].payType = matchedWorker.payType || matchedWorker.salaryModel || '일급'; // Map PayType
                         newRows[row].role = matchedWorker.role || '작업자';
-                        // Auto-fill description with default role if empty -> Removed as per user request
-                        // if (!newRows[row].description) newRows[row].description = matchedWorker.role || '';
 
                         const team = matchedWorker.teamId ? teams.find(t => t.id === matchedWorker.teamId) : undefined;
                         if (team) {
@@ -87,13 +89,24 @@ const DailyReportTable: React.FC<{
                     } else {
                         // Name exists but NO match found -> Worker ID empty (Unknown Worker)
                         newRows[row].workerId = '';
-                        if (!newRows[row].unitPrice) newRows[row].unitPrice = 0;
-                        if (!newRows[row].role) newRows[row].role = '작업자';
+                        // User requested not to show 0/Ilgeup by default for unknown? 
+                        // "단가 급여도 이름 써지면 나타나게 해줘" -> implied if known?
+                        // If unknown, we probably shouldn't auto-fill "0" based on request "0 일급으로 나타나지 말고"
+                        // But if they are ReadOnly, user can't see anything.
+                        // Assuming unknown workers are allowed but manual entry is blocked? 
+                        // No, if manual entry blocked, unknown workers are useless.
+                        // But user said "automatically written so block selection".
+                        // Logic: If Unknown, maybe leave empty or allow edit?
+                        // For now, adhere to "Don't show 0/Ilgeup".
+                        newRows[row].unitPrice = null;
+                        newRows[row].payType = '';
+                        newRows[row].role = '작업자';
                     }
                 } else {
                     // Name is empty - clear all related fields
                     newRows[row].workerId = '';
-                    newRows[row].unitPrice = 0;
+                    newRows[row].unitPrice = null;
+                    newRows[row].payType = '';
                     newRows[row].role = '작업자';
                     newRows[row].teamName = '';
                     newRows[row].teamId = '';
@@ -101,7 +114,13 @@ const DailyReportTable: React.FC<{
                 }
             } else if (col === 1) { // ManDay column
                 newRows[row].manDay = Number(newValue) || 1;
+            } else if (col === 3) { // UnitPrice column (Index 3)
+                // ReadOnly but just in case
+                newRows[row].unitPrice = Number(newValue) || 0;
+            } else if (col === 4) { // PayType column (Index 4)
+                newRows[row].payType = newValue?.toString() || '';
             }
+            // col 2 is TeamName (ReadOnly), ignore logic
         });
 
         onUpdate(ledger.id, { rows: newRows });
@@ -132,10 +151,8 @@ const DailyReportTable: React.FC<{
         // Find first empty row to start inserting
         let insertIndex = newRows.findIndex(r => !r.name || r.name.trim() === '');
         if (insertIndex === -1) {
-            // No empty rows, append to end (though usually we have spare rows)
+            // No empty rows, append to end
             insertIndex = newRows.length;
-            // Logic to expand rows is simpler if we just fill available empty slots or tell user to add rows
-            // For now, let's fill available slots
         }
 
         let filledCount = 0;
@@ -152,6 +169,7 @@ const DailyReportTable: React.FC<{
                     teamId: team.id || '',
                     teamName: team.name,
                     unitPrice: worker.unitPrice || 0,
+                    payType: worker.payType || worker.salaryModel || '일급',
                     role: worker.role || '작업자',
                     description: ''
                 };
@@ -172,52 +190,97 @@ const DailyReportTable: React.FC<{
     // Count unknown workers for summary badge
     const unknownWorkersCount = ledger.rows.filter(r => r.name.trim() !== '' && !r.workerId).length;
 
+    // Calculate Total Man Day
+    const totalManDay = ledger.rows.reduce((sum, r) => {
+        // Only count rows with name
+        if (!r.name || r.name.trim() === '') return sum;
+        return sum + (Number(r.manDay) || 0);
+    }, 0);
+
     return (
-        <div className={`border rounded-lg overflow-hidden shadow-sm flex flex-col w-[320px] bg-white transition-all ${isSiteMissing ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-300'}`}>
+        <div className={`border rounded-lg overflow-hidden shadow-sm flex flex-col w-[415px] bg-white transition-all ${isSiteMissing ? 'border-red-400 ring-1 ring-red-400' : 'border-slate-300'}`}>
             {/* Ledger Header - Compact */}
-            <div className={`px-2 py-1 flex justify-between items-center shrink-0 ${isSiteMissing ? 'bg-red-500' : 'bg-[#4A192C]'} text-white transition-colors`}>
-                <div className="flex items-center gap-2 flex-1">
-                    <span className="font-bold text-xs whitespace-nowrap">장부{ledgerIndex}</span>
-                    <select
-                        value={ledger.siteId}
-                        onChange={(e) => onUpdate(ledger.id, { siteId: e.target.value })}
-                        className={`text-slate-900 border-none rounded px-2 py-1 text-xs font-bold focus:ring-2 flex-1 ${isSiteMissing ? 'bg-red-50 focus:ring-red-300' : 'bg-white focus:ring-blue-500'}`}
-                    >
-                        <option value="" disabled>⚠️ 현장 필수 선택</option>
-                        {sites.map(site => (
-                            <option key={site.id} value={site.id}>{site.name}</option>
-                        ))}
-                    </select>
-                </div>
-                <div className="flex items-center gap-2">
-                    {unknownWorkersCount > 0 && (
-                        <span className="bg-yellow-400 text-slate-900 text-[10px] px-1.5 rounded-full font-bold flex items-center gap-1" title="등록되지 않은 작업자 수">
-                            <FontAwesomeIcon icon={faExclamationTriangle} /> {unknownWorkersCount}
-                        </span>
-                    )}
-                    {/* Team Quick Add Buttons */}
-                    {siteTeams.length > 0 && (
-                        <div className="flex gap-1 ml-2 px-2 border-l border-white/20">
-                            {siteTeams.map(team => (
-                                <button
-                                    key={team.id}
-                                    onClick={() => handleAddTeamMembers(team)}
-                                    className="px-2 py-0.5 bg-white/20 hover:bg-white/40 text-white text-[10px] rounded transition-colors"
-                                    title={`${team.name} 팀원 전체 추가`}
-                                >
-                                    {team.name}
-                                </button>
+            <div className={`px-2 py-1 flex flex-col shrink-0 ${isSiteMissing ? 'bg-red-500' : 'bg-[#4A192C]'} text-white transition-colors`}>
+                <div className="flex justify-between items-center w-full">
+                    <div className="flex items-center gap-2 flex-1">
+                        <span className="font-bold text-xs whitespace-nowrap">장부{ledgerIndex}</span>
+                        <select
+                            value={ledger.siteId}
+                            onChange={(e) => onUpdate(ledger.id, { siteId: e.target.value })}
+                            className={`text-slate-900 border-none rounded px-2 py-1 text-xs font-bold focus:ring-2 flex-1 ${isSiteMissing ? 'bg-red-50 focus:ring-red-300' : 'bg-white focus:ring-blue-500'}`}
+                        >
+                            <option value="" disabled>⚠️ 현장 필수 선택</option>
+                            {sites.map(site => (
+                                <option key={site.id} value={site.id}>{site.name}</option>
                             ))}
-                        </div>
-                    )}
-                    <button
-                        onClick={() => onDelete(ledger.id)}
-                        className="ml-1 text-white/70 hover:text-white"
-                        title="장부 삭제"
-                    >
-                        <FontAwesomeIcon icon={faTimes} />
-                    </button>
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.5 rounded font-bold" title="총 공수">
+                            {totalManDay.toFixed(1)}공수
+                        </span>
+                        {unknownWorkersCount > 0 && (
+                            <span className="bg-yellow-400 text-slate-900 text-[10px] px-1.5 rounded-full font-bold flex items-center gap-1" title="등록되지 않은 작업자 수">
+                                <FontAwesomeIcon icon={faExclamationTriangle} /> {unknownWorkersCount}
+                            </span>
+                        )}
+                        <button
+                            onClick={() => onDelete(ledger.id)}
+                            className="ml-1 text-white/70 hover:text-white"
+                            title="장부 삭제"
+                        >
+                            <FontAwesomeIcon icon={faTimes} />
+                        </button>
+                    </div>
                 </div>
+
+                {/* Site Metadata Display Row */}
+                {selectedSite && (
+                    <div className="mt-1 pb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/90 border-t border-white/20 pt-1">
+                        {/* Client (발주사) */}
+                        {selectedSite.clientCompanyName && selectedSite.clientCompanyName.trim() !== '' && (
+                            <div className="flex items-center gap-1" title="발주사 (Client)">
+                                <span>🏢</span>
+                                <span className="opacity-70 text-[9px]">발주:</span>
+                                <span className="font-medium">{selectedSite.clientCompanyName}</span>
+                            </div>
+                        )}
+                        {/* Constructor (시공사) */}
+                        {selectedSite.companyName && selectedSite.companyName.trim() !== '' && selectedSite.companyName !== selectedSite.partnerName && (
+                            <div className="flex items-center gap-1" title="시공사 (Constructor)">
+                                <span>🏗️</span>
+                                <span className="opacity-70 text-[9px]">시공:</span>
+                                <span className="font-medium">{selectedSite.companyName}</span>
+                            </div>
+                        )}
+                        {/* Partner (협력사) */}
+                        {selectedSite.partnerName && selectedSite.partnerName.trim() !== '' && (
+                            <div className="flex items-center gap-1" title="협력사 (Partner)">
+                                <span>🤝</span>
+                                <span className="opacity-70 text-[9px]">협력:</span>
+                                <span className="font-medium">{selectedSite.partnerName}</span>
+                            </div>
+                        )}
+                        {/* Responsible Team (시공팀 - Click to Add) */}
+                        {selectedSite.responsibleTeamName && (
+                            <button
+                                onClick={() => {
+                                    const team = siteTeams.find(t => t.id === selectedSite.responsibleTeamId);
+                                    if (team) handleAddTeamMembers(team);
+                                }}
+                                disabled={!siteTeams.find(t => t.id === selectedSite.responsibleTeamId)}
+                                className="flex items-center gap-1 hover:bg-white/20 px-1 py-0.5 rounded cursor-pointer transition-colors"
+                                title="시공팀 (클릭하여 팀원 일괄 추가)"
+                            >
+                                <span>👷</span>
+                                <span className="opacity-70 text-[9px]">팀:</span>
+                                <span className="font-medium underline decoration-dotted">{selectedSite.responsibleTeamName}</span>
+                            </button>
+                        )}
+                    </div>
+                )}
+
+
             </div>
 
             {/* Handsontable Grid */}
@@ -225,11 +288,13 @@ const DailyReportTable: React.FC<{
                 <HotTable
                     ref={hotRef}
                     data={tableData}
-                    colHeaders={['이름', '공수', '팀명']}
+                    colHeaders={['이름', '공수', '팀명', '단가', '급여']}
                     columns={[
-                        { type: 'text', width: 90 },
-                        { type: 'numeric', width: 50 },
-                        { type: 'text', width: 90, readOnly: true, className: 'htDimmed' },
+                        { type: 'text', width: 80 }, // Name (0)
+                        { type: 'numeric', width: 50 }, // ManDay (1)
+                        { type: 'text', width: 80, readOnly: true, className: 'htDimmed' }, // TeamName (2)
+                        { type: 'numeric', width: 80, numericFormat: { pattern: '0,0' }, readOnly: true, className: 'htDimmed' }, // UnitPrice (3)
+                        { type: 'text', width: 60, readOnly: true, className: 'htDimmed' }, // PayType (4)
                     ]}
                     rowHeaders={false}
                     width="100%"
@@ -245,20 +310,21 @@ const DailyReportTable: React.FC<{
                     fillHandle={true}
                     // Event handlers
                     afterChange={handleAfterChange}
-                    // Prevent Selection on Team Column (Index 2)
+                    // Prevent Selection on Team Column (Index 2 now)
                     beforeOnCellMouseDown={(event: MouseEvent, coords: any) => {
-                        // Prevent click on Team column (col 2)
-                        if (coords.col === 2) {
+                        // Prevent click on Team(2), UnitPrice(3), PayType(4)
+                        if (coords.col >= 2 && coords.col <= 4) {
                             event.stopImmediatePropagation();
                         }
                     }}
                     afterSelection={(r: number, c: number) => {
-                        // If somehow selected (e.g. Tab), move to next row, first column
-                        if (c === 2) {
+                        // Skip read-only columns (2, 3, 4)
+                        // If user creates a selection on col 1 (ManDay), and moves right?
+                        // Or logic: if selection lands on 2,3,4 -> move to next row col 0?
+                        if (c >= 2 && c <= 4) {
                             const hot = hotRef.current?.hotInstance;
                             if (hot) {
-                                // If it's the last row, maybe just stay or add row? 
-                                // For now, just go to next row col 0
+                                // Move to next row, first column
                                 hot.selectCell(r + 1, 0);
                             }
                         }
@@ -293,9 +359,17 @@ const DailyReportTable: React.FC<{
                         type="text"
                         value={ledger.description || ''}
                         onChange={(e) => onUpdate(ledger.id, { description: e.target.value })}
-                        placeholder="이 현장의 금일 작업내용을 입력하세요 (장부 전체 적용)"
+                        placeholder="이 현장의 금일 작업내용을 입력하세요"
                         className="flex-1 text-xs px-2 py-1 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
+                    <button
+                        onClick={() => onAddRow(ledger.id)}
+                        className="px-2 py-1 bg-slate-200 text-slate-700 rounded hover:bg-slate-300 text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
+                        title="행 추가"
+                    >
+                        <FontAwesomeIcon icon={faPlus} />
+                        행 추가
+                    </button>
                 </div>
             </div>
 
@@ -311,14 +385,14 @@ const DailyReportTable: React.FC<{
                     font-size: 11px;
                 }
                 /* Default Styles */
-                .handsontable-container .handsontable td:first-child {
+                .handsontable-container .handsontable td:nth-child(1) { /* Name */
                     background-color: #E0F7FA;
                 }
-                .handsontable-container .handsontable td:nth-child(2) {
+                .handsontable-container .handsontable td:nth-child(2) { /* ManDay */
                     background-color: #FCE4EC;
                     text-align: center;
                 }
-                .handsontable-container .handsontable td:nth-child(3) {
+                .handsontable-container .handsontable td:nth-child(3) { /* Team Column (Reordered) */
                     background-color: #F5F5F5;
                     color: #64748b;
                     font-size: 11px;
@@ -481,7 +555,8 @@ const DailyReportGridInput: React.FC = () => {
             workerId: '',
             name: '',
             manDay: 1.0,
-            unitPrice: 0,
+            unitPrice: null,
+            payType: '', // Added
             role: '작업자',
             description: ''
         }));
@@ -512,11 +587,14 @@ const DailyReportGridInput: React.FC = () => {
         setLedgers(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l));
     }, []);
 
-    const addRowsToAllLedgers = useCallback(() => {
-        setLedgers(prev => prev.map(ledger => ({
-            ...ledger,
-            rows: [...ledger.rows, ...createEmptyRows(10)]
-        })));
+    const addRowToLedger = useCallback((id: string) => {
+        setLedgers(prev => prev.map(ledger => {
+            if (ledger.id !== id) return ledger;
+            return {
+                ...ledger,
+                rows: [...ledger.rows, ...createEmptyRows(5)] // Add 5 rows at a time
+            };
+        }));
     }, []);
 
     const handleSaveAll = async () => {
@@ -555,12 +633,19 @@ const DailyReportGridInput: React.FC = () => {
 
                     const totalManDay = rows.reduce((sum, r) => sum + r.manDay, 0);
                     const reportWorkers = rows.map(r => ({
-                        salaryModel: (() => {
+                        salaryModel: r.payType || (() => {
                             const matchedWorker = workers.find(w => w.id === r.workerId);
                             if (matchedWorker?.teamType === '지원팀') return '지원팀';
                             if (matchedWorker?.teamType === '용역팀') return '용역팀';
                             return matchedWorker?.salaryModel || '일급제';
                         })(),
+                        // Map payType to Worker.payType as well if needed, but salaryModel is the main field used in Reports?
+                        // Actually ReportWorker has `payType`? No, it has `salaryModel` (legacy) or we added `payType`.
+                        // Let's check DailyReportWorker interface.
+                        // Wait, I didn't check DailyReportWorker interface in dailyReportService.ts fully.
+                        // I added payType to "Worker", not "DailyReportWorker".
+                        // ...
+                        payType: r.payType || '일급', // ADD THIS
                         workerId: r.workerId || 'unknown',
                         name: r.name,
                         role: r.role,
@@ -568,7 +653,7 @@ const DailyReportGridInput: React.FC = () => {
                         manDay: r.manDay,
                         workContent: r.description, // User removed individual work content input, but logic remains if needed
                         teamId: r.teamId, // ✅ 작업자의 실제 소속팀 저장 (인력교류 추적용)
-                        unitPrice: r.unitPrice
+                        unitPrice: r.unitPrice ?? 0
                     }));
 
                     allReports.push({
@@ -580,8 +665,22 @@ const DailyReportGridInput: React.FC = () => {
                         writerId: currentUser?.uid || 'unknown',
                         workers: reportWorkers,
                         totalManDay,
-                        responsibleTeamId: site?.responsibleTeamId,
-                        responsibleTeamName: site?.responsibleTeamName,
+                        responsibleTeamId: site?.responsibleTeamId || '',
+                        responsibleTeamName: site?.responsibleTeamName || '',
+
+                        // Site Metadata Saving (Corrected Mapping)
+                        // DailyReport.companyId refers to CLIENT (발주사) based on services/dailyReportService.ts
+                        companyId: site?.clientCompanyId || '',
+                        companyName: site?.clientCompanyName || '',
+
+                        // DailyReport.constructorCompanyId refers to CONSTRUCTOR (시공사)
+                        constructorCompanyId: site?.companyId || '',
+                        constructorCompanyName: site?.companyName || '',
+
+                        // Partner (협력사)
+                        partnerId: site?.partnerId || '',
+                        partnerName: site?.partnerName || '',
+
                         workContent: ledger.description || '' // Report Level Work Content
                     });
                 });
@@ -672,6 +771,7 @@ const DailyReportGridInput: React.FC = () => {
                         teamName: worker?.teamType === '지원팀' ? '지원' : (worker ? (teams.find(t => t.id === worker.teamId)?.name || '') : ''),
                         workerId: worker?.id || '',
                         unitPrice: worker?.unitPrice || 0,
+                        payType: worker?.payType || worker?.salaryModel || '일급',
                         role: w.role || worker?.role || '작업자',
                         description: w.workContent || '' // AI content or Empty
                     };
@@ -818,12 +918,7 @@ const DailyReportGridInput: React.FC = () => {
                     >
                         <FontAwesomeIcon icon={faMinus} /> 장부 삭제
                     </button>
-                    <button
-                        onClick={addRowsToAllLedgers}
-                        className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faPlus} /> 행 10개 추가
-                    </button>
+
                     <button
                         onClick={handleSaveAll}
                         disabled={loading}
@@ -848,6 +943,7 @@ const DailyReportGridInput: React.FC = () => {
                             workerMap={workerMap}
                             onUpdate={updateLedger}
                             onDelete={removeLedger}
+                            onAddRow={addRowToLedger}
                         />
                     ))}
 

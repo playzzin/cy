@@ -4,8 +4,8 @@ import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { MenuItem } from '../../../../services/menuServiceV11';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFolder, faLink, faGripVertical, faChevronDown, faChevronRight, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons';
-import * as FaIcons from '@fortawesome/free-solid-svg-icons';
+import { faFolder, faLink, faGripVertical, faChevronDown, faChevronRight, faEye, faEyeSlash, faArrowRight, faArrowLeft, faChartPie, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { resolveIcon } from '../../../../constants/iconMap';
 
 // --- Recursive Sortable Item ---
 interface SortableItemProps {
@@ -14,10 +14,14 @@ interface SortableItemProps {
     onSelect: (id: string, multiSelect?: boolean) => void;
     selectedIds: string[];
     onDelete: (id: string) => void;
+    onIndent?: (id: string) => void;
+    onOutdent?: (id: string) => void;
     isMultiSelectMode?: boolean;
+    index: number; // Added index prop
+    isFirst: boolean;
 }
 
-const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, selectedIds, onDelete, isMultiSelectMode }) => {
+const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, selectedIds, onDelete, onIndent, onOutdent, isMultiSelectMode, index, isFirst }) => {
     const {
         attributes,
         listeners,
@@ -38,11 +42,14 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
     };
 
     // Icon Resolution
-    const IconComponent = (FaIcons as any)[item.icon || 'faLink'] || (item.sub ? faFolder : faLink);
+    // Use resolveIcon for safe lookup
+    // Default to faFolder (if folder) or faLink (if leaf) if resolve fails/returns default
+    const resolved = resolveIcon(item.icon);
+    const IconComponent = resolved !== faChartPie ? resolved : (item.sub ? faFolder : faLink);
+
     const isSelected = selectedIds.includes(item.id || '');
 
     // --- Dynamic Style Logic (Matching Sidebar.tsx) ---
-    // ... (Keep existing logic)
     const activeColor = item.activeColor || '#1abc9c';
     const iconColor = item.iconColor;
 
@@ -72,8 +79,6 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                 `}
                 onClick={(e) => {
                     e.stopPropagation();
-                    // Toggle if Ctrl/Cmd is pressed OR if we treat all clicks as toggle in "Selection Mode" (optional)
-                    // Currently adhering to requested "Batch Edit" flow:
                     onSelect(item.id || '', e.ctrlKey || e.metaKey);
                 }}
                 onMouseEnter={() => setIsHovered(true)}
@@ -89,16 +94,15 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={(e) => onSelect(item.id || '', true)} // Always toggle on checkbox change
+                        onChange={(e) => onSelect(item.id || '', true)}
                         className="w-4 h-4 rounded border-gray-600 text-blue-500 focus:ring-blue-500 bg-gray-700 cursor-pointer"
                     />
                 </div>
 
                 {/* Dynamic Icon */}
-                {/* Sidebar uses a simple FontAwesomeIcon. We wrap it for better editor visuals but style it to match. */}
                 <div
                     className="w-6 h-6 flex items-center justify-center transition-colors duration-200"
-                    style={{ color: effectiveIconColor || '#9ca3af' }} /* Default gray-400 if no color */
+                    style={{ color: effectiveIconColor || '#9ca3af' }}
                 >
                     <FontAwesomeIcon icon={IconComponent} />
                 </div>
@@ -111,8 +115,35 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     >
                         {item.text}
                     </span>
-                    {/* Path is metadata, keep it subtle */}
                     {item.path && <span className="text-[10px] text-gray-600 font-mono leading-none mt-0.5">{item.path}</span>}
+                </div>
+
+                {/* Indent/Outdent Actions (Hover) */}
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 mr-2 transition-opacity">
+                    {onOutdent && depth > 0 && (
+                        <button
+                            title="상위로 이동 (Outdent)"
+                            className="text-gray-400 hover:text-white p-1 hover:bg-gray-700 rounded"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onOutdent(item.id || '');
+                            }}
+                        >
+                            <FontAwesomeIcon icon={faArrowLeft} size="xs" />
+                        </button>
+                    )}
+                    {onIndent && !isFirst && (
+                        <button
+                            title="하위로 이동 (Indent)"
+                            className="text-gray-400 hover:text-white p-1 hover:bg-gray-700 rounded"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onIndent(item.id || '');
+                            }}
+                        >
+                            <FontAwesomeIcon icon={faArrowRight} size="xs" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Quick Actions (Hover) */}
@@ -168,7 +199,7 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                             onDelete(item.id || item.text);
                         }}
                     >
-                        <FontAwesomeIcon icon={FaIcons.faTrash} size="xs" />
+                        <FontAwesomeIcon icon={faTrash} size="xs" />
                     </button>
                 </div>
             </div>
@@ -179,7 +210,21 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     <SortableContext items={item.sub.map(c => typeof c === 'string' ? c : (c.id || c.text))} strategy={verticalListSortingStrategy}>
                         {item.sub.map((child, idx) => {
                             if (typeof child === 'string') return <div key={idx} className="p-2 text-gray-500">{child}</div>;
-                            return <SortableMenuNode key={child.id || child.text} item={child} depth={depth + 1} onSelect={onSelect} selectedIds={selectedIds} onDelete={onDelete} />;
+                            return (
+                                <SortableMenuNode
+                                    key={child.id || `fallback_${idx}_${child.text}`}
+                                    item={child}
+                                    depth={depth + 1}
+                                    onSelect={onSelect}
+                                    selectedIds={selectedIds}
+                                    onDelete={onDelete}
+                                    onIndent={onIndent}
+                                    onOutdent={onOutdent}
+                                    isMultiSelectMode={isMultiSelectMode}
+                                    index={idx}
+                                    isFirst={idx === 0}
+                                />
+                            );
                         })}
                     </SortableContext>
                 </div>
@@ -189,15 +234,18 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
 };
 
 interface SortableTreeCanvasProps {
-    siteId: string;
+    siteId?: string; // Made optional as it's not always passed or strictly needed for logic
     items: MenuItem[]; // Enforce strict type
     onItemsChange: (items: MenuItem[]) => void;
     selectedIds: string[];
     onSelect: (id: string, multiSelect?: boolean) => void;
     onDelete: (id: string) => void;
+    onIndent?: (id: string) => void;
+    onOutdent?: (id: string) => void;
+    isMultiSelectMode?: boolean;
 }
 
-const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, onItemsChange, selectedIds, onSelect, onDelete }) => {
+const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
 
@@ -218,15 +266,14 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
                     </h2>
                 </div>
 
-                {items.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-gray-700 rounded-xl bg-gray-800/50">
-                        <FontAwesomeIcon icon={faLink} className="text-4xl text-gray-600 mb-4" />
-                        <p className="text-gray-400 font-medium text-lg">메뉴가 비어있습니다</p>
-                        <p className="text-sm text-gray-500 mt-2">좌측 툴박스에서 항목을 드래그하여 추가하세요</p>
-                    </div>
-                ) : (
-                    <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
-                        {items.map((item) => (
+                <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
+                    {items.length === 0 ? (
+                        <div className="text-center py-20 border-2 border-dashed border-gray-800 rounded-xl">
+                            <p className="text-gray-500 mb-2">메뉴가 비어있습니다.</p>
+                            <p className="text-sm text-gray-600">오른쪽 도구 상자에서 메뉴를 드래그하거나<br />빠른 추가 버튼을 사용하세요.</p>
+                        </div>
+                    ) : (
+                        items.map((item, idx) => (
                             <SortableMenuNode
                                 key={item.id || item.text}
                                 item={item}
@@ -234,13 +281,19 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
                                 onSelect={onSelect}
                                 selectedIds={selectedIds}
                                 onDelete={onDelete}
+                                onIndent={onIndent}
+                                onOutdent={onOutdent}
+                                isMultiSelectMode={isMultiSelectMode}
+                                index={idx}
+                                isFirst={idx === 0}
                             />
-                        ))}
-                    </SortableContext>
-                )}
+                        ))
+                    )}
+                </SortableContext>
             </div>
         </div>
     );
 };
 
 export default SortableTreeCanvas;
+

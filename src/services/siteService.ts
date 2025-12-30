@@ -10,9 +10,14 @@ export interface Site {
     status: 'active' | 'completed' | 'planned';
     responsibleTeamId?: string; // ID of the team managing this site
     responsibleTeamName?: string; // Denormalized name for display
-    companyId?: string; // ID of the client company (건설사 등)
-    companyName?: string; // Name of the client company
-    constructorCompanyId?: string; // ID of the constructor company (시공사)
+    companyId?: string; // ID of the constructor company (시공사) - Main company
+    companyName?: string; // Name of the constructor company
+    clientCompanyId?: string; // ID of the client company (발주사) - New
+    clientCompanyName?: string; // Name of the client company (발주사) - New
+    constructorCompanyId?: string; // DEPRECATED: Use companyId for Constructor
+    constructorCompanyName?: string; // DEPRECATED: Use companyName for Constructor
+    partnerId?: string; // 협력사 ID (Partner) - New
+    partnerName?: string; // 협력사 (Partner) - New
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
     totalManDay?: number; // 누적 공수
@@ -30,14 +35,35 @@ export const siteService = {
             status: site.status,
             responsibleTeamId: site.responsibleTeamId || '',
             responsibleTeamName: site.responsibleTeamName || '',
-            companyId: site.companyId || '',
-            companyName: site.companyName || '',
-            constructorCompanyId: site.constructorCompanyId || '',
+            companyId: site.companyId || '', // Constructor (시공사)
+            companyName: site.companyName || '', // Constructor Name
+            clientCompanyId: site.clientCompanyId || '', // Client (발주사)
+            clientCompanyName: site.clientCompanyName || '', // Client Name
+            constructorCompanyId: site.constructorCompanyId || '', // Deprecated but kept for safety
+            constructorCompanyName: site.constructorCompanyName || '', // Deprecated
+            partnerId: site.partnerId || '',
+            partnerName: site.partnerName || '',
 
             color: site.color || '', // Include color
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now()
         });
+
+        // Sync: Add Site ID to Client Company (발주사) if selected
+        if (site.clientCompanyId) {
+            try {
+                const { arrayUnion, doc: fsDoc, updateDoc: fsUpdateDoc } = await import('firebase/firestore');
+                const clientCompanyRef = fsDoc(db, 'companies', site.clientCompanyId);
+                await fsUpdateDoc(clientCompanyRef, {
+                    siteIds: arrayUnion(docRef.id),
+                    siteNames: arrayUnion(site.name), // Optional: sync name too
+                    updatedAt: Timestamp.now()
+                });
+            } catch (err) {
+                console.error("Failed to sync site to client company:", err);
+            }
+        }
+
         toast.saved('현장', 1);
         return docRef.id;
     },
@@ -92,6 +118,17 @@ export const siteService = {
         } catch (error) {
             console.error("Error updating sites batch:", error);
             throw error;
+        }
+    },
+
+    // Get single site by ID
+    getSite: async (id: string): Promise<Site | null> => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            return { id: docSnap.id, ...docSnap.data() } as Site;
+        } else {
+            return null;
         }
     },
 

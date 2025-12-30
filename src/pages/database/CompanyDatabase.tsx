@@ -547,25 +547,95 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                             <td colSpan={visibleColumns.length + 2} className="px-6 py-4">
                                                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                                                                     {/* Sites */}
-                                                                    <div>
-                                                                        <div className="text-sm font-semibold mb-2 flex items-center gap-2">
-                                                                            <FontAwesomeIcon icon={faBuilding} className="text-indigo-500" />
-                                                                            <span>회사 기준 현장 현황</span>
+                                                                    {/* Sites */}
+                                                                    <div className="flex flex-col h-full">
+                                                                        <div className="text-sm font-semibold mb-3 flex items-center justify-between">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className="bg-indigo-100 p-1.5 rounded-lg">
+                                                                                    <FontAwesomeIcon icon={faBuilding} className="text-indigo-600" />
+                                                                                </div>
+                                                                                <span>회사 기준 현장 현황</span>
+                                                                                <span className="text-xs text-slate-400 font-normal">
+                                                                                    ({sites.filter(s => s.companyId === company.id).length}개 현장)
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="w-48">
+                                                                                <MultiSelectPopover
+                                                                                    options={sites.map(s => ({ id: s.id!, name: s.name }))}
+                                                                                    selectedIds={company.siteIds || []}
+                                                                                    onSelect={(id) => {
+                                                                                        const currentIds = company.siteIds || [];
+                                                                                        const newIds = currentIds.includes(id)
+                                                                                            ? currentIds.filter(i => i !== id)
+                                                                                            : [...currentIds, id];
+                                                                                        handleCompanyBlur(company.id!, 'siteIds', newIds);
+                                                                                    }}
+                                                                                    onSelectAll={() => {
+                                                                                        const allIds = sites.map(s => s.id!);
+                                                                                        const currentIds = company.siteIds || [];
+                                                                                        const isAllSelected = currentIds.length === allIds.length;
+                                                                                        const newIds = isAllSelected ? [] : allIds;
+                                                                                        handleCompanyBlur(company.id!, 'siteIds', newIds);
+                                                                                    }}
+                                                                                    placeholder="현장 추가/제거"
+                                                                                    minimal={false}
+                                                                                />
+                                                                            </div>
                                                                         </div>
-                                                                        {sites.filter(s => s.companyId === company.id).length > 0 ? (
-                                                                            <ul className="text-xs text-slate-600 space-y-1 max-h-40 overflow-y-auto pr-1">
-                                                                                {sites
-                                                                                    .filter(s => s.companyId === company.id)
-                                                                                    .map(site => (
-                                                                                        <li key={site.id} className="flex items-center justify-between">
-                                                                                            <span>{site.name}</span>
-                                                                                            <span className="text-slate-400 text-[10px]">{site.status === 'completed' ? '종료' : '진행중'}</span>
-                                                                                        </li>
-                                                                                    ))}
-                                                                            </ul>
-                                                                        ) : (
-                                                                            <div className="text-xs text-slate-400">등록된 현장이 없습니다.</div>
-                                                                        )}
+
+                                                                        <div className="bg-slate-100/50 rounded-xl p-4 border border-slate-200 flex-1">
+                                                                            {sites.filter(s => s.companyId === company.id).length > 0 ? (
+                                                                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-3">
+                                                                                    {sites
+                                                                                        .filter(s => s.companyId === company.id)
+                                                                                        .map(site => (
+                                                                                            <div key={site.id} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow group relative">
+                                                                                                <div className="flex justify-between items-start mb-2">
+                                                                                                    <div className="flex items-center gap-2">
+                                                                                                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${site.status === 'active' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-100 text-slate-400'}`}>
+                                                                                                            <FontAwesomeIcon icon={faBuilding} className="text-sm" />
+                                                                                                        </div>
+                                                                                                        <div>
+                                                                                                            <div className="font-semibold text-slate-800 text-sm">{site.name}</div>
+                                                                                                            <div className="text-[10px] text-slate-500">{site.code}</div>
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${site.status === 'active' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                                                                        {site.status === 'active' ? '진행중' : '종료'}
+                                                                                                    </span>
+                                                                                                </div>
+
+                                                                                                <div className="text-xs text-slate-500 mb-2 line-clamp-1">
+                                                                                                    {site.address || '주소 미입력'}
+                                                                                                </div>
+
+                                                                                                <div className="flex justify-end pt-2 border-t border-slate-100">
+                                                                                                    <button
+                                                                                                        onClick={(e) => {
+                                                                                                            e.stopPropagation();
+                                                                                                            if (window.confirm(`'${site.name}' 현장을 이 회사에서 제외하시겠습니까?`)) {
+                                                                                                                const currentIds = company.siteIds || [];
+                                                                                                                const newIds = currentIds.filter(id => id !== site.id);
+                                                                                                                handleCompanyBlur(company.id!, 'siteIds', newIds);
+                                                                                                            }
+                                                                                                        }}
+                                                                                                        className="text-xs text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors opacity-0 group-hover:opacity-100"
+                                                                                                    >
+                                                                                                        <FontAwesomeIcon icon={faTrash} />
+                                                                                                        <span>제외</span>
+                                                                                                    </button>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        ))}
+                                                                                </div>
+                                                                            ) : (
+                                                                                <div className="h-full flex flex-col items-center justify-center text-slate-400 py-8">
+                                                                                    <FontAwesomeIcon icon={faBuilding} className="text-3xl mb-2 opacity-20" />
+                                                                                    <p className="text-sm">배정된 현장이 없습니다.</p>
+                                                                                    <p className="text-xs mt-1">우측 상단의 메뉴를 통해 현장을 배정해주세요.</p>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
 
                                                                     {/* Teams */}

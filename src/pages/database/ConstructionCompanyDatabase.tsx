@@ -749,6 +749,7 @@ const ConstructionCompanyDatabase: React.FC<ConstructionCompanyDatabaseProps> = 
                 )
                 }
             </div >
+            {/* End of Card Grid */}
         </div >
     );
 };

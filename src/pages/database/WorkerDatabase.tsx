@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { resolveIcon } from '../../constants/iconMap';
 import {
-    faUsers, faUser, faPlus, faSearch, faEdit, faTrash, faPenToSquare,
-    faImages, faLink, faDownload, faCheckSquare, faSquare, faTable, faMoneyCheck, faBuilding,
-    faIdCard, faArrowUp, faArrowDown, faEye, faEyeSlash,
-    faCrown, faUserTie, faUserShield, faHardHat, faUserPlus,
-    faUserGear, faHelmetSafety, faPersonDigging, faWrench, faScrewdriverWrench,
+    faUsers, faUser, faPlus, faSearch, faEdit, faTrash,
+    faCheckSquare, faSquare, faTable, faBuilding,
+    faIdCard, faArrowUp, faArrowDown,
+    faEye, faEyeSlash, faLink, faImages, faPenToSquare, faDownload, faMoneyCheck,
     IconDefinition
 } from '@fortawesome/free-solid-svg-icons';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -30,31 +30,16 @@ import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import InputPopover from '../../components/common/InputPopover';
 
-// 아이콘 맵핑 (문자열 → 실제 아이콘)
-const ICON_MAP: Record<string, IconDefinition> = {
-    faCrown,
-    faUserTie,
-    faUserShield,
-    faHardHat,
-    faUser,
-    faUserPlus,
-    faUserGear,
-    faHelmetSafety,
-    faPersonDigging,
-    faWrench,
-    faScrewdriverWrench,
-};
-
 const WORKER_COLUMNS = [
     { key: 'name', label: '이름' },
     { key: 'idNumber', label: '주민번호' },
     { key: 'contact', label: '연락처' },
+    { key: 'address', label: '주소' },
     { key: 'role', label: '직책' },
     { key: 'salaryModel', label: '구분' },
     { key: 'teamName', label: '팀명' },
     { key: 'companyName', label: '회사' },
     { key: 'status', label: '상태' },
-    { key: 'unitPrice', label: '단가' },
     { key: 'unitPrice', label: '단가' },
     { key: 'bankInfo', label: '계좌번호' },
     { key: 'signature', label: '서명' },
@@ -88,12 +73,12 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         { key: 'name', label: '이름' },
         { key: 'idNumber', label: '주민번호' },
         { key: 'contact', label: '연락처' },
+        { key: 'address', label: '주소' },
         { key: 'role', label: '직책' },
         { key: 'salaryModel', label: '구분' },
         { key: 'teamName', label: '팀명' },
         { key: 'companyName', label: '회사' },
         { key: 'status', label: '상태' },
-        { key: 'unitPrice', label: '단가' },
         { key: 'unitPrice', label: '단가' },
         { key: 'bankInfo', label: '계좌번호' },
         { key: 'signature', label: '서명' },
@@ -930,6 +915,21 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                     />
                                                                 </td>
                                                             );
+                                                        case 'address':
+                                                            return (
+                                                                <td key={key} className="px-4 py-3 text-gray-600">
+                                                                    <InputPopover
+                                                                        value={worker.address || ''}
+                                                                        placeholder="주소"
+                                                                        onChange={(val) => {
+                                                                            handleWorkerChange(worker.id!, 'address', String(val));
+                                                                            handleWorkerBlur(worker.id!, 'address', String(val));
+                                                                        }}
+                                                                        minimal={!isEditMode}
+                                                                        formatDisplay={(val) => <span className="truncate max-w-[200px] inline-block" title={String(val)}>{val || '-'}</span>}
+                                                                    />
+                                                                </td>
+                                                            );
                                                         case 'role': {
                                                             const workerPosition = positions.find(p => p.name === worker.role);
                                                             const posColor = workerPosition?.color || 'gray';
@@ -954,7 +954,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                             options={positions.map(p => ({
                                                                                 id: p.name,
                                                                                 name: p.name,
-                                                                                icon: <FontAwesomeIcon icon={p.icon && ICON_MAP[p.icon] ? ICON_MAP[p.icon] : faUser} />
+                                                                                icon: <FontAwesomeIcon icon={resolveIcon(p.icon, faUser)} />
                                                                             }))}
                                                                             selectedId={worker.role || '일반'}
                                                                             onSelect={(val) => {
@@ -1025,7 +1025,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                             ...teams.map(t => ({
                                                                                 id: t.id || '',
                                                                                 name: t.name,
-                                                                                icon: <FontAwesomeIcon icon={t.icon && ICON_MAP[t.icon] ? ICON_MAP[t.icon] : faUsers} className="text-xs" />,
+                                                                                icon: <FontAwesomeIcon icon={resolveIcon(t.icon, faUsers)} className="text-xs" />,
                                                                                 color: t.color
                                                                             }))
                                                                         ]}

@@ -21,6 +21,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { resolveIcon } from '../../constants/iconMap';
 
 interface HeaderProps {
     toggleSidebar: () => void;
@@ -30,23 +31,7 @@ interface HeaderProps {
 }
 
 // Icon mapping (duplicated for now, can be moved to a shared utility)
-const iconMap: { [key: string]: any } = {
-    'fa-shield-halved': faShieldHalved,
-    'fa-chart-pie': faChartPie,
-    'fa-clipboard-list': faClipboardList,
-    'fa-file-invoice-dollar': faFileInvoiceDollar,
-    'fa-database': faDatabase,
-    'fa-building': faBuilding,
-    'fa-photo-film': faPhotoFilm,
-    'fa-cart-shopping': faCartShopping,
-    'fa-pen-nib': faPenNib,
-    'fa-flask': faFlask,
-    'fa-circle-info': faChartPie,
-    'fa-youtube': faPhotoFilm,
-    'fa-cash-register': faCartShopping,
-    'fa-pencil': faPenNib,
-    'fa-vial': faFlask
-};
+
 
 const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSiteData, isAdmin }) => {
     const { currentUser, logout } = useAuth();
@@ -101,7 +86,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSite
                 </button>
 
                 <div className="mobile-logo-area">
-                    <FontAwesomeIcon icon={iconMap[currentSiteData.icon] || faShieldHalved} style={{ marginRight: '8px', color: '#3498db' }} />
+                    <FontAwesomeIcon icon={resolveIcon(currentSiteData.icon, faShieldHalved)} style={{ marginRight: '8px', color: '#3498db' }} />
                     <span>{currentSiteData.name}</span>
                 </div>
             </div>

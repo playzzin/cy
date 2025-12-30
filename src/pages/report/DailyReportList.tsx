@@ -11,10 +11,9 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 
 // Icon Map for Team/Worker types
-const ICON_MAP: Record<string, any> = {
-    faCrown, faUserTie, faUserShield, faHardHat, faUser, faUserPlus, faUserGear,
-    faHelmetSafety, faPersonDigging, faWrench, faScrewdriverWrench
-};
+import { resolveIcon } from '../../constants/iconMap';
+
+// Local ICON_MAP removed in favor of safe resolveIcon
 
 interface DailyReportListProps {
     initialDate?: string;
@@ -378,9 +377,7 @@ const DailyReportList: React.FC<DailyReportListProps> = ({ initialDate }) => {
                                         </td>
                                         <td className="px-3 py-2">
                                             <div className="flex items-center gap-1.5">
-                                                {workTeam?.icon && ICON_MAP[workTeam.icon] ? (
-                                                    <FontAwesomeIcon icon={ICON_MAP[workTeam.icon]} className="text-indigo-500" />
-                                                ) : <FontAwesomeIcon icon={faUsers} className="text-indigo-400" />}
+                                                <FontAwesomeIcon icon={resolveIcon(workTeam?.icon, faUsers)} className="text-indigo-500" />
                                                 <span className="text-slate-700">{row.teamName || '-'}</span>
                                             </div>
                                         </td>

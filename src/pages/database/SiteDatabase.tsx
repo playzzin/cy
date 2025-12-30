@@ -19,10 +19,11 @@ import InputPopover from '../../components/common/InputPopover';
 
 const SITE_COLUMNS = [
     { key: 'name', label: '현장명' },
-    { key: 'totalGongsu', label: '누적공수' }, // Added
     { key: 'address', label: '주소' },
     { key: 'responsibleTeamName', label: '담당팀' },
-    { key: 'companyName', label: '회사' },
+    { key: 'clientCompanyName', label: '발주사' }, // Client (New)
+    { key: 'companyName', label: '시공사' }, // Constructor (Main)
+    { key: 'partnerName', label: '협력사' }, // Partner (New)
     { key: 'status', label: '상태' }
 ];
 
@@ -66,7 +67,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         toggleColumn,
         showColumnSettings,
         setShowColumnSettings
-    } = useColumnSettings('site_db', SITE_COLUMNS);
+    } = useColumnSettings('site_db_v4', SITE_COLUMNS);
 
     // 통계 데이터만 별도 로드
     useEffect(() => {
@@ -471,6 +472,26 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         }}
                                                                         placeholder="담당팀 선택"
                                                                     />
+                                                                ) : col.key === 'clientCompanyName' ? (
+                                                                    <select
+                                                                        value={site.clientCompanyId || ''}
+                                                                        onChange={(e) => {
+                                                                            const companyId = e.target.value;
+                                                                            const company = companies.find(c => c.id === companyId);
+                                                                            handleSiteSelectChange(site.id!, {
+                                                                                clientCompanyId: companyId || '',
+                                                                                clientCompanyName: company?.name || ''
+                                                                            });
+                                                                        }}
+                                                                        className="border rounded px-2 py-1 w-full text-sm"
+                                                                    >
+                                                                        <option value="">발주사 선택</option>
+                                                                        {companies
+                                                                            .filter(c => c.type === '건설사')
+                                                                            .map(company => (
+                                                                                <option key={company.id} value={company.id}>{company.name}</option>
+                                                                            ))}
+                                                                    </select>
                                                                 ) : col.key === 'companyName' ? (
                                                                     <select
                                                                         value={site.companyId || ''}
@@ -484,10 +505,32 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         }}
                                                                         className="border rounded px-2 py-1 w-full text-sm"
                                                                     >
-                                                                        <option value="">회사 선택</option>
-                                                                        {companies.map(company => (
-                                                                            <option key={company.id} value={company.id}>{company.name}</option>
-                                                                        ))}
+                                                                        <option value="">시공사 선택</option>
+                                                                        {companies
+                                                                            .filter(c => c.type === '시공사')
+                                                                            .map(company => (
+                                                                                <option key={company.id} value={company.id}>{company.name}</option>
+                                                                            ))}
+                                                                    </select>
+                                                                ) : col.key === 'partnerName' ? (
+                                                                    <select
+                                                                        value={site.partnerId || ''}
+                                                                        onChange={(e) => {
+                                                                            const companyId = e.target.value;
+                                                                            const company = companies.find(c => c.id === companyId);
+                                                                            handleSiteSelectChange(site.id!, {
+                                                                                partnerId: companyId || '',
+                                                                                partnerName: company?.name || ''
+                                                                            });
+                                                                        }}
+                                                                        className="border rounded px-2 py-1 w-full text-sm"
+                                                                    >
+                                                                        <option value="">협력사 선택</option>
+                                                                        {companies
+                                                                            .filter(c => c.type === '협력사')
+                                                                            .map(company => (
+                                                                                <option key={company.id} value={company.id}>{company.name}</option>
+                                                                            ))}
                                                                     </select>
                                                                 ) : col.key === 'name' ? (
                                                                     <div className="flex items-center gap-2">
@@ -587,17 +630,59 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             );
                                                                         }}
                                                                     />
+                                                                ) : col.key === 'clientCompanyName' ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        {(() => {
+                                                                            const clientCompany = companies.find(c => c.id === site.clientCompanyId);
+                                                                            // 발주사인데 타입이 '건설사'가 아니면 경고
+                                                                            const isInvalid = clientCompany && clientCompany.type !== '건설사';
+                                                                            return (
+                                                                                <div className="flex flex-col">
+                                                                                    <span className={`font-semibold text-slate-800 ${isInvalid ? 'text-red-500 decoration-red-500' : ''}`}>
+                                                                                        {site.clientCompanyName || '-'}
+                                                                                    </span>
+                                                                                    {isInvalid && <span className="text-[10px] text-red-500">(타입 오류: {clientCompany.type})</span>}
+                                                                                </div>
+                                                                            );
+                                                                        })()}
+                                                                    </div>
                                                                 ) : col.key === 'companyName' ? (
                                                                     <div className="flex items-center gap-2">
                                                                         <span
                                                                             className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-200 flex-shrink-0"
-                                                                            style={{ backgroundColor: siteCompanyColor }}
+                                                                            style={{ backgroundColor: siteCompanyColor ?? '#F3F4F6' }}
                                                                         >
                                                                             <FontAwesomeIcon icon={faBuilding} className="text-white text-xs" />
                                                                         </span>
-                                                                        <span className="font-semibold text-slate-800">
-                                                                            {siteCompany?.name || site.companyName || '-'}
-                                                                        </span>
+                                                                        {(() => {
+                                                                            const compNames = site.companyName || siteCompany?.name || '-';
+                                                                            // 시공사인데 타입이 '시공사'가 아니면 경고 (단, 미지정은 허용할 수도 있으나 Strict 모드에서는 경고)
+                                                                            const isInvalid = siteCompany && siteCompany.type !== '시공사';
+
+                                                                            return (
+                                                                                <div className="flex flex-col">
+                                                                                    <span className={`font-semibold text-slate-800 ${isInvalid ? 'text-red-500 decoration-red-500' : ''}`}>
+                                                                                        {compNames}
+                                                                                    </span>
+                                                                                    {isInvalid && <span className="text-[10px] text-red-500">(타입 오류: {siteCompany.type})</span>}
+                                                                                </div>
+                                                                            );
+                                                                        })()}
+                                                                    </div>
+                                                                ) : col.key === 'partnerName' ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        {(() => {
+                                                                            const partnerCompany = companies.find(c => c.id === site.partnerId);
+                                                                            const isInvalid = partnerCompany && partnerCompany.type !== '협력사';
+                                                                            return (
+                                                                                <div className="flex flex-col">
+                                                                                    <span className={`font-semibold text-slate-800 ${isInvalid ? 'text-red-500 decoration-red-500' : ''}`}>
+                                                                                        {site.partnerName || '-'}
+                                                                                    </span>
+                                                                                    {isInvalid && <span className="text-[10px] text-red-500">(타입 오류: {partnerCompany ? partnerCompany.type : '미지정'})</span>}
+                                                                                </div>
+                                                                            );
+                                                                        })()}
                                                                     </div>
                                                                 ) : col.key === 'address' ? (
                                                                     <InputPopover

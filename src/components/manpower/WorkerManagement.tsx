@@ -4,8 +4,9 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faUsers, faUser, faPlus, faSearch, faEdit, faTrash, faPenToSquare,
     faImages, faLink, faDownload, faCheckSquare, faSquare, faTable, faMoneyCheck, faBuilding,
-    faGripVertical, faIdCard
+    faGripVertical, faIdCard, faChevronUp, faChevronDown, IconDefinition
 } from '@fortawesome/free-solid-svg-icons';
+
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
@@ -22,26 +23,11 @@ import BankBookAnalysisModal from './BankBookAnalysisModal';
 import IdCardAnalysisModal from './IdCardAnalysisModal';
 import WorkerModal from '../../pages/manpower/WorkerModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
-import {
-    faCrown, faUserTie, faUserShield, faHardHat, faUserPlus,
-    faUserGear, faHelmetSafety, faPersonDigging, faWrench, faScrewdriverWrench,
-    IconDefinition, faChevronUp, faChevronDown
-} from '@fortawesome/free-solid-svg-icons';
 
-// 아이콘 맵핑 (문자열 → 실제 아이콘)
-const ICON_MAP: Record<string, IconDefinition> = {
-    faCrown,
-    faUserTie,
-    faUserShield,
-    faHardHat,
-    faUser,
-    faUserPlus,
-    faUserGear,
-    faHelmetSafety,
-    faPersonDigging,
-    faWrench,
-    faScrewdriverWrench,
-};
+import { resolveIcon } from '../../constants/iconMap';
+
+// 아이콘 맵핑 (문자열 → 실제 아이콘) -> Removed in favor of resolveIcon
+
 
 const WORKER_COLUMNS = [
     { key: 'name', label: '이름' },
@@ -786,7 +772,7 @@ const WorkerManagement: React.FC = () => {
                                                                             />
                                                                             <input
                                                                                 type="text"
-                                                                                value={worker.name}
+                                                                                value={worker.name || ''}
                                                                                 onChange={(e) => handleWorkerChange(worker.id!, 'name', e.target.value)}
                                                                                 onBlur={(e) => handleWorkerBlur(worker.id!, 'name', e.target.value)}
                                                                                 className="w-full border rounded px-2 py-1 text-sm"
@@ -819,7 +805,7 @@ const WorkerManagement: React.FC = () => {
                                                                     case 'idNumber': return isEditMode ? (
                                                                         <input
                                                                             type="text"
-                                                                            value={worker.idNumber}
+                                                                            value={worker.idNumber || ''}
                                                                             onChange={(e) => handleWorkerChange(worker.id!, 'idNumber', e.target.value)}
                                                                             onBlur={(e) => handleWorkerBlur(worker.id!, 'idNumber', e.target.value)}
                                                                             className="w-full border rounded px-2 py-1 text-sm"
@@ -836,7 +822,7 @@ const WorkerManagement: React.FC = () => {
                                                                     ) : (worker.contact || '-');
                                                                     case 'role': {
                                                                         const workerPosition = positions.find(p => p.name === worker.role);
-                                                                        const posIcon = workerPosition?.icon ? ICON_MAP[workerPosition.icon] : faUser;
+                                                                        const posIcon = resolveIcon(workerPosition?.icon, faUser);
                                                                         const posColor = workerPosition?.color || 'gray';
                                                                         const colorClass = {
                                                                             red: 'bg-red-500', orange: 'bg-orange-500', yellow: 'bg-yellow-500',
@@ -861,7 +847,7 @@ const WorkerManagement: React.FC = () => {
                                                                         ) : (
                                                                             <div className="flex items-center gap-2">
                                                                                 <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md ${colorClass}`}>
-                                                                                    <FontAwesomeIcon icon={posIcon || faUser} className="text-white text-xs" />
+                                                                                    <FontAwesomeIcon icon={posIcon} className="text-white text-xs" />
                                                                                 </span>
                                                                                 <span>{worker.role || '일반'}</span>
                                                                             </div>
@@ -902,12 +888,12 @@ const WorkerManagement: React.FC = () => {
                                                                         );
                                                                     }
                                                                     case 'teamName': {
-                                                                        const teamIcon = workerTeam?.icon ? ICON_MAP[workerTeam.icon] : faUsers;
+                                                                        const teamIcon = resolveIcon(workerTeam?.icon, faUsers);
                                                                         const teamColor = workerTeam?.color || '#94a3b8';
                                                                         return isEditMode ? (
                                                                             <div className="flex items-center gap-2">
                                                                                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-md flex-shrink-0" style={{ backgroundColor: teamColor }}>
-                                                                                    <FontAwesomeIcon icon={teamIcon || faUsers} className="text-white text-xs" />
+                                                                                    <FontAwesomeIcon icon={teamIcon} className="text-white text-xs" />
                                                                                 </span>
                                                                                 <select
                                                                                     value={worker.teamId || ''}

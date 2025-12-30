@@ -205,7 +205,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 // console.log("Using default favicon");
             }
         };
-        loadFavicon();
+        // loadFavicon(); // Disabled to prevent 403 errors until configured
     }, []);
 
     const toggleSidebar = () => {
@@ -439,6 +439,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
             <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
                 <Sidebar
+                    currentSite={effectiveSite}
                     currentSiteData={currentSiteData}
                     closeAll={closeAll}
                     activeMenuItems={activeMenuItems}

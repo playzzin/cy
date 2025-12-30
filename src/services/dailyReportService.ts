@@ -38,8 +38,12 @@ export interface DailyReport {
     siteName: string;
     responsibleTeamId?: string;
     responsibleTeamName?: string;
-    companyId?: string;
+    companyId?: string; // 발주사 (Client)
     companyName?: string;
+    constructorCompanyId?: string; // 시공사 (Constructor)
+    constructorCompanyName?: string;
+    partnerId?: string; // 협력사 (Partner)
+    partnerName?: string;
     writerId: string;
     workers: DailyReportWorker[];
     totalManDay: number;
@@ -544,7 +548,7 @@ export const dailyReportService = {
     },
 
     // Add Worker to Report (Find or Create)
-    addWorkerToReport: async (date: string, teamId: string, teamName: string, siteId: string, siteName: string, worker: DailyReportWorker): Promise<void> => {
+    addWorkerToReport: async (date: string, teamId: string, teamName: string, siteId: string, siteName: string, worker: DailyReportWorker, siteData?: { constructorCompanyId?: string; constructorCompanyName?: string; partnerId?: string; partnerName?: string; companyId?: string; companyName?: string }): Promise<void> => {
         try {
             // 1. Check if report exists
             const q = query(
@@ -600,6 +604,14 @@ export const dailyReportService = {
                     siteName,
                     teamId,
                     teamName,
+                    // New Fields
+                    companyId: siteData?.companyId || '',
+                    companyName: siteData?.companyName || '',
+                    constructorCompanyId: siteData?.constructorCompanyId || '',
+                    constructorCompanyName: siteData?.constructorCompanyName || '',
+                    partnerId: siteData?.partnerId || '',
+                    partnerName: siteData?.partnerName || '',
+
                     responsibleTeamName: teamName, // Default to team name
                     totalManDay: worker.manDay,
                     totalAmount: (worker.manDay || 0) * (worker.unitPrice || 0),

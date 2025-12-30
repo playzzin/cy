@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faXmark, faShieldHalved, faBuilding, faPhotoFilm, faCartShopping, faPenNib, faFlask, faChartPie, faSitemap, faFileImport } from '@fortawesome/free-solid-svg-icons';
+import { resolveIcon } from '../../constants/iconMap';
 
 interface RightPanelProps {
     isOpen: boolean;
@@ -23,7 +24,7 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
     // Get System Structure Diagram items from learning menu
     const structureItems = siteData.learning?.menu?.find((m: any) => m.text === "시스템 구조도")?.sub || [];
 
-    const getIconName = (iconClass: string) => iconClass.replace('fa-', '');
+
 
     return (
         <aside id="right-panel" className={`panel ${isOpen ? 'open' : ''}`}>
@@ -62,7 +63,7 @@ const RightPanel: React.FC<RightPanelProps> = ({ isOpen, togglePanel, siteData, 
                             >
                                 <FontAwesomeIcon
                                     // @ts-ignore
-                                    icon={['fas', getIconName(siteData[key].icon)]}
+                                    icon={resolveIcon(siteData[key].icon, faBuilding)}
                                     style={{ fontSize: '20px', marginBottom: '8px' }}
                                 />
                                 <span style={{ fontSize: '12px', textAlign: 'center', fontWeight: currentSite === key ? 'bold' : 'normal' }}>{siteData[key].name}</span>

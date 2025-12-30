@@ -47,6 +47,10 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 text: "시스템 관리",
                 icon: "fa-gears",
                 sub: ["메뉴관리", "시스템 메시지 설정", "데이터 연결 점검"]
+            },
+            {
+                text: "클라우드 저장소",
+                icon: "fa-hdd"
             }
         ],
         positionConfig: [

@@ -85,9 +85,18 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
                             role: existingWorker?.role || '일용직',
                             status: 'attendance',
                             manDay: parseFloat(row.manDay),
-                            unitPrice: existingWorker ? (existingWorker as any).unitPrice || 0 : 0,
+                            unitPrice: row.unitPrice ? parseFloat(row.unitPrice) : (existingWorker ? (existingWorker as any).unitPrice || 0 : 0),
+                            payType: row.payType || (existingWorker ? (existingWorker as any).payType : ''),
                             workContent: row.workContent || '',
                             teamId: existingWorker ? existingWorker.teamId : team.id
+                        },
+                        {
+                            companyId: site.companyId,
+                            companyName: site.companyName,
+                            constructorCompanyId: site.constructorCompanyId,
+                            constructorCompanyName: site.constructorCompanyName,
+                            partnerId: site.partnerId,
+                            partnerName: site.partnerName
                         }
                     );
                     successCount++;
@@ -121,19 +130,26 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
     const handleGridChange = (data: any[]) => {
         // Map grid data to component state
         const mapped = data.map((row, idx) => {
-            const { date, siteName, responsibleTeamName, name, teamName, manDay, workContent, payType } = row;
+            const { date, siteName, responsibleTeamName, name, teamName, manDay, workContent, payType, unitPrice } = row;
+
+            const matchedWorker = workers.find(w => w.name === name);
+            const matchedSite = sites.find(s => s.name === siteName);
 
             const rowData: any = {
                 _valid: true,
                 _errors: [],
                 date: date || new Date().toISOString().split('T')[0],
                 siteName: siteName,
+                // New Fields for Display
+                clientName: matchedSite?.companyName || '',
+                partnerName: matchedSite?.partnerName || '',
+                constructorName: matchedSite?.constructorCompanyName || '',
                 teamName: teamName,  // Worker's Team
                 workerName: name,
                 manDay: typeof manDay === 'number' ? manDay.toFixed(1) : (manDay || '1.0'),
-                unitPrice: '0', // Default
+                unitPrice: unitPrice || (matchedWorker ? matchedWorker.unitPrice : '0'),
                 workContent: workContent || '',
-                payType: payType || ''
+                payType: payType || (matchedWorker ? matchedWorker.payType : '')
             };
 
             // Validation
@@ -145,9 +161,9 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
         });
 
         // Set Headers purely for display (fixed structure now)
-        setHeaders(['날짜', '현장명', '담당팀', '이름', '팀명', '공수', '작업내용', '구분']);
+        setHeaders(['날짜', '현장명', '담당팀', '이름', '팀명', '공수', '단가', '구분', '작업내용']);
         // Mock mapped fields for preview table compatibility
-        setMappedFields({ 0: 'date', 1: 'siteName', 2: 'teamName', 3: 'workerName', 4: 'manDay', 5: 'workContent', 6: 'payType' });
+        setMappedFields({ 0: 'date', 1: 'siteName', 2: 'teamName', 3: 'workerName', 4: 'teamName', 5: 'manDay', 6: 'unitPrice', 7: 'payType', 8: 'workContent' });
 
         setParsedData(mapped);
     };
@@ -202,9 +218,14 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
                                             <th className="px-4 py-3 border-b border-slate-100 w-12 text-center">상태</th>
                                             <th className="px-4 py-3 border-b border-slate-100">날짜</th>
                                             <th className="px-4 py-3 border-b border-slate-100">현장명</th>
+                                            <th className="px-4 py-3 border-b border-slate-100">발주사</th>
+                                            <th className="px-4 py-3 border-b border-slate-100">협력사</th>
+                                            <th className="px-4 py-3 border-b border-slate-100">시공사</th>
                                             <th className="px-4 py-3 border-b border-slate-100">팀명</th>
                                             <th className="px-4 py-3 border-b border-slate-100">이름</th>
                                             <th className="px-4 py-3 border-b border-slate-100">공수</th>
+                                            <th className="px-4 py-3 border-b border-slate-100">단가</th>
+                                            <th className="px-4 py-3 border-b border-slate-100">구분</th>
                                             <th className="px-4 py-3 border-b border-slate-100">작업내용</th>
                                         </tr>
                                     </thead>
@@ -220,9 +241,18 @@ const SmartDailyReportRegistrationPage: React.FC = () => {
                                                 </td>
                                                 <td className="px-4 py-2.5">{row.date}</td>
                                                 <td className="px-4 py-2.5">{row.siteName}</td>
+                                                <td className="px-4 py-2.5 text-slate-500 text-xs">{row.clientName || '-'}</td>
+                                                <td className="px-4 py-2.5 text-slate-500 text-xs">{row.partnerName || '-'}</td>
+                                                <td className="px-4 py-2.5 text-slate-500 text-xs">{row.constructorName || '-'}</td>
                                                 <td className="px-4 py-2.5">{row.teamName}</td>
                                                 <td className="px-4 py-2.5">{row.workerName}</td>
                                                 <td className="px-4 py-2.5">{row.manDay}</td>
+                                                <td className="px-4 py-2.5">{row.unitPrice ? parseInt(row.unitPrice).toLocaleString() : '0'}</td>
+                                                <td className="px-4 py-2.5">
+                                                    <span className={`px-2 py-0.5 rounded text-xs ${row.payType === '일급' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                                                        {row.payType || '-'}
+                                                    </span>
+                                                </td>
                                                 <td className="px-4 py-2.5">{row.workContent}</td>
                                             </tr>
                                         ))}

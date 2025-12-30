@@ -292,7 +292,7 @@ const StatusGraphPage: React.FC = () => {
                                     <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 12 }} />
                                     <Tooltip
                                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        formatter={(value: number) => [value.toFixed(1) + ' MD', '공수']}
+                                        formatter={(value: any) => [value.toFixed(1) + ' MD', '공수']}
                                     />
                                     <Area type="monotone" dataKey="공수" stroke="#6366f1" strokeWidth={3} fillOpacity={1} fill="url(#colorManDay)" />
                                 </AreaChart>
@@ -315,7 +315,7 @@ const StatusGraphPage: React.FC = () => {
                                     <Tooltip
                                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                         cursor={{ fill: '#F1F5F9' }}
-                                        formatter={(value: number) => [value.toFixed(1) + ' MD', '공수']}
+                                        formatter={(value: any) => [value.toFixed(1) + ' MD', '공수']}
                                     />
                                     <Bar dataKey="공수" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={20} />
                                 </BarChart>
@@ -350,7 +350,7 @@ const StatusGraphPage: React.FC = () => {
                                     </Pie>
                                     <Tooltip
                                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                        formatter={(value: number) => [value.toFixed(1) + ' MD', '공수']}
+                                        formatter={(value: any) => [value.toFixed(1) + ' MD', '공수']}
                                     />
                                     <Legend layout="vertical" verticalAlign="middle" align="right" />
                                 </PieChart>

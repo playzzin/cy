@@ -11,6 +11,7 @@ interface InputPopoverProps {
     disabled?: boolean;
     formatDisplay?: (value: string | number) => React.ReactNode;
     suffix?: string;
+    isCard?: boolean;
 }
 
 const InputPopover: React.FC<InputPopoverProps> = ({
@@ -21,7 +22,8 @@ const InputPopover: React.FC<InputPopoverProps> = ({
     minimal = false,
     disabled = false,
     formatDisplay,
-    suffix
+    suffix,
+    isCard = false
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [inputValue, setInputValue] = useState<string | number>('');

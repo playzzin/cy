@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     DndContext,
     DragOverlay,
@@ -20,7 +21,9 @@ import {
     faExclamationTriangle,
     faRotateRight,
     faUsers,
-    faGlobe
+    faGlobe,
+    faArrowRight,
+    faArrowLeft
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -31,7 +34,7 @@ import SortableTreeCanvas from './components/SortableTreeCanvas';
 import InspectorPanel from './components/InspectorPanel';
 import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
-import MenuManagerHeader from './components/MenuManagerHeader'; // Added MenuManagerHeader
+import MenuManagerHeader from './components/MenuManagerHeader';
 
 // --- Recursive Helpers ---
 
@@ -68,13 +71,6 @@ const findMenuItemInTree = (nodes: (MenuItem | string)[], id: string | null): Me
 const updateMenuItemInTree = (nodes: (MenuItem | string)[], updatedItem: MenuItem): (MenuItem | string)[] => {
     return nodes.map(item => {
         if (typeof item === 'string') {
-            // Strings don't have IDs usually, or the string itself is the ID? 
-            // Logic in findRef assumes string item ID is the string itself.
-            // If updatedItem is replacing a string item, we check if updatedItem.text matches?
-            // Since strings are usually references or simple items, assume complex items are Objects.
-            // If updatedItem matches the string (by some logic), verify logic.
-            // Simpler: Just map over, if object has same ID, replace.
-            // String items are tricky if updated. Assuming strict object update here.
             return item;
         }
 
@@ -94,9 +90,12 @@ const updateMenuItemInTree = (nodes: (MenuItem | string)[], updatedItem: MenuIte
 };
 
 const AdvancedMenuManager: React.FC = () => {
+    const [searchParams] = useSearchParams();
+    const initialSite = searchParams.get('site') || 'cheongyeon';
+
     // --- State ---
     const [menuData, setMenuData] = useState<SiteDataType | null>(null);
-    const [selectedSite, setSelectedSite] = useState<string>('cheongyeon');
+    const [selectedSite, setSelectedSite] = useState<string>(initialSite);
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
@@ -129,6 +128,53 @@ const AdvancedMenuManager: React.FC = () => {
         }
         setLeftPanelOpen(false);
     }, []);
+
+    const handleIndent = useCallback((id: string) => {
+        if (!menuData) return;
+        const currentMenu = [...(menuData[selectedSite]?.menu || [])];
+        const ref = findRef(currentMenu, id);
+
+        if (!ref || ref.index <= 0) return; // Can't indent if first item
+
+        const prevSibling = ref.list[ref.index - 1];
+        if (typeof prevSibling === 'string') return; // Can't nest under a string (separator)
+
+        // Remove from current list
+        const [movedItem] = ref.list.splice(ref.index, 1);
+
+        // Add to prevSibling's sub
+        if (!prevSibling.sub) prevSibling.sub = [];
+        prevSibling.sub.push(movedItem);
+
+        // Update state
+        const newData = { ...menuData };
+        newData[selectedSite].menu = currentMenu;
+        setMenuData(newData);
+        menuServiceV11.saveMenuConfig(newData);
+    }, [menuData, selectedSite]);
+
+    const handleOutdent = useCallback((id: string) => {
+        if (!menuData) return;
+        const currentMenu = [...(menuData[selectedSite]?.menu || [])];
+        const ref = findRef(currentMenu, id);
+
+        if (!ref || !ref.parent) return; // Can't outdent if root
+
+        const parentRef = findRef(currentMenu, ref.parent.id || ref.parent.text || '');
+        if (!parentRef) return; // Should not happen
+
+        // Remove from parent's sub
+        const [movedItem] = ref.list.splice(ref.index, 1);
+
+        // Add to grandParent's list (parentRef.list) after parent
+        parentRef.list.splice(parentRef.index + 1, 0, movedItem);
+
+        // Update state
+        const newData = { ...menuData };
+        newData[selectedSite].menu = currentMenu;
+        setMenuData(newData);
+        menuServiceV11.saveMenuConfig(newData);
+    }, [menuData, selectedSite]);
 
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
@@ -540,6 +586,8 @@ const AdvancedMenuManager: React.FC = () => {
                             selectedIds={selectedIds}
                             onSelect={handleNodeSelect}
                             onDelete={handleDeleteItem}
+                            onIndent={handleIndent}
+                            onOutdent={handleOutdent}
                         />
                     </main>
 

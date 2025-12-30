@@ -157,4 +157,10 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 개발자 도구
     "에이전트 플레이그라운드": "/admin/agent-playground",
     "메뉴관리": "/admin/menu-manager",
+    // Refine Integrated Console
+    "작업자 콘솔": "/manpower/refine-workers",
+    "팀 콘솔": "/manpower/refine-teams",
+    "현장 콘솔": "/manpower/refine-sites",
+    "회사 콘솔": "/manpower/refine-companies",
+    "통합 데이터 콘솔": "/manpower/refine-sites", // Alias
 };

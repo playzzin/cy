@@ -405,5 +405,136 @@ export const menuServiceV11 = {
     clearCache: () => {
         currentConfig = null;
         currentRawConfig = null;
+    },
+
+    syncWithPositions: async (positions: { id: string; name: string; rank: number; color: string; icon?: string; iconKey?: string; }[]) => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+
+            // 1. Update positionConfig in admin site
+            const newPositionConfig = [
+                { id: 'full', name: '전체 메뉴', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
+                ...positions.map((p, index) => ({
+                    id: p.id,
+                    name: p.name,
+                    icon: p.iconKey || p.icon || 'fa-user',
+                    color: p.color || 'gray',
+                    order: (p.rank || 0) + 1
+                }))
+            ];
+
+            if (JSON.stringify(config.admin.positionConfig) !== JSON.stringify(newPositionConfig)) {
+                config.admin.positionConfig = newPositionConfig;
+                modified = true;
+            }
+
+            // 2. Ensure each position has a site entry
+            positions.forEach(pos => {
+                const siteKey = pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`;
+
+                // If this site key doesn't exist, create it
+                if (!config[siteKey]) {
+                    // Fallback to default menu if pos_general exists, otherwise empty
+                    const fallbackMenu = config['pos_general']?.menu
+                        ? JSON.parse(JSON.stringify(config['pos_general'].menu))
+                        : [];
+
+                    config[siteKey] = {
+                        name: pos.name,
+                        icon: pos.iconKey || pos.icon || 'fa-user',
+                        menu: fallbackMenu
+                    };
+                    modified = true;
+                } else {
+                    // Update metadata if changed
+                    if (config[siteKey].name !== pos.name || config[siteKey].icon !== (pos.iconKey || pos.icon)) {
+                        config[siteKey].name = pos.name;
+                        config[siteKey].icon = pos.iconKey || pos.icon || 'fa-user';
+                        modified = true;
+                    }
+                }
+            });
+
+            // 3. Remove orphaned site keys (pos_*) that no longer exist in positions list
+            const validPosKeys = new Set(positions.map(p => p.id.startsWith('pos_') ? p.id : `pos_${p.id}`));
+
+            Object.keys(config).forEach(key => {
+                if (key.startsWith('pos_') && !validPosKeys.has(key)) {
+                    delete config[key];
+                    modified = true;
+                }
+            });
+
+            if (modified) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Synced positions to menu config.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Sync failed:', error);
+        }
+    },
+
+    pruneDuplicates: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return;
+
+            let modified = false;
+            const seenIds = new Set<string>();
+
+            const pruneRecursive = (items: (MenuItem | string)[]): (MenuItem | string)[] => {
+                const seenText = new Set<string>();
+                const uniqueItems: (MenuItem | string)[] = [];
+
+                items.forEach(item => {
+                    const text = typeof item === 'string' ? item : item.text;
+                    const normalizedText = text.trim();
+
+                    // 1. Text Deduplication (per level)
+                    if (seenText.has(normalizedText)) {
+                        modified = true;
+                        return; // Skip duplicate text at same level
+                    }
+                    seenText.add(normalizedText);
+
+                    // 2. ID Deduplication (Global) & ID Generation
+                    if (typeof item !== 'string') {
+                        if (!item.id || seenIds.has(item.id)) {
+                            // Generate new ID if missing or duplicate
+                            item.id = `m_${Math.random().toString(36).substr(2, 9)}`;
+                            modified = true;
+                        }
+                        seenIds.add(item.id);
+
+                        if (item.sub) {
+                            item.sub = pruneRecursive(item.sub);
+                        }
+                    }
+
+                    uniqueItems.push(item);
+                });
+
+                return uniqueItems;
+            };
+
+            Object.keys(config).forEach(siteKey => {
+                const site = config[siteKey];
+                if (site.menu) {
+                    site.menu = pruneRecursive(site.menu) as MenuItem[];
+                }
+            });
+
+            if (modified) {
+                console.log('[MenuService] Duplicates (IDs/Text) pruned and fixed.');
+                await menuServiceV11.saveMenuConfig(config);
+            } else {
+                console.log('[MenuService] No duplicates found.');
+            }
+        } catch (error: any) {
+            console.error('[MenuService] Prune failed:', error);
+        }
     }
 };

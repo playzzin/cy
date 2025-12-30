@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
+import { toast } from '../../utils/swal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faPenToSquare, faTrash, faBuilding, faFileExcel, faFileImport, faFileExport } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx';
@@ -176,7 +177,158 @@ const SiteManagement: React.FC = () => {
         reader.readAsBinaryString(file);
     };
 
-    // ... existing fetchData, handleSave, handleDelete, openModal ...
+    // ... existing functions ...
+
+    const handleUpdateSite = async (siteId: string, field: 'clientCompanyId' | 'companyId' | 'partnerId', value: string) => {
+        const company = companies.find(c => c.id === value);
+        let updates: Partial<Site> = { [field]: value };
+
+        if (field === 'clientCompanyId') updates.clientCompanyName = company?.name || '';
+        if (field === 'companyId') updates.companyName = company?.name || '';
+        if (field === 'partnerId') updates.partnerName = company?.name || '';
+
+        try {
+            await siteService.updateSite(siteId, updates);
+            setSites(prev => prev.map(s => s.id === siteId ? { ...s, ...updates } : s));
+        } catch (error) {
+            console.error("Failed to update site", error);
+            alert("수정 실패");
+        }
+    };
+
+    const refreshSites = async () => {
+        try {
+            const fetchedSites = await siteService.getSites();
+            setSites(fetchedSites);
+        } catch (error) {
+            console.error("Failed to refresh sites", error);
+        }
+    };
+
+    const handleTeamChange = async (siteId: string, teamId: string) => {
+        // 1. Fetch Fresh Team Data from DB
+        let freshTeam: Team | null = null;
+        try {
+            freshTeam = await teamService.getTeam(teamId);
+        } catch (e) {
+            console.error("Failed to fetch fresh team", e);
+            freshTeam = teams.find(t => t.id === teamId) || null;
+        }
+
+        const team = freshTeam || teams.find(t => t.id === teamId);
+        if (!team) return;
+
+        // 2. Resolve Company (Smart Match Logic - Self Healing)
+        let targetCompany: Company | undefined = undefined;
+        let matchMethod = 'id';
+
+        const normalize = (s: string) => s ? s.replace(/\s+/g, '').trim() : '';
+        const teamCompName = normalize(team.companyName || '');
+
+        // A. Try ID Match
+        if (team.companyId) {
+            targetCompany = companies.find(c => c.id === team.companyId);
+        }
+
+        // B. Check for Data Drift & Fuzzy Search
+        // If ID Match failed OR Name Mismatch (Drift)
+        let isDrift = false;
+        if (targetCompany && teamCompName && normalize(targetCompany.name) !== teamCompName) {
+            isDrift = true;
+            console.warn(`[SmartMatch] Name Mismatch! Team says '${team.companyName}', ID points to '${targetCompany.name}'`);
+        }
+
+        if (!targetCompany || isDrift) {
+            // Priority 1: Exact Name Match
+            let candidate = companies.find(c => c.name === team.companyName);
+
+            // Priority 2: Normalized Name Match
+            if (!candidate && teamCompName) {
+                candidate = companies.find(c => normalize(c.name) === teamCompName);
+            }
+
+            // Priority 3: Partial Match (Team name inside Company name or vice versa)
+            // Only if string is long enough to avoid false positives
+            if (!candidate && teamCompName.length > 2) {
+                candidate = companies.find(c => {
+                    const cName = normalize(c.name);
+                    return cName.includes(teamCompName) || teamCompName.includes(cName);
+                });
+            }
+
+            if (candidate) {
+                targetCompany = candidate;
+                matchMethod = 'fuzzy_fix';
+                console.log(`[SmartMatch] Found Company by Name/Fuzzy: ${candidate.name}`);
+
+                // *** SELF HEALING ***
+                // Update the Team's broken link so it works next time
+                try {
+                    await teamService.updateTeam(team.id!, {
+                        companyId: candidate.id,
+                        companyName: candidate.name
+                    });
+                    console.log("[SmartMatch] Auto-Repaired Team Data.");
+                } catch (err) {
+                    console.error("Failed to auto-repair team", err);
+                }
+            }
+        }
+
+        let updates: Partial<Site> = {
+            responsibleTeamId: teamId,
+            responsibleTeamName: team.name || ''
+        };
+
+        let typeLabel = '';
+        if (targetCompany) {
+            const companyType = targetCompany.type?.trim();
+            if (companyType === '협력사') {
+                updates.partnerId = targetCompany.id;
+                updates.partnerName = targetCompany.name;
+                updates.companyId = '';
+                updates.companyName = '';
+                updates.clientCompanyId = '';
+                updates.clientCompanyName = '';
+                typeLabel = '협력사';
+            } else {
+                updates.companyId = targetCompany.id;
+                updates.companyName = targetCompany.name;
+                updates.partnerId = '';
+                updates.partnerName = '';
+                typeLabel = companyType || '시공사(기본)';
+            }
+        } else if (teamId) {
+            updates.companyId = '';
+            updates.companyName = '';
+            updates.partnerId = '';
+            updates.partnerName = '';
+        }
+
+        try {
+            await siteService.updateSite(siteId, updates);
+            setSites(prev => prev.map(s => s.id === siteId ? { ...s, ...updates } : s));
+            await refreshSites();
+
+            if (targetCompany) {
+                let msg = `[${team.name}] → ${targetCompany.name} (${typeLabel}) 적용 완료`;
+                if (matchMethod === 'fuzzy_fix') msg += ' (자동 보정됨)';
+                if (isDrift) msg += ' (데이터 오류 수정됨)';
+                toast.success(msg);
+            } else if (teamId) {
+                // Diagnose WHY it failed
+                const reason = team.companyName
+                    ? `회사명 '${team.companyName}'을(를) DB에서 찾을 수 없습니다.`
+                    : '팀에 연결된 회사가 없습니다.';
+                toast.error(`[${team.name}] 회사 연동 실패: ${reason}`);
+            }
+        } catch (error) {
+            console.error("Failed to update site team", error);
+            alert("팀 수정 실패");
+        }
+    };
+
+    // ... existing useEffect ...
 
 
 
@@ -234,7 +386,9 @@ const SiteManagement: React.FC = () => {
                                 <tr>
                                     <th className="px-6 py-3 border-b border-slate-200">현장명</th>
                                     <th className="px-6 py-3 border-b border-slate-200">담당팀</th>
-                                    <th className="px-6 py-3 border-b border-slate-200">회사명</th>
+                                    <th className="px-4 py-3 border-b border-slate-200">발주사</th>
+                                    <th className="px-4 py-3 border-b border-slate-200">시공사</th>
+                                    <th className="px-4 py-3 border-b border-slate-200">협력사</th>
                                     <th className="px-6 py-3 border-b border-slate-200">현장코드</th>
                                     <th className="px-6 py-3 border-b border-slate-200">주소</th>
 
@@ -245,9 +399,9 @@ const SiteManagement: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-sm">
                                 {isLoading ? (
-                                    <tr><td colSpan={8} className="text-center py-10">로딩중...</td></tr>
+                                    <tr><td colSpan={10} className="text-center py-10">로딩중...</td></tr>
                                 ) : sites.length === 0 ? (
-                                    <tr><td colSpan={8} className="text-center py-10 text-slate-400">등록된 현장이 없습니다.</td></tr>
+                                    <tr><td colSpan={10} className="text-center py-10 text-slate-400">등록된 현장이 없습니다.</td></tr>
                                 ) : (
                                     sites.map((site) => {
                                         const company = companies.find(c => c.id === site.companyId);
@@ -264,19 +418,76 @@ const SiteManagement: React.FC = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 text-slate-600">
-                                                    {site.responsibleTeamName ? (
-                                                        <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs font-bold">
-                                                            {site.responsibleTeamName}
-                                                        </span>
-                                                    ) : '-'}
+                                                    <select
+                                                        value={site.responsibleTeamId || ''}
+                                                        onChange={(e) => handleTeamChange(site.id!, e.target.value)}
+                                                        className="text-xs border border-slate-200 rounded px-2 py-1 w-full cursor-pointer hover:border-brand-500 transition-colors bg-indigo-50 text-indigo-700 font-bold"
+                                                        style={{ minWidth: '100px' }}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {teams.map(t => (
+                                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                                        ))}
+                                                    </select>
                                                 </td>
-                                                <td className="px-6 py-4 text-slate-600">
-                                                    {site.companyName ? (
-                                                        <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">
-                                                            {site.companyName}
-                                                        </span>
-                                                    ) : '-'}
+
+                                                {/* Client (발주사) Editable */}
+                                                <td className="px-4 py-4">
+                                                    <select
+                                                        value={site.clientCompanyId || ''}
+                                                        onChange={(e) => handleUpdateSite(site.id!, 'clientCompanyId', e.target.value)}
+                                                        className={`text-xs border rounded px-2 py-1 w-32 cursor-pointer hover:border-brand-500 transition-colors ${site.clientCompanyId && companies.find(c => c.id === site.clientCompanyId)?.type !== '건설사'
+                                                            ? 'border-red-500 text-red-600 bg-red-50 font-bold'
+                                                            : 'border-slate-200'
+                                                            }`}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {companies.map(c => (
+                                                            <option key={c.id} value={c.id}>
+                                                                {c.type !== '건설사' ? '⚠️ ' : ''}{c.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
                                                 </td>
+
+                                                {/* Constructor (시공사) Editable */}
+                                                <td className="px-4 py-4">
+                                                    <select
+                                                        value={site.companyId || ''}
+                                                        onChange={(e) => handleUpdateSite(site.id!, 'companyId', e.target.value)}
+                                                        className={`text-xs border rounded px-2 py-1 w-32 cursor-pointer hover:border-brand-500 transition-colors ${site.companyId && !['시공사', '건설사', '미지정'].includes(companies.find(c => c.id === site.companyId)?.type || '')
+                                                            ? 'border-red-500 text-red-600 bg-red-50 font-bold'
+                                                            : 'border-slate-200'
+                                                            }`}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {companies.map(c => (
+                                                            <option key={c.id} value={c.id}>
+                                                                {c.type === '협력사' ? '⚠️ ' : ''}{c.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+
+                                                {/* Partner (협력사) Editable */}
+                                                <td className="px-4 py-4">
+                                                    <select
+                                                        value={site.partnerId || ''}
+                                                        onChange={(e) => handleUpdateSite(site.id!, 'partnerId', e.target.value)}
+                                                        className={`text-xs border rounded px-2 py-1 w-32 cursor-pointer hover:border-brand-500 transition-colors ${site.partnerId && companies.find(c => c.id === site.partnerId)?.type !== '협력사'
+                                                            ? 'border-red-500 text-red-600 bg-red-50 font-bold'
+                                                            : 'border-slate-200'
+                                                            }`}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {companies.map(c => (
+                                                            <option key={c.id} value={c.id}>
+                                                                {c.type !== '협력사' ? '⚠️ ' : ''}{c.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+
                                                 <td className="px-6 py-4 text-slate-600 font-mono">{site.code}</td>
                                                 <td className="px-6 py-4 text-slate-600">{site.address}</td>
 

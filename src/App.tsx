@@ -122,6 +122,12 @@ import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionL
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 import { useWorkerTeamIdMigration } from './hooks/useWorkerTeamIdMigration';
 import { menuServiceV11 } from './services/menuServiceV11';
+import { RefineWrapper } from './providers/refine/RefineWrapper';
+import RefineSiteList from './pages/refine/RefineSiteList';
+import { RefineSmartSelectDemo } from './pages/refine/RefineSmartSelectDemo';
+import RefineWorkerList from './pages/refine/RefineWorkerList';
+import RefineTeamList from './pages/refine/RefineTeamList';
+import RefineCompanyList from './pages/refine/RefineCompanyList';
 
 // 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -133,8 +139,10 @@ const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) 
       console.log(`[App] Migration completed: ${result.updated} reports updated`);
     }
 
-    // Auto-migrate menu structure for Admin
-    menuServiceV11.ensureSystemMenuExists().catch(err => console.error(err));
+    // Auto-migrate menu structure for Admin and Prune Duplicates
+    menuServiceV11.ensureSystemMenuExists()
+      .then(() => menuServiceV11.pruneDuplicates())
+      .catch(err => console.error(err));
   }, [status, result]);
 
   return <>{children}</>;
@@ -150,7 +158,7 @@ const DashboardLayoutWrapper = () => (
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
@@ -194,6 +202,15 @@ const App: React.FC = () => {
               <Route path="smart-registration-grid" element={<WorkerBulkRegistrationPage />} />
               <Route path="smart-team-registration" element={<SmartTeamRegistrationPage />} />
               <Route path="smart-site-registration" element={<SmartSiteRegistrationPage />} />
+            </Route>
+
+            {/* Refine Integration - Safe Zone */}
+            <Route element={<RefineWrapper />}>
+              <Route path="/manpower/refine-sites" element={<RefineSiteList />} />
+              <Route path="/manpower/refine-workers" element={<RefineWorkerList />} />
+              <Route path="/manpower/refine-teams" element={<RefineTeamList />} />
+              <Route path="/manpower/refine-companies" element={<RefineCompanyList />} />
+              <Route path="/manpower/refine-smart-select" element={<RefineSmartSelectDemo />} />
             </Route>
 
             {/* Database Management */}

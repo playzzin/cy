@@ -24,6 +24,12 @@ export interface Contract {
     landlordName: string;
     landlordContact: string;
     isReported: boolean; // 임대차계약 신고 여부
+
+    // Bank & Payment Info
+    bankName?: string;
+    accountNumber?: string;
+    accountHolder?: string;
+    rentPayDate?: number; // 1-31
 }
 
 export interface Accommodation {

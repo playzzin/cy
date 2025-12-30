@@ -128,6 +128,15 @@ export const teamService = {
         return { id: querySnapshot.docs[0].id, ...querySnapshot.docs[0].data() } as Team;
     },
 
+    getTeam: async (id: string): Promise<Team | null> => {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+            return { id: snap.id, ...snap.data() } as Team;
+        }
+        return null;
+    },
+
     // Get teams (Paginated)
     getTeamsPaginated: async (limitCount: number, lastDoc: any = null): Promise<{ teams: Team[], lastDoc: any }> => {
         try {

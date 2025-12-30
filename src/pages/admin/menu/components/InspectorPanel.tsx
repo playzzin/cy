@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faChevronLeft, faChevronRight, faTag, faLink, faUserShield,
-    faEye, faEyeSlash, faTimes, faCheckCircle, faPalette
+    faEye, faEyeSlash, faTimes, faCheckCircle, faPalette, faChartPie, faLayerGroup
 } from '@fortawesome/free-solid-svg-icons';
+import { resolveIcon } from '../../../../constants/iconMap';
 import { MenuItem } from '../../../../services/menuServiceV11';
 import IconPicker from './IconPicker';
 import * as Fas from '@fortawesome/free-solid-svg-icons';
@@ -87,7 +88,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                         <div className="flex items-center gap-3 mb-1">
                             <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 ring-1 ring-blue-500/20">
                                 <FontAwesomeIcon
-                                    icon={(localState.icon && (Fas as any)[localState.icon]) ? (Fas as any)[localState.icon] : Fas.faChartPie}
+                                    icon={resolveIcon(localState.icon, faChartPie)}
                                     size="lg"
                                 />
                             </div>
@@ -154,7 +155,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                     >
                                         <div className="flex items-center gap-3">
                                             <div className="w-6 h-6 rounded bg-gray-700 flex items-center justify-center text-gray-300 group-hover:bg-gray-600 group-hover:text-white transition-colors">
-                                                <FontAwesomeIcon icon={Fas.faLayerGroup} size="sm" />
+                                                <FontAwesomeIcon icon={faLayerGroup} size="sm" />
                                             </div>
                                             <span className="text-sm text-gray-300 font-mono">아이콘 일괄 변경</span>
                                         </div>
@@ -280,7 +281,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                         <div className="flex items-center gap-3">
                                             <div className="w-6 h-6 rounded bg-gray-700 flex items-center justify-center text-gray-300 group-hover:bg-gray-600 group-hover:text-white transition-colors">
                                                 <FontAwesomeIcon
-                                                    icon={(localState.icon && (Fas as any)[localState.icon]) ? (Fas as any)[localState.icon] : Fas.faChartPie}
+                                                    icon={resolveIcon(localState.icon, faChartPie)}
                                                     size="sm"
                                                 />
                                             </div>

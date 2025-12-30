@@ -1,9 +1,8 @@
 import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import {
-    faXmark
-} from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faUserTie } from '@fortawesome/free-solid-svg-icons';
 import { PositionItem } from '../../types/menu';
+import { resolveIcon } from '../../constants/iconMap';
 
 interface PositionPanelProps {
     isOpen: boolean;
@@ -21,9 +20,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
     positions = []
 }) => {
 
-    const getIconName = (iconClass: string) => {
-        return iconClass.replace('fa-', '');
-    };
+
 
     return (
         <aside
@@ -61,7 +58,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                                 : 'bg-slate-600'
                                 }`}>
                                 {/* @ts-ignore - FontAwesome library dynamic loading */}
-                                <FontAwesomeIcon icon={['fas', getIconName(pos.icon)]} className="text-lg" />
+                                <FontAwesomeIcon icon={resolveIcon(pos.icon, faUserTie)} className="text-lg" />
                             </div>
                             <span className="text-sm font-medium">{pos.name}</span>
                             {currentPosition === pos.id && (

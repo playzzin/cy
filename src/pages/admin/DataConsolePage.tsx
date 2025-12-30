@@ -27,7 +27,7 @@ import {
     themeQuartz
 } from 'ag-grid-community';
 
-import 'ag-grid-community/styles/ag-grid.css';
+// import 'ag-grid-community/styles/ag-grid.css'; // Removed for AG Grid v33+ Theming API compatibility
 
 import 'ag-grid-community/styles/ag-theme-quartz.css';
 
