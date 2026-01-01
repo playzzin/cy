@@ -1,0 +1,83 @@
+:root {
+    /* 
+     * Premium SaaS Slate/Zinc Palette 
+     * Replacing basic colors with sophisticated Tailwind-native scales 
+     */
+    --memo-background: 250 250 252;
+    /* #fafafc (Zinc-50 mixed) */
+    --memo-foreground: 15 23 42;
+    /* Slate-900 */
+
+    --memo-card: 255 255 255;
+    --memo-card-foreground: 30 41 59;
+    /* Slate-800 */
+
+    --memo-primary: 79 70 229;
+    /* Indigo-600 */
+    --memo-primary-foreground: 255 255 255;
+
+    --memo-secondary: 241 245 249;
+    /* Slate-100 */
+    --memo-secondary-foreground: 51 65 85;
+    /* Slate-700 */
+
+    --memo-muted: 248 250 252;
+    /* Slate-50 */
+    --memo-muted-foreground: 100 116 139;
+    /* Slate-500 */
+
+    --memo-accent: 241 245 249;
+    /* Slate-100 */
+    --memo-accent-foreground: 15 23 42;
+    /* Slate-900 */
+
+    --memo-destructive: 239 68 68;
+    /* Red-500 */
+    --memo-destructive-foreground: 255 255 255;
+
+    --memo-border: 226 232 240;
+    /* Slate-200 */
+    --memo-input: 226 232 240;
+    /* Slate-200 */
+    --memo-ring: 99 102 241;
+    /* Indigo-500 */
+}
+
+/* 
+ * Custom Utilities for Premium Effects 
+ */
+
+/* Smoother transitions for grid items */
+.react-grid-item {
+    transition: all 200ms ease;
+    transition-property: left, top, width, height, transform;
+}
+
+/* Hide resize handles when collapsed or pinned */
+.react-grid-item.z-0 .react-resizable-handle {
+    display: none !important;
+}
+
+/* Ensure resize handles are visible and usable */
+.react-resizable-handle {
+    z-index: 50 !important;
+    opacity: 0.5;
+}
+
+.react-resizable-handle:hover {
+    opacity: 1;
+}
+
+/* Dot Grid Pattern for subtle background texture */
+.bg-dot-pattern {
+    background-image: radial-gradient(#e2e8f0 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
+/* Glassmorphism helpers for cleaner HTML - Converted to standard CSS */
+.glass-effect {
+    background-color: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(226, 232, 240, 0.6);
+}

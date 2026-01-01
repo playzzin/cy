@@ -1,3 +1,4 @@
+@import './features/smart-memo/styles/memo-theme.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

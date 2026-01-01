@@ -17,6 +17,7 @@ import RateChangePage from './pages/hr/RateChangePage';
 import SupportSettingsPage from './pages/support/SupportSettingsPage';
 import SupportStatusPage from './pages/support/SupportStatusPage';
 import AccommodationManager from './pages/support/AccommodationManager';
+import { VehicleManagerPage } from './pages/support/VehicleManagerPage';
 import MaterialMasterPage from './pages/materials/MaterialMasterPage';
 import MaterialInboundPage from './pages/materials/MaterialInboundPage';
 import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
@@ -58,7 +59,10 @@ import Login from './components/auth/Login';
 import IntegratedDatabase from './pages/database/ManpowerDatabase';
 import ManualPage from './pages/manual/ManualPage';
 import ProfilePage from './pages/profile/ProfilePage';
+
+
 import StorageManagerPage from './pages/storage/StorageManagerPage';
+import { GoogleDriveManagerPage } from './pages/storage/GoogleDriveManagerPage';
 import SchemaDesignViewer from './pages/structure/SchemaDesignViewer';
 import WhiteboardStatusBoard from './pages/jeonkuk/WhiteboardStatusBoard';
 import IntegratedSupportStatusBoard from './pages/dashboard/IntegratedSupportStatusBoard';
@@ -91,6 +95,7 @@ import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
 import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
 import AgentPlayground from './pages/developer/AgentPlayground';
 import AdvancedMenuManager from './pages/admin/menu/AdvancedMenuManager';
+import RoleMenuAssignmentPage from './pages/admin/RoleMenuAssignmentPage';
 
 import TeamPersonnelStatusReportPage from './pages/report/TeamPersonnelStatusReportPage';
 
@@ -128,6 +133,7 @@ import { RefineSmartSelectDemo } from './pages/refine/RefineSmartSelectDemo';
 import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
 import RefineCompanyList from './pages/refine/RefineCompanyList';
+import { MemoPage } from './features/smart-memo/pages/MemoPage'; // New Feature Import
 
 // 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -140,9 +146,11 @@ const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) 
     }
 
     // Auto-migrate menu structure for Admin and Prune Duplicates
-    menuServiceV11.ensureSystemMenuExists()
-      .then(() => menuServiceV11.pruneDuplicates())
-      .catch(err => console.error(err));
+    // Disabled to allow manual menu deletions to persist (User Feedback: "Why does it come back?")
+    // menuServiceV11.ensureSystemMenuExists()
+    //   .then(() => menuServiceV11.ensureSmartMemoMenuExists())
+    //   .then(() => menuServiceV11.pruneDuplicates())
+    //   .catch(err => console.error(err));
   }, [status, result]);
 
   return <>{children}</>;
@@ -203,6 +211,9 @@ const App: React.FC = () => {
               <Route path="smart-team-registration" element={<SmartTeamRegistrationPage />} />
               <Route path="smart-site-registration" element={<SmartSiteRegistrationPage />} />
             </Route>
+
+            {/* Smart Memo System - Phase 5 Integration */}
+            <Route path="/memos" element={<MemoPage />} />
 
             {/* Refine Integration - Safe Zone */}
             <Route element={<RefineWrapper />}>
@@ -291,6 +302,7 @@ const App: React.FC = () => {
 
             {/* Storage Management */}
             <Route path="/storage" element={<StorageManagerPage />} />
+            <Route path="/storage/google-drive" element={<GoogleDriveManagerPage />} />
 
             {/* Settings */}
             <Route path="/settings" element={<SettingsPage />} />
@@ -311,6 +323,7 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<AccommodationManager />} />
+            <Route path="/support/vehicles" element={<VehicleManagerPage />} />
 
             {/* Materials Management */}
             <Route path="/materials/master" element={<MaterialMasterPage />} />
@@ -362,6 +375,7 @@ const App: React.FC = () => {
               <Route path="accommodation-design" element={<AccommodationDesignViewer />} />
               <Route path="agent-playground" element={<AgentPlayground />} />
               <Route path="menu-manager" element={<AdvancedMenuManager />} />
+              <Route path="role-menu" element={<RoleMenuAssignmentPage />} />
             </Route>
 
             {/* Design System */}

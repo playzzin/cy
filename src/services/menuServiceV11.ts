@@ -57,38 +57,57 @@ const normalizePayrollMenuItem = (item: MenuItem): MenuItem => {
         return found ? { ...found } : null;
     };
 
-    const dailyWage = normalizeMenuItem(takeLeaf('일급제') ?? ({ text: '일급제' } as MenuItem), `payroll/${item.text}`);
-    const monthlyWage = normalizeMenuItem(takeLeaf('월급제') ?? ({ text: '월급제' } as MenuItem), `payroll/${item.text}`);
-    const supportTeam = normalizeMenuItem(takeLeaf('지원팀') ?? ({ text: '지원팀' } as MenuItem), `payroll/${item.text}`);
+    const dailyWage = takeLeaf('일급제');
+    const monthlyWage = takeLeaf('월급제');
+    const supportTeam = takeLeaf('지원팀');
 
     const looseTaxAdvance = takeLeaf('세금/가불');
-
     const advanceGroupExisting = takeGroup('가불관리');
-    const advanceChildrenRaw = Array.isArray(advanceGroupExisting?.sub) ? (advanceGroupExisting?.sub ?? []) : [];
-    const advanceChildren = advanceChildrenRaw
-        .map((child) => (typeof child === 'string' ? ({ text: child } as MenuItem) : (child as MenuItem)))
-        .map((child) => normalizeMenuItem(child, `payroll/${item.text}/가불관리`));
 
-    const ensureAdvanceChild = (text: string): MenuItem => {
-        const found = advanceChildren.find((c) => c.text === text && (!c.sub || c.sub.length === 0));
-        const resolved = found ? { ...found, sub: [] } : ({ text } as MenuItem);
-        return normalizeMenuItem(resolved, `payroll/${item.text}/가불관리`);
-    };
+    // Only process sub-items if "가불관리" group exists or we have children needing grouping
+    let advanceGroup: MenuItem | null = null;
 
-    const advanceRegister = ensureAdvanceChild('가불등록');
-    const taxAdvance = looseTaxAdvance ?? ensureAdvanceChild('세금/가불');
+    if (advanceGroupExisting) {
+        const advanceChildrenRaw = Array.isArray(advanceGroupExisting.sub) ? advanceGroupExisting.sub : [];
+        const advanceChildren = advanceChildrenRaw
+            .map((child) => (typeof child === 'string' ? ({ text: child } as MenuItem) : (child as MenuItem)))
+            .map((child) => normalizeMenuItem(child, `payroll/${item.text}/가불관리`));
 
-    const advanceGroup: MenuItem = normalizeMenuItem(
-        {
-            ...(advanceGroupExisting ?? ({ text: '가불관리' } as MenuItem)),
-            sub: [advanceRegister, taxAdvance]
-        },
-        `payroll/${item.text}`
-    );
+        const ensureAdvanceChild = (text: string): MenuItem | null => {
+            const found = advanceChildren.find((c) => c.text === text && (!c.sub || c.sub.length === 0));
+            return found ? { ...found, sub: [] } : null; // Do NOT create if missing
+        };
+
+        const advanceRegister = ensureAdvanceChild('가불등록');
+        const taxAdvance = looseTaxAdvance ?? ensureAdvanceChild('세금/가불');
+
+        const validAdvanceSubs = [advanceRegister, taxAdvance].filter((c): c is MenuItem => c !== null);
+
+        advanceGroup = normalizeMenuItem(
+            {
+                ...advanceGroupExisting,
+                sub: validAdvanceSubs
+            },
+            `payroll/${item.text}`
+        );
+    } else {
+        // If "가불관리" doesn't exist, check for loose "세금/가불"
+        // If user deleted "가불관리", we respect that.
+        // We do NOT auto-create it just because '세금/가불' exists (unless we want to preserve it).
+        // Let's assume if they deleted the group, they deleted the structure.
+        // But if '세금/가불' was at root, it's captured in looseTaxAdvance.
+        // If looseTaxAdvance exists, we might want to keep it at root? 
+        // The original logic normalized it into the group. 
+        // Let's just keep looseTaxAdvance if we aren't enforcing the group.
+    }
+
+    const newSub = [dailyWage, monthlyWage, supportTeam, advanceGroup, (!advanceGroup && looseTaxAdvance) ? looseTaxAdvance : null]
+        .filter((c): c is MenuItem => c !== null)
+        .map(c => normalizeMenuItem(c!, `payroll/${item.text}`));
 
     return {
         ...item,
-        sub: [dailyWage, monthlyWage, supportTeam, advanceGroup]
+        sub: newSub
     };
 };
 
@@ -399,6 +418,36 @@ export const menuServiceV11 = {
             }
         } catch (error) {
             console.error('[MenuService] Migration Failed:', error);
+        }
+    },
+
+    ensureSmartMemoMenuExists: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+            const adminMenu = config.admin.menu || [];
+
+            // Check if "스마트 메모" exists (using Korean text as in defaultMenu.ts)
+            // Also check for English "Smart Memo" just in case
+            const exists = adminMenu.some((item) => item.text === '스마트 메모' || item.text === 'Smart Memo');
+
+            if (!exists) {
+                console.log('[MenuService] Migrating: Adding Smart Memo to Admin...');
+                adminMenu.push({
+                    text: '스마트 메모',
+                    icon: 'fa-sticky-note'
+                });
+                modified = true;
+            }
+
+            if (modified) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Migration Complete: Smart Memo added.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Smart Memo Migration Failed:', error);
         }
     },
 

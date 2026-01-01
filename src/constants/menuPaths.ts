@@ -46,6 +46,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "미수금 대시보드": "/payroll/taxinvoice/dashboard",
     "미수금 관리": "/payroll/taxinvoice/receivables",
     "숙소 관리": "/support/accommodation",
+    "법인차량 관리": "/support/vehicles",
     "가불 및 공제": "/payroll/advance-payment",
 
     // 자재관리
@@ -125,6 +126,8 @@ export const MENU_PATHS: { [key: string]: string } = {
 
 
     "클라우드 저장소": "/storage",
+    "로컬 저장소": "/storage",
+    "구글 드라이브": "/storage/google-drive",
 
     "급여 정산 설계도": "/jeonkuk/payroll-design",
 
@@ -157,10 +160,15 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 개발자 도구
     "에이전트 플레이그라운드": "/admin/agent-playground",
     "메뉴관리": "/admin/menu-manager",
+    "권한 관리": "/admin/role-menu",
+    "시스템 권한 관리": "/admin/role-menu", // Alias
+    "카카오톡 관리": "/payroll/kakao-notification",
+    "사용자 권한 설정": "/settings", // Alias for Settings where User Management lives
     // Refine Integrated Console
     "작업자 콘솔": "/manpower/refine-workers",
     "팀 콘솔": "/manpower/refine-teams",
     "현장 콘솔": "/manpower/refine-sites",
     "회사 콘솔": "/manpower/refine-companies",
     "통합 데이터 콘솔": "/manpower/refine-sites", // Alias
+    "스마트 메모": "/memos", // Smart Memo System
 };

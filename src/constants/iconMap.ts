@@ -4,7 +4,8 @@ import {
     faPhotoFilm, faCartShopping, faPenNib, faFlask, faUserGear, faHardDrive, faUserTie,
     faUsers, faUserTag, faWrench, faPersonDigging, faUserPlus, faListCheck, faFileImport,
     faUserGroup, faHandHoldingDollar, faTruckFront, faHelmetSafety, faSitemap, faBookOpen,
-    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears, faUserShield
+    faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears, faUserShield,
+    faNoteSticky, faStickyNote
 } from '@fortawesome/free-solid-svg-icons';
 
 export const iconMap: { [key: string]: any } = {
@@ -47,7 +48,9 @@ export const iconMap: { [key: string]: any } = {
     'fa-chart-simple': faChartSimple,
     'fa-book': faBook,
     'fa-user-shield': faUserShield,
-    'faUserShield': faUserShield
+    'faUserShield': faUserShield,
+    'fa-note-sticky': faNoteSticky,
+    'fa-sticky-note': faStickyNote
 };
 
 // Helper: Safely resolve icon from string (kebab-case or camelCase)

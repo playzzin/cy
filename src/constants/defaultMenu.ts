@@ -19,6 +19,17 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: ["일보작성", "일보목록"]
             },
             {
+                text: "지원 관리",
+                icon: "fa-life-ring",
+                sub: [
+                    "지원비 설정",
+                    "지원 현황판",
+                    "지원비 단가 관리",
+                    "숙소 관리",
+                    "법인차량 관리"
+                ]
+            },
+            {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
                 sub: [
@@ -50,7 +61,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             },
             {
                 text: "클라우드 저장소",
-                icon: "fa-hdd"
+                icon: "fa-hdd",
+                sub: ["로컬 저장소", "구글 드라이브"]
+            },
+            {
+                text: "스마트 메모",
+                icon: "fa-sticky-note"
             }
         ],
         positionConfig: [

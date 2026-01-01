@@ -76,6 +76,8 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
     '급여 지급 관리': 'payroll-payment',
     '명세서 조회': 'payroll-payslip',
     '시스템 설정': 'system-config',
+    '스마트 메모': 'smart-memo',
+    'Smart Memo': 'smart-memo',
     // Add mappings for parent menus if needed, or handle logic to show parent if any child is visible
 };
 

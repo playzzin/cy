@@ -228,6 +228,8 @@ const AdvancedMenuManager: React.FC = () => {
             const data = await menuServiceV11.getMenuConfig();
             if (data) {
                 // [Sync Logic] Ensure all 'pos_' sites exist for defined roles
+                // Disabled auto-repair to allow manual deletion of site tabs. (User Feedback: "Deleted items reappear")
+                /*
                 const syncedData = { ...data };
                 let hasChanges = false;
                 const positions = syncedData.admin?.positionConfig || [];
@@ -247,21 +249,31 @@ const AdvancedMenuManager: React.FC = () => {
                         };
                         hasChanges = true;
                     }
-                    // Optional: Sync Name/Icon if they differ? 
-                    // Let's rely on RoleManager for explicit updates to avoid overwriting user customizations
                 });
-
-                setMenuData(syncedData);
+                
+                if (hasChanges) {
+                    menuServiceV11.saveMenuConfig(syncedData);
+                    // Use synced data
+                    setMenuData(syncedData);
+                } else {
+                    setMenuData(data);
+                }
+                */
+                setMenuData(data);
 
                 // If we patched data, save it silently or just keep in state? 
                 // Better to save it ensuring consistency for next reload
+                /*
                 if (hasChanges) {
                     menuServiceV11.saveMenuConfig(syncedData);
                 }
+                */
 
                 // Set default site if not selected or invalid
-                if (!Object.keys(syncedData).includes(selectedSite)) {
-                    setSelectedSite(Object.keys(syncedData)[0] || 'admin');
+                // const keys = Object.keys(syncedData); // syncedData is commented out
+                const keys = Object.keys(data); // Use raw data
+                if (!keys.includes(selectedSite)) {
+                    setSelectedSite(keys[0] || 'admin');
                 }
             }
         };

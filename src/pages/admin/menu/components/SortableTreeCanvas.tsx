@@ -259,7 +259,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
             className={`flex-1 overflow-y-auto p-8 custom-scrollbar h-full transition-colors ${isOver ? 'bg-blue-500/10' : ''}`}
         >
             <div className="max-w-3xl mx-auto space-y-4 pb-20 min-h-[500px]">
-                <div className="flex items-center justify-between mb-6 sticky top-0 bg-gray-900/95 backdrop-blur z-10 py-4 border-b border-gray-800">
+                <div className="flex items-center justify-between mb-6 py-4 border-b border-gray-800">
                     <h2 className="text-lg font-bold text-gray-100 flex items-center gap-3">
                         <span className="w-1.5 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
                         메뉴 구조도 <span className="text-gray-500 text-sm font-normal ml-2">({siteId === 'cheongyeon' ? '청연 본사' : siteId})</span>

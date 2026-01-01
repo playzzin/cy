@@ -9,7 +9,9 @@ import {
     query,
     orderBy,
     serverTimestamp,
-    Timestamp
+    Timestamp,
+    writeBatch,
+    where
 } from 'firebase/firestore';
 
 import { UserRole } from '../types/roles';
@@ -96,7 +98,7 @@ export const positionService = {
         }
     },
 
-    // 직책 수정
+    // 직책 수정 (기본)
     updatePosition: async (id: string, updates: Partial<Position>): Promise<void> => {
         try {
             const docRef = doc(db, COLLECTION_NAME, id);
@@ -115,6 +117,52 @@ export const positionService = {
             });
         } catch (error) {
             console.error("Error updating position:", error);
+            throw error;
+        }
+    },
+
+    // [New] 직책명 변경 및 작업자 동기화 (Batch Update)
+    updatePositionNameWithSync: async (id: string, oldName: string, newName: string): Promise<void> => {
+        try {
+            const batch = writeBatch(db);
+
+            // 1. Position Document Update
+            const posRef = doc(db, COLLECTION_NAME, id);
+            batch.update(posRef, {
+                name: newName,
+                updatedAt: serverTimestamp()
+            });
+
+            // 2. Find all workers with the old role name
+            const workersRef = collection(db, 'workers');
+            const q = query(workersRef, where('role', '==', oldName));
+            const workerSnapshot = await getDocs(q);
+
+            // 3. Queue updates for each worker
+            workerSnapshot.docs.forEach(doc => {
+                batch.update(doc.ref, { role: newName });
+            });
+
+            // 4. Commit batch
+            await batch.commit();
+            console.log(`Updated position name "${oldName}" -> "${newName}" and synced ${workerSnapshot.size} workers.`);
+
+        } catch (error) {
+            console.error("Error updating position name with sync:", error);
+            throw error;
+        }
+    },
+
+    // [New] 직책 색상 변경
+    updatePositionColor: async (id: string, newColor: string): Promise<void> => {
+        try {
+            const docRef = doc(db, COLLECTION_NAME, id);
+            await updateDoc(docRef, {
+                color: newColor,
+                updatedAt: serverTimestamp()
+            });
+        } catch (error) {
+            console.error("Error updating position color:", error);
             throw error;
         }
     },

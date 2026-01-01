@@ -68,10 +68,13 @@ const PositionManager: React.FC = () => {
     const [newPosRole, setNewPosRole] = useState<UserRole>(UserRole.GENERAL);
 
     // "Edit Icon" context
-    // If editing a specific position's icon, we store its ID here.
-    // If null, we might be picking for the *new* position form, or just closed.
-    // Let's discriminate: 'NEW' vs PositionID vs null
-    const [iconPickerTarget, setIconPickerTarget] = useState<'NEW' | string | null>(null);
+    const [iconPickerTarget, setIconPickerTarget] = useState<'NEW' | 'EDIT_TEMP' | string | null>(null);
+
+    // "Edit Position" Form State
+    const [editPos, setEditPos] = useState<Position | null>(null);
+    const [editPosName, setEditPosName] = useState('');
+    const [editPosColor, setEditPosColor] = useState('');
+    const [editPosIcon, setEditPosIcon] = useState('');
 
     // --- 1. Load Data ---
     useEffect(() => {
@@ -91,7 +94,9 @@ const PositionManager: React.FC = () => {
                 const unsubWorkers = onSnapshot(
                     query(collection(db, 'workers'), orderBy('name', 'asc')),
                     (snapshot) => {
-                        const loaded = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Worker));
+                        const loaded = snapshot.docs
+                            .map(d => ({ id: d.id, ...d.data() } as Worker))
+                            .filter(w => w.status !== '퇴사'); // Exclude retired workers
                         setWorkers(loaded);
                         setLoading(false);
                     }
@@ -109,14 +114,26 @@ const PositionManager: React.FC = () => {
         loadData();
     }, []);
 
-    // Sync Positions with Menu System
+    // --- 1.5 Auto-Sync Menu with Positions ---
     useEffect(() => {
-        if (!loading && positions.length > 0 && typeof menuServiceV11.syncWithPositions === 'function') {
-            const validPositions = positions.filter(p => p.id) as (Position & { id: string })[];
-            menuServiceV11.syncWithPositions(validPositions).catch(err => console.error(err));
-        }
-    }, [positions, loading]);
+        if (positions.length > 0) {
+            // Filter valid positions with IDs for sync
+            const validPositions = positions
+                .filter(p => p.id)
+                .map(p => ({
+                    id: p.id!,
+                    name: p.name,
+                    rank: p.rank,
+                    color: p.color,
+                    icon: p.icon,
+                    iconKey: p.iconKey
+                }));
 
+            menuServiceV11.syncWithPositions(validPositions).catch(err =>
+                console.error("Failed to sync menu with positions:", err)
+            );
+        }
+    }, [positions]);
 
     // --- 2. Actions ---
 
@@ -153,10 +170,9 @@ const PositionManager: React.FC = () => {
     };
 
     const handleDeletePosition = async (id: string, name: string) => {
-        // Check assignment
         const assignedCount = workers.filter(w => w.role === name).length;
         if (assignedCount > 0) {
-            Swal.fire('삭제 불가', `현재 ${assignedCount}명의 작업자가 이 직책을 가지고 있습니다.\n배정을 해제한 후 삭제해주세요.`, 'warning');
+            Swal.fire('삭제 불가', `현재 ${assignedCount}명의 작업자가 이 직책을 가지고 있습니다.\\n배정을 해제한 후 삭제해주세요.`, 'warning');
             return;
         }
 
@@ -185,8 +201,10 @@ const PositionManager: React.FC = () => {
     const handleIconSelect = async (iconName: string) => {
         if (iconPickerTarget === 'NEW') {
             setNewPosIcon(iconName);
+        } else if (iconPickerTarget === 'EDIT_TEMP') {
+            setEditPosIcon(iconName);
         } else if (iconPickerTarget) {
-            // Update existing position
+            // Update existing position (Direct Icon Edit from List)
             try {
                 await positionService.updatePosition(iconPickerTarget, { icon: iconName });
             } catch (error) {
@@ -225,7 +243,46 @@ const PositionManager: React.FC = () => {
         }
     };
 
-    // --- 3. Worker Assignment Actions ---
+    // --- 3. Edit Position (Open Modal) ---
+    const handleEditPosition = (pos: Position) => {
+        setEditPos(pos);
+        setEditPosName(pos.name);
+        setEditPosColor(pos.color);
+        setEditPosIcon(pos.icon || 'faUser');
+    };
+
+    const handleSaveEditPosition = async () => {
+        if (!editPos) return;
+        if (!editPosName.trim()) {
+            Swal.fire('오류', '직책 이름을 입력해주세요.', 'warning');
+            return;
+        }
+
+        try {
+            // 1. Update Name (Integrated Sync)
+            if (editPosName !== editPos.name) {
+                await positionService.updatePositionNameWithSync(editPos.id!, editPos.name, editPosName);
+            }
+
+            // 2. Update Color
+            if (editPosColor !== editPos.color) {
+                await positionService.updatePositionColor(editPos.id!, editPosColor);
+            }
+
+            // 3. Update Icon (Check if changed)
+            if (editPosIcon !== editPos.icon) {
+                await positionService.updatePosition(editPos.id!, { icon: editPosIcon });
+            }
+
+            Swal.fire({ icon: 'success', title: '수정 완료', toast: true, position: 'top-end', showConfirmButton: false, timer: 1500 });
+            setEditPos(null); // Close modal
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '수정 중 문제가 발생했습니다.', 'error');
+        }
+    };
+
+    // --- 4. Worker Assignment Actions ---
     const handleWorkerPositionChange = async (workerId: string, positionName: string) => {
         try {
             // Find full position to verify? Not strictly needed if we trust the name.
@@ -391,6 +448,13 @@ const PositionManager: React.FC = () => {
                                             {/* Actions */}
                                             <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                                 <button
+                                                    onClick={() => handleEditPosition(pos)}
+                                                    className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
+                                                    title="직책명/색상 수정"
+                                                >
+                                                    <FontAwesomeIcon icon={faEdit} />
+                                                </button>
+                                                <button
                                                     onClick={() => navigate(`/admin/menu-manager?site=${pos.id!.startsWith('pos_') ? pos.id : `pos_${pos.id}`}`)}
                                                     className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
                                                     title="메뉴 설정"
@@ -517,12 +581,94 @@ const PositionManager: React.FC = () => {
 
             </div>
 
+            {/* --- Edit Modal --- */}
+            {editPos && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 animate-fadeIn">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-scaleUp">
+                        <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                            <h3 className="font-bold text-gray-800">직책 수정</h3>
+                            <button onClick={() => setEditPos(null)} className="text-gray-400 hover:text-gray-600">
+                                <FontAwesomeIcon icon={faPlus} className="rotate-45" />
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-5">
+                            {/* Icon & Name Row */}
+                            <div className="flex gap-4">
+                                <button
+                                    onClick={() => {
+                                        setIconPickerTarget('EDIT_TEMP');
+                                        setIsIconPickerOpen(true);
+                                    }}
+                                    className={`w-14 h-14 rounded-xl flex-shrink-0 flex items-center justify-center border-2 transition-all cursor-pointer shadow-sm hover:shadow-md
+                                        ${getColorStyle(editPosColor).bg} text-white border-transparent relative group
+                                    `}
+                                >
+                                    <FontAwesomeIcon icon={resolveIcon(editPosIcon, faUser)} size="lg" />
+                                    <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-xl flex items-center justify-center transition-all">
+                                        <FontAwesomeIcon icon={faEdit} className="text-white opacity-0 group-hover:opacity-100" />
+                                    </div>
+                                </button>
+                                <div className="flex-1">
+                                    <label className="text-xs font-bold text-gray-500 mb-1 block">직책 이름</label>
+                                    <input
+                                        type="text"
+                                        value={editPosName}
+                                        onChange={(e) => setEditPosName(e.target.value)}
+                                        className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                        placeholder="직책명"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Color Picker */}
+                            <div>
+                                <label className="text-xs font-bold text-gray-500 mb-2 block">색상 선택</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {COLORS.map(c => (
+                                        <button
+                                            key={c.id}
+                                            onClick={() => setEditPosColor(c.id)}
+                                            className={`w-8 h-8 rounded-full flex items-center justify-center transition-all
+                                                ${c.bg} ${editPosColor === c.id ? 'ring-2 ring-offset-2 ring-blue-500 scale-110 shadow-sm' : 'hover:scale-105 opacity-70 hover:opacity-100'}
+                                            `}
+                                        >
+                                            {editPosColor === c.id && <FontAwesomeIcon icon={faCheck} className="text-white text-xs" />}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="bg-orange-50 text-orange-600 text-xs p-3 rounded-lg flex gap-2 items-start">
+                                <FontAwesomeIcon icon={faInfoCircle} className="mt-0.5" />
+                                <p>직책 이름을 변경하면, 해당 직책을 배정받은 모든 작업자의 명찰도 자동으로 업데이트됩니다.</p>
+                            </div>
+                        </div>
+
+                        <div className="p-4 border-t border-gray-100 bg-gray-50 flex gap-2 justify-end">
+                            <button
+                                onClick={() => setEditPos(null)}
+                                className="px-4 py-2 rounded-lg text-gray-500 hover:bg-gray-200 font-bold text-sm transition-colors"
+                            >
+                                취소
+                            </button>
+                            <button
+                                onClick={handleSaveEditPosition}
+                                className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-bold text-sm shadow-md transition-colors"
+                            >
+                                저장하기
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* --- Icon Picker Modal --- */}
             <IconPicker
                 isOpen={isIconPickerOpen}
                 onClose={() => setIsIconPickerOpen(false)}
                 onSelect={handleIconSelect}
-                currentIcon={iconPickerTarget === 'NEW' ? newPosIcon : positions.find(p => p.id === iconPickerTarget)?.icon}
+                currentIcon={iconPickerTarget === 'NEW' ? newPosIcon : iconPickerTarget === 'EDIT_TEMP' ? editPosIcon : positions.find(p => p.id === iconPickerTarget)?.icon}
             />
 
         </div>

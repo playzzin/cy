@@ -155,5 +155,32 @@ export const storageService = {
             console.error('Create folder failed:', error);
             throw error;
         }
+    },
+
+    /**
+     * Move a file (Copy + Delete)
+     * @param oldPath Full path of the source file
+     * @param newPath Full path of the destination
+     */
+    moveFile: async (oldPath: string, newPath: string): Promise<void> => {
+        try {
+            // 1. Get Download URL
+            const oldRef = ref(storage, oldPath);
+            const url = await getDownloadURL(oldRef);
+
+            // 2. Fetch Blob
+            const response = await fetch(url);
+            const blob = await response.blob();
+
+            // 3. Upload to New Path
+            const newRef = ref(storage, newPath);
+            await uploadBytesResumable(newRef, blob);
+
+            // 4. Delete Old File
+            await deleteObject(oldRef);
+        } catch (error) {
+            console.error('Move file failed:', error);
+            throw error;
+        }
     }
 };
