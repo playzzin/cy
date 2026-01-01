@@ -170,5 +170,6 @@ export const MENU_PATHS: { [key: string]: string } = {
     "현장 콘솔": "/manpower/refine-sites",
     "회사 콘솔": "/manpower/refine-companies",
     "통합 데이터 콘솔": "/manpower/refine-sites", // Alias
+    "정산 시스템 설계도": "/design/settlement-architecture",
     "스마트 메모": "/memos", // Smart Memo System
 };

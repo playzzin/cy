@@ -5,6 +5,35 @@ import lodashDebounce from 'lodash.debounce';
 import { cn } from '../lib/utils';
 import { useMemoStore } from '../store/useMemoStore';
 
+// Custom Simple Renderer to avoid heavy dependencies
+const SimpleRenderer = ({ content }: { content: string }) => {
+    // Regex to capture URLs only
+    const parts = content.split(/(https?:\/\/[^\s]+|\n)/g);
+
+    return (
+        <>
+            {parts.map((part, index) => {
+                if (part === '\n') return <br key={index} />;
+                if (part.startsWith('http')) {
+                    return (
+                        <a
+                            key={index}
+                            href={part}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-500 hover:underline cursor-pointer relative z-50"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {part}
+                        </a>
+                    );
+                }
+                return <span key={index}>{part}</span>;
+            })}
+        </>
+    );
+};
+
 interface MemoCardProps {
     memo: Memo;
     onDelete: () => void;
@@ -40,24 +69,50 @@ const ChecklistTextarea = ({
     isChecked: boolean;
 }) => {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [localValue, setLocalValue] = useState(value);
+    const [isFocused, setIsFocused] = useState(false);
+
+    // Sync from props if not focused to avoid race conditions
+    useEffect(() => {
+        if (!isFocused && value !== localValue) {
+            setLocalValue(value);
+        }
+    }, [value, isFocused, localValue]);
+
+    // Debounced update to parent (Store)
+    const debouncedOnChange = useRef(
+        lodashDebounce((newValue: string) => {
+            onChange(newValue);
+        }, 500)
+    ).current;
 
     // Auto-resize logic
     useEffect(() => {
         if (textareaRef.current) {
-            // Reset height to auto to get correct scrollHeight for shrinking
             textareaRef.current.style.height = 'auto';
             textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
         }
-    }, [value]);
+    }, [localValue]);
 
     return (
         <textarea
             ref={textareaRef}
             rows={1}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
+            value={localValue}
+            onChange={(e) => {
+                const val = e.target.value;
+                setLocalValue(val);
+                debouncedOnChange(val);
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => {
+                setIsFocused(false);
+                // Force sync on blur to ensure consistency
+                if (localValue !== value) {
+                    onChange(localValue);
+                }
+            }}
             onKeyDown={(e) => {
-                // Prevent Enter from adding newline, instead let parent handle it (add new item)
                 if (e.key === 'Enter') {
                     e.preventDefault();
                 }
@@ -73,6 +128,7 @@ const ChecklistTextarea = ({
                 paddingTop: '2px',
                 paddingBottom: '2px'
             }}
+            spellCheck={false}
         />
     );
 };
@@ -91,15 +147,22 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
 }, ref) => {
     const updateMemo = useMemoStore(state => state.updateMemo);
     const toggleMemoCollapse = useMemoStore(state => state.toggleMemoCollapse);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Local State for smooth typing
     const [title, setTitle] = useState(memo.title || '');
     const [content, setContent] = useState(memo.content || '');
+    const [isFocused, setIsFocused] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
 
+    // Sync from Props (Firestore) -> Local State
+    // Only if user is NOT typing (not focused)
     useEffect(() => {
-        setTitle(memo.title || '');
-        setContent(memo.content || '');
-    }, [memo.title, memo.content]);
+        if (!isFocused && !isEditing) {
+            if (memo.title !== title) setTitle(memo.title || '');
+            if (memo.content !== content) setContent(memo.content || '');
+        }
+    }, [memo.title, memo.content, isFocused, isEditing]);
 
     // Debounced Updaters
     const debouncedUpdateContent = useRef(
@@ -125,6 +188,42 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
         const val = e.target.value;
         setTitle(val);
         debouncedUpdateTitle(memo.id, val);
+    };
+
+    // Formatting Logic
+    const handleFormat = (tag: 'b' | 'u', e: React.MouseEvent) => {
+        e.stopPropagation();
+
+        if (!isEditing) {
+            setIsEditing(true);
+            // Use setTimeout to allow render
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.focus();
+                    // Append at end if no selection
+                    const len = textareaRef.current.value.length;
+                    textareaRef.current.setSelectionRange(len, len);
+                }
+            }, 0);
+            return;
+        }
+
+        if (!textareaRef.current) return;
+
+        const start = textareaRef.current.selectionStart;
+        const end = textareaRef.current.selectionEnd;
+        if (start === end) return; // No selection
+
+        const wrapper = tag === 'b' ? '**' : '<u>';
+        const wrapperEnd = tag === 'b' ? '**' : '</u>';
+
+        const selectedText = content.substring(start, end);
+        const newContent = content.substring(0, start) + wrapper + selectedText + wrapperEnd + content.substring(end);
+
+        setContent(newContent);
+        debouncedUpdateContent(memo.id, newContent);
+
+        // Restore focus? Might not be needed for simple button click
     };
 
     const handleCollapseToggle = async (e: React.MouseEvent) => {
@@ -175,13 +274,72 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                     type="text"
                     value={title}
                     onChange={handleTitleChange}
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => setIsFocused(false)}
                     onMouseDown={(e) => e.stopPropagation()} // Allow text selection
                     placeholder="Title"
                     className="flex-1 bg-transparent border-none outline-none text-sm font-bold text-slate-700 placeholder:text-slate-400 min-w-0"
                 />
 
                 {/* 3. Controls */}
-                <div className="flex items-center gap-1 ml-2">
+                <div className="flex items-center gap-1 ml-2 relative">
+                    {/* Color Picker Pattern */}
+                    {!memo.isCollapsed && (
+                        <div className="relative group/color">
+                            <button
+                                className={cn(
+                                    "p-1.5 rounded-full hover:bg-black/5 transition-colors",
+                                    "text-slate-400 hover:text-slate-600"
+                                )}
+                                title="Change Color"
+                            >
+                                <div className={cn(
+                                    "w-3.5 h-3.5 rounded-full border border-slate-300",
+                                    {
+                                        'bg-white': memo.color === 'white',
+                                        'bg-rose-400': memo.color === 'red',
+                                        'bg-orange-400': memo.color === 'orange',
+                                        'bg-amber-400': memo.color === 'yellow',
+                                        'bg-emerald-400': memo.color === 'green',
+                                        'bg-sky-400': memo.color === 'blue',
+                                        'bg-violet-400': memo.color === 'purple',
+                                        'bg-slate-400': memo.color === 'gray',
+                                    }
+                                )} />
+                            </button>
+
+                            {/* Color Picker Popover (Hover Trigger for ease) */}
+                            <div className="absolute top-full right-0 mt-1 p-2 bg-white rounded-xl shadow-xl border border-slate-100 z-50 hidden group-hover/color:grid grid-cols-4 gap-2 w-[110px]">
+                                {(['white', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'] as const).map((c) => (
+                                    <button
+                                        key={c}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            updateMemo(memo.id, { color: c });
+                                        }}
+                                        className={cn(
+                                            "w-5 h-5 rounded-full border border-slate-200 hover:scale-110 transition-transform",
+                                            {
+                                                'bg-white': c === 'white',
+                                                'bg-rose-400': c === 'red',
+                                                'bg-orange-400': c === 'orange',
+                                                'bg-amber-400': c === 'yellow',
+                                                'bg-emerald-400': c === 'green',
+                                                'bg-sky-400': c === 'blue',
+                                                'bg-violet-400': c === 'purple',
+                                                'bg-slate-400': c === 'gray',
+                                                'ring-2 ring-slate-400 ring-offset-1': memo.color === c
+                                            }
+                                        )}
+                                        title={c.charAt(0).toUpperCase() + c.slice(1)}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Formatting Buttons Removed */}
+
                     {/* Convert Type Button (Text <-> Checklist) */}
                     {!memo.isCollapsed && (
                         <button
@@ -272,17 +430,38 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                         </div>
                     </div>
                 ) : (
-                    <textarea
-                        value={content}
-                        onChange={handleContentChange}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        placeholder="Write here..."
-                        className={cn(
-                            "w-full h-full p-4 resize-none bg-transparent border-none outline-none",
-                            "text-slate-700 text-sm leading-relaxed font-sans placeholder:text-slate-400/70"
-                        )}
-                        spellCheck={false}
-                    />
+                    // Toggle: Markdown View <-> Textarea Edit
+                    isEditing || !content ? (
+                        <textarea
+                            ref={textareaRef}
+                            value={content}
+                            onChange={handleContentChange}
+                            onFocus={() => setIsFocused(true)}
+                            onBlur={() => {
+                                setIsFocused(false);
+                                if (content.trim()) setIsEditing(false); // Switch to View on blur
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            placeholder="Write here..."
+                            className={cn(
+                                "w-full h-full p-4 resize-none bg-transparent border-none outline-none",
+                                "text-slate-700 text-sm placeholder:text-slate-300"
+                            )}
+                            style={{
+                                lineHeight: '1.5'
+                            }}
+                            spellCheck={false}
+                            autoFocus={isEditing}
+                        />
+                    ) : (
+                        <div
+                            className="w-full h-full p-4 overflow-y-auto cursor-text text-sm text-slate-700 whitespace-pre-wrap"
+                            onClick={() => setIsEditing(true)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <SimpleRenderer content={content} />
+                        </div>
+                    )
                 )}
             </div>
         </div>

@@ -1,0 +1,12 @@
+→ View more at smithery.ai/search?q=figma
+
+? Select server for details (or search again): [2m(Use arrow keys or type to [22m
+[2msearch)[22m
+[36m> ← Search again[39m 
+  Exit 
+  Google Calendar (5,097 calls/month) 
+  Google search console (239 calls/month) 
+  Google Maps (975 calls/month) 
+  Ticktick (2,219 calls/month) 
+  Linkedin (337 calls/month) 
+(Move up and down to reveal more choices)[9A[41D[81C[9B

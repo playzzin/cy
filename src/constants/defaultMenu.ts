@@ -65,6 +65,11 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: ["로컬 저장소", "구글 드라이브"]
             },
             {
+                text: "설계도",
+                icon: "fa-sitemap",
+                sub: ["정산 시스템 설계도", "DB 설계도", "급여 정산 설계도"]
+            },
+            {
                 text: "스마트 메모",
                 icon: "fa-sticky-note"
             }

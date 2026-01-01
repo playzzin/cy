@@ -98,6 +98,7 @@ import AdvancedMenuManager from './pages/admin/menu/AdvancedMenuManager';
 import RoleMenuAssignmentPage from './pages/admin/RoleMenuAssignmentPage';
 
 import TeamPersonnelStatusReportPage from './pages/report/TeamPersonnelStatusReportPage';
+import SettlementArchitecturePage from './pages/design/SettlementArchitecturePage';
 
 import FirestoreStructureViewer from './pages/database/FirestoreStructureViewer';
 import PayrollDesignViewer from './pages/structure/PayrollDesignViewer';
@@ -358,6 +359,7 @@ const App: React.FC = () => {
 
             {/* Design Management */}
             <Route path="/design/management" element={<DesignManagementPage />} />
+            <Route path="/design/settlement-architecture" element={<SettlementArchitecturePage />} />
 
             {/* Admin Routes */}
             <Route path="/admin">
