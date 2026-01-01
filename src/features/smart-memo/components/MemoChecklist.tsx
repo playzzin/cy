@@ -3,7 +3,8 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Memo, ChecklistItem } from '../types/memo';
 import { useMemoStore } from '../store/useMemoStore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCheck, faPlus } from '@fortawesome/free-solid-svg-icons';
+import { faCheck, faPlus, faComment, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faComment as faCommentRegular } from '@fortawesome/free-regular-svg-icons';
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface MemoChecklistProps {
@@ -11,9 +12,19 @@ interface MemoChecklistProps {
 }
 
 export const MemoChecklist: React.FC<MemoChecklistProps> = ({ memo }) => {
-    const { addChecklistItem, updateChecklistItem, deleteChecklistItem, toggleChecklistItem } = useMemoStore();
+    const { addChecklistItem, updateChecklistItem, deleteChecklistItem, toggleChecklistItem, addChecklistComment, deleteChecklistComment } = useMemoStore();
     const [focusedId, setFocusedId] = useState<string | null>(null);
+    const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
     const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+
+    const toggleComments = (itemId: string) => {
+        setExpandedComments(prev => ({ ...prev, [itemId]: !prev[itemId] }));
+    };
+
+    const handleAddComment = (itemId: string, text: string) => {
+        if (!text.trim()) return;
+        addChecklistComment(memo.id, itemId, text);
+    };
 
     const items = memo.checklistItems || [];
 
@@ -23,7 +34,7 @@ export const MemoChecklist: React.FC<MemoChecklistProps> = ({ memo }) => {
             el.style.height = 'auto';
             el.style.height = el.scrollHeight + 'px';
         }
-    }, []); // No dependencies needed as it only accesses ref.current
+    }, []);
 
     // Focus management
     useEffect(() => {
@@ -31,31 +42,26 @@ export const MemoChecklist: React.FC<MemoChecklistProps> = ({ memo }) => {
             textareaRefs.current[focusedId]?.focus();
             adjustHeight(focusedId);
         }
-    }, [focusedId, items, adjustHeight]); // items dependency ensures focus after re-render if needed
+    }, [focusedId, items, adjustHeight]);
 
-    // Auto-resize trigger for all items on initial load and item changes
+    // Auto-resize trigger
     useEffect(() => {
         items.forEach(item => adjustHeight(item.id));
     }, [items, adjustHeight]);
 
     const handleKeyDown = (e: React.KeyboardEvent, index: number, item: ChecklistItem) => {
         if (e.key === 'Enter') {
-            e.preventDefault(); // Prevent newline in textarea
+            e.preventDefault();
             const nextIndex = index + 1;
-            // Add new item below current
             addChecklistItem(memo.id, '', nextIndex);
         } else if (e.key === 'Backspace' && item.text === '') {
             e.preventDefault();
-            // Delete current if empty and focus previous
             if (items.length > 1) {
                 const prevIndex = index - 1;
                 deleteChecklistItem(memo.id, item.id);
                 if (prevIndex >= 0) {
                     setFocusedId(items[prevIndex].id);
                 }
-            } else {
-                // If it's the last item, maybe convert back to text or just clear?
-                // Google keep deletes the note if empty? No, just clears.
             }
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
@@ -72,69 +78,112 @@ export const MemoChecklist: React.FC<MemoChecklistProps> = ({ memo }) => {
         }
     };
 
-    // Special handling for focusing new items:
-    // If items length increases, focus the one that was added?
-    // A bit tricky without ID. Let's start simple.
-
-    // Sort items: Unchecked first? Or keep strict order?
-    // Google Keep allows manual reorder. For now, strict order of array array index.
-    // Checked items usually behave same as unchecked until refreshed or manually moved.
-
-    // Sort logic optimization: Checked items visual style only?
-    // Let's keep them in order for now.
-
     const handleChange = (id: string, text: string) => {
         updateChecklistItem(memo.id, id, text);
-        adjustHeight(id); // Adjust height on change
+        adjustHeight(id);
     };
-
-    // Separate Unchecked and Checked for visual grouping (Optional, like Keep)
-    // For now, let's render mixed list to preserve index order for keyboard nav consistency.
 
     return (
         <div className="flex flex-col gap-0.5">
             {items.map((item, index) => (
-                <div key={item.id} className="group flex items-start gap-2 py-1">
-                    {/* Checkbox */}
-                    <button
-                        onClick={() => toggleChecklistItem(memo.id, item.id)}
-                        className={`
-                            flex-shrink-0 w-4 h-4 rounded mt-1 ml-[-2px] border transition-colors duration-200 flex items-center justify-center
-                            ${item.isChecked
-                                ? 'bg-slate-500 border-slate-500 text-white'
-                                : 'bg-white border-slate-300 hover:border-slate-400 shadow-sm'}
-                        `}
-                    >
-                        {item.isChecked && <FontAwesomeIcon icon={faCheck} className="text-[10px]" />}
-                    </button>
+                <React.Fragment key={item.id}>
+                    <div className="group flex items-start gap-2 py-1">
+                        {/* Checkbox */}
+                        <button
+                            onClick={() => toggleChecklistItem(memo.id, item.id)}
+                            className={`
+                                flex-shrink-0 w-4 h-4 rounded mt-1 ml-[-2px] border transition-colors duration-200 flex items-center justify-center
+                                ${item.isChecked
+                                    ? 'bg-slate-500 border-slate-500 text-white'
+                                    : 'bg-white border-slate-300 hover:border-slate-400 shadow-sm'}
+                            `}
+                        >
+                            {item.isChecked && <FontAwesomeIcon icon={faCheck} className="text-[10px]" />}
+                        </button>
 
-                    {/* Auto-resizing Textarea */}
-                    <textarea
-                        ref={el => { textareaRefs.current[item.id] = el; }}
-                        value={item.text}
-                        onChange={(e) => handleChange(item.id, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(e, index, item)}
-                        onFocus={() => setFocusedId(item.id)}
-                        rows={1}
-                        placeholder={items.length === 1 ? "리스트 아이템 입력..." : ""}
-                        className={`
-                            flex-1 bg-transparent outline-none text-slate-700 text-sm placeholder:text-slate-300 resize-none overflow-hidden min-h-[24px] leading-relaxed
-                            ${item.isChecked ? 'line-through text-slate-400' : ''}
-                        `}
-                    />
+                        {/* Textarea */}
+                        <textarea
+                            ref={el => { textareaRefs.current[item.id] = el; }}
+                            value={item.text}
+                            onChange={(e) => handleChange(item.id, e.target.value)}
+                            onKeyDown={(e) => handleKeyDown(e, index, item)}
+                            onFocus={() => setFocusedId(item.id)}
+                            rows={1}
+                            placeholder={items.length === 1 ? "리스트 아이템 입력..." : ""}
+                            className={`
+                                flex-1 bg-transparent outline-none text-slate-700 text-sm placeholder:text-slate-300 resize-none overflow-hidden min-h-[24px] leading-relaxed
+                                ${item.isChecked ? 'line-through text-slate-400' : ''}
+                            `}
+                        />
 
-                    {/* Delete Button (Hover only) */}
-                    <button
-                        onClick={() => deleteChecklistItem(memo.id, item.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-0.5 text-slate-300 hover:text-slate-500"
-                        tabIndex={-1}
-                    >
-                        &times;
-                    </button>
-                </div>
+                        {/* Comment Button */}
+                        <button
+                            onClick={() => toggleComments(item.id)}
+                            className={`opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-0.5 hover:text-slate-500 ${(item.comments?.length || 0) > 0 ? 'opacity-100 text-slate-400' : 'text-slate-300'
+                                }`}
+                            tabIndex={-1}
+                            title="댓글"
+                        >
+                            <div className="relative">
+                                <FontAwesomeIcon icon={(item.comments?.length || 0) > 0 ? faComment : faCommentRegular} className="text-xs" />
+                                {(item.comments?.length || 0) > 0 && (
+                                    <span className="absolute -top-1.5 -right-1.5 bg-slate-500 text-white text-[8px] px-1 rounded-full min-w-[12px] h-[12px] flex items-center justify-center">
+                                        {item.comments?.length}
+                                    </span>
+                                )}
+                            </div>
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                            onClick={() => deleteChecklistItem(memo.id, item.id)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 mt-0.5 text-slate-300 hover:text-slate-500"
+                            tabIndex={-1}
+                        >
+                            &times;
+                        </button>
+                    </div>
+
+                    {/* Comments Section */}
+                    <AnimatePresence>
+                        {expandedComments[item.id] && (
+                            <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden ml-8 mr-2 mb-2"
+                            >
+                                <div className="bg-slate-50 rounded pl-2 pr-1 py-1 flex flex-col gap-1 border border-slate-100">
+                                    {item.comments?.map(comment => (
+                                        <div key={comment.id} className="flex items-start gap-2 group/comment text-xs text-slate-600 mb-1">
+                                            <div className="flex-1 whitespace-pre-wrap break-words">{comment.text}</div>
+                                            <button
+                                                onClick={() => deleteChecklistComment(memo.id, item.id, comment.id)}
+                                                className="opacity-0 group-hover/comment:opacity-100 text-slate-300 hover:text-red-400 px-1"
+                                            >
+                                                <FontAwesomeIcon icon={faTrash} size="xs" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <input
+                                        type="text"
+                                        placeholder="댓글 입력..."
+                                        className="w-full text-xs bg-transparent outline-none placeholder:text-slate-300 mt-1"
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                handleAddComment(item.id, e.currentTarget.value);
+                                                e.currentTarget.value = '';
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </React.Fragment>
             ))}
 
-            {/* Add Item Button (Bottom) - Optional specific interaction */}
+            {/* Add Item Button */}
             <div
                 className="flex items-center gap-2 py-1 opacity-50 hover:opacity-100 cursor-text transition-opacity"
                 onClick={() => addChecklistItem(memo.id, '')}

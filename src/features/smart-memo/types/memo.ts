@@ -6,10 +6,17 @@ export type MemoSortMode = 'manual' | 'newest' | 'title' | 'starred';
 
 export type MemoType = 'text' | 'checklist';
 
+export interface MemoComment {
+    id: string;
+    text: string;
+    createdAt: number; // Milliseconds
+}
+
 export interface ChecklistItem {
     id: string;
     text: string;
     isChecked: boolean;
+    comments?: MemoComment[];
 }
 
 export interface Memo {

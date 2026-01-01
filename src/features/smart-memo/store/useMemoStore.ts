@@ -463,6 +463,80 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         }
     },
 
+    addChecklistComment: async (memoId: string, itemId: string, text: string) => {
+        const previousMemos = get().memos;
+        const newComment = {
+            id: crypto.randomUUID(),
+            text,
+            createdAt: Date.now()
+        };
+
+        set(state => ({
+            memos: state.memos.map(m => {
+                if (m.id !== memoId || !m.checklistItems) return m;
+                return {
+                    ...m,
+                    checklistItems: m.checklistItems.map(item =>
+                        item.id === itemId
+                            ? { ...item, comments: [...(item.comments || []), newComment] }
+                            : item
+                    )
+                };
+            })
+        }));
+
+        try {
+            const memo = get().memos.find(m => m.id === memoId);
+            if (!memo || !memo.checklistItems) return;
+
+            const docRef = doc(db, MEMO_COLLECTION, memoId);
+            await updateDoc(docRef, {
+                checklistItems: memo.checklistItems.map(item => ({
+                    ...item,
+                    comments: item.comments?.map(comment =>
+                        comment.id === newComment.id ? { ...comment, createdAt: Date.now() } : comment
+                    )
+                })),
+                updatedAt: serverTimestamp()
+            });
+        } catch (error: any) {
+            console.error("Failed to add checklist comment:", error);
+            set({ error: error.message, memos: previousMemos });
+        }
+    },
+
+    deleteChecklistComment: async (memoId: string, itemId: string, commentId: string) => {
+        const previousMemos = get().memos;
+
+        set(state => ({
+            memos: state.memos.map(m => {
+                if (m.id !== memoId || !m.checklistItems) return m;
+                return {
+                    ...m,
+                    checklistItems: m.checklistItems.map(item =>
+                        item.id === itemId
+                            ? { ...item, comments: (item.comments || []).filter(comment => comment.id !== commentId) }
+                            : item
+                    )
+                };
+            })
+        }));
+
+        try {
+            const memo = get().memos.find(m => m.id === memoId);
+            if (!memo || !memo.checklistItems) return;
+
+            const docRef = doc(db, MEMO_COLLECTION, memoId);
+            await updateDoc(docRef, {
+                checklistItems: memo.checklistItems,
+                updatedAt: serverTimestamp()
+            });
+        } catch (error: any) {
+            console.error("Failed to delete checklist comment:", error);
+            set({ error: error.message, memos: previousMemos });
+        }
+    },
+
     convertToChecklist: async (memoId: string) => {
         const previousMemos = get().memos;
 
