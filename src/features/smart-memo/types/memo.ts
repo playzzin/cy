@@ -22,6 +22,7 @@ export interface ChecklistItem {
 export interface Memo {
     id: string;
     userId: string;
+    scope?: 'private' | 'public';
     // Core Data
     type: MemoType;
     title: string;
@@ -105,6 +106,8 @@ export interface MemoState {
     addChecklistItem: (memoId: string, text: string, index?: number) => Promise<void>;
     updateChecklistItem: (memoId: string, itemId: string, text: string) => Promise<void>;
     deleteChecklistItem: (memoId: string, itemId: string) => Promise<void>;
+    addChecklistComment: (memoId: string, itemId: string, text: string) => Promise<void>;
+    deleteChecklistComment: (memoId: string, itemId: string, commentId: string) => Promise<void>;
     convertToChecklist: (memoId: string) => Promise<void>;
     convertToText: (memoId: string) => Promise<void>;
 

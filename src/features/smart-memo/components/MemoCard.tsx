@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Memo, MemoColor } from '../types/memo';
-import { Trash2, GripHorizontal, ChevronUp, ChevronDown } from 'lucide-react';
+import { Trash2, GripHorizontal, ChevronUp, ChevronDown, Globe } from 'lucide-react';
 import lodashDebounce from 'lodash.debounce';
+import debounce from 'lodash.debounce';
 import { cn } from '../lib/utils';
 import { useMemoStore } from '../store/useMemoStore';
 
@@ -43,6 +44,7 @@ interface MemoCardProps {
     onMouseDown?: React.MouseEventHandler;
     onMouseUp?: React.MouseEventHandler;
     onTouchEnd?: React.TouchEventHandler;
+    onContentSizeChange?: (size: { height: number }) => void;
 }
 
 const COLOR_MAP: Record<MemoColor, string> = {
@@ -148,12 +150,42 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
     const updateMemo = useMemoStore(state => state.updateMemo);
     const toggleMemoCollapse = useMemoStore(state => state.toggleMemoCollapse);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const checklistRef = useRef<HTMLDivElement>(null);
 
     // Local State for smooth typing
     const [title, setTitle] = useState(memo.title || '');
     const [content, setContent] = useState(memo.content || '');
     const [isFocused, setIsFocused] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
+
+    // Height Measurement Logic
+    useEffect(() => {
+        const target = memo.type === 'checklist' ? checklistRef.current : contentRef.current;
+        if (!target || !props.onContentSizeChange) return;
+
+        const measure = debounce(() => {
+            if (!target) return;
+            // Add some padding for header (approx 40px) + borders
+            const totalHeight = target.scrollHeight + 50;
+            props.onContentSizeChange?.({ height: totalHeight });
+        }, 200);
+
+        measure();
+
+        const resizeObserver = new ResizeObserver(measure);
+        resizeObserver.observe(target);
+
+        // Also observe textarea if editing text
+        if (textareaRef.current && memo.type === 'text' && (isEditing || !content)) {
+            resizeObserver.observe(textareaRef.current);
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+            measure.cancel();
+        };
+    }, [memo.type, memo.content, memo.checklistItems, isEditing, props.onContentSizeChange]);
 
     // Sync from Props (Firestore) -> Local State
     // Only if user is NOT typing (not focused)
@@ -283,6 +315,14 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
 
                 {/* 3. Controls */}
                 <div className="flex items-center gap-1 ml-2 relative">
+                    {/* Public Badge */}
+                    {memo.scope === 'public' && (
+                        <div className="p-1 px-2 rounded-full bg-blue-50 border border-blue-100 text-blue-500 mr-1 flex items-center gap-1" title="Public Memo">
+                            <Globe className="w-3 h-3" />
+                            <span className="text-[10px] font-bold">Public</span>
+                        </div>
+                    )}
+
                     {/* Color Picker Pattern */}
                     {!memo.isCollapsed && (
                         <div className="relative group/color">
@@ -389,7 +429,7 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                 memo.isCollapsed ? "opacity-0 pointer-events-none hidden" : "opacity-100"
             )}>
                 {memo.type === 'checklist' ? (
-                    <div className="w-full h-full p-2 overflow-y-auto no-scrollbar" onMouseDown={e => e.stopPropagation()}>
+                    <div ref={checklistRef} className="w-full h-full p-2 overflow-y-auto no-scrollbar" onMouseDown={e => e.stopPropagation()}>
                         {/* Checklist Render */}
                         {(memo.checklistItems || []).map((item, index) => (
                             <div key={item.id} className="flex items-start gap-2 mb-1 group px-1">
@@ -455,6 +495,7 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                         />
                     ) : (
                         <div
+                            ref={contentRef}
                             className="w-full h-full p-4 overflow-y-auto cursor-text text-sm text-slate-700 whitespace-pre-wrap"
                             onClick={() => setIsEditing(true)}
                             onMouseDown={(e) => e.stopPropagation()}

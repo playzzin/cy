@@ -229,6 +229,64 @@ const DataBackupPage: React.FC = () => {
                         반드시 <strong>백업(Excel 다운로드)</strong>을 먼저 진행한 후 초기화를 수행하십시오.
                     </p>
                 </div>
+            </div >
+
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-8">
+                <h3 className="text-xl font-bold text-indigo-900 mb-2 flex items-center gap-2">
+                    <FontAwesomeIcon icon={faTable} />
+                    데이터베이스 구조 변경 대비 백업 (Snapshot)
+                </h3>
+                <p className="text-indigo-700 text-sm mb-4">
+                    DB 구조 변경(예: 단일 컬렉션 분리) 전, 현재 데이터를 안전하게 별도 컬렉션으로 복제합니다.<br />
+                    백업된 데이터는 <code>_backup_YYYYMMDD</code> 접미사가 붙은 새로운 컬렉션으로 저장됩니다.
+                </p>
+
+                <div className="flex gap-4">
+                    <button
+                        onClick={async () => {
+                            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                            const source = 'companies';
+                            const target = `companies_backup_${dateStr}`;
+
+                            const confirm = await MySwal.fire({
+                                icon: 'question',
+                                title: '회사 컬렉션 백업',
+                                text: `'${source}' 컬렉션을 '${target}'으로 전체 복사하시겠습니까?`,
+                                showCancelButton: true,
+                                confirmButtonText: '백업 실행',
+                                cancelButtonText: '취소'
+                            });
+
+                            if (confirm.isConfirmed) {
+                                setProcessingId('backup_companies');
+                                try {
+                                    // Dynamic import to allow code splitting and avoid circular dep if any
+                                    const { backupCollection } = await import('../../utils/firestoreBackup');
+                                    const count = await backupCollection(source, target);
+
+                                    MySwal.fire({
+                                        icon: 'success',
+                                        title: '백업 완료',
+                                        text: `총 ${count}개의 문서가 '${target}'으로 안전하게 복제되었습니다.`
+                                    });
+                                } catch (error) {
+                                    MySwal.fire({
+                                        icon: 'error',
+                                        title: '백업 실패',
+                                        text: String(error)
+                                    });
+                                } finally {
+                                    setProcessingId(null);
+                                }
+                            }
+                        }}
+                        disabled={processingId === 'backup_companies'}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-indigo-700 transition flex items-center gap-2"
+                    >
+                        {processingId === 'backup_companies' ? <div className="animate-spin w-4 h-4 border-2 border-white rounded-full border-t-transparent" /> : <FontAwesomeIcon icon={faCheckCircle} />}
+                        회사(Companies) 컬렉션 스냅샷 생성
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useResizeDetector } from 'react-resize-detector';
 import { ResponsiveGridLayout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
@@ -16,7 +16,9 @@ import {
     ArrowDownWideNarrow,
     Palette,
     GripHorizontal,
-    MoreHorizontal
+    MoreHorizontal,
+    Globe,
+    Inbox
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { CategoryManagerDialog } from '../components/CategoryManagerDialog';
@@ -26,6 +28,8 @@ const DEFAULT_H = 4;
 const GRID_ROW_HEIGHT = 50; // Adjusted for better density
 const BREAKPOINTS = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 };
 const COLS = { lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 };
+const MARGIN_X = 20;
+const MARGIN_Y = 20;
 
 const isFiniteNumber = (val: unknown): val is number => typeof val === 'number' && Number.isFinite(val);
 
@@ -37,6 +41,7 @@ export const MemoPage = () => {
     const subscribeMemos = useMemoStore(state => state.subscribeMemos);
     const addMemo = useMemoStore(state => state.addMemo);
     const deleteMemo = useMemoStore(state => state.deleteMemo);
+    const updateMemo = useMemoStore(state => state.updateMemo);
     const updateMemoLayouts = useMemoStore(state => state.updateMemoLayouts);
     const repackMemos = useMemoStore(state => state.repackMemos);
     const loadingState = useMemoStore(state => state.isLoading);
@@ -140,7 +145,30 @@ export const MemoPage = () => {
     }, [categoryScopedMemos, searchQuery]);
 
     // 4. Robust Layout Generation
+    const [isDragging, setIsDragging] = useState(false);
+    const lastLayoutsRef = useRef<any>({});
+
+    const handleMemoSizeChange = useCallback((id: string, size: { height: number }) => {
+        // Prevent updates during drag to avoid fighting
+        if (isDragging) return;
+
+        const memo = memos.find(m => m.id === id);
+        if (!memo || memo.isCollapsed) return;
+
+        const neededH = Math.ceil((size.height + MARGIN_Y) / (GRID_ROW_HEIGHT + MARGIN_Y));
+        const finalH = Math.max(2, neededH); // Min 2 rows
+
+        if (finalH !== memo.h) {
+            updateMemo(id, { h: finalH });
+        }
+    }, [memos, updateMemo, isDragging]);
+
     const layouts = useMemo(() => {
+        // Stability: Return stale layout during dragging
+        if (isDragging && Object.keys(lastLayoutsRef.current).length > 0) {
+            return lastLayoutsRef.current;
+        }
+
         const breakpoints = Object.keys(COLS) as Array<keyof typeof COLS>;
         const result = breakpoints.reduce<Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>>((acc, bp) => {
             const cols = COLS[bp];
@@ -162,8 +190,9 @@ export const MemoPage = () => {
             return acc;
         }, {});
 
+        lastLayoutsRef.current = result;
         return result;
-    }, [filteredMemos]);
+    }, [filteredMemos, isDragging]);
 
     // Close sort menu on click outside
     useEffect(() => {
@@ -253,6 +282,31 @@ export const MemoPage = () => {
 
             {/* Category Tabs */}
             <div className="sticky top-[72px] z-10 bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-3 flex items-center gap-4 overflow-x-auto no-scrollbar shadow-sm shrink-0">
+                <button
+                    onClick={() => setSelectedCategoryId('all')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-2",
+                        selectedCategoryId === 'all'
+                            ? "bg-slate-900 text-white shadow-md bg-gradient-to-r from-slate-800 to-slate-900"
+                            : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    )}
+                >
+                    <Inbox className="w-3.5 h-3.5" />
+                    All
+                </button>
+                <button
+                    onClick={() => setSelectedCategoryId('public')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap flex items-center gap-2",
+                        selectedCategoryId === 'public'
+                            ? "bg-blue-600 text-white shadow-md bg-gradient-to-r from-blue-500 to-blue-700"
+                            : "bg-white text-blue-600 hover:bg-blue-50 border border-blue-200"
+                    )}
+                >
+                    <Globe className="w-3.5 h-3.5" />
+                    Public
+                </button>
+                <div className="w-px h-6 bg-slate-200 mx-1" />
                 {categories.map(cat => (
                     <button
                         key={cat.id}
@@ -308,25 +362,27 @@ export const MemoPage = () => {
                         isResizable={true}
                         draggableHandle=".grid-drag-handle"
                         draggableCancel=".no-drag"
-                        resizeHandles={['se', 's', 'e']}
+                        resizeHandles={['e']} // Only allow Width resize to support Auto-Height
 
                         // Event Handlers
-                        onDragStop={handleLayoutSave}
-                        onResizeStop={handleLayoutSave}
+                        onDragStart={() => setIsDragging(true)}
+                        onDragStop={(layout) => {
+                            setIsDragging(false);
+                            handleLayoutSave(layout);
+                        }}
+                        onResizeStart={() => setIsDragging(true)}
+                        onResizeStop={(layout) => {
+                            setIsDragging(false);
+                            handleLayoutSave(layout);
+                        }}
                         onLayoutChange={() => { }}
                     >
                         {filteredMemos.map((memo) => {
                             const safeY = isFiniteNumber(memo.y) ? memo.y : 0;
                             const isCollapsed = memo.isCollapsed;
 
-                            // Allow resize/drag ONLY if NOT collapsed (except width resize?)
+                            // Allow resize/drag ONLY if NOT collapsed
                             // User strict rule: "Collapsed memos cannot be dragged or resized"
-                            // So we disable completely.
-                            // However, User asked "Horizontal resize possible".
-                            // If we disable resize completely, they can't horizontal resize.
-                            // If we allow resize, they might vertical resize (which breaks h=1).
-                            // Solution: Use maxH: 1 constraint in data-grid if collapsed.
-                            // RGL handles constraint.
 
                             return (
                                 <div
@@ -337,10 +393,10 @@ export const MemoPage = () => {
                                         w: memo.w ?? DEFAULT_W,
                                         h: memo.isCollapsed ? 1 : (memo.h ?? DEFAULT_H),
                                         isDraggable: !isCollapsed && !memo.isPinned,
-                                        isResizable: !memo.isPinned, // We allow resize, but constraint H below
+                                        isResizable: !memo.isPinned,
                                         minW: 2,
                                         minH: isCollapsed ? 1 : 2,
-                                        maxH: isCollapsed ? 1 : undefined // Lock height if collapsed
+                                        maxH: isCollapsed ? 1 : undefined
                                     }}
                                     className={cn(
                                         "relative group transition-all duration-200",
@@ -351,6 +407,7 @@ export const MemoPage = () => {
                                         memo={memo}
                                         onDelete={() => deleteMemo(memo.id)}
                                         className="h-full w-full"
+                                        onContentSizeChange={(size) => handleMemoSizeChange(memo.id, size)}
                                     />
                                 </div>
                             );

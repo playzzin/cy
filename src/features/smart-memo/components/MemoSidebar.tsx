@@ -2,7 +2,7 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useMemoStore } from '../store/useMemoStore';
 import { cn } from '../lib/utils';
-import { Folder, Inbox, Plus, Trash2 } from 'lucide-react';
+import { Folder, Inbox, Plus, Trash2, Globe } from 'lucide-react';
 import { Button } from './ui/Button';
 
 interface CategoryItemProps {
@@ -81,6 +81,13 @@ export const MemoSidebar: React.FC<MemoSidebarProps> = ({ currentFilter, onFilte
                         icon={<Inbox className="h-4 w-4" />}
                         isActive={currentFilter === null}
                         onClick={() => onFilterChange(null)}
+                    />
+                    <CategoryDropTarget
+                        id="public"
+                        label="공용 메모 (Shared)"
+                        icon={<Globe className="h-4 w-4 text-blue-500" />}
+                        isActive={currentFilter === 'public'}
+                        onClick={() => onFilterChange('public')}
                     />
                 </div>
 

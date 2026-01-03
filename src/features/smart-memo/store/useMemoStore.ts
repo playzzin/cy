@@ -63,7 +63,6 @@ export const useMemoStore = create<MemoState>((set, get) => ({
     subscribeMemos: (userId: string) => {
         const state = get();
 
-        // 1. Cleanup existing subscriptions if any
         if (state.unsubscribeMemos) {
             state.unsubscribeMemos();
         }
@@ -78,48 +77,67 @@ export const useMemoStore = create<MemoState>((set, get) => ({
 
         set({ isLoading: true });
 
-        // 2. Memos Listener (No orderBy to avoid Index/Assertion Errors)
-        const memoQuery = query(
+        // Internal buffers for merge
+        let privateMemos: Memo[] = [];
+        let publicMemos: Memo[] = [];
+
+        const updateMergedState = () => {
+            // Merge: Private + Public
+            // Deduplication: If a memo is BOTH private (my own) and public, it appears in both.
+            // We use a Map keyed by ID.
+            const memoMap = new Map<string, Memo>();
+
+            // Add private first
+            privateMemos.forEach(m => memoMap.set(m.id, m));
+            // Add public (overwrite if exists - should be same data, but ensures we satisfy "public is public")
+            publicMemos.forEach(m => memoMap.set(m.id, m));
+
+            const merged = Array.from(memoMap.values());
+
+            // Client-side sorting
+            merged.sort((a, b) => {
+                const pinnedA = a.isPinned ? 1 : 0;
+                const pinnedB = b.isPinned ? 1 : 0;
+                if (pinnedA !== pinnedB) return pinnedB - pinnedA;
+
+                if (a.order !== undefined && b.order !== undefined) {
+                    return a.order - b.order;
+                }
+                const dateA = a.updatedAt?.toMillis() || 0;
+                const dateB = b.updatedAt?.toMillis() || 0;
+                return dateB - dateA;
+            });
+
+            set({ memos: merged, isLoading: false, error: null });
+        };
+
+        // 1. Private Memos Listener
+        const privateQuery = query(
             collection(db, MEMO_COLLECTION),
             where("userId", "==", userId)
         );
 
-        const unsubscribeMemos = onSnapshot(memoQuery,
-            (snapshot) => {
-                let memos = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as Memo[];
+        const unsubPrivate = onSnapshot(privateQuery, (snapshot) => {
+            privateMemos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Memo[];
+            updateMergedState();
+        }, (error) => {
+            console.error("Private memo subscription error:", error);
+            set({ error: error.message });
+        });
 
-                // Client-side sorting: Pinned -> Order -> UpdatedAt
-                memos.sort((a, b) => {
-                    // 1. Pinned check
-                    const pinnedA = a.isPinned ? 1 : 0;
-                    const pinnedB = b.isPinned ? 1 : 0;
-                    if (pinnedA !== pinnedB) return pinnedB - pinnedA;
-
-                    // 2. Order check (Ascending)
-                    if (a.order !== undefined && b.order !== undefined) {
-                        return a.order - b.order;
-                    }
-                    if (a.order !== undefined) return -1; // item with order comes first? or last? strict order.
-                    if (b.order !== undefined) return 1;
-
-                    // 3. Date fallback (Newest first)
-
-                    // 2. Date check (handle nulls safely)
-                    const dateA = a.updatedAt?.toMillis() || 0;
-                    const dateB = b.updatedAt?.toMillis() || 0;
-                    return dateB - dateA;
-                });
-
-                set({ memos, isLoading: false, error: null });
-            },
-            (error) => {
-                console.error("Memo subscription error:", error);
-                set({ error: error.message, isLoading: false });
-            }
+        // 2. Public Memos Listener
+        const publicQuery = query(
+            collection(db, MEMO_COLLECTION),
+            where("scope", "==", "public")
         );
+
+        const unsubPublic = onSnapshot(publicQuery, (snapshot) => {
+            publicMemos = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Memo[];
+            updateMergedState();
+        }, (error) => {
+            console.error("Public memo subscription error:", error);
+            // Don't block UI if public fetch fails (e.g. permission)
+        });
 
         // 3. Categories Listener
         const categoryQuery = query(
@@ -133,22 +151,21 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     id: doc.id,
                     ...doc.data()
                 })) as Category[];
-
-                // Client-side sorting by 'order'
                 categories.sort((a, b) => (a.order || 0) - (b.order || 0));
-
                 set({ categories });
             },
             (error) => {
                 console.error("Category subscription error:", error);
-                // Non-blocking error
             }
         );
 
-        // Store unsubscribe functions in state
+        const unsubscribeMemos = () => {
+            unsubPrivate();
+            unsubPublic();
+        };
+
         set({ unsubscribeMemos, unsubscribeCategories });
 
-        // Return cleanup function for the component
         return () => {
             unsubscribeMemos();
             unsubscribeCategories();
@@ -160,38 +177,22 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         try {
             if (!userId) throw new Error("User ID is missing");
 
-            // 1. Generate ID synchronously
             const docRef = doc(collection(db, MEMO_COLLECTION));
             const newId = docRef.id;
-            const now = serverTimestamp(); // Note: Local optimistic state might need a real Date object if strictly typed, but let's try pushing the object and letting Snapshot override.
-            // Actually, for optimistic UI, we want immediate valid data.
-            // Firestore timestamps are objects. In optimistic state, we might use null or a compatible object.
-            // But strict typing `Memo` expects `Timestamp`.
-            // We'll let `onSnapshot` handle the "official" addition usually, BUT for "Instant" feel we want it in the array NOW.
-            // Issue: If we add to state, `onSnapshot` might flash or duplicate?
-            // Firestore SDK handles latency compensation locally. `onSnapshot` *should* fire immediately with the local write.
-            // The delay in the previous version was likely awaiting `addDoc`.
-            // IF we assume `onSnapshot` works correctly with local writes (latency compensation), we just need to NOT wait for the Promise to resolve to get the ID.
+            const now = serverTimestamp();
 
-            // Strategy:
-            // 1. Get ID.
-            // 2. Fire setDoc (Async).
-            // 3. Return ID IMMEDIATELY.
-            // We rely on Firestore's own 'onSnapshot' latency compensation to update the `memos` array instantly.
-            // We DO NOT manually update Zustand state unless Firestore's offline support is disabled (it's enabled by default usually).
-            // Waiting for `setDoc` is what caused the delay.
+            // Logic: Category 'public' maps to scope 'public'
+            const scope = memoData.categoryId === 'public' ? 'public' : 'private';
 
             setDoc(docRef, {
                 ...memoData,
-                categoryId: memoData.categoryId ?? null, // Ensure null if undefined (Firestore fix)
+                categoryId: memoData.categoryId === 'public' ? 'public' : (memoData.categoryId ?? null),
+                scope,
                 userId,
                 order: 0,
                 createdAt: now,
                 updatedAt: now,
             });
-            // Better: We can await it, but we already have the ID.
-            // Actually, safe to await if we want to catch errors, but for "Whiteboard Speed", we return ID first?
-            // No, the UI needs the ID to set `newMemoId`.
 
             return newId;
         } catch (error: any) {
@@ -248,10 +249,13 @@ export const useMemoStore = create<MemoState>((set, get) => ({
     moveMemoToCategory: async (memoId: string, categoryId: string | null) => {
         const previousMemos = get().memos;
 
+        // Scope logic
+        const newScope = categoryId === 'public' ? 'public' : 'private';
+
         // 1. Optimistic Update
         set(state => ({
             memos: state.memos.map(m =>
-                m.id === memoId ? { ...m, categoryId: categoryId || undefined } : m
+                m.id === memoId ? { ...m, categoryId: categoryId || undefined, scope: newScope } : m
             )
         }));
 
@@ -260,6 +264,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             const docRef = doc(db, MEMO_COLLECTION, memoId);
             await updateDoc(docRef, {
                 categoryId: categoryId || null,
+                scope: newScope,
                 updatedAt: serverTimestamp()
             });
         } catch (error: any) {

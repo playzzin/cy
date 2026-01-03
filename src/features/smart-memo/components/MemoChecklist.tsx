@@ -4,7 +4,7 @@ import { Memo, ChecklistItem } from '../types/memo';
 import { useMemoStore } from '../store/useMemoStore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faPlus, faComment, faTrash } from '@fortawesome/free-solid-svg-icons';
-import { faComment as faCommentRegular } from '@fortawesome/free-regular-svg-icons';
+
 import { AnimatePresence, motion } from 'framer-motion';
 
 interface MemoChecklistProps {
@@ -125,7 +125,7 @@ export const MemoChecklist: React.FC<MemoChecklistProps> = ({ memo }) => {
                             title="댓글"
                         >
                             <div className="relative">
-                                <FontAwesomeIcon icon={(item.comments?.length || 0) > 0 ? faComment : faCommentRegular} className="text-xs" />
+                                <FontAwesomeIcon icon={faComment} className="text-xs" />
                                 {(item.comments?.length || 0) > 0 && (
                                     <span className="absolute -top-1.5 -right-1.5 bg-slate-500 text-white text-[8px] px-1 rounded-full min-w-[12px] h-[12px] flex items-center justify-center">
                                         {item.comments?.length}
