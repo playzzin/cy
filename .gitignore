@@ -34,3 +34,7 @@ cyee/
 **/oracleJdk*/
 **/*.pack
 .firebase/
+
+# Backup & Secrets
+service-account.json
+backups/

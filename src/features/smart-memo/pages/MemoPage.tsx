@@ -18,7 +18,9 @@ import {
     GripHorizontal,
     MoreHorizontal,
     Globe,
-    Inbox
+    Inbox,
+    ChevronsDown,
+    ChevronsUp
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { CategoryManagerDialog } from '../components/CategoryManagerDialog';
@@ -44,6 +46,7 @@ export const MemoPage = () => {
     const updateMemo = useMemoStore(state => state.updateMemo);
     const updateMemoLayouts = useMemoStore(state => state.updateMemoLayouts);
     const repackMemos = useMemoStore(state => state.repackMemos);
+    const setMemosCollapsed = useMemoStore(state => state.setMemosCollapsed);
     const loadingState = useMemoStore(state => state.isLoading);
     const errorState = useMemoStore(state => state.error);
     const addCategory = useMemoStore(state => state.addCategory);
@@ -114,7 +117,7 @@ export const MemoPage = () => {
             h: l.h
         }));
 
-        updateMemoLayouts(updates);
+        void updateMemoLayouts(updates).catch(() => { });
     }, [updateMemoLayouts]);
 
     const [isSortOpen, setIsSortOpen] = useState(false);
@@ -144,6 +147,9 @@ export const MemoPage = () => {
         });
     }, [categoryScopedMemos, searchQuery]);
 
+    const visibleMemoIds = useMemo(() => filteredMemos.map(m => m.id), [filteredMemos]);
+    const isAllCollapsed = useMemo(() => filteredMemos.length > 0 && filteredMemos.every(m => m.isCollapsed), [filteredMemos]);
+
     // 4. Robust Layout Generation
     const [isDragging, setIsDragging] = useState(false);
     const lastLayoutsRef = useRef<any>({});
@@ -152,16 +158,21 @@ export const MemoPage = () => {
         // Prevent updates during drag to avoid fighting
         if (isDragging) return;
 
-        const memo = memos.find(m => m.id === id);
+        const memo = useMemoStore.getState().memos.find(m => m.id === id);
         if (!memo || memo.isCollapsed) return;
 
         const neededH = Math.ceil((size.height + MARGIN_Y) / (GRID_ROW_HEIGHT + MARGIN_Y));
         const finalH = Math.max(2, neededH); // Min 2 rows
 
         if (finalH !== memo.h) {
-            updateMemo(id, { h: finalH });
+            void updateMemo(id, { h: finalH }).catch(() => { });
         }
     }, [memos, updateMemo, isDragging]);
+
+    const handleSetAllCollapsed = useCallback((collapsed: boolean) => {
+        if (visibleMemoIds.length === 0) return;
+        void setMemosCollapsed(visibleMemoIds, collapsed, { gridCols: currentCols }).catch(() => { });
+    }, [visibleMemoIds, setMemosCollapsed, currentCols]);
 
     const layouts = useMemo(() => {
         // Stability: Return stale layout during dragging
@@ -245,20 +256,38 @@ export const MemoPage = () => {
                         {isSortOpen && (
                             <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <button className="w-full text-left px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                                    onClick={() => { repackMemos('date-desc', { gridCols: currentCols, scopeIds: sortScopeIds }); setIsSortOpen(false); }}>
+                                    onClick={() => { void repackMemos('date-desc', { gridCols: currentCols, scopeIds: sortScopeIds }).catch(() => { }); setIsSortOpen(false); }}>
                                     최신순 (Newest)
                                 </button>
                                 <button className="w-full text-left px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                                    onClick={() => { repackMemos('date-asc', { gridCols: currentCols, scopeIds: sortScopeIds }); setIsSortOpen(false); }}>
+                                    onClick={() => { void repackMemos('date-asc', { gridCols: currentCols, scopeIds: sortScopeIds }).catch(() => { }); setIsSortOpen(false); }}>
                                     오래된순 (Oldest)
                                 </button>
                                 <button className="w-full text-left px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                                    onClick={() => { repackMemos('title', { gridCols: currentCols, scopeIds: sortScopeIds }); setIsSortOpen(false); }}>
+                                    onClick={() => { void repackMemos('title', { gridCols: currentCols, scopeIds: sortScopeIds }).catch(() => { }); setIsSortOpen(false); }}>
                                     가나다순 (Title)
                                 </button>
                             </div>
                         )}
                     </div>
+
+                    <button
+                        onClick={() => handleSetAllCollapsed(!isAllCollapsed)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 transition-all shadow-sm"
+                        title={isAllCollapsed ? '전체 펼치기' : '전체 접기'}
+                    >
+                        {isAllCollapsed ? (
+                            <>
+                                <ChevronsDown className="w-3.5 h-3.5" />
+                                <span>전체 펼치기</span>
+                            </>
+                        ) : (
+                            <>
+                                <ChevronsUp className="w-3.5 h-3.5" />
+                                <span>전체 접기</span>
+                            </>
+                        )}
+                    </button>
 
                     {/* New Memo Button */}
                     <button
@@ -354,7 +383,7 @@ export const MemoPage = () => {
                         }}
 
                         // Layout Behavior: Free movement, No gravity, Push items
-                        {...({ compactType: null } as any)}
+                        {...({ compactType: isAllCollapsed ? 'horizontal' : null } as any)}
                         preventCollision={false}
                         allowOverlap={false}
 

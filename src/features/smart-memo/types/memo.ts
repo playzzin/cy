@@ -64,6 +64,20 @@ export interface Category {
     createdAt: Timestamp | null;
 }
 
+export type MemoSortField = 'createdAt' | 'updatedAt' | 'title' | 'order' | 'priority' | 'manual' | 'color';
+export type MemoSortDirection = 'asc' | 'desc';
+
+export interface MemoFilter {
+    colorFilter: MemoColor | null;
+    typeFilter: MemoType | null;
+    onlyFavorites: boolean;
+}
+
+export interface MemoSortConfig {
+    field: MemoSortField;
+    direction: MemoSortDirection;
+}
+
 export interface MemoState {
     memos: Memo[];
     categories: Category[];
@@ -74,10 +88,20 @@ export interface MemoState {
     unsubscribeMemos: (() => void) | null;
     unsubscribeCategories: (() => void) | null;
 
-    // View Mode State (Local Only)
+    // View Mode State
     expandedMemos: Record<string, boolean>; // id -> isExpanded
     isGlobalExpanded: boolean; // Track global state preference
-    sortMode: MemoSortMode;
+
+    // Sorting & Filtering
+    sortMode: MemoSortMode; // Deprecated or kept for compatibility? Let's use sortConfig primarily but keep strict sync if needed.
+    sortConfig: MemoSortConfig;
+    filters: MemoFilter;
+    activeSpace: string | null; // Category ID or 'public'/'private'
+    searchQuery: string;
+
+    // Modal State
+    selectedMemoId: string | null; // For detailed modal view
+
     layoutVersion: number;
 
     // Actions
@@ -85,6 +109,13 @@ export interface MemoState {
     toggleMemoExpanded: (id: string) => void;
     setAllExpanded: (expanded: boolean) => void;
     setSortMode: (mode: MemoSortMode) => void;
+
+    // New Actions
+    setFilters: (filters: Partial<MemoFilter>) => void;
+    setSortConfig: (config: MemoSortConfig) => void;
+    setActiveSpace: (spaceId: string | null) => void;
+    setSelectedMemoId: (id: string | null) => void;
+    setSearchQuery: (query: string) => void;
 
     // CRUD Actions
     addMemo: (memo: Omit<Memo, 'id' | 'createdAt' | 'updatedAt' | 'userId'>, userId: string) => Promise<string>;
@@ -111,12 +142,9 @@ export interface MemoState {
     convertToChecklist: (memoId: string) => Promise<void>;
     convertToText: (memoId: string) => Promise<void>;
 
-    // Search
-    searchQuery: string;
-    setSearchQuery: (query: string) => void;
-
     // Type 3: Grid Layout Actions (RGL)
     updateMemoLayouts: (layouts: { i: string, x: number, y: number, w: number, h: number }[]) => Promise<void>;
     toggleMemoCollapse: (id: string, updates: { isCollapsed: boolean, h?: number }) => Promise<void>;
+    setMemosCollapsed: (memoIds: string[], collapsed: boolean, options?: { gridCols?: number }) => Promise<void>;
     repackMemos: (strategy?: 'date-desc' | 'date-asc' | 'title', options?: { scopeIds?: string[]; gridCols?: number }) => Promise<void>;
 }

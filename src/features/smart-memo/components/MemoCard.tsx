@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Memo, MemoColor } from '../types/memo';
 import { Trash2, GripHorizontal, ChevronUp, ChevronDown, Globe } from 'lucide-react';
-import lodashDebounce from 'lodash.debounce';
 import debounce from 'lodash.debounce';
 import { cn } from '../lib/utils';
 import { useMemoStore } from '../store/useMemoStore';
@@ -39,6 +38,7 @@ interface MemoCardProps {
     memo: Memo;
     onDelete: () => void;
     className?: string;
+    showDragHandle?: boolean;
     // RGL Props
     style?: React.CSSProperties;
     onMouseDown?: React.MouseEventHandler;
@@ -83,10 +83,17 @@ const ChecklistTextarea = ({
 
     // Debounced update to parent (Store)
     const debouncedOnChange = useRef(
-        lodashDebounce((newValue: string) => {
+        debounce((newValue: string) => {
             onChange(newValue);
         }, 500)
     ).current;
+
+    useEffect(() => {
+        return () => {
+            debouncedOnChange.flush();
+            debouncedOnChange.cancel();
+        };
+    }, [debouncedOnChange]);
 
     // Auto-resize logic
     useEffect(() => {
@@ -141,10 +148,12 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
     memo,
     onDelete,
     className,
+    showDragHandle = true,
     style,
     onMouseDown,
     onMouseUp,
     onTouchEnd,
+    onContentSizeChange,
     ...props
 }, ref) => {
     const updateMemo = useMemoStore(state => state.updateMemo);
@@ -162,13 +171,13 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
     // Height Measurement Logic
     useEffect(() => {
         const target = memo.type === 'checklist' ? checklistRef.current : contentRef.current;
-        if (!target || !props.onContentSizeChange) return;
+        if (!target || !onContentSizeChange) return;
 
         const measure = debounce(() => {
             if (!target) return;
             // Add some padding for header (approx 40px) + borders
             const totalHeight = target.scrollHeight + 50;
-            props.onContentSizeChange?.({ height: totalHeight });
+            onContentSizeChange?.({ height: totalHeight });
         }, 200);
 
         measure();
@@ -185,9 +194,9 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
             resizeObserver.disconnect();
             measure.cancel();
         };
-    }, [memo.type, memo.content, memo.checklistItems, isEditing, props.onContentSizeChange]);
+    }, [memo.type, memo.content, memo.checklistItems, isEditing, onContentSizeChange]);
 
-    // Sync from Props (Firestore) -> Local State
+    // Sync from props (Firestore) -> Local State
     // Only if user is NOT typing (not focused)
     useEffect(() => {
         if (!isFocused && !isEditing) {
@@ -198,16 +207,25 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
 
     // Debounced Updaters
     const debouncedUpdateContent = useRef(
-        lodashDebounce(async (id: string, newContent: string) => {
-            await updateMemo(id, { content: newContent });
+        debounce((id: string, newContent: string) => {
+            void updateMemo(id, { content: newContent }).catch(() => { });
         }, 800)
     ).current;
 
     const debouncedUpdateTitle = useRef(
-        lodashDebounce(async (id: string, newTitle: string) => {
-            await updateMemo(id, { title: newTitle });
+        debounce((id: string, newTitle: string) => {
+            void updateMemo(id, { title: newTitle }).catch(() => { });
         }, 800)
     ).current;
+
+    useEffect(() => {
+        return () => {
+            debouncedUpdateContent.flush();
+            debouncedUpdateContent.cancel();
+            debouncedUpdateTitle.flush();
+            debouncedUpdateTitle.cancel();
+        };
+    }, [debouncedUpdateContent, debouncedUpdateTitle]);
 
     // Handlers
     const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -291,12 +309,12 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                 "flex items-center justify-between px-3 py-2 z-10 shrink-0",
                 "rounded-t-2xl border-b border-black/5",
                 "bg-white/30 backdrop-blur-sm transition-colors",
-                !memo.isCollapsed ? "grid-drag-handle cursor-grab active:cursor-grabbing" : ""
+                (!memo.isCollapsed && showDragHandle) ? "grid-drag-handle cursor-grab active:cursor-grabbing" : ""
             )}>
                 {/* 1. Drag Handle + Type Icon */}
                 <div className={cn(
                     "mr-2 text-black/20 flex items-center gap-1",
-                    !memo.isCollapsed ? "opacity-100" : "opacity-0"
+                    (!memo.isCollapsed && showDragHandle) ? "opacity-100" : "opacity-0"
                 )}>
                     <GripHorizontal className="w-4 h-4" />
                 </div>
@@ -355,7 +373,7 @@ export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
                                         key={c}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            updateMemo(memo.id, { color: c });
+                                            void updateMemo(memo.id, { color: c }).catch(() => { });
                                         }}
                                         className={cn(
                                             "w-5 h-5 rounded-full border border-slate-200 hover:scale-110 transition-transform",

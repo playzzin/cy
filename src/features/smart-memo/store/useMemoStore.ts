@@ -13,11 +13,38 @@ import {
     writeBatch,
     deleteField
 } from 'firebase/firestore';
+import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../../config/firebase';
 import { Memo, Category, MemoState } from '../types/memo';
 
 const MEMO_COLLECTION = 'smart_memos';
 const CATEGORY_COLLECTION = 'smart_memo_categories';
+
+const stripUndefined = <T extends Record<string, any>>(obj: T): Partial<T> => {
+    const result: Record<string, any> = {};
+    for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            const value = obj[key];
+            if (value !== undefined) {
+                result[key] = value;
+            }
+        }
+    }
+    return result as Partial<T>;
+};
+
+const generateId = (): string => {
+    const c: any = typeof crypto !== 'undefined' ? crypto : undefined;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    return uuidv4();
+};
+
+const getMillisSafe = (val: any): number => {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    if (typeof val?.toMillis === 'function') return val.toMillis();
+    return Date.now();
+};
 
 export const useMemoStore = create<MemoState>((set, get) => ({
     memos: [],
@@ -28,12 +55,27 @@ export const useMemoStore = create<MemoState>((set, get) => ({
     unsubscribeCategories: null,
     expandedMemos: {},
     isGlobalExpanded: true,
+
+    // Initial State
     sortMode: 'manual',
+    sortConfig: { field: 'createdAt', direction: 'desc' },
+    filters: { colorFilter: null, typeFilter: null, onlyFavorites: false },
+    activeSpace: null,
     searchQuery: '',
+    selectedMemoId: null,
+
     layoutVersion: 0,
 
     setSearchQuery: (query) => set({ searchQuery: query }),
-    setSortMode: (mode) => set({ sortMode: mode }),
+    setSortMode: (mode) => set({ sortMode: mode }), // Legacy support
+
+    // New Actions Implementation
+    setFilters: (newFilters) => set((state) => ({
+        filters: { ...state.filters, ...newFilters }
+    })),
+    setSortConfig: (config) => set({ sortConfig: config }),
+    setActiveSpace: (spaceId) => set({ activeSpace: spaceId }),
+    setSelectedMemoId: (id) => set({ selectedMemoId: id }),
 
     toggleMemoExpanded: (id) => {
         set((state) => {
@@ -103,8 +145,8 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 if (a.order !== undefined && b.order !== undefined) {
                     return a.order - b.order;
                 }
-                const dateA = a.updatedAt?.toMillis() || 0;
-                const dateB = b.updatedAt?.toMillis() || 0;
+                const dateA = getMillisSafe(a.updatedAt);
+                const dateB = getMillisSafe(b.updatedAt);
                 return dateB - dateA;
             });
 
@@ -122,7 +164,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             updateMergedState();
         }, (error) => {
             console.error("Private memo subscription error:", error);
-            set({ error: error.message });
+            set({ error: error.message, isLoading: false });
         });
 
         // 2. Public Memos Listener
@@ -184,8 +226,10 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             // Logic: Category 'public' maps to scope 'public'
             const scope = memoData.categoryId === 'public' ? 'public' : 'private';
 
-            setDoc(docRef, {
-                ...memoData,
+            const sanitizedMemoData = stripUndefined(memoData as Record<string, any>);
+
+            await setDoc(docRef, {
+                ...sanitizedMemoData,
                 categoryId: memoData.categoryId === 'public' ? 'public' : (memoData.categoryId ?? null),
                 scope,
                 userId,
@@ -202,11 +246,151 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         }
     },
 
+    setMemosCollapsed: async (memoIds, collapsed, options) => {
+        const state = get();
+        const previousMemos = state.memos;
+
+        if (!Array.isArray(memoIds) || memoIds.length === 0) return;
+
+        const idSet = new Set<string>(memoIds);
+        const gridCols = Math.max(1, Math.floor(options?.gridCols ?? 12));
+
+        const COLLAPSED_W = 2;
+        const COLLAPSED_H = 1;
+
+        const memoById = new Map<string, Memo>();
+        previousMemos.forEach(m => memoById.set(m.id, m));
+
+        const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+        const getSafeNumber = (value: unknown, fallback: number) => (isFiniteNumber(value) ? value : fallback);
+
+        const perRow = Math.max(1, Math.floor(gridCols / COLLAPSED_W));
+
+        const layoutForId = new Map<string, { x: number; y: number; w: number; h: number }>();
+
+        if (collapsed) {
+            memoIds.forEach((id, index) => {
+                const col = index % perRow;
+                const row = Math.floor(index / perRow);
+                layoutForId.set(id, {
+                    x: col * COLLAPSED_W,
+                    y: row * COLLAPSED_H,
+                    w: COLLAPSED_W,
+                    h: COLLAPSED_H
+                });
+            });
+        } else {
+            // Repack expanded memos using a simple masonry placement to avoid overlaps.
+            const colHeights = new Array(gridCols).fill(0);
+
+            memoIds.forEach((id) => {
+                const memo = memoById.get(id);
+                if (!memo) return;
+
+                const rawW = getSafeNumber(memo.prevW ?? memo.w, 4);
+                const rawH = getSafeNumber(memo.prevH ?? memo.h, 4);
+
+                const w = Math.min(Math.max(1, Math.floor(rawW)), gridCols);
+                const h = Math.max(2, Math.floor(rawH));
+
+                let bestX = 0;
+                let bestY = Infinity;
+
+                for (let x = 0; x <= gridCols - w; x++) {
+                    let maxYInSpan = 0;
+                    for (let k = x; k < x + w; k++) {
+                        maxYInSpan = Math.max(maxYInSpan, colHeights[k]);
+                    }
+                    if (maxYInSpan < bestY) {
+                        bestY = maxYInSpan;
+                        bestX = x;
+                    }
+                }
+
+                for (let k = bestX; k < bestX + w; k++) {
+                    colHeights[k] = bestY + h;
+                }
+
+                layoutForId.set(id, { x: bestX, y: bestY, w, h });
+            });
+        }
+
+        const nextMemos = previousMemos.map(m => {
+            if (!idSet.has(m.id)) return m;
+
+            const layout = layoutForId.get(m.id);
+            if (!layout) return m;
+
+            // Avoid rewriting prevW/prevH when already collapsed
+            const shouldStorePrev = collapsed && !m.isCollapsed;
+            const shouldClearPrev = !collapsed && m.isCollapsed;
+
+            const restoredW = !collapsed ? (m.prevW ?? m.w ?? 4) : layout.w;
+            const restoredH = !collapsed ? (m.prevH ?? m.h ?? 4) : layout.h;
+
+            return {
+                ...m,
+                isCollapsed: collapsed,
+                x: layout.x,
+                y: layout.y,
+                w: collapsed ? layout.w : restoredW,
+                h: collapsed ? layout.h : restoredH,
+                prevW: shouldStorePrev ? m.w : (shouldClearPrev ? undefined : m.prevW),
+                prevH: shouldStorePrev ? m.h : (shouldClearPrev ? undefined : m.prevH)
+            };
+        });
+
+        set((s) => ({ memos: nextMemos, layoutVersion: s.layoutVersion + 1 }));
+
+        try {
+            const batch = writeBatch(db);
+
+            memoIds.forEach((id) => {
+                const before = memoById.get(id);
+                const after = nextMemos.find(m => m.id === id);
+                if (!before || !after) return;
+
+                const docRef = doc(db, MEMO_COLLECTION, id);
+
+                const data: any = {
+                    isCollapsed: after.isCollapsed,
+                    x: after.x,
+                    y: after.y,
+                    w: after.w,
+                    h: after.h,
+                    updatedAt: serverTimestamp()
+                };
+
+                if (collapsed) {
+                    // Only set prev* when transitioning to collapsed.
+                    if (!before.isCollapsed) {
+                        data.prevW = before.w;
+                        data.prevH = before.h;
+                    }
+                } else {
+                    // Clear prev* when transitioning to expanded.
+                    if (before.isCollapsed) {
+                        data.prevW = deleteField();
+                        data.prevH = deleteField();
+                    }
+                }
+
+                batch.update(docRef, data);
+            });
+
+            await batch.commit();
+        } catch (error: any) {
+            console.error('Failed to set memos collapsed:', error);
+            set({ memos: previousMemos, error: error.message });
+        }
+    },
+
     updateMemo: async (id, updates) => {
         try {
             const docRef = doc(db, MEMO_COLLECTION, id);
+            const sanitizedUpdates = stripUndefined(updates as Record<string, any>);
             await updateDoc(docRef, {
-                ...updates,
+                ...sanitizedUpdates,
                 updatedAt: serverTimestamp(),
             });
         } catch (error: any) {
@@ -255,7 +439,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         // 1. Optimistic Update
         set(state => ({
             memos: state.memos.map(m =>
-                m.id === memoId ? { ...m, categoryId: categoryId || undefined, scope: newScope } : m
+                m.id === memoId ? { ...m, categoryId: categoryId ?? null, scope: newScope } : m
             )
         }));
 
@@ -371,7 +555,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
     addChecklistItem: async (memoId: string, text: string, index?: number) => {
         const previousMemos = get().memos;
         const newItem = {
-            id: crypto.randomUUID(), // Local ID generation
+            id: generateId(), // Local ID generation
             text,
             isChecked: false
         };
@@ -471,7 +655,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
     addChecklistComment: async (memoId: string, itemId: string, text: string) => {
         const previousMemos = get().memos;
         const newComment = {
-            id: crypto.randomUUID(),
+            id: generateId(),
             text,
             createdAt: Date.now()
         };
@@ -551,7 +735,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 const text = m.content || "";
                 const lines = text.split('\n').filter(line => line.trim() !== '');
                 const checklistItems = lines.map(line => ({
-                    id: crypto.randomUUID(),
+                    id: generateId(),
                     text: line,
                     isChecked: false
                 }));
@@ -725,7 +909,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         }
 
         // 4. Update Store
-        set({ memos: newMemos });
+        set((s) => ({ memos: newMemos, layoutVersion: s.layoutVersion + 1 }));
 
         // 5. Update Firestore
         try {

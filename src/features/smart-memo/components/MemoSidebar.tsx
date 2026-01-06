@@ -1,8 +1,9 @@
 import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { useMemoStore } from '../store/useMemoStore';
+import { useAuth } from '../../../contexts/AuthContext';
 import { cn } from '../lib/utils';
-import { Folder, Inbox, Plus, Trash2, Globe } from 'lucide-react';
+import { Folder, Inbox, Plus, Globe } from 'lucide-react';
 import { Button } from './ui/Button';
 
 interface CategoryItemProps {
@@ -52,15 +53,14 @@ interface MemoSidebarProps {
 }
 
 export const MemoSidebar: React.FC<MemoSidebarProps> = ({ currentFilter, onFilterChange }) => {
-    const { categories, addCategory, deleteCategory } = useMemoStore();
+    const { currentUser } = useAuth();
+    const { categories, addCategory } = useMemoStore();
 
     const handleAddCategory = () => {
+        if (!currentUser?.uid) return;
         const name = prompt("새 카테고리 이름:");
         if (name) {
-            addCategory({ name, order: categories.length, color: 'gray' }, "current-user-id"); // userId injected in store usually, but here we might need it. 
-            // Store's addCategory needs userId. We should fix store to use internal auth state or pass it. 
-            // For now, let's assume MemoPage passes it or we get it from auth.
-            // Wait, useMemoStore doesn't select currentUser.
+            void addCategory({ name, order: categories.length, color: 'gray' }, currentUser.uid).catch(() => { });
         }
     };
 
