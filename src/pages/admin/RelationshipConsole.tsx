@@ -6,15 +6,25 @@ import {
     faCheckCircle, faChartLine, faNetworkWired, faInfoCircle, faTimes,
     faSave, faUndo, faExpand, faCompress
 } from '@fortawesome/free-solid-svg-icons';
+import { getDataConnect } from 'firebase/data-connect';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
 import { workerSiteAssignmentService, WorkerSiteAssignment } from '../../services/workerSiteAssignmentService';
+import app from '../../config/firebase';
+import {
+    connectorConfig,
+    listWorkers,
+    listTeams,
+    listSites,
+    listCompanies,
+} from '../../dataconnect-generated';
 import Swal from 'sweetalert2';
 
 type ActiveView = 'worker' | 'team' | 'site' | 'company';
 type FilterPreset = 'all' | 'incomplete' | 'orphaned' | 'active';
+type DataSource = 'firestore' | 'dataconnect';
 
 interface DashboardMetrics {
     totalWorkers: number;
@@ -27,11 +37,14 @@ interface DashboardMetrics {
 }
 
 const RelationshipConsolePage: React.FC = () => {
+    const [dataSource, setDataSource] = useState<DataSource>('firestore');
     const [activeView, setActiveView] = useState<ActiveView>('worker');
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterPreset, setFilterPreset] = useState<FilterPreset>('all');
     const [showGraphView, setShowGraphView] = useState(false);
+
+    const isReadOnly = dataSource === 'dataconnect';
 
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -44,31 +57,116 @@ const RelationshipConsolePage: React.FC = () => {
     const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadData();
+    const getDc = useCallback(() => {
+        return getDataConnect(app, connectorConfig);
     }, []);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            const [workerData, teamData, siteData, companyData, assignmentData] = await Promise.all([
-                manpowerService.getWorkers(),
-                teamService.getTeams(),
-                siteService.getSites(),
-                companyService.getCompanies(),
-                workerSiteAssignmentService.getAllAssignments()
+            if (dataSource === 'firestore') {
+                const [workerData, teamData, siteData, companyData, assignmentData] = await Promise.all([
+                    manpowerService.getWorkers(),
+                    teamService.getTeams(),
+                    siteService.getSites(),
+                    companyService.getCompanies(),
+                    workerSiteAssignmentService.getAllAssignments()
+                ]);
+                setWorkers(workerData);
+                setTeams(teamData);
+                setSites(siteData);
+                setCompanies(companyData);
+                setAssignments(assignmentData);
+                return;
+            }
+
+            // Data Connect mode: read-only verification
+            const dc = getDc();
+            const [workerRes, teamRes, siteRes, companyRes] = await Promise.all([
+                listWorkers(dc),
+                listTeams(dc),
+                listSites(dc),
+                listCompanies(dc)
             ]);
-            setWorkers(workerData);
-            setTeams(teamData);
-            setSites(siteData);
-            setCompanies(companyData);
-            setAssignments(assignmentData);
+
+            const companiesDc: Company[] = (companyRes as any)?.data?.companies?.map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                code: c.code || '',
+                businessNumber: c.businessNumber || '',
+                ceoName: c.ceoName || '',
+                address: '',
+                phone: '',
+                type: (c.type as any) || '미지정',
+                status: (c.status || '').toString().toLowerCase() as any,
+            })) ?? [];
+
+            const teamsDc: Team[] = (teamRes as any)?.data?.teams?.map((t: any) => ({
+                id: t.id,
+                name: t.name,
+                type: t.type || '',
+                leaderId: t.leader?.id || '',
+                leaderName: t.leader?.name || '',
+                companyId: t.company?.id || '',
+                companyName: t.company?.name || '',
+                status: 'active',
+                totalManDay: t.totalManDay ?? 0,
+            })) ?? [];
+
+            const sitesDc: Site[] = (siteRes as any)?.data?.sites?.map((s: any) => ({
+                id: s.id,
+                name: s.name,
+                code: s.code || '',
+                address: s.address || '',
+                status: (s.status || 'ACTIVE') === 'ACTIVE' ? 'active' : 'completed',
+                companyId: '',
+                companyName: '',
+                responsibleTeamId: '',
+                responsibleTeamName: '',
+                totalManDay: 0,
+                color: ''
+            })) ?? [];
+
+            const workersDc: Worker[] = (workerRes as any)?.data?.workers?.map((w: any) => ({
+                id: w.id,
+                name: w.name,
+                idNumber: w.residentNumber || '',
+                address: w.address || '',
+                contact: w.phone || '',
+                role: w.role || '',
+                teamId: w.team?.id || '',
+                teamName: w.team?.name || '',
+                companyId: w.team?.company?.id || '',
+                companyName: w.team?.company?.name || '',
+                teamType: w.team?.type || '',
+                status: (w.isActive === false) ? 'inactive' : 'active',
+                unitPrice: w.unitPrice ?? 0,
+                payType: w.payType || '',
+                isActive: w.isActive !== false,
+                createdAt: undefined,
+                updatedAt: undefined,
+            })) ?? [];
+
+            setWorkers(workersDc);
+            setTeams(teamsDc);
+            setSites(sitesDc);
+            setCompanies(companiesDc);
+            setAssignments([]);
         } catch (error) {
             console.error('Failed to load relationship data', error);
+            Swal.fire({
+                icon: 'error',
+                title: '로드 실패',
+                text: (error as any)?.message || '관계 데이터 로드 중 오류가 발생했습니다.'
+            });
         } finally {
             setLoading(false);
         }
-    };
+    }, [dataSource, getDc]);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
 
     const openWorkerView = (workerId?: string | null) => {
         if (!workerId) return;
@@ -115,6 +213,7 @@ const RelationshipConsolePage: React.FC = () => {
     );
 
     const handleWorkerTeamChange = async (worker: Worker, newTeamId: string) => {
+        if (isReadOnly) return;
         if (!worker.id) return;
         const team = teams.find(t => t.id === newTeamId) || null;
         try {
@@ -161,6 +260,7 @@ const RelationshipConsolePage: React.FC = () => {
     };
 
     const handleSiteCompanyChange = async (site: Site, newCompanyId: string) => {
+        if (isReadOnly) return;
         if (!site.id) return;
         const company = companies.find(c => c.id === newCompanyId) || null;
         try {
@@ -198,6 +298,7 @@ const RelationshipConsolePage: React.FC = () => {
     };
 
     const handleSiteTeamChange = async (site: Site, newTeamId: string) => {
+        if (isReadOnly) return;
         if (!site.id) return;
         const team = teams.find(t => t.id === newTeamId) || null;
         try {
@@ -397,12 +498,31 @@ const RelationshipConsolePage: React.FC = () => {
                         <FontAwesomeIcon icon={faProjectDiagram} className="text-indigo-600" />
                         <span>관계 관리 콘솔</span>
                         <span className="text-sm font-normal text-slate-500">(Worker → Team → Site → Company)</span>
+                        {dataSource === 'dataconnect' && (
+                            <span className="ml-2 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-mono">
+                                Data Connect (Read-only)
+                            </span>
+                        )}
                     </h1>
                     <p className="text-slate-500 mt-2 text-sm">
                         상용화급 관계 관리: 시각적 분석, 데이터 무결성, 실시간 모니터링
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-white overflow-hidden text-xs">
+                        <button
+                            onClick={() => setDataSource('firestore')}
+                            className={`px-3 py-2 font-semibold ${dataSource === 'firestore' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                        >
+                            Firestore
+                        </button>
+                        <button
+                            onClick={() => setDataSource('dataconnect')}
+                            className={`px-3 py-2 font-semibold ${dataSource === 'dataconnect' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}
+                        >
+                            Data Connect
+                        </button>
+                    </div>
                     <button
                         onClick={() => setShowGraphView(!showGraphView)}
                         className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${showGraphView

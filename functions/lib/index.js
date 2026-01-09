@@ -37,6 +37,9 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTaxInvoiceListApi = exports.getTaxInvoiceStatusApi = exports.issueTaxInvoiceApi = void 0;
 const functions = __importStar(require("firebase-functions"));
@@ -170,4 +173,8 @@ exports.getTaxInvoiceListApi = functions.https.onRequest(async (req, res) => {
         });
     }
 });
+// ============================================
+// 카카오톡 알림톡 Functions (SOLAPI)
+// ============================================
+__exportStar(require("./kakao"), exports);
 //# sourceMappingURL=index.js.map

@@ -1,0 +1,126 @@
+{
+  "dailyReportsPath": "backups\\2026-01-07T12-27-27-625Z\\daily_reports.json",
+  "totalReports": 514,
+  "totalWorkerRows": 2338,
+  "workerFields": {
+    "salaryModel": {
+      "types": {
+        "null": 0,
+        "string": 2332,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "workerId": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "role": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "unitPrice": {
+      "types": {
+        "null": 0,
+        "string": 0,
+        "number": 2338,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "payType": {
+      "types": {
+        "null": 0,
+        "string": 2182,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "name": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "manDay": {
+      "types": {
+        "null": 0,
+        "string": 0,
+        "number": 2338,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "status": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "workContent": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    },
+    "teamId": {
+      "types": {
+        "null": 0,
+        "string": 2338,
+        "number": 0,
+        "boolean": 0,
+        "array": 0,
+        "object": 0
+      }
+    }
+  },
+  "statusCounts": {
+    "attendance": 2338
+  },
+  "payTypeCounts": {
+    "일급제": 2098,
+    "__null__": 156,
+    "지원팀": 84
+  },
+  "salaryModelCounts": {
+    "일급제": 2138,
+    "월급제": 110,
+    "지원팀": 84,
+    "__null__": 6
+  },
+  "roleCounts": {
+    "작업자": 2187,
+    "일반": 135,
+    "팀장": 16
+  }
+}

@@ -697,7 +697,10 @@ const DailyReportGridInput: React.FC = () => {
 
         } catch (error) {
             console.error("Save failed", error);
-            alert("저장 중 오류가 발생했습니다.");
+            const e = error as any;
+            const code = typeof e?.code === 'string' ? e.code : '';
+            const message = typeof e?.message === 'string' ? e.message : '';
+            alert(`저장 중 오류가 발생했습니다.${code ? `\n${code}` : ''}${message ? `\n${message}` : ''}`);
         } finally {
             setLoading(false);
         }

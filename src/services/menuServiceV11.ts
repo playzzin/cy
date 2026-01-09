@@ -1,4 +1,4 @@
-import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
@@ -8,7 +8,15 @@ import { SiteDataTypeSchema } from '../types/menuSchema';
 export type { MenuItem, SiteDataType };
 
 const COLLECTION_NAME = 'settings';
-const DOC_ID_CONFIG = 'menus_v12';
+const DOC_ID_CANDIDATES = ['menus_v12', 'menus_v11', 'menus_v10'];
+let activeDocId = DOC_ID_CANDIDATES[0];
+
+const isPermissionDenied = (err: any): boolean => {
+    const code = err?.code;
+    return code === 'permission-denied' || code === 'PERMISSION_DENIED';
+};
+
+const getMenuDocRef = (docId: string) => doc(db, COLLECTION_NAME, docId);
 
 // Options no longer need mergeWithDefaults
 interface MenuSubscribeOptions { }
@@ -31,7 +39,41 @@ const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const MENU_TEXT_ALIASES: Record<string, string> = {
     '월급제v2': '월급제',
-    '세금/가불 계산': '세금/가불'
+    '세금/가불 계산': '세금/가불',
+    '일용노무비지급명세서': '일용노무비 지급명세서',
+    '노무비지급명세서': '일용노무비 지급명세서',
+    '노무비지급명세서생성기': '노무비 지급명세서 생성기'
+};
+
+const PATH_TO_MENU_TEXT: Record<string, string> = Object.entries(MENU_PATHS).reduce((acc, [name, path]) => {
+    if (!acc[path]) acc[path] = name;
+    return acc;
+}, {} as Record<string, string>);
+
+const DEFAULT_POSITION_CONFIG_BY_ID: Record<string, any> = (
+    DEFAULT_MENU_CONFIG.admin?.positionConfig || []
+).reduce((acc: Record<string, any>, item: any) => {
+    if (item && item.id) acc[String(item.id)] = item;
+    return acc;
+}, {} as Record<string, any>);
+
+const sanitizePositionConfig = (input: any): any[] | undefined => {
+    if (!Array.isArray(input)) return undefined;
+    const next = input
+        .map((raw: any) => {
+            const id = typeof raw?.id === 'string' ? raw.id : '';
+            const fallback = id ? DEFAULT_POSITION_CONFIG_BY_ID[id] : undefined;
+            const name = typeof raw?.name === 'string' ? raw.name : (fallback?.name ?? '');
+            const icon = typeof raw?.icon === 'string' ? raw.icon : (fallback?.icon ?? '');
+            const color = typeof raw?.color === 'string' ? raw.color : (fallback?.color ?? 'from-slate-600 to-slate-400');
+            const order = typeof raw?.order === 'number' ? raw.order : (typeof fallback?.order === 'number' ? fallback.order : undefined);
+
+            if (!id || !name || !icon || !color) return null;
+            return { id, name, icon, color, ...(order !== undefined ? { order } : {}) };
+        })
+        .filter(Boolean);
+
+    return next.length > 0 ? (next as any[]) : undefined;
 };
 
 // ALLOWED_MENU_TREE removed to support dynamic menu management
@@ -137,43 +179,102 @@ const createDeterministicId = (parts: string[]): string => {
     return `m_${(hash >>> 0).toString(36)}`;
 };
 
-const normalizeMenuItem = (item: MenuItem | string, parentIdPath: string): MenuItem => {
-    const base: MenuItem = typeof item === 'string' ? { text: item } : { ...item };
+const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
+    const base: MenuItem =
+        typeof item === 'string'
+            ? { text: item }
+            : (item && typeof item === 'object')
+                ? { ...(item as MenuItem) }
+                : ({ text: '' } as MenuItem);
 
-    const rawText = String(base.text ?? '').trim();
-    const normalizedText = MENU_TEXT_ALIASES[rawText] ?? rawText;
-    const idSeed = `${parentIdPath}/${normalizedText}`;
-    const normalizedId = base.id && String(base.id).trim().length > 0 ? String(base.id) : createDeterministicId([idSeed]);
+    const rawText = typeof base.text === 'string' ? base.text.trim() : '';
+    const rawPath = typeof base.path === 'string' ? base.path.trim() : '';
+    const rawId = typeof base.id === 'string' ? base.id.trim() : '';
+    const fromPath = rawPath ? (PATH_TO_MENU_TEXT[rawPath] || '') : '';
+    const inferredText = rawText || fromPath || rawId;
+    const normalizedText = inferredText ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : '';
 
-    const rawSub = Array.isArray(base.sub) ? base.sub : [];
-    const normalizedSub = rawSub.map((child) => normalizeMenuItem(child, `${idSeed}`));
+    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}`;
+    const normalizedId = rawId.length > 0 ? rawId : createDeterministicId([idSeed]);
 
-    const normalizedPath =
-        base.path && String(base.path).trim().length > 0
-            ? String(base.path)
-            : MENU_PATHS[normalizedText] || undefined;
+    const rawSub = Array.isArray(base.sub)
+        ? base.sub.filter((c: any) => typeof c === 'string' || (c && typeof c === 'object'))
+        : [];
+    const normalizedSub = rawSub
+        .map((child: any) => normalizeMenuItem(child, `${idSeed}`))
+        .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
 
-    return {
+    const normalizedPath = rawPath.length > 0 ? rawPath : (normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined);
+
+    const next: MenuItem = {
         ...base,
         text: normalizedText,
         id: normalizedId,
         path: normalizedPath,
         sub: normalizedSub
     };
+
+    if (!next.sub || next.sub.length === 0) {
+        delete (next as any).sub;
+    }
+
+    return next;
 };
 
 const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
     const normalized: SiteDataType = {};
-    Object.keys(config).forEach((siteKey) => {
-        const site = config[siteKey];
+    const safeConfig: any = config && typeof config === 'object' ? config : {};
+    Object.keys(safeConfig).forEach((siteKey) => {
+        const siteAny: any = safeConfig[siteKey];
+        const site: any = siteAny && typeof siteAny === 'object' ? siteAny : {};
+
+        const safeName = typeof site.name === 'string' && site.name.trim().length > 0 ? site.name : siteKey;
+        const safeIcon = typeof site.icon === 'string' && site.icon.trim().length > 0 ? site.icon : 'fa-globe';
+
+        const rawMenu = Array.isArray(site.menu) ? site.menu : [];
+        const rawTrash = Array.isArray(site.trash) ? site.trash : undefined;
+
         normalized[siteKey] = {
             ...site,
-            menu: (site.menu || []).map((item) => normalizeMenuItem(item, siteKey)),
-            trash: site.trash ? site.trash.map((item) => normalizeMenuItem(item, `${siteKey}/trash`)) : site.trash,
-            deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems : []
+            name: safeName,
+            icon: safeIcon,
+            menu: rawMenu
+                .map((item: any) => normalizeMenuItem(item, siteKey))
+                .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
+            trash: rawTrash
+                ? rawTrash
+                    .map((item: any) => normalizeMenuItem(item, `${siteKey}/trash`))
+                    .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0)
+                : undefined,
+            deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems.filter((v: any) => typeof v === 'string') : [],
+            positionConfig: sanitizePositionConfig(site.positionConfig)
         };
     });
     return normalized;
+};
+
+const pruneLargeConfig = (config: SiteDataType): SiteDataType => {
+    try {
+        const json = JSON.stringify(config);
+        const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(json).length : json.length;
+        // Firestore doc limit is 1MiB; keep a buffer.
+        if (bytes < 900_000) return config;
+
+        const next: SiteDataType = deepClone(config);
+        Object.keys(next).forEach((siteKey) => {
+            const site: any = (next as any)[siteKey];
+            if (!site || typeof site !== 'object') return;
+            if (Array.isArray(site.trash) && site.trash.length > 50) {
+                site.trash = site.trash.slice(-50);
+            }
+            if (Array.isArray(site.deletedItems) && site.deletedItems.length > 200) {
+                site.deletedItems = site.deletedItems.slice(-200);
+            }
+        });
+        return next;
+    } catch {
+        return config;
+    }
 };
 
 // Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
@@ -217,7 +318,9 @@ const setupSnapshotListener = () => {
         return;
     }
 
-    unsubscribeSnapshot = onSnapshot(doc(db, COLLECTION_NAME, DOC_ID_CONFIG), (snapshot) => {
+    unsubscribeSnapshot = onSnapshot(
+        getMenuDocRef(activeDocId),
+        (snapshot) => {
         if (!snapshot.exists()) {
             console.warn('[MenuService] Configuration missing. Initializing with defaults...');
             // Cold Init: Save DEFAULT_MENU_CONFIG to DB so it persists.
@@ -246,7 +349,23 @@ const setupSnapshotListener = () => {
         currentConfig = processIncomingConfig(normalizedIncoming);
 
         notifyListeners();
-    });
+        },
+        (error) => {
+            console.error('[MenuService] Snapshot listener error:', error);
+            if (isPermissionDenied(error)) {
+                const currentIndex = DOC_ID_CANDIDATES.indexOf(activeDocId);
+                const nextDocId = DOC_ID_CANDIDATES[currentIndex + 1];
+                if (nextDocId) {
+                    activeDocId = nextDocId;
+                    if (unsubscribeSnapshot) {
+                        unsubscribeSnapshot();
+                        unsubscribeSnapshot = null;
+                    }
+                    setupSnapshotListener();
+                }
+            }
+        }
+    );
 };
 
 export const menuServiceV11 = {
@@ -272,22 +391,39 @@ export const menuServiceV11 = {
 
     getMenuConfig: async (options: MenuFetchOptions = {}): Promise<SiteDataType | null> => {
         try {
-            const menuRef = doc(db, COLLECTION_NAME, DOC_ID_CONFIG);
-            const docSnapshot = await getDoc(menuRef);
+            let firstReadableMissing: string | null = null;
 
-            if (!docSnapshot.exists()) {
-                // Same init logic as snapshot listener
-                console.warn('[MenuService] Config missing on fetch. Returning defaults.');
-                const initial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
-                // Optional: We could save here, but let's let the caller or background listener handle persistence if needed.
-                // For consistency with subscribe, let's save.
-                await menuServiceV11.saveMenuConfig(initial);
-                return initial;
+            for (const candidate of DOC_ID_CANDIDATES) {
+                try {
+                    const menuRef = getMenuDocRef(candidate);
+                    const docSnapshot = await getDoc(menuRef);
+
+                    if (docSnapshot.exists()) {
+                        activeDocId = candidate;
+                        const rawData = docSnapshot.data();
+                        const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
+                        return processIncomingConfig(normalizedIncoming);
+                    }
+
+                    if (!firstReadableMissing) {
+                        firstReadableMissing = candidate;
+                    }
+                } catch (err: any) {
+                    if (isPermissionDenied(err)) {
+                        continue;
+                    }
+                    throw err;
+                }
             }
 
-            const rawData = docSnapshot.data();
-            const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
-            return processIncomingConfig(normalizedIncoming);
+            if (firstReadableMissing) {
+                activeDocId = firstReadableMissing;
+            }
+
+            console.warn('[MenuService] Config missing on fetch. Returning defaults.');
+            const initial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
+            await menuServiceV11.saveMenuConfig(initial);
+            return initial;
 
         } catch (error) {
             console.error('Failed to fetch menu configuration:', error);
@@ -296,8 +432,9 @@ export const menuServiceV11 = {
     },
 
     saveMenuConfig: async (newConfig: SiteDataType) => {
-        const normalizedConfig = normalizeSiteDataType(newConfig);
-        const result = SiteDataTypeSchema.safeParse(normalizedConfig);
+        const normalizedConfig = processIncomingConfig(normalizeSiteDataType(newConfig));
+        const prunedConfig = pruneLargeConfig(normalizedConfig);
+        const result = SiteDataTypeSchema.safeParse(prunedConfig);
 
         if (!result.success) {
             const issues = result.error.issues;
@@ -308,8 +445,36 @@ export const menuServiceV11 = {
 
         try {
             const sanitizedData = JSON.parse(JSON.stringify(result.data));
-            await setDoc(doc(db, COLLECTION_NAME, DOC_ID_CONFIG), sanitizedData);
-            return true;
+            let lastError: any = null;
+
+            const candidatesToTry = [activeDocId, ...DOC_ID_CANDIDATES.filter((d) => d !== activeDocId)];
+            for (const candidate of candidatesToTry) {
+                const menuRef = getMenuDocRef(candidate);
+                try {
+                    await setDoc(menuRef, sanitizedData, { merge: true });
+                    activeDocId = candidate;
+                    return true;
+                } catch (err: any) {
+                    try {
+                        // Fallback: some rulesets allow update but restrict set/replace semantics.
+                        await updateDoc(menuRef, sanitizedData as any);
+                        activeDocId = candidate;
+                        return true;
+                    } catch (err2: any) {
+                        lastError = err2;
+                        if (isPermissionDenied(err2)) {
+                            continue;
+                        }
+                    }
+
+                    lastError = err;
+                    if (isPermissionDenied(err)) {
+                        continue;
+                    }
+                }
+            }
+
+            throw lastError;
         } catch (error) {
             console.error('Failed to save menu configuration:', error);
             throw error;
@@ -442,12 +607,29 @@ export const menuServiceV11 = {
                 modified = true;
             }
 
+            // --- Barobill Menu Migration ---
+            // Add "카카오톡 연동 설정" to "시스템 관리" group if exists, or root if not
+            // Re-using adminMenu reference
+            let systemGroup = adminMenu.find((item) => item.text === '시스템 관리');
+            if (systemGroup && systemGroup.sub) {
+                const barobillItemText = '카카오톡 연동 설정';
+                const subItems = systemGroup.sub.map(s => typeof s === 'string' ? s : s.text);
+
+                if (!subItems.includes(barobillItemText)) {
+                    console.log('[MenuService] Migrating: Adding Barobill Kakao Menu...');
+                    // Pushing string, normalize will handle it using MENU_PATHS
+                    (systemGroup.sub as any[]).push(barobillItemText);
+                    modified = true;
+                }
+            }
+            // -------------------------------
+
             if (modified) {
                 await menuServiceV11.saveMenuConfig(config);
-                console.log('[MenuService] Migration Complete: Smart Memo added.');
+                console.log('[MenuService] Migration Complete: Menu items added.');
             }
         } catch (error) {
-            console.error('[MenuService] Smart Memo Migration Failed:', error);
+            console.error('[MenuService] Smart Memo / Barobill Migration Failed:', error);
         }
     },
 

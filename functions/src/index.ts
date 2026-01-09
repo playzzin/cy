@@ -152,3 +152,8 @@ export const getTaxInvoiceListApi = functions.https.onRequest(async (req, res) =
         });
     }
 });
+
+// ============================================
+// 카카오톡 알림톡 Functions (SOLAPI)
+// ============================================
+export * from './kakao';

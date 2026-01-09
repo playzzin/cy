@@ -5,6 +5,9 @@
  * 세금계산서 발행 알림, 입금 요청 알림 등에 사용됩니다.
  */
 
+import { functions } from '../config/firebase';
+import { httpsCallable } from 'firebase/functions';
+
 // Firebase Functions URL
 const FUNCTIONS_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
 
@@ -157,18 +160,17 @@ export async function sendKakaoNotification(
         };
     }
 
-    // 실제 API 호출 (Local Server)
+    // 실제 API 호출 (Firebase Callable Function)
     try {
-        const response = await fetch(`${FUNCTIONS_BASE_URL}/kakao/alimtalk`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(request),
+        const sendAlimtalk = httpsCallable<any, KakaoNotificationResponse>(functions, 'sendKakaoAlimtalk');
+
+        const result = await sendAlimtalk({
+            to: request.recipientPhone,
+            templateId: request.templateType,
+            variables: request.variables
         });
 
-        const result = await response.json();
-        return result;
+        return result.data;
     } catch (error) {
         console.error('알림톡 발송 오류:', error);
         return {
@@ -179,97 +181,6 @@ export async function sendKakaoNotification(
 }
 
 /**
- * 세금계산서 발행 알림 발송 (편의 함수)
- */
-export async function sendTaxInvoiceNotification(
-    recipientPhone: string,
-    recipientName: string,
-    companyName: string,
-    invoiceDate: string,
-    totalAmount: number,
-    invoiceNum: string
-): Promise<KakaoNotificationResponse> {
-    return sendKakaoNotification({
-        templateType: 'TAX_INVOICE_ISSUED',
-        recipientPhone,
-        recipientName,
-        variables: {
-            companyName,
-            invoiceDate,
-            totalAmount: new Intl.NumberFormat('ko-KR').format(totalAmount),
-            invoiceNum,
-        },
-    });
-}
-
-/**
- * 입금 요청 알림 발송 (편의 함수)
- */
-export async function sendPaymentRequestNotification(
-    recipientPhone: string,
-    recipientName: string,
-    companyName: string,
-    balance: number,
-    dueDate: string
-): Promise<KakaoNotificationResponse> {
-    return sendKakaoNotification({
-        templateType: 'PAYMENT_REQUEST',
-        recipientPhone,
-        recipientName,
-        variables: {
-            companyName,
-            balance: new Intl.NumberFormat('ko-KR').format(balance),
-            dueDate,
-        },
-    });
-}
-
-/**
- * 입금 확인 알림 발송 (편의 함수)
- */
-export async function sendPaymentReceivedNotification(
-    recipientPhone: string,
-    recipientName: string,
-    companyName: string,
-    paymentDate: string,
-    paymentAmount: number,
-    remainingBalance: number
-): Promise<KakaoNotificationResponse> {
-    return sendKakaoNotification({
-        templateType: 'PAYMENT_RECEIVED',
-        recipientPhone,
-        recipientName,
-        variables: {
-            companyName,
-            paymentDate,
-            paymentAmount: new Intl.NumberFormat('ko-KR').format(paymentAmount),
-            remainingBalance: new Intl.NumberFormat('ko-KR').format(remainingBalance),
-        },
-    });
-}
-
-/**
- * 전화번호 형식 정규화 (하이픈 제거)
- */
-export function normalizePhoneNumber(phone: string): string {
-    return phone.replace(/-/g, '');
-}
-
-/**
- * 전화번호 형식화 (하이픈 추가)
- */
-export function formatPhoneNumber(phone: string): string {
-    const cleaned = phone.replace(/\D/g, '');
-    if (cleaned.length === 11) {
-        return cleaned.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
-    }
-    if (cleaned.length === 10) {
-        return cleaned.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
-    }
-    return phone;
-}
-
-/**
  * 친구톡 발송
  */
 export async function sendFriendTalk(
@@ -277,6 +188,7 @@ export async function sendFriendTalk(
 ): Promise<KakaoNotificationResponse> {
     // Mock 모드
     if (MOCK_MODE) {
+        // ... (keep mock logic)
         console.log('🧪 [MOCK] 카카오톡 친구톡 발송 요청:', request);
 
         // 유효성 검사
@@ -305,7 +217,7 @@ export async function sendFriendTalk(
         // 성공 시뮬레이션 (1초 딜레이)
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        const typeNames = { TEXT: '텍스트', IMAGE: '이미지', WIDE: '와이드' };
+        const typeNames: Record<string, string> = { TEXT: '텍스트', IMAGE: '이미지', WIDE: '와이드' };
         return {
             success: true,
             message: `✅ [테스트 모드] ${request.recipientName}님에게 ${typeNames[request.type]} 친구톡이 발송되었습니다.`,
@@ -313,23 +225,17 @@ export async function sendFriendTalk(
         };
     }
 
-    // 실제 API 호출 (Local Server)
+    // 실제 API 호출 (Firebase Callable Function)
     try {
-        const response = await fetch(`${FUNCTIONS_BASE_URL}/kakao/friendtalk`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(request),
-        });
+        const sendFT = httpsCallable<any, KakaoNotificationResponse>(functions, 'sendFriendTalk');
 
-        const result = await response.json();
-        return result;
+        const result = await sendFT(request);
+        return result.data;
     } catch (error) {
         console.error('친구톡 발송 오류:', error);
         return {
             success: false,
-            message: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다.',
+            message: error instanceof Error ? error.message : '네트워크 오류가 발생했습니다. (백엔드 미구현 가능성)',
         };
     }
 }
@@ -359,3 +265,13 @@ export const FRIEND_TALK_TYPES: Record<FriendTalkType, {
         imageSize: '800x600',
     },
 };
+
+/**
+ * 전화번호 형식 변환 (010-1234-5678)
+ */
+export function formatPhoneNumber(phone: string): string {
+    if (!phone) return '';
+    const cleaned = phone.replace(/[^0-9]/g, '');
+    if (cleaned.length < 10) return phone;
+    return cleaned.replace(/(\d{3})(\d{3,4})(\d{4})/, '$1-$2-$3');
+}

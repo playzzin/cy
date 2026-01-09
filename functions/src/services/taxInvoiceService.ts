@@ -6,6 +6,7 @@
 
 import * as soap from 'soap';
 import { getWsdlUrl, getBarobillAuth } from '../config/barobill';
+import { sendAlimtalk, KAKAO_TEMPLATES } from './barobillKakaoService';
 
 // 세금계산서 데이터 인터페이스
 export interface TaxInvoiceData {
@@ -26,6 +27,7 @@ export interface TaxInvoiceData {
     invoiceeBizType?: string;      // 업태
     invoiceeBizClass?: string;     // 종목
     invoiceeEmail?: string;        // 공급받는자 이메일
+    invoiceeHP?: string;           // 공급받는자 휴대폰번호 (알림톡 발송용)
 
     // 세금계산서 정보
     writeDate: string;             // 작성일자 (YYYYMMDD)
@@ -104,7 +106,7 @@ export async function issueTaxInvoice(data: TaxInvoiceData): Promise<BarobillRes
                 InvoiceeBizClass: data.invoiceeBizClass || '',
                 InvoiceeContactName: '',
                 InvoiceeTEL: '',
-                InvoiceeHP: '',
+                InvoiceeHP: data.invoiceeHP || '',
                 InvoiceeEmail: data.invoiceeEmail || '',
 
                 // 세금계산서 기본 정보
@@ -124,13 +126,39 @@ export async function issueTaxInvoice(data: TaxInvoiceData): Promise<BarobillRes
             };
 
             // RegistAndIssueTaxInvoice 메서드 호출 (등록 + 즉시발행)
-            client.RegistAndIssueTaxInvoice(requestData, (err: Error | null, result: unknown) => {
+            client.RegistAndIssueTaxInvoice(requestData, async (err: Error | null, result: unknown) => {
                 if (err) {
                     reject({ code: -2, message: `API 호출 실패: ${err.message}` });
                     return;
                 }
 
                 const response = parseBarobillResponse(result);
+
+                // 성공 시 카카오톡 알림 발송
+                if (response.code === 0 && response.invoiceNum && data.invoiceeHP) {
+                    try {
+                        // 날짜 포맷 (YYYYMMDD -> YYYY-MM-DD)
+                        const formattedDate = data.writeDate.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+
+                        // 금액 포맷 (천단위 콤마)
+                        const formattedAmount = data.totalAmount.toLocaleString('ko-KR');
+
+                        await sendAlimtalk({
+                            to: data.invoiceeHP,
+                            templateId: 'TAX_INVOICE_ISSUED',
+                            variables: {
+                                companyName: data.invoicerCorpName,
+                                invoiceDate: formattedDate,
+                                totalAmount: formattedAmount + '원',
+                                invoiceNum: response.invoiceNum
+                            }
+                        });
+                    } catch (notifyError) {
+                        // 알림 발송 실패가 세금계산서 발행 성공 여부에 영향을 주지 않도록 로깅만 함
+                        console.error('Failed to send Kakao notification for tax invoice:', notifyError);
+                    }
+                }
+
                 resolve(response);
             });
         });

@@ -5,13 +5,15 @@ import routerBindings, {
     CatchAllNavigate,
     UnsavedChangesNotifier,
 } from "@refinedev/react-router-v6";
-import { firebaseRefineProvider } from "./firebaseProvider";
+// import { firebaseRefineProvider } from "./firebaseProvider";
+import { dataConnectProvider } from "./dataConnectProvider";
 import { Outlet } from "react-router-dom";
 
 export const RefineWrapper: React.FC = () => {
     return (
         <Refine
-            dataProvider={firebaseRefineProvider}
+            // dataProvider={firebaseRefineProvider}
+            dataProvider={dataConnectProvider}
             routerProvider={routerBindings}
             resources={[
                 {

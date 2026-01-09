@@ -4,10 +4,9 @@
  * Firebase Functions를 통해 바로빌 API를 호출합니다.
  */
 
-// Firebase Functions URL (배포 후 변경 필요)
-// Firebase Functions URL (배포 후 변경 필요)
-// 로컬 Express 서버: http://localhost:4000
-const FUNCTIONS_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api';
+// Firebase Functions URL (기본값: Production URL)
+// 로컬 테스트 시: firebase emulators:start 후 http://localhost:5001/cyee-9c1e4/us-central1 로 설정
+const FUNCTIONS_BASE_URL = process.env.REACT_APP_API_URL || 'https://us-central1-cyee-9c1e4.cloudfunctions.net';
 
 export interface TaxInvoiceRequest {
     // 공급자 정보
@@ -104,7 +103,7 @@ export async function issueTaxInvoice(data: TaxInvoiceRequest): Promise<TaxInvoi
 
     // 실제 API 호출
     try {
-        const response = await fetch(`${FUNCTIONS_BASE_URL}/tax-invoice/issue`, {
+        const response = await fetch(`${FUNCTIONS_BASE_URL}/issueTaxInvoiceApi`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -129,7 +128,7 @@ export async function issueTaxInvoice(data: TaxInvoiceRequest): Promise<TaxInvoi
 export async function getTaxInvoiceStatus(invoiceNum: string): Promise<TaxInvoiceResponse> {
     try {
         const response = await fetch(
-            `${FUNCTIONS_BASE_URL}/tax-invoice/status/${invoiceNum}`
+            `${FUNCTIONS_BASE_URL}/getTaxInvoiceStatusApi?invoiceNum=${invoiceNum}`
         );
 
         const result = await response.json();
@@ -165,7 +164,7 @@ export async function getTaxInvoiceList(limit = 50): Promise<TaxInvoiceListItem[
 
     try {
         const response = await fetch(
-            `${FUNCTIONS_BASE_URL}/tax-invoice/list?limit=${limit}`
+            `${FUNCTIONS_BASE_URL}/getTaxInvoiceListApi?limit=${limit}`
         );
 
         const result = await response.json();

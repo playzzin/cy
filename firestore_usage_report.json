@@ -1,0 +1,1500 @@
+{
+  "scannedFiles": 386,
+  "uniqueCollections": 39,
+  "collections": [
+    {
+      "name": "accommodation_assignments",
+      "hits": 11,
+      "files": [
+        "src\\services\\accommodationAssignmentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 92,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 124,
+          "snippet": "const ref = doc(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 148,
+          "snippet": "await updateDoc(doc(db, COLLECTION_NAME, id), {"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 160,
+          "snippet": "await updateDoc(doc(db, COLLECTION_NAME, id), {"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 179,
+          "snippet": "batch.update(doc(db, COLLECTION_NAME, id), {"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 194,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 200,
+          "snippet": "const snap = await getDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 206,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('workerId', '==', workerId));"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 219,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('accommodationId', '==', accommodationId));"
+        },
+        {
+          "file": "src\\services\\accommodationAssignmentService.ts",
+          "line": 232,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('teamId', '==', teamId));"
+        }
+      ]
+    },
+    {
+      "name": "accommodation_billing_documents",
+      "hits": 3,
+      "files": [
+        "src\\services\\accommodationBillingService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\accommodationBillingService.ts",
+          "line": 164,
+          "snippet": "collection(db, BILLING_COLLECTION),"
+        },
+        {
+          "file": "src\\services\\accommodationBillingService.ts",
+          "line": 179,
+          "snippet": "const docRef = doc(db, BILLING_COLLECTION, docData.id);"
+        },
+        {
+          "file": "src\\services\\accommodationBillingService.ts",
+          "line": 200,
+          "snippet": "const billingRef = doc(db, BILLING_COLLECTION, billingId);"
+        }
+      ]
+    },
+    {
+      "name": "accommodations",
+      "hits": 4,
+      "files": [
+        "src\\services\\accommodationService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 24,
+          "snippet": "const q = query(collection(db, ACCOMMODATION_COLLECTION), orderBy('name'));"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 33,
+          "snippet": "const docRef = await addDoc(collection(db, ACCOMMODATION_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 42,
+          "snippet": "const docRef = doc(db, ACCOMMODATION_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 50,
+          "snippet": "await deleteDoc(doc(db, ACCOMMODATION_COLLECTION, id));"
+        }
+      ]
+    },
+    {
+      "name": "advance_payments",
+      "hits": 5,
+      "files": [
+        "src\\services\\accommodationBillingService.ts",
+        "src\\services\\advancePaymentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\accommodationBillingService.ts",
+          "line": 228,
+          "snippet": "const advanceRef = doc(db, ADVANCE_PAYMENT_COLLECTION, advanceId);"
+        },
+        {
+          "file": "src\\services\\advancePaymentService.ts",
+          "line": 39,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\advancePaymentService.ts",
+          "line": 77,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('yearMonth', '==', yearMonth));"
+        },
+        {
+          "file": "src\\services\\advancePaymentService.ts",
+          "line": 116,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, docId);"
+        },
+        {
+          "file": "src\\services\\advancePaymentService.ts",
+          "line": 145,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        }
+      ]
+    },
+    {
+      "name": "agent_conversations",
+      "hits": 3,
+      "files": [
+        "src\\services\\agentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 127,
+          "snippet": "const docRef = await addDoc(collection(db, CONVERSATIONS_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 142,
+          "snippet": "const conversationRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 162,
+          "snippet": "const conversationRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);"
+        }
+      ]
+    },
+    {
+      "name": "agents",
+      "hits": 4,
+      "files": [
+        "src\\services\\agentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 25,
+          "snippet": "const docRef = await addDoc(collection(db, AGENTS_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 35,
+          "snippet": "const agentRef = doc(db, AGENTS_COLLECTION, agentId);"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 44,
+          "snippet": "const querySnapshot = await getDocs(collection(db, AGENTS_COLLECTION));"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 56,
+          "snippet": "collection(db, AGENTS_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "audit_logs",
+      "hits": 2,
+      "files": [
+        "src\\services\\auditService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\auditService.ts",
+          "line": 24,
+          "snippet": "await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\auditService.ts",
+          "line": 45,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), ...constraints);"
+        }
+      ]
+    },
+    {
+      "name": "companies",
+      "hits": 1,
+      "files": [
+        "src\\services\\manpowerService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\manpowerService.ts",
+          "line": 523,
+          "snippet": "query(collection(db, 'companies'), where('type', '==', '협력사'))"
+        }
+      ]
+    },
+    {
+      "name": "daily_dispatches",
+      "hits": 2,
+      "files": [
+        "src\\services\\dispatchService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\dispatchService.ts",
+          "line": 24,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, date);"
+        },
+        {
+          "file": "src\\services\\dispatchService.ts",
+          "line": 36,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, date);"
+        }
+      ]
+    },
+    {
+      "name": "daily_reports",
+      "hits": 27,
+      "files": [
+        "src\\services\\dailyReportService.ts",
+        "src\\services\\settlementService.ts",
+        "src\\services\\statisticsService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 63,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 106,
+          "snippet": "const reportRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 109,
+          "snippet": "const oldSnap = await getDocs(query(collection(db, COLLECTION_NAME), where('__name__', '==', id)));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 175,
+          "snippet": "const docRef = doc(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 239,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('date', '==', date));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 274,
+          "snippet": "const docRef = doc(collection(db, COLLECTION_NAME)); // Auto ID"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 351,
+          "snippet": "let q = query(collection(db, COLLECTION_NAME), orderBy('date', 'desc'), limit(1));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 353,
+          "snippet": "q = query(collection(db, COLLECTION_NAME), where('teamId', '==', teamId), orderBy('date', 'desc'), limit(1));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 370,
+          "snippet": "let q = query(collection(db, COLLECTION_NAME), where('date', '==', date));"
+        },
+        {
+          "file": "src\\services\\dailyReportService.ts",
+          "line": 389,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        }
+      ]
+    },
+    {
+      "name": "dailyReports",
+      "hits": 2,
+      "files": [
+        "src\\pages\\support\\SupportStatusPage.tsx",
+        "src\\services\\agentDataService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\pages\\support\\SupportStatusPage.tsx",
+          "line": 70,
+          "snippet": "const reportRef = collection(db, 'dailyReports');"
+        },
+        {
+          "file": "src\\services\\agentDataService.ts",
+          "line": 20,
+          "snippet": "let q = query(collection(db, 'dailyReports'));"
+        }
+      ]
+    },
+    {
+      "name": "estimates",
+      "hits": 4,
+      "files": [
+        "src\\services\\estimateService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\estimateService.ts",
+          "line": 51,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\estimateService.ts",
+          "line": 64,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\estimateService.ts",
+          "line": 72,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\estimateService.ts",
+          "line": 76,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));"
+        }
+      ]
+    },
+    {
+      "name": "homepageEstimates",
+      "hits": 5,
+      "files": [
+        "src\\services\\homepageEstimateService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\homepageEstimateService.ts",
+          "line": 115,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\homepageEstimateService.ts",
+          "line": 133,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\homepageEstimateService.ts",
+          "line": 158,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\homepageEstimateService.ts",
+          "line": 169,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\homepageEstimateService.ts",
+          "line": 185,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        }
+      ]
+    },
+    {
+      "name": "homepageRequests",
+      "hits": 8,
+      "files": [
+        "src\\services\\homepageActivityService.ts",
+        "src\\services\\homepageChecklistService.ts",
+        "src\\services\\homepageRequestService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\homepageActivityService.ts",
+          "line": 25,
+          "snippet": "collection(db, 'homepageRequests', requestId, 'activities');"
+        },
+        {
+          "file": "src\\services\\homepageChecklistService.ts",
+          "line": 55,
+          "snippet": "collection(db, 'homepageRequests', requestId, 'checklist');"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 64,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 91,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 101,
+          "snippet": "const colRef = collection(db, COLLECTION_NAME);"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 126,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 138,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\homepageRequestService.ts",
+          "line": 156,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        }
+      ]
+    },
+    {
+      "name": "inboundTransactions",
+      "hits": 6,
+      "files": [
+        "src\\services\\materialService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 125,
+          "snippet": "const docRef = await addDoc(collection(db, INBOUND_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 141,
+          "snippet": "const docRef = doc(collection(db, INBOUND_COLLECTION));"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 175,
+          "snippet": "const q = query(collection(db, INBOUND_COLLECTION), ...constraints);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 190,
+          "snippet": "const docRef = doc(db, INBOUND_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 201,
+          "snippet": "const docRef = doc(db, INBOUND_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 307,
+          "snippet": "const inboundQ = query(collection(db, INBOUND_COLLECTION), ...inboundConstraints);"
+        }
+      ]
+    },
+    {
+      "name": "materials",
+      "hits": 6,
+      "files": [
+        "src\\services\\materialService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 37,
+          "snippet": "collection(db, MATERIALS_COLLECTION),"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 53,
+          "snippet": "const docRef = doc(db, MATERIALS_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 67,
+          "snippet": "const docRef = await addDoc(collection(db, MATERIALS_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 82,
+          "snippet": "const docRef = doc(db, MATERIALS_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 93,
+          "snippet": "const docRef = doc(db, MATERIALS_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 105,
+          "snippet": "collection(db, MATERIALS_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "outboundTransactions",
+      "hits": 6,
+      "files": [
+        "src\\services\\materialService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 213,
+          "snippet": "const docRef = await addDoc(collection(db, OUTBOUND_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 229,
+          "snippet": "const docRef = doc(collection(db, OUTBOUND_COLLECTION));"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 263,
+          "snippet": "const q = query(collection(db, OUTBOUND_COLLECTION), ...constraints);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 278,
+          "snippet": "const docRef = doc(db, OUTBOUND_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 289,
+          "snippet": "const docRef = doc(db, OUTBOUND_COLLECTION, id);"
+        },
+        {
+          "file": "src\\services\\materialService.ts",
+          "line": 316,
+          "snippet": "const outboundQ = query(collection(db, OUTBOUND_COLLECTION), ...outboundConstraints);"
+        }
+      ]
+    },
+    {
+      "name": "payments",
+      "hits": 9,
+      "files": [
+        "src\\services\\paymentFirestoreService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 65,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 77,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 88,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 95,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 106,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 121,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 137,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 153,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\paymentFirestoreService.ts",
+          "line": 172,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        }
+      ]
+    },
+    {
+      "name": "positions",
+      "hits": 14,
+      "files": [
+        "src\\pages\\hr\\PositionManager.tsx",
+        "src\\services\\positionService.ts",
+        "src\\services\\rolePermissionService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\pages\\hr\\PositionManager.tsx",
+          "line": 86,
+          "snippet": "query(collection(db, 'positions'), orderBy('rank', 'asc')),"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 63,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), orderBy('rank', 'asc'));"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 89,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 104,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 130,
+          "snippet": "const posRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 159,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 173,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 184,
+          "snippet": "addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 200,
+          "snippet": "const snapshot = await getDocs(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\positionService.ts",
+          "line": 225,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, pos.id));"
+        }
+      ]
+    },
+    {
+      "name": "receivables",
+      "hits": 9,
+      "files": [
+        "src\\services\\receivableService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 37,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 54,
+          "snippet": "let q = query(collection(db, COLLECTION_NAME), orderBy('issueDate', 'desc'));"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 94,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 116,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 137,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 190,
+          "snippet": "await updateDoc(doc(db, COLLECTION_NAME, receivableId), {"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 223,
+          "snippet": "await updateDoc(doc(db, COLLECTION_NAME, receivableId), {"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 353,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\receivableService.ts",
+          "line": 365,
+          "snippet": "await updateDoc(doc(db, COLLECTION_NAME, id), {"
+        }
+      ]
+    },
+    {
+      "name": "settings",
+      "hits": 11,
+      "files": [
+        "src\\services\\menuServiceV11.ts",
+        "src\\services\\payrollConfigService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\menuServiceV11.ts",
+          "line": 220,
+          "snippet": "unsubscribeSnapshot = onSnapshot(doc(db, COLLECTION_NAME, DOC_ID_CONFIG), (snapshot) => {"
+        },
+        {
+          "file": "src\\services\\menuServiceV11.ts",
+          "line": 275,
+          "snippet": "const menuRef = doc(db, COLLECTION_NAME, DOC_ID_CONFIG);"
+        },
+        {
+          "file": "src\\services\\menuServiceV11.ts",
+          "line": 311,
+          "snippet": "await setDoc(doc(db, COLLECTION_NAME, DOC_ID_CONFIG), sanitizedData);"
+        },
+        {
+          "file": "src\\services\\menuServiceV11.ts",
+          "line": 329,
+          "snippet": "await setDoc(doc(db, COLLECTION_NAME, 'menu_custom_defaults_v11'), sanitizedData);"
+        },
+        {
+          "file": "src\\services\\menuServiceV11.ts",
+          "line": 339,
+          "snippet": "const customDefaultRef = doc(db, COLLECTION_NAME, 'menu_custom_defaults_v11');"
+        },
+        {
+          "file": "src\\services\\payrollConfigService.ts",
+          "line": 134,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, DOC_ID);"
+        },
+        {
+          "file": "src\\services\\payrollConfigService.ts",
+          "line": 178,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, DOC_ID);"
+        },
+        {
+          "file": "src\\services\\payrollConfigService.ts",
+          "line": 218,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, DOC_ID);"
+        },
+        {
+          "file": "src\\services\\payrollConfigService.ts",
+          "line": 231,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, DOC_ID);"
+        },
+        {
+          "file": "src\\services\\payrollConfigService.ts",
+          "line": 244,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, DOC_ID);"
+        }
+      ]
+    },
+    {
+      "name": "settlements",
+      "hits": 2,
+      "files": [
+        "src\\services\\settlementService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\settlementService.ts",
+          "line": 27,
+          "snippet": "const settlementsRef = collection(db, 'settlements');"
+        },
+        {
+          "file": "src\\services\\settlementService.ts",
+          "line": 190,
+          "snippet": "const docRef = doc(db, 'settlements', entry.id);"
+        }
+      ]
+    },
+    {
+      "name": "sites",
+      "hits": 13,
+      "files": [
+        "src\\pages\\system\\SystemManagementPage.tsx",
+        "src\\services\\agentDataService.ts",
+        "src\\services\\siteService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 374,
+          "snippet": "addToBatch(doc(db, 'sites', item.id), { responsibleTeamId: item.targetId });"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 377,
+          "snippet": "addToBatch(doc(db, 'sites', item.id), { companyId: item.targetId });"
+        },
+        {
+          "file": "src\\services\\agentDataService.ts",
+          "line": 110,
+          "snippet": "let q = query(collection(db, 'sites'));"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 31,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 72,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 100,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 110,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 126,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 136,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'));"
+        },
+        {
+          "file": "src\\services\\siteService.ts",
+          "line": 146,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('name', '==', name), limit(1));"
+        }
+      ]
+    },
+    {
+      "name": "smart_memo_categories",
+      "hits": 5,
+      "files": [
+        "src\\features\\smart-memo\\store\\useMemoStore.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 186,
+          "snippet": "collection(db, CATEGORY_COLLECTION),"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 473,
+          "snippet": "await addDoc(collection(db, CATEGORY_COLLECTION), {"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 487,
+          "snippet": "const docRef = doc(db, CATEGORY_COLLECTION, id);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 498,
+          "snippet": "await deleteDoc(doc(db, CATEGORY_COLLECTION, id));"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 514,
+          "snippet": "const docRef = doc(db, CATEGORY_COLLECTION, cat.id);"
+        }
+      ]
+    },
+    {
+      "name": "smart_memos",
+      "hits": 19,
+      "files": [
+        "src\\features\\smart-memo\\store\\useMemoStore.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 158,
+          "snippet": "collection(db, MEMO_COLLECTION),"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 172,
+          "snippet": "collection(db, MEMO_COLLECTION),"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 222,
+          "snippet": "const docRef = doc(collection(db, MEMO_COLLECTION));"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 353,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, id);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 390,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, id);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 419,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, memo.id);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 448,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, memoId);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 462,
+          "snippet": "await deleteDoc(doc(db, MEMO_COLLECTION, id));"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 544,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, memoId);"
+        },
+        {
+          "file": "src\\features\\smart-memo\\store\\useMemoStore.ts",
+          "line": 583,
+          "snippet": "const docRef = doc(db, MEMO_COLLECTION, memoId);"
+        }
+      ]
+    },
+    {
+      "name": "support_rates",
+      "hits": 3,
+      "files": [
+        "src\\services\\supportRateService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\supportRateService.ts",
+          "line": 24,
+          "snippet": "const snapshot = await getDocs(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\supportRateService.ts",
+          "line": 38,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), where('teamId', '==', teamId));"
+        },
+        {
+          "file": "src\\services\\supportRateService.ts",
+          "line": 51,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, rate.teamId);"
+        }
+      ]
+    },
+    {
+      "name": "system_components",
+      "hits": 2,
+      "files": [
+        "src\\services\\componentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\componentService.ts",
+          "line": 42,
+          "snippet": "const colRef = collection(db, COLLECTION_NAME);"
+        },
+        {
+          "file": "src\\services\\componentService.ts",
+          "line": 74,
+          "snippet": "const ref = doc(db, COLLECTION_NAME, id);"
+        }
+      ]
+    },
+    {
+      "name": "system_config",
+      "hits": 2,
+      "files": [
+        "src\\services\\rolePermissionService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\rolePermissionService.ts",
+          "line": 21,
+          "snippet": "onSnapshot(doc(db, PERMISSION_COLLECTION, PERMISSION_DOC_ID), (docSnap) => {"
+        },
+        {
+          "file": "src\\services\\rolePermissionService.ts",
+          "line": 60,
+          "snippet": "await setDoc(doc(db, PERMISSION_COLLECTION, PERMISSION_DOC_ID), permissions);"
+        }
+      ]
+    },
+    {
+      "name": "tasks",
+      "hits": 3,
+      "files": [
+        "src\\services\\agentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 73,
+          "snippet": "const docRef = await addDoc(collection(db, TASKS_COLLECTION), {"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 87,
+          "snippet": "const taskRef = doc(db, TASKS_COLLECTION, taskId);"
+        },
+        {
+          "file": "src\\services\\agentService.ts",
+          "line": 105,
+          "snippet": "collection(db, TASKS_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "taxInvoices",
+      "hits": 10,
+      "files": [
+        "src\\services\\taxInvoiceFirestoreService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 96,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 108,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 119,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 126,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 137,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 157,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 173,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 189,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 205,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\taxInvoiceFirestoreService.ts",
+          "line": 225,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        }
+      ]
+    },
+    {
+      "name": "teams",
+      "hits": 18,
+      "files": [
+        "src\\pages\\payroll\\PayrollRateManagementPage.tsx",
+        "src\\pages\\system\\SystemManagementPage.tsx",
+        "src\\services\\agentDataService.ts",
+        "src\\services\\manpowerService.ts",
+        "src\\services\\settlementService.ts",
+        "src\\services\\statisticsService.ts",
+        "src\\services\\teamService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\pages\\payroll\\PayrollRateManagementPage.tsx",
+          "line": 266,
+          "snippet": "batch.update(doc(db, 'teams', u.teamId), {"
+        },
+        {
+          "file": "src\\pages\\payroll\\PayrollRateManagementPage.tsx",
+          "line": 382,
+          "snippet": "batch.update(doc(db, 'teams', u.teamId), {"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 366,
+          "snippet": "addToBatch(doc(db, 'teams', item.id), { leaderId: item.targetId });"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 369,
+          "snippet": "addToBatch(doc(db, 'teams', item.id), { companyId: item.targetId });"
+        },
+        {
+          "file": "src\\services\\agentDataService.ts",
+          "line": 140,
+          "snippet": "let q = query(collection(db, 'teams'));"
+        },
+        {
+          "file": "src\\services\\manpowerService.ts",
+          "line": 532,
+          "snippet": "const teamsSnapshot = await getDocs(collection(db, 'teams'));"
+        },
+        {
+          "file": "src\\services\\settlementService.ts",
+          "line": 208,
+          "snippet": "const teamsRef = collection(db, 'teams');"
+        },
+        {
+          "file": "src\\services\\statisticsService.ts",
+          "line": 16,
+          "snippet": "const teamsSnapshot = await getDocs(collection(db, 'teams'));"
+        },
+        {
+          "file": "src\\services\\teamService.ts",
+          "line": 52,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\teamService.ts",
+          "line": 62,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "hits": 11,
+      "files": [
+        "src\\components\\layout\\DashboardLayout.tsx",
+        "src\\components\\layout\\Header.tsx",
+        "src\\components\\layout\\Sidebar.tsx",
+        "src\\pages\\profile\\ProfilePage.tsx",
+        "src\\services\\userService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\components\\layout\\DashboardLayout.tsx",
+          "line": 127,
+          "snippet": "unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnapshot) => {"
+        },
+        {
+          "file": "src\\components\\layout\\Header.tsx",
+          "line": 69,
+          "snippet": "const userRef = doc(db, 'users', currentUser.uid);"
+        },
+        {
+          "file": "src\\components\\layout\\Sidebar.tsx",
+          "line": 111,
+          "snippet": "userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap: any) => {"
+        },
+        {
+          "file": "src\\pages\\profile\\ProfilePage.tsx",
+          "line": 101,
+          "snippet": "const userRef = doc(db, 'users', currentUser.uid);"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 38,
+          "snippet": "const userRef = doc(db, COLLECTION_NAME, user.uid);"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 69,
+          "snippet": "const userRef = doc(db, COLLECTION_NAME, uid);"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 84,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 113,
+          "snippet": "const userRef = doc(db, COLLECTION_NAME, uid);"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 152,
+          "snippet": "const userRef = doc(db, COLLECTION_NAME, uid);"
+        },
+        {
+          "file": "src\\services\\userService.ts",
+          "line": 184,
+          "snippet": "const userRef = doc(db, COLLECTION_NAME, user.uid);"
+        }
+      ]
+    },
+    {
+      "name": "utility_records",
+      "hits": 4,
+      "files": [
+        "src\\services\\accommodationService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 57,
+          "snippet": "collection(db, UTILITY_RECORD_COLLECTION),"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 73,
+          "snippet": "? doc(db, UTILITY_RECORD_COLLECTION, record.id)"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 74,
+          "snippet": ": doc(collection(db, UTILITY_RECORD_COLLECTION)); // New ID if not exists"
+        },
+        {
+          "file": "src\\services\\accommodationService.ts",
+          "line": 104,
+          "snippet": "collection(db, UTILITY_RECORD_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "vehicle_assignments",
+      "hits": 4,
+      "files": [
+        "src\\services\\vehicleService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 99,
+          "snippet": "const assignmentRef = doc(collection(db, ASSIGNMENT_COLLECTION));"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 131,
+          "snippet": "collection(db, ASSIGNMENT_COLLECTION),"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 148,
+          "snippet": "await updateDoc(doc(db, ASSIGNMENT_COLLECTION, activeDoc.id), {"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 213,
+          "snippet": "collection(db, ASSIGNMENT_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "vehicle_billings",
+      "hits": 2,
+      "files": [
+        "src\\services\\vehicleBillingService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\vehicleBillingService.ts",
+          "line": 74,
+          "snippet": "const docRef = doc(db, BILLING_COLLECTION, billing.id);"
+        },
+        {
+          "file": "src\\services\\vehicleBillingService.ts",
+          "line": 86,
+          "snippet": "collection(db, BILLING_COLLECTION),"
+        }
+      ]
+    },
+    {
+      "name": "vehicle_expenses",
+      "hits": 3,
+      "files": [
+        "src\\services\\vehicleService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 172,
+          "snippet": "const docRef = doc(collection(db, EXPENSE_COLLECTION));"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 194,
+          "snippet": "collection(db, EXPENSE_COLLECTION),"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 227,
+          "snippet": "await deleteDoc(doc(db, EXPENSE_COLLECTION, id));"
+        }
+      ]
+    },
+    {
+      "name": "vehicles",
+      "hits": 6,
+      "files": [
+        "src\\services\\vehicleService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 23,
+          "snippet": "const docRef = doc(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 43,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 57,
+          "snippet": "await deleteDoc(doc(db, COLLECTION_NAME, id));"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 67,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME), orderBy('licensePlate', 'asc'));"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 88,
+          "snippet": "const vehicleRef = doc(db, COLLECTION_NAME, vehicleId);"
+        },
+        {
+          "file": "src\\services\\vehicleService.ts",
+          "line": 139,
+          "snippet": "const vehicleRef = doc(db, COLLECTION_NAME, vehicleId);"
+        }
+      ]
+    },
+    {
+      "name": "worker_site_assignments",
+      "hits": 7,
+      "files": [
+        "src\\services\\workerSiteAssignmentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 47,
+          "snippet": "const docRef = await addDoc(collection(db, COLLECTION_NAME), {"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 64,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 91,
+          "snippet": "const docRef = doc(db, COLLECTION_NAME, id);"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 105,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 115,
+          "snippet": "const q = query(collection(db, COLLECTION_NAME));"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 134,
+          "snippet": "batch.update(doc(db, COLLECTION_NAME, item.id), {"
+        },
+        {
+          "file": "src\\services\\workerSiteAssignmentService.ts",
+          "line": 151,
+          "snippet": "collection(db, COLLECTION_NAME),"
+        }
+      ]
+    },
+    {
+      "name": "workers",
+      "hits": 42,
+      "files": [
+        "scripts\\updateSalaryModel.js",
+        "src\\pages\\admin\\AdminDataIntegrityPage.tsx",
+        "src\\pages\\admin\\SalaryModelUpdater.tsx",
+        "src\\pages\\hr\\PositionManager.tsx",
+        "src\\pages\\payroll\\PayrollRateManagementPage.tsx",
+        "src\\pages\\system\\SystemManagementPage.tsx",
+        "src\\services\\agentDataService.ts",
+        "src\\services\\manpowerService.ts",
+        "src\\services\\positionService.ts",
+        "src\\services\\settlementService.ts",
+        "src\\services\\signatureService.ts",
+        "src\\services\\userService.ts",
+        "src\\services\\workerSiteAssignmentService.ts"
+      ],
+      "samples": [
+        {
+          "file": "src\\pages\\admin\\AdminDataIntegrityPage.tsx",
+          "line": 195,
+          "snippet": "const workerRef = doc(db, 'workers', issue.workerId);"
+        },
+        {
+          "file": "src\\pages\\admin\\SalaryModelUpdater.tsx",
+          "line": 200,
+          "snippet": "const workersRef = collection(db, 'workers');"
+        },
+        {
+          "file": "src\\pages\\admin\\SalaryModelUpdater.tsx",
+          "line": 215,
+          "snippet": "batch.update(doc(db, 'workers', workerDoc.id), { salaryModel: correctModel });"
+        },
+        {
+          "file": "src\\pages\\hr\\PositionManager.tsx",
+          "line": 95,
+          "snippet": "query(collection(db, 'workers'), orderBy('name', 'asc')),"
+        },
+        {
+          "file": "src\\pages\\payroll\\PayrollRateManagementPage.tsx",
+          "line": 156,
+          "snippet": "batch.update(doc(db, 'workers', u.workerId), {"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 355,
+          "snippet": "addToBatch(doc(db, 'workers', item.id), { teamId: item.targetId });"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 358,
+          "snippet": "addToBatch(doc(db, 'workers', item.id), { companyId: item.targetId });"
+        },
+        {
+          "file": "src\\pages\\system\\SystemManagementPage.tsx",
+          "line": 361,
+          "snippet": "addToBatch(doc(db, 'workers', item.id), { role: item.targetRole });"
+        },
+        {
+          "file": "src\\services\\agentDataService.ts",
+          "line": 71,
+          "snippet": "let q = query(collection(db, 'workers'));"
+        },
+        {
+          "file": "src\\services\\manpowerService.ts",
+          "line": 65,
+          "snippet": "let q = query(collection(db, COLLECTION_NAME), orderBy('createdAt', 'desc'), limit(limitCount));"
+        }
+      ]
+    }
+  ]
+}

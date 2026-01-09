@@ -1,0 +1,323 @@
+# Create Company
+mutation CreateCompany($name: String!, $code: String!, $legacyId: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  company_insert(data: {
+    legacyId: $legacyId,
+    name: $name,
+    code: $code,
+    businessNumber: $businessNumber,
+    ceoName: $ceoName,
+    type: $type,
+    status: $status
+  })
+}
+
+# Create Team
+mutation CreateTeam($name: String!, $legacyId: String, $companyId: UUID, $leaderId: UUID, $type: String, $status: Status, $totalManDay: Float) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  team_insert(data: {
+    legacyId: $legacyId,
+    name: $name,
+    companyId: $companyId,
+    leaderId: $leaderId,
+    type: $type,
+    status: $status,
+    totalManDay: $totalManDay
+  })
+}
+
+# Create Worker
+mutation CreateWorker($name: String!, $legacyId: String, $teamId: UUID, $role: String, $payType: String, $unitPrice: Float, $residentNumber: String, $phone: String, $address: String, $bankAccount: String, $bankName: String, $isActive: Boolean, $joinDate: Date) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  worker_insert(data: {
+    legacyId: $legacyId,
+    name: $name,
+    teamId: $teamId,
+    role: $role,
+    payType: $payType,
+    unitPrice: $unitPrice,
+    residentNumber: $residentNumber,
+    phone: $phone,
+    address: $address,
+    bankAccount: $bankAccount,
+    bankName: $bankName,
+    isActive: $isActive,
+    joinDate: $joinDate
+  })
+}
+
+# Create Site
+mutation CreateSite($name: String!, $legacyId: String, $code: String, $address: String, $startDate: Date, $endDate: Date, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  site_insert(data: {
+    legacyId: $legacyId,
+    name: $name,
+    code: $code,
+    address: $address,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status
+  })
+}
+
+# Create Daily Report
+mutation CreateDailyReport($date: Date!, $legacyId: String, $teamId: UUID!, $siteId: UUID, $siteName: String, $status: String, $totalManDay: Float, $totalAmount: Float, $weather: String, $writerUid: String, $companyName: String, $responsibleTeamName: String, $responsibleTeamLegacyId: String, $workContent: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReport_insert(data: {
+    legacyId: $legacyId,
+    date: $date,
+    teamId: $teamId,
+    siteId: $siteId,
+    siteName: $siteName,
+    status: $status,
+    writerUid: $writerUid,
+    companyName: $companyName,
+    responsibleTeamName: $responsibleTeamName,
+    responsibleTeamLegacyId: $responsibleTeamLegacyId,
+    totalManDay: $totalManDay,
+    totalAmount: $totalAmount,
+    weather: $weather,
+    workContent: $workContent
+  })
+}
+
+# Create Daily Report Worker
+mutation CreateDailyReportWorker($dailyReportId: UUID!, $workerId: UUID!, $gongsu: Float!, $unitPrice: Float!, $amount: Float!, $workDescription: String, $legacyWorkerId: String, $legacyTeamId: String, $workerName: String, $role: String, $status: String, $manDay: Float, $payType: String, $salaryModel: String, $workContent: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReportWorker_insert(data: {
+    dailyReportId: $dailyReportId,
+    workerId: $workerId,
+    gongsu: $gongsu,
+    unitPrice: $unitPrice,
+    amount: $amount,
+    workDescription: $workDescription,
+    legacyWorkerId: $legacyWorkerId,
+    legacyTeamId: $legacyTeamId,
+    workerName: $workerName,
+    role: $role,
+    status: $status,
+    manDay: $manDay,
+    payType: $payType,
+    salaryModel: $salaryModel,
+    workContent: $workContent
+  })
+}
+
+mutation UpdateDailyReportWorker($dailyReportId: UUID!, $workerId: UUID!, $gongsu: Float, $unitPrice: Float, $amount: Float, $workDescription: String, $legacyWorkerId: String, $legacyTeamId: String, $workerName: String, $role: String, $status: String, $manDay: Float, $payType: String, $salaryModel: String, $workContent: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReportWorker_update(key: { dailyReportId: $dailyReportId, workerId: $workerId }, data: {
+    gongsu: $gongsu,
+    unitPrice: $unitPrice,
+    amount: $amount,
+    workDescription: $workDescription,
+    legacyWorkerId: $legacyWorkerId,
+    legacyTeamId: $legacyTeamId,
+    workerName: $workerName,
+    role: $role,
+    status: $status,
+    manDay: $manDay,
+    payType: $payType,
+    salaryModel: $salaryModel,
+    workContent: $workContent
+  })
+}
+
+mutation DeleteDailyReportWorker($dailyReportId: UUID!, $workerId: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReportWorker_delete(key: { dailyReportId: $dailyReportId, workerId: $workerId })
+}
+
+# Create Position
+mutation CreatePosition($name: String!, $legacyId: String, $rank: Int, $color: String, $icon: String, $isDefault: Boolean) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  position_insert(data: {
+    legacyId: $legacyId,
+    name: $name,
+    rank: $rank,
+    color: $color,
+    icon: $icon,
+    isDefault: $isDefault
+  })
+}
+
+mutation CreateAuditLog($id: String!, $action: String, $category: String, $actorId: String, $actorEmail: String, $targetId: String, $details: String, $timestamp: Timestamp) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  auditLog_insert(data: {
+    id: $id,
+    action: $action,
+    category: $category,
+    actorId: $actorId,
+    actorEmail: $actorEmail,
+    targetId: $targetId,
+    details: $details,
+    timestamp: $timestamp
+  })
+}
+
+mutation CreateAgent($id: String!, $name: String, $type: String, $role: String, $capabilities: String, $systemPrompt: String, $status: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  agent_insert(data: {
+    id: $id,
+    name: $name,
+    type: $type,
+    role: $role,
+    capabilities: $capabilities,
+    systemPrompt: $systemPrompt,
+    status: $status
+  })
+}
+
+mutation CreateAgentConversation($id: String!, $mainAgentId: String, $userId: String, $messages: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  agentConversation_insert(data: {
+    id: $id,
+    mainAgentId: $mainAgentId,
+    userId: $userId,
+    messages: $messages
+  })
+}
+
+mutation CreateSetting($id: String!, $data: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  setting_insert(data: { id: $id, data: $data })
+}
+
+mutation UpdateSetting($id: String!, $data: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  setting_update(id: $id, data: { data: $data })
+}
+
+mutation CreateSystemConfig($id: String!, $data: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  systemConfig_insert(data: { id: $id, data: $data })
+}
+
+mutation UpdateSystemConfig($id: String!, $data: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  systemConfig_update(id: $id, data: { data: $data })
+}
+
+mutation DeletePosition($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  position_delete(id: $id)
+}
+
+# --- Updates ---
+
+mutation UpdateCompany($id: UUID!, $name: String, $code: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  company_update(id: $id, data: {
+    name: $name,
+    code: $code,
+    businessNumber: $businessNumber,
+    ceoName: $ceoName,
+    type: $type,
+    status: $status
+  })
+}
+
+mutation DeleteCompany($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  company_delete(id: $id)
+}
+
+mutation UpdateTeam($id: UUID!, $name: String, $companyId: UUID, $leaderId: UUID, $type: String, $status: Status, $totalManDay: Float) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  team_update(id: $id, data: {
+    name: $name,
+    companyId: $companyId,
+    leaderId: $leaderId,
+    type: $type,
+    status: $status,
+    totalManDay: $totalManDay
+  })
+}
+
+mutation DeleteTeam($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  team_delete(id: $id)
+}
+
+mutation UpdateWorker($id: UUID!, $name: String, $teamId: UUID, $role: String, $payType: String, $unitPrice: Float, $phone: String, $residentNumber: String, $address: String, $isActive: Boolean) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  worker_update(id: $id, data: {
+    name: $name,
+    teamId: $teamId,
+    role: $role,
+    payType: $payType,
+    unitPrice: $unitPrice,
+    phone: $phone,
+    residentNumber: $residentNumber,
+    address: $address,
+    isActive: $isActive
+  })
+}
+
+mutation DeleteWorker($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  worker_delete(id: $id)
+}
+
+mutation UpdateSite($id: UUID!, $name: String, $code: String, $address: String, $startDate: Date, $endDate: Date, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  site_update(id: $id, data: {
+    name: $name,
+    code: $code,
+    address: $address,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status
+  })
+}
+
+mutation DeleteSite($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  site_delete(id: $id)
+}
+
+mutation UpdateDailyReport($id: UUID!, $date: Date, $teamId: UUID, $siteId: UUID, $siteName: String, $status: String, $totalManDay: Float, $totalAmount: Float, $weather: String, $writerUid: String, $companyName: String, $responsibleTeamName: String, $responsibleTeamLegacyId: String, $workContent: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReport_update(id: $id, data: {
+    date: $date,
+    teamId: $teamId,
+    siteId: $siteId,
+    siteName: $siteName,
+    status: $status,
+    writerUid: $writerUid,
+    companyName: $companyName,
+    responsibleTeamName: $responsibleTeamName,
+    responsibleTeamLegacyId: $responsibleTeamLegacyId,
+    totalManDay: $totalManDay,
+    totalAmount: $totalAmount,
+    weather: $weather,
+    workContent: $workContent
+  })
+}
+
+mutation DeleteDailyReport($id: UUID!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  dailyReport_delete(id: $id)
+}
+
+mutation CreateAppUser($id: String!, $uid: String, $email: String, $displayName: String, $photoUrl: String, $linkedWorkerIds: String, $role: String, $lastLogin: Timestamp) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  appUser_insert(data: {
+    id: $id,
+    uid: $uid,
+    email: $email,
+    displayName: $displayName,
+    photoUrl: $photoUrl,
+    linkedWorkerIds: $linkedWorkerIds,
+    role: $role,
+    lastLogin: $lastLogin
+  })
+}
+
+mutation UpdateAppUser($id: String!, $uid: String, $email: String, $displayName: String, $photoUrl: String, $linkedWorkerIds: String, $role: String, $lastLogin: Timestamp) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  appUser_update(id: $id, data: {
+    uid: $uid,
+    email: $email,
+    displayName: $displayName,
+    photoUrl: $photoUrl,
+    linkedWorkerIds: $linkedWorkerIds,
+    role: $role,
+    lastLogin: $lastLogin
+  })
+}
+
+mutation DeleteAppUser($id: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  appUser_delete(id: $id)
+}
+
+mutation CreateMenuConfig($id: String!, $config: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  menuConfig_insert(data: { id: $id, config: $config })
+}
+
+mutation UpdateMenuConfig($id: String!, $config: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  menuConfig_update(id: $id, data: { config: $config })
+}
+
+mutation DeleteMenuConfig($id: String!) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  menuConfig_delete(id: $id)
+}
+
+mutation CreateSystemLog($category: String!, $action: String!, $userEmail: String, $details: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+  systemLog_insert(data: {
+    category: $category,
+    action: $action,
+    userEmail: $userEmail,
+    details: $details
+  })
+}

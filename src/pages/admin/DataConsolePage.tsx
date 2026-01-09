@@ -12,8 +12,19 @@ import {
     serverTimestamp,
     updateDoc
 } from 'firebase/firestore';
+import { getDataConnect } from 'firebase/data-connect';
 import { db } from '../../config/firebase';
 import { useAuth } from '../../contexts/AuthContext';
+import {
+    connectorConfig,
+    listCompanies,
+    listTeams,
+    listWorkers,
+    listSites,
+    listDailyReports,
+    listDailyReportWorkers,
+} from '../../dataconnect-generated';
+import app from '../../config/firebase';
 
 // AG Grid Imports (v34+)
 import { AgGridReact } from 'ag-grid-react';
@@ -95,7 +106,7 @@ const COLLECTION_GROUPS: CollectionGroup[] = [
     {
         groupName: '업무 데이터 (Work)',
         collections: [
-            { id: 'daily_reports', name: '작업 일보 (Daily Reports)', icon: faFileInvoice, description: '일일 출력 및 작업 내용' },
+            { id: 'daily_reports', name: '작업일보 (Daily Reports)', icon: faFileInvoice, description: '일일 출력 및 작업 내용' },
             { id: 'accommodations', name: '숙소 (Accommodations)', icon: faBed, description: '숙소 계약 및 정보' },
             { id: 'utility_records', name: '공과금 (Utilities)', icon: faBolt, description: '숙소 공과금 및 관리비' },
         ]
@@ -107,6 +118,20 @@ const COLLECTION_GROUPS: CollectionGroup[] = [
             { id: 'positions', name: '직책/직급 (Positions)', icon: faUserShield, description: '인사 관리 직책' },
             { id: 'system_config', name: '시스템 설정 (Config)', icon: faCog, description: '권한 및 전역 설정' },
             { id: 'audit_logs', name: '활동 로그 (Audit)', icon: faDatabase, description: '시스템 주요 활동 기록', hidden: false },
+        ]
+    }
+];
+
+const DATA_CONNECT_COLLECTION_GROUPS: CollectionGroup[] = [
+    {
+        groupName: 'Data Connect (Read-only)',
+        collections: [
+            { id: 'workers', name: '근로자 (Workers)', icon: faHardHat, description: '현장 투입 근로자 정보 (Postgres/Data Connect)' },
+            { id: 'teams', name: '팀 (Teams)', icon: faUsers, description: '작업 팀 및 반장 정보 (Postgres/Data Connect)' },
+            { id: 'sites', name: '현장 (Sites)', icon: faBuilding, description: '건설 현장 및 프로젝트 (Postgres/Data Connect)' },
+            { id: 'companies', name: '회사 (Companies)', icon: faBuilding, description: '시공사 및 협력사 (Postgres/Data Connect)' },
+            { id: 'daily_reports', name: '작업일보 (Daily Reports)', icon: faFileInvoice, description: '일일 출력 및 작업 내용 (Postgres/Data Connect)' },
+            { id: 'daily_report_workers', name: '작업일보-인력(행) (Daily Report Workers)', icon: faTable, description: '일보별 투입 인력 행 (Postgres/Data Connect)' },
         ]
     }
 ];
@@ -145,6 +170,7 @@ const TEMPLATES: Record<string, object> = {
 const DataConsolePage: React.FC = () => {
     // State
     const [selectedCollectionId, setSelectedCollectionId] = useState<string>('workers');
+    const [dataSource, setDataSource] = useState<'firestore' | 'dataconnect'>('firestore');
     const [rowData, setRowData] = useState<any[]>([]);
     const [columnDefs, setColumnDefs] = useState<ColDef[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
@@ -158,33 +184,93 @@ const DataConsolePage: React.FC = () => {
     const [jsonContent, setJsonContent] = useState('');
     const [jsonError, setJsonError] = useState<string | null>(null);
 
+    const isReadOnly = dataSource === 'dataconnect';
+
+    const canUseDataConnectForCollection = useMemo(() => {
+        return ['companies', 'teams', 'workers', 'sites', 'daily_reports', 'daily_report_workers'].includes(selectedCollectionId);
+    }, [selectedCollectionId]);
+
+    const sidebarGroups = useMemo(() => {
+        return dataSource === 'dataconnect' ? DATA_CONNECT_COLLECTION_GROUPS : COLLECTION_GROUPS;
+    }, [dataSource]);
+
+    useEffect(() => {
+        if (dataSource !== 'dataconnect') return;
+        if (canUseDataConnectForCollection) return;
+        setSelectedCollectionId('workers');
+    }, [dataSource, canUseDataConnectForCollection]);
+
+    const getDc = useCallback(() => {
+        return getDataConnect(app, connectorConfig);
+    }, []);
+
     // Helper: Determine current collection info
     const currentCollection = useMemo(() => {
-        for (const group of COLLECTION_GROUPS) {
+        for (const group of sidebarGroups) {
             const found = group.collections.find(c => c.id === selectedCollectionId);
             if (found) return found;
         }
         return { id: selectedCollectionId, name: selectedCollectionId, icon: faDatabase, description: '' };
-    }, [selectedCollectionId]);
+    }, [selectedCollectionId, sidebarGroups]);
 
     // Data Fetching
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            // Default Limit 1000 for performance, Order by updatedAt desc if possible, else default
-            const q = query(collection(db, selectedCollectionId), limit(1000));
-            const snapshot = await getDocs(q);
+            if (dataSource === 'firestore') {
+                // Default Limit 1000 for performance
+                const q = query(collection(db, selectedCollectionId), limit(1000));
+                const snapshot = await getDocs(q);
 
-            const docs = snapshot.docs.map(doc => {
-                const data = doc.data();
-                return {
-                    id: doc.id, // Ensure ID is present
-                    ...data
-                };
-            });
+                const docs = snapshot.docs.map(doc => {
+                    const data = doc.data();
+                    return {
+                        id: doc.id,
+                        ...data
+                    };
+                });
+
+                setRowData(docs);
+                generateColumns(docs, false);
+                return;
+            }
+
+            if (!canUseDataConnectForCollection) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Data Connect 미지원 컬렉션',
+                    text: `현재 '${selectedCollectionId}'는 Data Connect 조회를 아직 지원하지 않습니다.`
+                });
+                setRowData([]);
+                setColumnDefs([]);
+                return;
+            }
+
+            const dc = getDc();
+            let docs: any[] = [];
+
+            if (selectedCollectionId === 'companies') {
+                const response = await listCompanies(dc);
+                docs = (response as any)?.data?.companies ?? [];
+            } else if (selectedCollectionId === 'teams') {
+                const response = await listTeams(dc);
+                docs = (response as any)?.data?.teams ?? [];
+            } else if (selectedCollectionId === 'workers') {
+                const response = await listWorkers(dc);
+                docs = (response as any)?.data?.workers ?? [];
+            } else if (selectedCollectionId === 'sites') {
+                const response = await listSites(dc);
+                docs = (response as any)?.data?.sites ?? [];
+            } else if (selectedCollectionId === 'daily_reports') {
+                const response = await listDailyReports(dc);
+                docs = (response as any)?.data?.dailyReports ?? [];
+            } else if (selectedCollectionId === 'daily_report_workers') {
+                const response = await listDailyReportWorkers(dc);
+                docs = (response as any)?.data?.dailyReportWorkers ?? [];
+            }
 
             setRowData(docs);
-            generateColumns(docs);
+            generateColumns(docs, true);
         } catch (error: any) {
             console.error("Fetch error:", error);
             Swal.fire({
@@ -197,7 +283,7 @@ const DataConsolePage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [selectedCollectionId]);
+    }, [selectedCollectionId, dataSource, canUseDataConnectForCollection, getDc]);
 
     useEffect(() => {
         fetchData();
@@ -206,6 +292,7 @@ const DataConsolePage: React.FC = () => {
 
     // Inline Edit Handler
     const onCellValueChanged = async (params: CellValueChangedEvent) => {
+        if (isReadOnly) return;
         const { data, colDef, newValue, oldValue } = params;
         if (newValue === oldValue) return;
 
@@ -338,7 +425,7 @@ const DataConsolePage: React.FC = () => {
     };
 
     // Column Generation Logic
-    const generateColumns = (docs: any[]) => {
+    const generateColumns = (docs: any[], readOnly: boolean) => {
         if (docs.length === 0) {
             setColumnDefs([{ field: 'id', headerName: '고유 ID (ID)', flex: 1 }]);
             return;
@@ -363,11 +450,12 @@ const DataConsolePage: React.FC = () => {
             let cellEditor = 'agTextCellEditor';
             let cellEditorParams = {};
 
-            if (key === 'id' || key === 'createdAt' || key === 'updatedAt') {
-                // Read-only system fields (keep as is)
-            } else {
-                // Default Editable
-                editable = true;
+            if (!readOnly) {
+                if (key === 'id' || key === 'createdAt' || key === 'updatedAt') {
+                    // Read-only system fields
+                } else {
+                    editable = true;
+                }
             }
 
             if (key === 'id') {
@@ -473,39 +561,42 @@ const DataConsolePage: React.FC = () => {
             } as ColDef;
         });
 
-        // Add Actions Column
-        defs.unshift({
-            headerName: 'Actions',
-            field: 'actions',
-            pinned: 'right',
-            width: 100,
-            sortable: false,
-            filter: false,
-            cellRenderer: (params: ICellRendererParams) => (
-                <div className="flex items-center gap-2 justify-center h-full">
-                    <button
-                        onClick={() => handleEditClick(params.data)}
-                        className="text-indigo-600 hover:text-indigo-800 transition-colors"
-                        title="Edit"
-                    >
-                        <FontAwesomeIcon icon={faEdit} />
-                    </button>
-                    <button
-                        onClick={() => handleDeleteClick(params.data.id)}
-                        className="text-red-500 hover:text-red-700 transition-colors"
-                        title="Delete"
-                    >
-                        <FontAwesomeIcon icon={faTrash} />
-                    </button>
-                </div>
-            )
-        });
+        if (!readOnly) {
+            // Add Actions Column
+            defs.unshift({
+                headerName: 'Actions',
+                field: 'actions',
+                pinned: 'right',
+                width: 100,
+                sortable: false,
+                filter: false,
+                cellRenderer: (params: ICellRendererParams) => (
+                    <div className="flex items-center gap-2 justify-center h-full">
+                        <button
+                            onClick={() => handleEditClick(params.data)}
+                            className="text-indigo-600 hover:text-indigo-800 transition-colors"
+                            title="Edit"
+                        >
+                            <FontAwesomeIcon icon={faEdit} />
+                        </button>
+                        <button
+                            onClick={() => handleDeleteClick(params.data.id)}
+                            className="text-red-500 hover:text-red-700 transition-colors"
+                            title="Delete"
+                        >
+                            <FontAwesomeIcon icon={faTrash} />
+                        </button>
+                    </div>
+                )
+            });
+        }
 
         setColumnDefs(defs);
     };
 
     // Actions
     const handleEditClick = (data: any) => {
+        if (isReadOnly) return;
         const { id, ...editableData } = data;
         // Convert Timestamps to string for editing
         const replacer = (key: string, value: any) => {
@@ -523,6 +614,7 @@ const DataConsolePage: React.FC = () => {
     };
 
     const handleCreateClick = () => {
+        if (isReadOnly) return;
         const template = TEMPLATES[selectedCollectionId] || {};
         setCurrentDocId('');
         setJsonContent(JSON.stringify(template, null, 2));
@@ -532,6 +624,7 @@ const DataConsolePage: React.FC = () => {
     };
 
     const handleDeleteClick = async (docId: string) => {
+        if (isReadOnly) return;
         const result = await Swal.fire({
             title: '정말 삭제하시겠습니까?',
             text: `ID: ${docId} 문서를 삭제합니다. 복구할 수 없습니다.`,
@@ -555,6 +648,7 @@ const DataConsolePage: React.FC = () => {
     };
 
     const handleSave = async () => {
+        if (isReadOnly) return;
         try {
             // Validate JSON
             let parsedData;
@@ -620,14 +714,29 @@ const DataConsolePage: React.FC = () => {
     // --- Stats Calculation ---
     const stats = useMemo(() => {
         const totalDocs = rowData.length;
-        const activeDocs = rowData.filter(d => d.isActive !== false && d.status !== 'completed').length;
+
+        const activeDocs = rowData.filter(d => {
+            if (typeof d?.isActive === 'boolean') return d.isActive !== false;
+            const status = typeof d?.status === 'string' ? d.status : null;
+            if (!status) return true;
+            return status.toLowerCase() !== 'completed';
+        }).length;
         // Calculate "Recent" (last 24h)
         const now = new Date();
         const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         const recentDocs = rowData.filter(d => {
-            if (!d.updatedAt) return false;
-            const date = d.updatedAt instanceof Timestamp ? d.updatedAt.toDate() : new Date(d.updatedAt.seconds * 1000);
-            return date > oneDayAgo;
+            const raw = d.updatedAt ?? d.createdAt;
+            if (!raw) return false;
+            try {
+                const date = raw instanceof Timestamp
+                    ? raw.toDate()
+                    : (typeof raw === 'string'
+                        ? new Date(raw)
+                        : new Date(raw.seconds * 1000));
+                return date > oneDayAgo;
+            } catch {
+                return false;
+            }
         }).length;
 
         return { totalDocs, activeDocs, recentDocs };
@@ -651,7 +760,7 @@ const DataConsolePage: React.FC = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 py-2 space-y-8 custom-scrollbar">
-                    {COLLECTION_GROUPS.map((group) => (
+                    {sidebarGroups.map((group) => (
                         <div key={group.groupName}>
                             <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4 px-2 flex items-center gap-2">
                                 {group.groupName}
@@ -706,6 +815,11 @@ const DataConsolePage: React.FC = () => {
                                 <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-mono font-normal">
                                     {currentCollection.id}
                                 </span>
+                                {dataSource === 'dataconnect' && (
+                                    <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/25 text-emerald-200 text-xs font-mono font-normal">
+                                        Data Connect (Read-only)
+                                    </span>
+                                )}
                             </h2>
                             <p className="text-slate-400 text-sm max-w-2xl">{currentCollection.description}</p>
                         </div>
@@ -730,6 +844,29 @@ const DataConsolePage: React.FC = () => {
 
                     {/* Toolbar */}
                     <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setDataSource('firestore')}
+                                className={`h-11 px-4 rounded-xl text-sm font-bold border transition-all shadow-lg backdrop-blur-md ${dataSource === 'firestore'
+                                    ? 'bg-indigo-600 border-indigo-500/40 text-white'
+                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                                    }`}
+                                title="Firestore"
+                            >
+                                Firestore
+                            </button>
+                            <button
+                                onClick={() => setDataSource('dataconnect')}
+                                className={`h-11 px-4 rounded-xl text-sm font-bold border transition-all shadow-lg backdrop-blur-md ${dataSource === 'dataconnect'
+                                    ? 'bg-emerald-600 border-emerald-500/40 text-white'
+                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
+                                    }`}
+                                title="Data Connect (Read-only)"
+                            >
+                                Data Connect
+                            </button>
+                        </div>
+
                         <div className="relative group flex-1 max-w-md">
                             <input
                                 type="text"
@@ -753,6 +890,7 @@ const DataConsolePage: React.FC = () => {
 
                         <button
                             onClick={handleCreateClick}
+                            disabled={isReadOnly}
                             className="h-11 px-6 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-900/30 flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
                         >
                             <FontAwesomeIcon icon={faPlus} />
@@ -790,7 +928,7 @@ const DataConsolePage: React.FC = () => {
                                 rowData={rowData}
                                 columnDefs={columnDefs}
                                 onGridReady={onGridReady}
-                                onCellValueChanged={onCellValueChanged}
+                                onCellValueChanged={isReadOnly ? undefined : onCellValueChanged}
                                 defaultColDef={{
                                     sortable: true,
                                     filter: true,
@@ -809,14 +947,18 @@ const DataConsolePage: React.FC = () => {
                     </div>
 
                     <div className="mt-3 flex justify-between items-center text-xs text-slate-500 px-2 font-mono">
-                        <span>Status: <span className="text-emerald-500">Connected</span></span>
+                        <span>
+                            Status:{' '}
+                            <span className="text-emerald-500">Connected</span>
+                            <span className="text-slate-500"> ({dataSource === 'dataconnect' ? 'Data Connect (Read-only)' : 'Firestore'})</span>
+                        </span>
                         <span>Time: {new Date().toLocaleTimeString()}</span>
                     </div>
                 </div>
             </div>
 
             {/* 3. JSON Editor Modal */}
-            {isModalOpen && (
+            {isModalOpen && !isReadOnly && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="bg-white w-full max-w-4xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 ring-1 ring-slate-900/5">
                         {/* Modal Header */}

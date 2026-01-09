@@ -103,7 +103,7 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
         return Object.entries(MENU_PATHS)
             .map(([name, path]) => ({ name, path }))
             .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()));
-    }, [searchTerm]);
+    }, [searchTerm, Object.keys(MENU_PATHS).length]);
 
     return (
         <div className={`relative bg-gray-800 border-r border-gray-700 shadow-xl transition-all duration-300 ease-in-out flex flex-col ${isOpen ? 'w-80' : 'w-0'}`}>

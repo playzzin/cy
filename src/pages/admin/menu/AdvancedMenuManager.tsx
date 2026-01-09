@@ -113,6 +113,38 @@ const AdvancedMenuManager: React.FC = () => {
 
     const activeItem = selectedItems.length === 1 ? selectedItems[0] : undefined;
 
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [saveError, setSaveError] = useState<string>('');
+
+    const formatSaveError = useCallback((err: any): string => {
+        if (!err) return 'Unknown error';
+        if (Array.isArray(err.issues)) {
+            const details = err.issues
+                .map((i: any) => `${Array.isArray(i.path) ? i.path.join('.') : ''}: ${i.message}`)
+                .join('\n');
+            return `${err.message || 'Invalid Menu Configuration'}\n${details}`.trim();
+        }
+        if (err.code) {
+            return `${String(err.code)}: ${String(err.message || '')}`.trim();
+        }
+        return String(err.message || err);
+    }, []);
+
+    const persistMenuData = useCallback((data: SiteDataType) => {
+        setSaveStatus('saving');
+        setSaveError('');
+        menuServiceV11.saveMenuConfig(data)
+            .then(() => {
+                setSaveStatus('saved');
+                setSaveError('');
+            })
+            .catch((err) => {
+                console.error('[MenuManager] saveMenuConfig failed:', err);
+                setSaveStatus('error');
+                setSaveError(formatSaveError(err));
+            });
+    }, [formatSaveError]);
+
     // Actions
     const handleNodeSelect = useCallback((id: string, multiSelect: boolean = false) => {
         if (multiSelect) {
@@ -150,8 +182,8 @@ const AdvancedMenuManager: React.FC = () => {
         const newData = { ...menuData };
         newData[selectedSite].menu = currentMenu;
         setMenuData(newData);
-        menuServiceV11.saveMenuConfig(newData);
-    }, [menuData, selectedSite]);
+        persistMenuData(newData);
+    }, [menuData, selectedSite, persistMenuData]);
 
     const handleOutdent = useCallback((id: string) => {
         if (!menuData) return;
@@ -173,8 +205,8 @@ const AdvancedMenuManager: React.FC = () => {
         const newData = { ...menuData };
         newData[selectedSite].menu = currentMenu;
         setMenuData(newData);
-        menuServiceV11.saveMenuConfig(newData);
-    }, [menuData, selectedSite]);
+        persistMenuData(newData);
+    }, [menuData, selectedSite, persistMenuData]);
 
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
@@ -218,8 +250,6 @@ const AdvancedMenuManager: React.FC = () => {
         past: [],
         future: []
     });
-
-    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
     // --- Effects ---
     useEffect(() => {
@@ -297,8 +327,8 @@ const AdvancedMenuManager: React.FC = () => {
         }));
 
         setMenuData(newData);
-        debouncedSave(newData);
-    }, [menuData]);
+        persistMenuData(newData);
+    }, [menuData, persistMenuData]);
 
     const handleUndo = () => {
         if (history.past.length === 0 || !menuData) return;
@@ -310,7 +340,7 @@ const AdvancedMenuManager: React.FC = () => {
             future: [menuData, ...history.future]
         });
         setMenuData(previous);
-        debouncedSave(previous);
+        persistMenuData(previous);
     };
 
     const handleRedo = () => {
@@ -323,7 +353,7 @@ const AdvancedMenuManager: React.FC = () => {
             future: newFuture
         });
         setMenuData(next);
-        debouncedSave(next);
+        persistMenuData(next);
     };
 
     const handleResetDefaults = () => {
@@ -337,7 +367,7 @@ const AdvancedMenuManager: React.FC = () => {
             }
             // Use defaults
             setMenuData(JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG)));
-            debouncedSave(DEFAULT_MENU_CONFIG);
+            persistMenuData(DEFAULT_MENU_CONFIG);
         }
     };
 
@@ -360,14 +390,6 @@ const AdvancedMenuManager: React.FC = () => {
             }
         }
     };
-
-    // Auto-save logic
-    const debouncedSave = useCallback((data: SiteDataType) => {
-        setSaveStatus('saving');
-        menuServiceV11.saveMenuConfig(data)
-            .then(() => setSaveStatus('saved'))
-            .catch(() => setSaveStatus('error'));
-    }, []);
 
     // --- DnD Sensors ---
     const sensors = useSensors(
@@ -524,7 +546,14 @@ const AdvancedMenuManager: React.FC = () => {
                     <div className="flex items-center gap-2 min-w-[100px] justify-end">
                         {saveStatus === 'saving' && <span className="text-yellow-400 text-sm animate-pulse flex items-center gap-1.5"><FontAwesomeIcon icon={faSave} /> 저장 중...</span>}
                         {saveStatus === 'saved' && <span className="text-green-400 text-sm flex items-center gap-1.5"><FontAwesomeIcon icon={faCheckCircle} /> 저장됨</span>}
-                        {saveStatus === 'error' && <span className="text-red-400 text-sm flex items-center gap-1.5"><FontAwesomeIcon icon={faExclamationTriangle} /> 오류 발생</span>}
+                        {saveStatus === 'error' && (
+                            <span
+                                className="text-red-400 text-sm flex items-center gap-1.5 cursor-help"
+                                title={saveError || '저장 오류'}
+                            >
+                                <FontAwesomeIcon icon={faExclamationTriangle} /> 오류 발생
+                            </span>
+                        )}
                     </div>
                 </div>
             </header>

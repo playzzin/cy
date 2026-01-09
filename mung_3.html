@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>일용노무비 지급명세서 (전체현장 및 기간 선택)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+            background-color: #ffffff;
+            font-size: 11px;
+        }
+        
+        .custom-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 2px solid #000;
+            table-layout: fixed;
+        }
+        
+        .custom-table th, .custom-table td {
+            border: 1px solid #000;
+            padding: 2px;
+            text-align: center;
+            vertical-align: middle;
+            height: 28px;
+            overflow: hidden;
+        }
+
+        /* 입력창 스타일 */
+        input[type="text"], input[type="number"], input[type="month"] {
+            width: 100%;
+            border: none;
+            background: transparent;
+            text-align: center;
+            outline: none;
+            font-family: inherit;
+            font-size: inherit;
+        }
+        input:focus { background-color: #f0f9ff; }
+        .text-left-input { text-align: left; padding-left: 4px; }
+
+        /* 제어바 전용 입력창 */
+        .control-input {
+            background-color: white !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 4px;
+            padding: 2px 8px;
+            height: 30px;
+        }
+
+        /* 공수 입력창 */
+        .day-input { font-size: 10px; color: #333; }
+
+        /* 헤더 컬러 */
+        .header-yellow { background-color: #fffacd; font-weight: bold; }
+        .header-blue { background-color: #008080; color: white; font-size: 10px; }
+        .header-red { background-color: #a52a2a; color: white; font-size: 10px; }
+        .total-row { background-color: #f08080; font-weight: bold; }
+
+        /* 위임 강조 */
+        .cell-delegate { background-color: #ffff00 !important; }
+        .cell-delegate input { font-weight: bold; color: #b45309; }
+
+        /* 열 숨김 관련 스타일 */
+        .bank-col { display: table-cell; }
+        .hide-bank-col .bank-col { display: none !important; }
+        
+        /* 제어 UI 표시 제어 */
+        .bank-info-container { display: flex; flex-direction: column; gap: 2px; }
+        .delegation-ui { display: none; font-size: 9px; justify-content: center; align-items: center; gap: 4px; margin-bottom: 2px; border-bottom: 1px solid #eee; padding-bottom: 2px; }
+        .show-delegation .delegation-ui { display: flex; }
+
+        /* 상단 박스 */
+        .control-box { border-radius: 8px; border: 1px solid; padding: 10px; height: 100%; }
+        .master-box { background-color: #fffbeb; border-color: #fcd34d; }
+        .db-box { background-color: #f0fdf4; border-color: #86efac; }
+
+        @media print {
+            .no-print { display: none; }
+            body { -webkit-print-color-adjust: exact; padding: 0; }
+            .cell-delegate { background-color: #ffff00 !important; -webkit-print-color-adjust: exact; }
+            .hide-bank-col .bank-col { display: none !important; }
+        }
+    </style>
+</head>
+<body class="p-4" onload="initApp()">
+
+    <!-- 제어바 -->
+    <div class="max-w-[1500px] mx-auto mb-4 flex flex-col gap-4 no-print">
+        <div class="flex flex-wrap items-center justify-between p-4 bg-gray-100 rounded-lg border border-gray-300 shadow-sm gap-4">
+            <div class="flex items-center gap-4">
+                <label class="flex items-center cursor-pointer font-bold text-sm">
+                    <input type="checkbox" id="toggleBank" class="mr-2 w-4 h-4" onchange="updateGlobalView()" checked>
+                    계좌번호 열 표시
+                </label>
+                <label class="flex items-center cursor-pointer font-bold text-sm">
+                    <input type="checkbox" id="toggleDelegation" class="mr-2 w-4 h-4" onchange="updateGlobalView()" checked>
+                    위임 선택 항목 표시
+                </label>
+            </div>
+
+            <div class="flex items-center gap-4 border-l pl-4 border-gray-300">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-sm text-blue-800">지급 월 선택:</span>
+                    <input type="month" id="monthPicker" class="control-input w-40 font-bold" onchange="updatePeriodByMonth(this.value)">
+                </div>
+                <div class="flex items-center gap-2 border-l pl-4 border-gray-300">
+                    <span class="font-bold text-sm text-gray-700">기본 단가:</span>
+                    <input type="number" id="globalRate" class="control-input w-24 text-right" value="150000" step="1000">
+                    <button onclick="applyRateToAll()" class="bg-indigo-600 text-white px-3 py-1 rounded hover:bg-indigo-700 text-sm font-bold">단가 일괄 적용</button>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="clearAllRows()" class="bg-red-500 text-white px-4 py-1.5 rounded hover:bg-red-600 text-sm font-bold">전체 비우기</button>
+                <button onclick="window.print()" class="bg-blue-600 text-white px-5 py-1.5 rounded hover:bg-blue-700 text-sm font-bold shadow-sm">명세서 인쇄</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- 위임 마스터 설정 -->
+            <div class="control-box master-box flex flex-col gap-2">
+                <div class="flex items-center gap-2">
+                    <div class="bg-amber-500 text-white px-2 py-0.5 rounded text-[10px] font-bold">MASTER</div>
+                    <span class="text-amber-800 font-bold text-sm">공통 위임 계좌 설정</span>
+                </div>
+                <div class="flex gap-2">
+                    <input type="text" id="masterBank" oninput="syncAllDelegatedRows()" class="bg-white border border-amber-200 rounded px-2 py-1 text-xs" placeholder="은행" value="농협">
+                    <input type="text" id="masterOwner" oninput="syncAllDelegatedRows()" class="bg-white border border-amber-200 rounded px-2 py-1 text-xs" placeholder="예금주" value="(주)건설안전">
+                    <input type="text" id="masterAccount" oninput="syncAllDelegatedRows()" class="bg-white border border-amber-200 rounded px-2 py-1 text-xs flex-grow" placeholder="계좌번호" value="302-0000-0000-01">
+                </div>
+            </div>
+
+            <!-- 현장 및 작업자 필터 불러오기 -->
+            <div class="control-box db-box flex flex-col gap-2">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="bg-green-600 text-white px-2 py-0.5 rounded text-[10px] font-bold">DATABASE</div>
+                        <span class="text-green-800 font-bold text-sm">작업자 불러오기 (순차 입력)</span>
+                    </div>
+                    <button onclick="loadAllSiteWorkers()" class="bg-green-700 text-white px-3 py-1 rounded text-xs hover:bg-green-800 font-bold">선택 필터 전체 로드</button>
+                </div>
+                <div class="flex gap-2">
+                    <select id="siteSelect" onchange="syncWorkerSelect()" class="bg-white border border-green-200 rounded px-2 py-1 text-xs w-40 font-bold text-green-800 focus:ring-1 focus:ring-green-500 outline-none">
+                        <option value="전체현장">전체현장 (전체작업자)</option>
+                        <option value="서울 현장">서울 현장</option>
+                        <option value="경기 현장">경기 현장</option>
+                        <option value="대전 현장">대전 현장</option>
+                    </select>
+                    <select id="workerSelect" class="bg-white border border-green-200 rounded px-2 py-1 text-xs flex-grow font-medium outline-none">
+                        <!-- JS 동적 생성 -->
+                    </select>
+                    <button onclick="loadWorkerToNextEmptyRow()" class="bg-green-600 text-white px-6 py-1 rounded hover:bg-green-700 text-xs font-bold shadow-sm">입력</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="mainContainer" class="max-w-[1500px] mx-auto show-delegation">
+        <!-- 상단 정보 -->
+        <div class="flex justify-between items-end mb-6">
+            <div class="flex-grow text-center ml-[350px]">
+                <h1 id="docTitle" class="text-3xl font-bold underline decoration-4 underline-offset-8 bg-yellow-50 inline-block px-6 py-2 border border-black shadow-sm">일용노무비 지급명세서</h1>
+            </div>
+            
+            <table class="border-collapse border border-black text-xs w-[350px] ml-4 bg-yellow-50">
+                <tr>
+                    <th class="border border-black bg-yellow-100 p-1 w-12" rowspan="2">기<br>간</th>
+                    <td class="border border-black p-1 text-center w-28"><input type="text" id="startDateInput" value="2025-06-01"></td>
+                    <th class="border border-black bg-yellow-100 p-1 w-16">회사명</th>
+                    <td class="border border-black p-1 text-center"><input type="text" placeholder="회사명 입력"></td>
+                </tr>
+                <tr>
+                    <td class="border border-black p-1 text-center"><input type="text" id="endDateInput" value="2025-06-30"></td>
+                    <th class="border border-black bg-yellow-100 p-1">현장명</th>
+                    <td class="border border-black p-1 text-center"><input type="text" id="siteNameInput" placeholder="현장명 입력"></td>
+                </tr>
+            </table>
+        </div>
+
+        <table class="custom-table" id="laborTable">
+            <colgroup>
+                <col style="width: 70px;">
+                <col style="width: 105px;">
+                <col style="width: 220px;">
+                <col style="width: 25px;" span="15">
+                <col style="width: 45px;">
+                <col style="width: 90px;">
+                <col style="width: 220px;" class="bank-col">
+            </colgroup>
+            <thead>
+                <tr class="header-yellow">
+                    <th rowspan="2">성 명</th>
+                    <th rowspan="2">주민등록번호<br><span class="text-[9px] font-normal text-gray-600">전화번호</span></th>
+                    <th rowspan="2">주 소</th>
+                    <th class="header-blue">01</th><th class="header-blue">02</th><th class="header-blue">03</th><th class="header-blue">04</th><th class="header-blue">05</th>
+                    <th class="header-blue">06</th><th class="header-blue">07</th><th class="header-blue">08</th><th class="header-blue">09</th><th class="header-blue">10</th>
+                    <th class="header-blue">11</th><th class="header-blue">12</th><th class="header-blue">13</th><th class="header-blue">14</th><th class="header-blue">15</th>
+                    <th rowspan="2">출역<br>일수</th>
+                    <th>단가</th>
+                    <th rowspan="2" class="bank-col">은행 / 예금주 / 계좌번호<br><span class="text-[9px] font-normal text-gray-600">(직불: 개인 / 위임: 마스터)</span></th>
+                </tr>
+                <tr class="header-yellow">
+                    <th class="header-red">16</th><th class="header-red">17</th><th class="header-red">18</th><th class="header-red">19</th><th class="header-red">20</th>
+                    <th class="header-red">21</th><th class="header-red">22</th><th class="header-red">23</th><th class="header-red">24</th><th class="header-red">25</th>
+                    <th class="header-red">26</th><th class="header-red">27</th><th class="header-red">28</th><th class="header-red">29</th><th class="header-red">30</th>
+                    <th>노무비 총액</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- JS 생성 -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const workerPresets = [
+            { 
+                site: "서울 현장", name: "홍길동", ssn: "800101-1234567", phone: "010-1111-2222", address: "서울시 종로구 세종로 1", 
+                bank: "국민은행", owner: "홍길동", account: "110-123-456789", attendance: [1,1,1,1,1, 0,0, 1,1,1,1,1, 0,0, 1,1,1,1,1, 0,0, 1,1,1,1,1, 0,0, 0,0] 
+            },
+            { 
+                site: "서울 현장", name: "김태희", ssn: "820303-2222222", phone: "010-2222-3333", address: "서울시 강남구 역삼동 2", 
+                bank: "우리은행", owner: "김태희", account: "1002-111-222222", attendance: [1,1,1,0,0, 1,1, 1,1,1,0,0, 1,1, 1,1,1,0,0, 1,1, 1,1,1,0,0, 1,1, 1,1] 
+            },
+            { 
+                site: "경기 현장", name: "이영희", ssn: "850505-2345678", phone: "010-3333-4444", address: "경기도 수원시 효원로 1", 
+                bank: "신한은행", owner: "이영희", account: "100-200-300400", attendance: [1,0,1,0,1, 0,0, 1,0,1,0,1, 0,0, 1,0,1,0,1, 0,0, 1,0,1,0,1, 0,0, 1,1] 
+            },
+            { 
+                site: "경기 현장", name: "박지성", ssn: "810225-1111111", phone: "010-7777-8888", address: "경기도 용인시 기흥구 3", 
+                bank: "기업은행", owner: "박지성", account: "010-7777-8888-01", attendance: [1,1,1,1,1, 1,1, 0,0,0,0,0, 1,1, 1,1,1,1,1, 1,1, 0,0,0,0,0, 1,1, 0,0] 
+            },
+            { 
+                site: "대전 현장", name: "김철수", ssn: "901010-1357924", phone: "010-5555-6666", address: "대전시 유성구 궁동 2", 
+                bank: "농협", owner: "김철수", account: "302-0000-1111-22", attendance: [0.5,0.5,0.5,0.5,0.5, 0,0, 1,1,1,1,1, 1,1, 0,0,0,0,0, 0,0, 0,0,0,0,0, 0,0, 0,0] 
+            }
+        ];
+
+        const personalBankData = {}; 
+
+        function initApp() {
+            createRows(10); 
+            
+            // 월 선택기 오늘 날짜 기준으로 초기화
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const monthVal = `${year}-${month}`;
+            document.getElementById('monthPicker').value = monthVal;
+            updatePeriodByMonth(monthVal);
+
+            syncWorkerSelect(); 
+            initDefaultPrices();
+        }
+
+        // 월 선택 시 명세서 기간 자동 계산
+        function updatePeriodByMonth(val) {
+            if (!val) return;
+            const [year, month] = val.split('-');
+            const startDate = `${year}-${month}-01`;
+            const lastDay = new Date(year, month, 0).getDate();
+            const endDate = `${year}-${month}-${lastDay}`;
+            document.getElementById('startDateInput').value = startDate;
+            document.getElementById('endDateInput').value = endDate;
+        }
+
+        function createRows(count) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            for(let i=1; i<=count; i++) {
+                const tr1 = document.createElement('tr');
+                tr1.className = 'labor-row';
+                tr1.setAttribute('data-row-id', i);
+                let dayCells1 = '';
+                for(let d=1; d<=15; d++) dayCells1 += `<td class="p-0"><input type="text" class="day-input day-${d}" oninput="calculateRowTotal(${i})"></td>`;
+                tr1.innerHTML = `
+                    <td rowspan="2"><input type="text" class="worker-name font-bold"></td>
+                    <td rowspan="2" class="p-0"><input type="text" class="worker-ssn text-[10px]"><div class="border-t border-gray-200 mt-1 pt-1"><input type="text" class="worker-phone text-[9px]"></div></td>
+                    <td rowspan="2" class="p-0 text-left"><input type="text" class="worker-address text-left-input text-[10px]"></td>
+                    ${dayCells1}
+                    <td rowspan="2" class="p-0"><input type="text" class="days-total font-bold" readonly value="0"></td>
+                    <td class="p-0"><input type="number" class="unit-price-input text-right pr-2" oninput="calculateRowTotal(${i})" step="1000"></td>
+                    <td rowspan="2" class="p-1 bank-cell bank-col">
+                        <div class="delegation-ui">
+                            <label class="flex items-center cursor-pointer"><input type="radio" name="payType${i}" value="direct" checked onchange="handleRowTypeChange(${i})">직불</label>
+                            <label class="flex items-center cursor-pointer ml-2 text-red-600 font-bold"><input type="radio" name="payType${i}" value="delegate" onchange="handleRowTypeChange(${i})">위임</label>
+                        </div>
+                        <div class="bank-info-container">
+                            <div class="flex gap-1 border-b border-gray-300 pb-1"><input type="text" class="bank-name-input text-[10px] w-1/2" placeholder="은행" oninput="savePersonalBankInfo(${i})"><input type="text" class="bank-owner-input text-[10px] w-1/2" placeholder="예금주" oninput="savePersonalBankInfo(${i})"></div>
+                            <input type="text" class="bank-account-input text-[10px] pt-1" placeholder="계좌번호" oninput="savePersonalBankInfo(${i})">
+                        </div>
+                    </td>
+                `;
+                const tr2 = document.createElement('tr');
+                tr2.setAttribute('data-row-id', i);
+                let dayCells2 = '';
+                for(let d=16; d<=30; d++) dayCells2 += `<td class="p-0"><input type="text" class="day-input day-${d}" oninput="calculateRowTotal(${i})"></td>`;
+                tr2.innerHTML = `${dayCells2}<td class="p-0"><input type="text" class="total-price-input font-bold text-right pr-2" readonly value="0"></td>`;
+                tbody.appendChild(tr1); tbody.appendChild(tr2);
+            }
+        }
+
+        function syncWorkerSelect() {
+            const selectedSite = document.getElementById('siteSelect').value;
+            const workerSelect = document.getElementById('workerSelect');
+            const siteNameInput = document.getElementById('siteNameInput');
+            
+            // 현장명 입력란 업데이트 (전체현장일 경우 텍스트 유지하거나 '전체'로 표시)
+            siteNameInput.value = selectedSite === "전체현장" ? "전체 통합" : selectedSite;
+            
+            workerSelect.innerHTML = '';
+            
+            // 필터링: 전체현장이면 모두 보여줌
+            const filtered = selectedSite === "전체현장" 
+                ? workerPresets 
+                : workerPresets.filter(w => w.site === selectedSite);
+            
+            filtered.forEach((worker) => {
+                const opt = document.createElement('option');
+                opt.value = workerPresets.indexOf(worker);
+                opt.textContent = `[${worker.site}] ${worker.name} (${worker.ssn.substring(0,8)}***)`;
+                workerSelect.appendChild(opt);
+            });
+            
+            if (filtered.length === 0) {
+                const opt = document.createElement('option');
+                opt.textContent = '해당 조건의 작업자 없음';
+                workerSelect.appendChild(opt);
+            }
+        }
+
+        function loadWorkerToNextEmptyRow() {
+            const idx = document.getElementById('workerSelect').value;
+            if (idx === "" || idx === null) return;
+            const rows = document.querySelectorAll('.labor-row');
+            let targetRowId = null;
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].querySelector('.worker-name').value.trim() === "") {
+                    targetRowId = rows[i].getAttribute('data-row-id');
+                    break;
+                }
+            }
+            if (targetRowId) fillRowWithData(targetRowId, workerPresets[idx]);
+        }
+
+        function loadAllSiteWorkers() {
+            const selectedSite = document.getElementById('siteSelect').value;
+            const filtered = selectedSite === "전체현장" 
+                ? workerPresets 
+                : workerPresets.filter(w => w.site === selectedSite);
+            
+            clearAllRows(); 
+            filtered.forEach((worker, index) => {
+                if (index < 10) fillRowWithData(index + 1, worker);
+            });
+        }
+
+        function fillRowWithData(rowId, data) {
+            const row1 = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            const row2 = document.querySelector(`tr[data-row-id="${rowId}"]:not(.labor-row)`);
+            if (!row1) return;
+            row1.querySelector('.worker-name').value = data.name;
+            row1.querySelector('.worker-ssn').value = data.ssn;
+            row1.querySelector('.worker-phone').value = data.phone;
+            row1.querySelector('.worker-address').value = data.address;
+            row1.querySelector('.bank-name-input').value = data.bank;
+            row1.querySelector('.bank-owner-input').value = data.owner;
+            row1.querySelector('.bank-account-input').value = data.account;
+            for (let d = 1; d <= 30; d++) {
+                const val = data.attendance[d - 1];
+                const input = d <= 15 ? row1.querySelector(`.day-${d}`) : row2.querySelector(`.day-${d}`);
+                input.value = val === 0 ? '' : val;
+            }
+            savePersonalBankInfo(rowId);
+            calculateRowTotal(rowId);
+            if (document.querySelector(`input[name="payType${rowId}"][value="delegate"]`).checked) applyMasterToRow(rowId);
+        }
+
+        function clearAllRows() {
+            document.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])').forEach(input => {
+                const id = input.id || "";
+                if(!id.includes('master') && id !== 'globalRate' && id !== 'monthPicker' && id !== 'startDateInput' && id !== 'endDateInput' && id !== 'siteNameInput') {
+                    input.value = '';
+                }
+            });
+            document.querySelectorAll('.bank-cell').forEach(cell => cell.classList.remove('cell-delegate'));
+            document.querySelectorAll('input[type="radio"][value="direct"]').forEach(r => r.checked = true);
+            initDefaultPrices();
+        }
+
+        function calculateRowTotal(rowId) {
+            const row1 = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            const row2 = document.querySelector(`tr[data-row-id="${rowId}"]:not(.labor-row)`);
+            if(!row1 || !row2) return;
+            let totalDays = 0;
+            for (let d = 1; d <= 30; d++) {
+                const input = d <= 15 ? row1.querySelector(`.day-${d}`) : row2.querySelector(`.day-${d}`);
+                totalDays += parseFloat(input.value) || 0;
+            }
+            row1.querySelector('.days-total').value = totalDays % 1 === 0 ? totalDays : totalDays.toFixed(1);
+            const unitPrice = parseFloat(row1.querySelector('.unit-price-input').value) || 0;
+            row2.querySelector('.total-price-input').value = Math.round(totalDays * unitPrice).toLocaleString();
+        }
+
+        function savePersonalBankInfo(rowId) {
+            const row = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            const radioDirect = document.querySelector(`input[name="payType${rowId}"][value="direct"]`);
+            if (!radioDirect || radioDirect.checked) {
+                personalBankData[rowId] = {
+                    bank: row.querySelector('.bank-name-input').value,
+                    owner: row.querySelector('.bank-owner-input').value,
+                    account: row.querySelector('.bank-account-input').value
+                };
+            }
+        }
+
+        function handleRowTypeChange(rowId) {
+            const firstRow = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            const bankCell = firstRow.querySelector('.bank-cell');
+            const radioDelegate = document.querySelector(`input[name="payType${rowId}"][value="delegate"]`);
+            const inputs = [firstRow.querySelector('.bank-name-input'), firstRow.querySelector('.bank-owner-input'), firstRow.querySelector('.bank-account-input')];
+            if (radioDelegate.checked) {
+                bankCell.classList.add('cell-delegate');
+                inputs.forEach(i => i.readOnly = true);
+                applyMasterToRow(rowId);
+            } else {
+                bankCell.classList.remove('cell-delegate');
+                inputs.forEach(i => i.readOnly = false);
+                restorePersonalToRow(rowId);
+            }
+        }
+
+        function applyMasterToRow(rowId) {
+            const row = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            row.querySelector('.bank-name-input').value = document.getElementById('masterBank').value;
+            row.querySelector('.bank-owner-input').value = document.getElementById('masterOwner').value;
+            row.querySelector('.bank-account-input').value = document.getElementById('masterAccount').value;
+        }
+
+        function restorePersonalToRow(rowId) {
+            const row = document.querySelector(`.labor-row[data-row-id="${rowId}"]`);
+            const data = personalBankData[rowId];
+            if (!data) return;
+            row.querySelector('.bank-name-input').value = data.bank;
+            row.querySelector('.bank-owner-input').value = data.owner;
+            row.querySelector('.bank-account-input').value = data.account;
+        }
+
+        function syncAllDelegatedRows() {
+            document.querySelectorAll('.labor-row').forEach(row => {
+                const id = row.getAttribute('data-row-id');
+                const radioDelegate = document.querySelector(`input[name="payType${id}"][value="delegate"]`);
+                if (radioDelegate && radioDelegate.checked) applyMasterToRow(id);
+            });
+        }
+
+        function initDefaultPrices() {
+            const rate = Math.floor((parseFloat(document.getElementById('globalRate').value) || 0) / 1000) * 1000;
+            document.querySelectorAll('.unit-price-input').forEach(input => {
+                if (!input.value) {
+                    input.value = rate;
+                    calculateRowTotal(input.closest('tr').getAttribute('data-row-id'));
+                }
+            });
+            updateGlobalView();
+        }
+
+        function applyRateToAll() {
+            const rate = Math.floor((parseFloat(document.getElementById('globalRate').value) || 0) / 1000) * 1000;
+            document.querySelectorAll('.labor-row').forEach(row => {
+                row.querySelector('.unit-price-input').value = rate;
+                calculateRowTotal(row.getAttribute('data-row-id'));
+            });
+        }
+
+        function updateGlobalView() {
+            const isBank = document.getElementById('toggleBank').checked;
+            const isDel = document.getElementById('toggleDelegation').checked;
+            const container = document.getElementById('mainContainer');
+            if (isBank) container.classList.remove('hide-bank-col');
+            else container.classList.add('hide-bank-col');
+            container.classList.toggle('show-delegation', isDel);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+specVersion: "v1"
+serviceId: "cy-connect"
+location: "us-central1"
+schema:
+  source: "./schema"
+  datasource:
+    postgresql:
+      database: "cy-db-clean"
+      cloudSql:
+        instanceId: "cy-postgres"
+        # schemaValidation: "STRICT"     # STRICT mode makes Postgres schema match Data Connect exactly.
+        # schemaValidation: "COMPATIBLE" # COMPATIBLE mode makes Postgres schema compatible with Data Connect.
+connectorDirs: ["./example"]

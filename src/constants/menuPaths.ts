@@ -35,6 +35,9 @@ export const MENU_PATHS: { [key: string]: string } = {
     "세금/가불 계산": "/payroll/team-payslip",
     "싸인 관리": "/payroll/sign-management",
 
+    "일용노무비 지급명세서": "/payroll/labor-cost-statement-generator",
+    "노무비 지급명세서 생성기": "/payroll/labor-cost-statement-generator",
+
     // 서명 관리
     "서명생성기": "/payroll/signature-generator",
     "서명위임장": "/payroll/delegation-letter",
@@ -163,6 +166,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "권한 관리": "/admin/role-menu",
     "시스템 권한 관리": "/admin/role-menu", // Alias
     "카카오톡 관리": "/payroll/kakao-notification",
+    "카카오톡 연동 설정": "/payroll/barobill-kakao-connection",
     "사용자 권한 설정": "/settings", // Alias for Settings where User Management lives
     // Refine Integrated Console
     "작업자 콘솔": "/manpower/refine-workers",

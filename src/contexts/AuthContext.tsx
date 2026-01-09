@@ -29,6 +29,8 @@ export function useAuth() {
   return context;
 }
 
+
+// Force HMR update
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);

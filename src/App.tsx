@@ -50,6 +50,9 @@ import SignManagementPage from './pages/payroll/SignManagementPage';
 import SignatureGeneratorPage from './pages/payroll/SignatureGeneratorPage';
 import DelegationLetterPage from './pages/payroll/DelegationLetterPage';
 import DelegationLetterV2Page from './pages/payroll/DelegationLetterV2Page';
+import DelegationBuilderPage from './pages/payroll/DelegationBuilderPage';
+import LaborCostStatementGeneratorPage from './pages/payroll/LaborCostStatementGeneratorPage';
+
 import LaborExchangePage from './pages/payroll/LaborExchangePage';
 import SupportRateManagementPage from './pages/support/SupportRateManagementPage';
 import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
@@ -118,6 +121,7 @@ import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPag
 
 import HomepageClientProgressPage from './pages/homepage/HomepageClientProgressPage';
 import HomepageRequestListPage from './pages/homepage/HomepageRequestListPage';
+import { KakaoTestPage } from './pages/kakao/KakaoTestPage';
 import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPage';
 import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
 import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
@@ -135,6 +139,8 @@ import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
 import RefineCompanyList from './pages/refine/RefineCompanyList';
 import { MemoPage } from './features/smart-memo/pages/MemoPage'; // New Feature Import
+import BarobillKakaoConnectionPage from './pages/admin/settings/BarobillKakaoConnectionPage';
+import KakaoSenderPage from './pages/helper/KakaoSenderPage';
 
 // 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -259,6 +265,7 @@ const App: React.FC = () => {
               <Route path="signature-generator" element={<SignatureGeneratorPage />} />
               <Route path="team-payment-draft" element={<TeamBasedPaymentDraftPageV2 />} />
               <Route path="team-payment-draft-legacy" element={<TeamBasedPaymentDraftPage />} />
+              <Route path="labor-cost-statement-generator" element={<LaborCostStatementGeneratorPage />} />
               <Route path="tax-invoice" element={<TaxInvoicePage />} />
               <Route path="tax-invoice-ledger" element={<TaxInvoiceLedgerPage />} />
               {/* Taxinvoice new routes */}
@@ -268,8 +275,12 @@ const App: React.FC = () => {
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
+              <Route path="kakao-test" element={<KakaoTestPage />} />
+              <Route path="kakao-sender" element={<KakaoSenderPage />} />
+              <Route path="barobill-kakao-connection" element={<BarobillKakaoConnectionPage />} />
               <Route path="delegation-letter" element={<DelegationLetterPage />} />
               <Route path="delegation-letter-v2" element={<DelegationLetterV2Page />} />
+              <Route path="delegation-letter-v3" element={<DelegationBuilderPage />} />
               <Route path="labor-exchange" element={<LaborExchangePage />} />
             </Route>
 

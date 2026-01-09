@@ -1,0 +1,196 @@
+# 0. Enums
+enum Status { ACTIVE, INACTIVE, ARCHIVED }
+
+# 1. Company
+type Company @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    name: String!
+    code: String!
+    businessNumber: String
+    ceoName: String
+    type: String
+    status: Status! @default(value: ACTIVE)
+    siteName: String
+    siteManager: String
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 2. Team
+type Team @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    name: String!
+    company: Company
+    leader: Worker
+    type: String
+    status: Status! @default(value: ACTIVE)
+    totalManDay: Float
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 3. Worker
+type Worker @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    name: String!
+    team: Team
+    role: String
+    payType: String # '일급', '월급'
+    unitPrice: Float
+    residentNumber: String
+    phone: String
+    address: String
+    bankAccount: String
+    bankName: String
+    isActive: Boolean @default(value: true)
+    joinDate: Date
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 4. Site
+type Site @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    name: String!
+    code: String
+    address: String
+    startDate: Date
+    endDate: Date
+    status: Status! @default(value: ACTIVE)
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 5. Position (Role) - For Data Integrity
+type Position @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    name: String!
+    rank: Int
+    color: String
+    icon: String
+    isDefault: Boolean @default(value: false)
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 6. Daily Report (Header)
+type DailyReport @table {
+    id: UUID! @default(expr: "uuidV4()")
+    legacyId: String # Original Firestore ID
+    date: Date!
+    team: Team!
+    site: Site
+    siteName: String # Denormalized for convenience
+    status: String # 'draft', 'submitted', 'approved'
+    writerUid: String
+    companyName: String
+    responsibleTeamName: String
+    responsibleTeamLegacyId: String
+    weather: String
+    totalManDay: Float
+    totalAmount: Float
+    workContent: String
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 7. Daily Report Worker (Detail)
+type DailyReportWorker @table(key: ["dailyReport", "worker"]) {
+    id: UUID! @default(expr: "uuidV4()")
+    dailyReport: DailyReport!
+    worker: Worker!
+    gongsu: Float!
+    unitPrice: Float!
+    amount: Float!
+    workDescription: String
+    legacyWorkerId: String
+    legacyTeamId: String
+    workerName: String
+    role: String
+    status: String
+    manDay: Float
+    payType: String
+    salaryModel: String
+    workContent: String
+    createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type AppUser @table {
+    id: String!
+    uid: String
+    email: String
+    displayName: String
+    photoUrl: String
+    linkedWorkerIds: String
+    role: String
+    lastLogin: Timestamp
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 8. Menu Configuration (JSONB)
+type MenuConfig @table {
+    id: String! # e.g. "default", "sidebar"
+    config: String! # Store as stringified JSON for now
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+# 9. System Log
+type SystemLog @table {
+    id: UUID! @default(expr: "uuidV4()")
+    category: String!
+    action: String!
+    userEmail: String
+    details: String
+    createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type AuditLog @table {
+    id: String!
+    action: String
+    category: String
+    actorId: String
+    actorEmail: String
+    targetId: String
+    details: String
+    timestamp: Timestamp
+    createdAt: Timestamp! @default(expr: "request.time")
+}
+
+type Agent @table {
+    id: String!
+    name: String
+    type: String
+    role: String
+    capabilities: String
+    systemPrompt: String
+    status: String
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type AgentConversation @table {
+    id: String!
+    mainAgentId: String
+    userId: String
+    messages: String
+    createdAt: Timestamp! @default(expr: "request.time")
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type Setting @table {
+    id: String!
+    data: String!
+    updatedAt: Timestamp! @default(expr: "request.time")
+}
+
+type SystemConfig @table {
+    id: String!
+    data: String!
+    updatedAt: Timestamp! @default(expr: "request.time")
+}

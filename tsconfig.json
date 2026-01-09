@@ -19,7 +19,16 @@
         "isolatedModules": true,
         "noEmit": true,
         "jsx": "react-jsx",
-        "downlevelIteration": true
+        "downlevelIteration": true,
+        "baseUrl": ".",
+        "paths": {
+            "@dataconnect/generated": [
+                "./src/dataconnect-generated"
+            ],
+            "@dataconnect/admin-generated": [
+                "./src/dataconnect-admin-generated"
+            ]
+        }
     },
     "include": [
         "src"

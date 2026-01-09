@@ -1,0 +1,2135 @@
+{
+  "backupDir": "backups\\2026-01-07T12-27-27-625Z",
+  "files": [
+    {
+      "file": "companies.json",
+      "rows": 66,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 66,
+            "object": 0
+          }
+        },
+        "siteName": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 66
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 66
+          }
+        },
+        "assignedClientCompanyIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 21,
+            "object": 0
+          }
+        },
+        "siteManager": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 31,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 20,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "type": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "idNumber": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "businessNumber": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "phone": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "code": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "ceoName": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 66,
+            "object": 0
+          }
+        },
+        "_sourceCollection": {
+          "types": {
+            "null": 0,
+            "string": 66,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "iconKey": {
+          "types": {
+            "null": 0,
+            "string": 17,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountNumber": {
+          "types": {
+            "null": 0,
+            "string": 20,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountHolder": {
+          "types": {
+            "null": 0,
+            "string": 20,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "email": {
+          "types": {
+            "null": 0,
+            "string": 20,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "bankName": {
+          "types": {
+            "null": 0,
+            "string": 20,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "companies_client.json",
+      "rows": 47,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "businessNumber": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "code": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 47
+          }
+        },
+        "phone": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "ceoName": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 47,
+            "object": 0
+          }
+        },
+        "siteName": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteManager": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 47,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "type": {
+          "types": {
+            "null": 0,
+            "string": 47,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 47
+          }
+        },
+        "iconKey": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountNumber": {
+          "types": {
+            "null": 0,
+            "string": 12,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountHolder": {
+          "types": {
+            "null": 0,
+            "string": 12,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 12,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "email": {
+          "types": {
+            "null": 0,
+            "string": 12,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "assignedClientCompanyIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 12,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 12,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "bankName": {
+          "types": {
+            "null": 0,
+            "string": 12,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "idNumber": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "companies_main.json",
+      "rows": 1,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 1,
+            "object": 0
+          }
+        },
+        "siteName": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 1
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 1
+          }
+        },
+        "assignedClientCompanyIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 1,
+            "object": 0
+          }
+        },
+        "siteManager": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 1,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "type": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "idNumber": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "businessNumber": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "phone": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "code": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "ceoName": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 1,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "companies_partner.json",
+      "rows": 18,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 18,
+            "object": 0
+          }
+        },
+        "siteIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 18,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteManager": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteName": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "type": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "ceoName": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 18
+          }
+        },
+        "phone": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "code": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "businessNumber": {
+          "types": {
+            "null": 0,
+            "string": 18,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 18
+          }
+        },
+        "email": {
+          "types": {
+            "null": 0,
+            "string": 8,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "idNumber": {
+          "types": {
+            "null": 0,
+            "string": 3,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "bankName": {
+          "types": {
+            "null": 0,
+            "string": 8,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountHolder": {
+          "types": {
+            "null": 0,
+            "string": 8,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "assignedClientCompanyIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 8,
+            "object": 0
+          }
+        },
+        "iconKey": {
+          "types": {
+            "null": 0,
+            "string": 6,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 7,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountNumber": {
+          "types": {
+            "null": 0,
+            "string": 8,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "daily_reports.json",
+      "rows": 514,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "date": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteId": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteName": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "teamId": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "teamName": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 514,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "writerId": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyName": {
+          "types": {
+            "null": 0,
+            "string": 474,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "responsibleTeamName": {
+          "types": {
+            "null": 0,
+            "string": 514,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 514
+          }
+        },
+        "workers": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 514,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 514
+          }
+        },
+        "responsibleTeamId": {
+          "types": {
+            "null": 0,
+            "string": 40,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalAmount": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 15,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "weather": {
+          "types": {
+            "null": 0,
+            "string": 15,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "workContent": {
+          "types": {
+            "null": 0,
+            "string": 40,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "menus.json",
+      "rows": 0,
+      "fields": {}
+    },
+    {
+      "file": "positions.json",
+      "rows": 11,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "rank": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 11,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "description": {
+          "types": {
+            "null": 0,
+            "string": 10,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "isDefault": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 11,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "systemRole": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 11
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 11
+          }
+        },
+        "icon": {
+          "types": {
+            "null": 0,
+            "string": 9,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "iconKey": {
+          "types": {
+            "null": 0,
+            "string": 3,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "sites.json",
+      "rows": 58,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "code": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "startDate": {
+          "types": {
+            "null": 0,
+            "string": 53,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "endDate": {
+          "types": {
+            "null": 0,
+            "string": 53,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "responsibleTeamId": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "responsibleTeamName": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 58
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 51,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "constructorCompanyId": {
+          "types": {
+            "null": 0,
+            "string": 48,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyId": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyName": {
+          "types": {
+            "null": 0,
+            "string": 58,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "clientCompanyName": {
+          "types": {
+            "null": 0,
+            "string": 49,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "clientCompanyId": {
+          "types": {
+            "null": 0,
+            "string": 49,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 58
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 7,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "partnerName": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "partnerId": {
+          "types": {
+            "null": 0,
+            "string": 11,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "constructorCompanyName": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "system_logs.json",
+      "rows": 0,
+      "fields": {}
+    },
+    {
+      "file": "teams.json",
+      "rows": 21,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyId": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "role": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 21
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "leaderName": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "leaderId": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "supportRate": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 21,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "supportModel": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "type": {
+          "types": {
+            "null": 0,
+            "string": 21,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 17,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 21
+          }
+        },
+        "companyName": {
+          "types": {
+            "null": 0,
+            "string": 7,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "parentTeamId": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "parentTeamName": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "memberCount": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 2,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "assignedWorkers": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 2,
+            "object": 0
+          }
+        },
+        "memberIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 2,
+            "object": 0
+          }
+        },
+        "memberNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 2,
+            "object": 0
+          }
+        },
+        "assignedSiteId": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "assignedSiteName": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "siteIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 1,
+            "object": 0
+          }
+        },
+        "siteNames": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 1,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "supportDescription": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "serviceRate": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 1,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "serviceModel": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "serviceDescription": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "defaultSalaryModel": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "icon": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    },
+    {
+      "file": "users.json",
+      "rows": 5,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "uid": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "email": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "displayName": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "photoURL": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "linkedWorkerIds": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 5,
+            "object": 0
+          }
+        },
+        "role": {
+          "types": {
+            "null": 0,
+            "string": 5,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "lastLogin": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 5
+          }
+        }
+      }
+    },
+    {
+      "file": "workers.json",
+      "rows": 178,
+      "fields": {
+        "id": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "name": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "teamId": {
+          "types": {
+            "null": 0,
+            "string": 174,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "teamName": {
+          "types": {
+            "null": 0,
+            "string": 177,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyId": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "contact": {
+          "types": {
+            "null": 0,
+            "string": 173,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "idNumber": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "address": {
+          "types": {
+            "null": 0,
+            "string": 172,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "payType": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "bankName": {
+          "types": {
+            "null": 0,
+            "string": 173,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountNumber": {
+          "types": {
+            "null": 0,
+            "string": 173,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "accountHolder": {
+          "types": {
+            "null": 0,
+            "string": 173,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "needsApproval": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 178,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "createdAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 178
+          }
+        },
+        "totalManDay": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 172,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "status": {
+          "types": {
+            "null": 0,
+            "string": 178,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "companyName": {
+          "types": {
+            "null": 0,
+            "string": 158,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "role": {
+          "types": {
+            "null": 0,
+            "string": 176,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "unitPrice": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 175,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "salaryModel": {
+          "types": {
+            "null": 0,
+            "string": 177,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "teamType": {
+          "types": {
+            "null": 0,
+            "string": 177,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "updatedAt": {
+          "types": {
+            "null": 0,
+            "string": 0,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 178
+          }
+        },
+        "signatureUrl": {
+          "types": {
+            "null": 0,
+            "string": 4,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "fileNameSaved": {
+          "types": {
+            "null": 0,
+            "string": 4,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "iconKey": {
+          "types": {
+            "null": 0,
+            "string": 3,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        },
+        "color": {
+          "types": {
+            "null": 0,
+            "string": 1,
+            "number": 0,
+            "boolean": 0,
+            "array": 0,
+            "object": 0
+          }
+        }
+      }
+    }
+  ]
+}

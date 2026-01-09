@@ -2,6 +2,9 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "dataconnect": {
+    "source": "dataconnect"
+  },
   "hosting": {
     "public": "build",
     "ignore": [
@@ -25,5 +28,10 @@
       "firebase-debug.log",
       "firebase-debug.*.log"
     ]
+  },
+  "emulators": {
+    "dataconnect": {
+      "dataDir": "dataconnect/.dataconnect/pgliteData"
+    }
   }
 }
