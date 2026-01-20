@@ -8,41 +8,52 @@ import {
     faUser,
     faRightFromBracket,
     faShieldHalved,
-    faChartPie,
-    faClipboardList,
-    faFileInvoiceDollar,
-    faDatabase,
-    faBuilding,
-    faPhotoFilm,
-    faCartShopping,
-    faPenNib,
-    faFlask,
     faIdBadge
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { resolveIcon } from '../../constants/iconMap';
+import { userService } from '../../services/userService';
+import PositionPanel from './PositionPanel';
+import { PositionItem } from '../../types/menu';
 
 interface HeaderProps {
     toggleSidebar: () => void;
     togglePanel: (type: 'right' | 'bottom' | 'admin' | 'position') => void;
     currentSiteData: any;
     isAdmin: boolean;
+    isPositionPanelOpen: boolean;
+    currentPosition: string;
+    changePosition: (positionId: string) => void;
+    positions: PositionItem[];
 }
 
-// Icon mapping (duplicated for now, can be moved to a shared utility)
-
-
-const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSiteData, isAdmin }) => {
+const Header: React.FC<HeaderProps> = ({ 
+    toggleSidebar, 
+    togglePanel, 
+    currentSiteData, 
+    isAdmin,
+    isPositionPanelOpen,
+    currentPosition,
+    changePosition,
+    positions 
+}) => {
     const { currentUser, logout } = useAuth();
     const navigate = useNavigate();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const profileRef = useRef<HTMLDivElement>(null);
+    const positionPanelRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
                 setIsProfileOpen(false);
+            }
+            // Close position panel if click is outside
+            if (positionPanelRef.current && !positionPanelRef.current.contains(event.target as Node)) {
+                if (isPositionPanelOpen) {
+                    togglePanel('position');
+                }
             }
         };
 
@@ -50,7 +61,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSite
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, []);
+    }, [isPositionPanelOpen, togglePanel]);
 
     const handleLogout = async () => {
         try {
@@ -64,12 +75,7 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSite
     const handleAdminToggle = async () => {
         if (!currentUser) return;
         try {
-            const { doc, updateDoc } = await import('firebase/firestore');
-            const { db } = await import('../../config/firebase');
-            const userRef = doc(db, 'users', currentUser.uid);
-            await updateDoc(userRef, {
-                role: isAdmin ? 'user' : 'admin'
-            });
+            await userService.updateUserRole(currentUser.uid, isAdmin ? 'user' : 'admin');
             alert(`관리자 권한이 ${isAdmin ? '해제' : '부여'}되었습니다. 새로고침하세요.`);
             window.location.reload();
         } catch (e) {
@@ -101,13 +107,24 @@ const Header: React.FC<HeaderProps> = ({ toggleSidebar, togglePanel, currentSite
                 )}
 
                 {isAdmin && (
-                    <button className="header-btn text-indigo-500 hover:bg-indigo-50" onClick={() => togglePanel('position')} title="직책 모드">
-                        <FontAwesomeIcon icon={faIdBadge} />
-                    </button>
+                    <div className="relative" ref={positionPanelRef}>
+                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="직책 모드">
+                            <FontAwesomeIcon icon={faIdBadge} />
+                        </button>
+                        {isPositionPanelOpen && (
+                            <PositionPanel
+                                isOpen={isPositionPanelOpen}
+                                togglePanel={togglePanel}
+                                currentPosition={currentPosition}
+                                changePosition={changePosition}
+                                positions={positions}
+                            />
+                        )}
+                    </div>
                 )}
 
                 {isAdmin && (
-                    <button className="header-btn text-red-500 hover:bg-red-50" onClick={() => togglePanel('admin')} title="관리자 메뉴">
+                    <button className="header-btn text-red-400 hover:bg-white/10" onClick={() => togglePanel('admin')} title="관리자 메뉴">
                         <FontAwesomeIcon icon={faUserShield} />
                     </button>
                 )}

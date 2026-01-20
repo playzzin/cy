@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
@@ -8,22 +8,19 @@ import './DashboardLayout.css';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import RightPanel from './RightPanel';
-import PositionPanel from './PositionPanel';
 
 import BottomPanel from './BottomPanel';
 import AdminPanel from './AdminPanel';
-import CheongyeonHeader from '../cheongyeon/CheongyeonHeader';
-import RichRightDrawer from '../cheongyeon/RichRightDrawer';
-import CheongyeonHome from '../../pages/cheongyeon/CheongyeonHome';
 
 // 타입 인터페이스 정의
 import SidebarSkeleton from './SidebarSkeleton';
 import { menuServiceV11 } from '../../services/menuServiceV11';
-import { SiteDataType, MenuItem } from '../../types/menu';
+import { SiteData, SiteDataType, MenuItem } from '../../types/menu';
 import { MENU_PATHS } from '../../constants/menuPaths';
 import { ErrorBoundary } from 'react-error-boundary';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation, faRotateRight } from '@fortawesome/free-solid-svg-icons';
+import { SiteModeProvider } from '../../contexts/SiteModeContext';
 
 // Removed hardcoded siteData in favor of dynamic loading
 
@@ -59,8 +56,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
     const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
     const [isPositionPanelOpen, setIsPositionPanelOpen] = useState(false);
-    const [currentSite, setCurrentSite] = useState('admin');
+    // 사이트 모드를 localStorage에서 복원하여 수동 변경 시 유지되도록 함
+    const [currentSite, setCurrentSite] = useState(() => {
+        const saved = localStorage.getItem('cy_current_site');
+        return saved || 'admin';
+    });
     const [currentPosition, setCurrentPosition] = useState('full');
+    const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
+        return localStorage.getItem('cy_site_manual') === 'true';
+    });
     const [activeMenuItems, setActiveMenuItems] = useState<{ [key: string]: boolean }>({});
     const [activeNestedMenuItems, setActiveNestedMenuItems] = useState<{ [key: string]: boolean }>({});
     const [isAdmin, setIsAdmin] = useState(false);
@@ -68,6 +72,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
+
+    const didRunMenuMigrationsRef = useRef(false);
 
     const { currentUser } = useAuth();
     const navigate = useNavigate();
@@ -78,6 +84,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         // Initial fetch logic omitted as subscribe handles init
         // Subscribe to real-time updates from menuServiceV11
         const unsubscribe = menuServiceV11.subscribe((newConfig) => {
+            console.log('[DashboardLayout] Received new menu config update.', { siteKeys: Object.keys(newConfig) });
             setSiteData(newConfig);
         });
 
@@ -115,36 +122,39 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         return () => document.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    // 청연사이트 모드일 때 /dashboard 접근 시 /dashboard2로 리다이렉트
     useEffect(() => {
-        let unsubscribe: () => void;
+        if (currentSite === 'test' && location.pathname === '/dashboard') {
+            navigate('/dashboard2', { replace: true });
+        }
+    }, [currentSite, location.pathname, navigate]);
 
+    useEffect(() => {
         const setupAdminListener = async () => {
             if (currentUser && siteData) { // Wait for siteData to be loaded
                 try {
-                    const { doc, onSnapshot } = await import('firebase/firestore');
-                    const { db } = await import('../../config/firebase');
+                    const { userService } = await import('../../services/userService');
 
-                    unsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnapshot) => {
-                        const userData = docSnapshot.data();
-                        const role = userData?.role || '';
+                    let cancelled = false;
+                    const applyRole = (roleRaw: any) => {
+                        const role = roleRaw ? String(roleRaw) : '';
+                        const adminRoles = ['admin', '관리자', '사장', '실장'];
+                        const isAdminRole = adminRoles.includes(role);
+                        setIsAdmin(isAdminRole);
 
-                        // 기존 로직: 관리자 권한 확인
-                        const adminRoles = ['admin', '사장', '실장'];
-                        setIsAdmin(adminRoles.includes(role));
+                        if (isAdminRole && !didRunMenuMigrationsRef.current) {
+                            didRunMenuMigrationsRef.current = true;
+                            menuServiceV11.runOneTimeMigrations().catch((err) => {
+                                console.error('[MenuService] One-time migration failed:', err);
+                            });
+                        }
 
-                        // 1. Role-Based Site Redirection
-                        // 역할에 맞는 사이트가 있는지 확인하고, 현재 사이트와 다르면 이동
-                        // 1. Role-Based Site Redirection (Dynamic)
-                        // 역할에 맞는 사이트가 있는지 확인하고, 현재 사이트와 다르면 이동
                         let targetSite = '';
-                        // admin check fallback
                         if (role === 'admin' || role === '관리자') targetSite = 'admin';
 
-                        // Lookup in positionConfig
                         if (siteData) {
                             const positions = siteData.admin?.positionConfig || [];
-                            const matchedPos = positions.find(p => p.name === role || p.id === role);
-
+                            const matchedPos = positions.find((p: any) => p.name === role || p.id === role);
                             if (matchedPos) {
                                 if (matchedPos.id === 'full') {
                                     targetSite = 'admin';
@@ -154,17 +164,29 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             }
                         }
 
-                        if (targetSite && siteData![targetSite]) { // siteData에 존재하는지 안전장치
-                            setCurrentSite(prevSite => {
-                                // 이미 같은 사이트면 변경하지 않음
-                                if (prevSite === targetSite) return prevSite;
-                                return targetSite;
-                            });
+                        // 사용자가 수동으로 사이트를 변경하지 않은 경우에만 자동 설정
+                        // 최초 로그인 시에만 역할 기반 사이트 설정 적용
+                        if (targetSite && (siteData as any)?.[targetSite] && !userManuallyChangedSite) {
+                            setCurrentSite((prevSite) => (prevSite === targetSite ? prevSite : targetSite));
                         }
 
-                        // Update MessageManager context with role
                         MessageManager.setContext({ role });
-                    });
+                    };
+
+                    const loadAndApply = async () => {
+                        if (!currentUser) return;
+                        const u = await userService.getUser(currentUser.uid);
+                        if (cancelled) return;
+                        applyRole(u?.role);
+                    };
+
+                    await loadAndApply();
+                    const timer = setInterval(loadAndApply, 30000);
+
+                    return () => {
+                        cancelled = true;
+                        clearInterval(timer);
+                    };
                 } catch (error) {
                     console.error("Failed to setup admin listener", error);
                 }
@@ -173,10 +195,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             }
         };
 
-        setupAdminListener();
+        let cleanup: void | (() => void);
+        (async () => {
+            cleanup = await setupAdminListener();
+        })();
 
         return () => {
-            if (unsubscribe) unsubscribe();
+            if (typeof cleanup === 'function') cleanup();
         };
     }, [currentUser, siteData]); // Re-run when siteData is loaded
 
@@ -265,7 +290,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     const handleLogoClick = () => {
         setActiveMenuItems({});
-        navigate('/dashboard');
+        // 청연사이트 모드이면 /dashboard2로, 아니면 /dashboard로 이동
+        navigate(currentSite === 'test' ? '/dashboard2' : '/dashboard');
     };
 
     // Position to Site mapping - 직책별로 전용 메뉴 사용
@@ -312,8 +338,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         // 1. Direct Path (Priority)
         if (item.path) {
             navigate(item.path);
-            if (isMobile) closeAll();
-            setActiveMenuItems({});
+            if (isMobile) {
+                closeAll();
+                setActiveMenuItems({});
+            } else {
+                // 상위 메뉴(Top Level) 클릭 시에만 다른 메뉴 닫기 (= Accordion 효과)
+                // 하위 메뉴(Level 2 등) 클릭 시에는 현재 펼쳐진 상태 유지
+                const isTopLevel = currentSiteData.menu.some(topItem => topItem.text === item.text);
+                if (isTopLevel) {
+                    setActiveMenuItems({});
+                }
+            }
             return;
         }
 
@@ -349,6 +384,18 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const changeSite = (siteKey: string) => {
         setCurrentSite(siteKey);
         setActiveMenuItems({});
+        // 사용자가 수동으로 사이트를 변경했음을 기록
+        setUserManuallyChangedSite(true);
+        localStorage.setItem('cy_current_site', siteKey);
+        localStorage.setItem('cy_site_manual', 'true');
+
+        // 청연사이트(test)로 전환 시 /dashboard2로 이동
+        if (siteKey === 'test') {
+            navigate('/dashboard2');
+        } else if (location.pathname === '/dashboard2') {
+            // 다른 사이트로 전환 시 /dashboard2에 있으면 /dashboard로 이동
+            navigate('/dashboard');
+        }
     };
 
     const changePosition = (positionId: string) => {
@@ -381,124 +428,180 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         }
     };
 
+    const siteModeValue = {
+        siteData,
+        currentSite,
+        effectiveSite,
+        currentSiteData: (currentSiteData as SiteData | null),
+        changeSite
+    };
+
     if (!siteData) {
         return (
-            <div className="app">
-                <SidebarSkeleton />
-                <main id="main-content" style={{ marginLeft: '250px' }}>
-                    {children}
-                </main>
-            </div>
+            <SiteModeProvider {...siteModeValue}>
+                <div className="app">
+                    <SidebarSkeleton />
+                    <main id="main-content" style={{ marginLeft: '250px' }}>
+                        {children}
+                    </main>
+                </div>
+            </SiteModeProvider>
         );
     }
 
-    // Layout Variant for Cheongyeon SITE (test) - Cinematic & Corporate Style
+    // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
     if (currentSite === 'test' && currentSiteData) {
         return (
-            <div className="relative min-h-screen bg-slate-900 font-sans overflow-x-hidden selection:bg-amber-500 selection:text-white">
-                <CheongyeonHeader
-                    currentSiteData={currentSiteData}
-                    onMenuClick={() => setIsRightPanelOpen(true)}
-                />
+            <SiteModeProvider {...siteModeValue}>
+                <div className={`app cheongyeon-mode ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+                    <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
-                <RichRightDrawer
-                    isOpen={isRightPanelOpen}
-                    onClose={() => setIsRightPanelOpen(false)}
-                    currentSiteData={currentSiteData}
-                    menuPaths={MENU_PATHS}
-                    changeSite={changeSite}
-                />
+                    {/* Same Header as Admin ERP */}
+                    <Header
+                        toggleSidebar={toggleSidebar}
+                        togglePanel={togglePanel}
+                        currentSiteData={currentSiteData}
+                        isAdmin={isAdmin}
+                        isPositionPanelOpen={isPositionPanelOpen}
+                        currentPosition={currentPosition}
+                        changePosition={changePosition}
+                        positions={positions}
+                    />
 
-                {/* Main Content */}
-                <main className="">
-                    {location.pathname === '/dashboard' ? (
-                        <CheongyeonHome />
-                    ) : (
-                        <div className="pt-[90px] min-h-screen bg-slate-50">
-                            <div className="w-full">
-                                {children}
-                            </div>
-                        </div>
-                    )}
-                </main>
-            </div>
+                    {/* Same Sidebar as Admin ERP (Left Side) */}
+                    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                        <Sidebar
+                            currentSite={effectiveSite}
+                            currentSiteData={currentSiteData}
+                            closeAll={closeAll}
+                            activeMenuItems={activeMenuItems}
+                            activeNestedMenuItems={activeNestedMenuItems}
+                            toggleSubmenu={toggleSubmenu}
+                            toggleNestedSubmenu={toggleNestedSubmenu}
+                            handleMenuItemClick={handleMenuItemClick}
+                            handleSubMenuClick={handleSubMenuClick}
+                            handleLogoClick={handleLogoClick}
+                            menuPaths={menuPaths}
+                            isSidebarCollapsed={isSidebarCollapsed}
+                            isMobile={isMobile}
+                            openMobileSidebar={() => setIsMobileOpen(true)}
+                        />
+                    </ErrorBoundary>
+
+                    {/* Right Panel - Site Mode Switcher */}
+                    <RightPanel
+                        isOpen={isRightPanelOpen}
+                        togglePanel={togglePanel}
+                        siteData={siteData}
+                        currentSite={currentSite}
+                        changeSite={changeSite}
+                        menuPaths={menuPaths}
+                    />
+
+                    {/* Bottom Panel */}
+                    <BottomPanel
+                        isOpen={isBottomPanelOpen}
+                        togglePanel={togglePanel}
+                        currentSite={currentSite}
+                        changeSite={changeSite}
+                    />
+
+                    {/* Admin Panel */}
+                    <AdminPanel
+                        isOpen={isAdminPanelOpen}
+                        togglePanel={togglePanel}
+                        siteData={siteData}
+                        menuPaths={menuPaths}
+                    />
+
+
+
+                    {/* Main Content with Video Background for Dashboard2 */}
+                    <main id="main-content" className={location.pathname === '/dashboard2' ? 'cheongyeon-main' : ''} onClick={() => {
+                        if (isRightPanelOpen || isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
+                            closeAll();
+                        }
+                    }}>
+                        <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                            {children}
+                        </ErrorBoundary>
+                    </main>
+                </div>
+            </SiteModeProvider>
         );
     }
 
     return (
-        <div className={`app ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
-            {/* Backdrop for mobile */}
-            <div className="backdrop" id="backdrop" onClick={closeAll}></div>
+        <SiteModeProvider {...siteModeValue}>
+            <div className={`app ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+                <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
-            <Header
-                toggleSidebar={toggleSidebar}
-                togglePanel={togglePanel}
-                currentSiteData={currentSiteData}
-                isAdmin={isAdmin}
-            />
-
-            <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
-                <Sidebar
-                    currentSite={effectiveSite}
+                <Header
+                    toggleSidebar={toggleSidebar}
+                    togglePanel={togglePanel}
                     currentSiteData={currentSiteData}
-                    closeAll={closeAll}
-                    activeMenuItems={activeMenuItems}
-                    activeNestedMenuItems={activeNestedMenuItems}
-                    toggleSubmenu={toggleSubmenu}
-                    toggleNestedSubmenu={toggleNestedSubmenu}
-                    handleMenuItemClick={handleMenuItemClick}
-                    handleSubMenuClick={handleSubMenuClick}
-                    handleLogoClick={handleLogoClick}
-                    menuPaths={menuPaths}
-                    isSidebarCollapsed={isSidebarCollapsed}
-                    isMobile={isMobile}
-                    openMobileSidebar={() => setIsMobileOpen(true)}
+                    isAdmin={isAdmin}
+                    isPositionPanelOpen={isPositionPanelOpen}
+                    currentPosition={currentPosition}
+                    changePosition={changePosition}
+                    positions={positions}
                 />
-            </ErrorBoundary>
 
-            <RightPanel
-                isOpen={isRightPanelOpen}
-                togglePanel={togglePanel}
-                siteData={siteData}
-                currentSite={currentSite}
-                changeSite={changeSite}
-                menuPaths={menuPaths}
-            />
-
-            <BottomPanel
-                isOpen={isBottomPanelOpen}
-                togglePanel={togglePanel}
-                currentSite={currentSite}
-                changeSite={changeSite}
-            />
-
-            <AdminPanel
-                isOpen={isAdminPanelOpen}
-                togglePanel={togglePanel}
-                siteData={siteData}
-                menuPaths={menuPaths}
-            />
-
-            <PositionPanel
-                isOpen={isPositionPanelOpen}
-                togglePanel={togglePanel}
-                currentPosition={currentPosition}
-                changePosition={changePosition}
-                positions={positions}
-            />
-
-            {/* 메인 콘텐츠 영역 */}
-            <main id="main-content" onClick={() => {
-                // Always close panels/sidebar when clicking main content
-                if (isRightPanelOpen || isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
-                    closeAll();
-                }
-            }}>
                 <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
-                    {children}
+                    <Sidebar
+                        currentSite={effectiveSite}
+                        currentSiteData={currentSiteData}
+                        closeAll={closeAll}
+                        activeMenuItems={activeMenuItems}
+                        activeNestedMenuItems={activeNestedMenuItems}
+                        toggleSubmenu={toggleSubmenu}
+                        toggleNestedSubmenu={toggleNestedSubmenu}
+                        handleMenuItemClick={handleMenuItemClick}
+                        handleSubMenuClick={handleSubMenuClick}
+                        handleLogoClick={handleLogoClick}
+                        menuPaths={menuPaths}
+                        isSidebarCollapsed={isSidebarCollapsed}
+                        isMobile={isMobile}
+                        openMobileSidebar={() => setIsMobileOpen(true)}
+                    />
                 </ErrorBoundary>
-            </main>
-        </div>
+
+                <RightPanel
+                    isOpen={isRightPanelOpen}
+                    togglePanel={togglePanel}
+                    siteData={siteData}
+                    currentSite={currentSite}
+                    changeSite={changeSite}
+                    menuPaths={menuPaths}
+                />
+
+                <BottomPanel
+                    isOpen={isBottomPanelOpen}
+                    togglePanel={togglePanel}
+                    currentSite={currentSite}
+                    changeSite={changeSite}
+                />
+
+                <AdminPanel
+                    isOpen={isAdminPanelOpen}
+                    togglePanel={togglePanel}
+                    siteData={siteData}
+                    menuPaths={menuPaths}
+                />
+
+
+
+                <main id="main-content" onClick={() => {
+                    if (isRightPanelOpen || isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
+                        closeAll();
+                    }
+                }}>
+                    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                        {children}
+                    </ErrorBoundary>
+                </main>
+            </div>
+        </SiteModeProvider>
     );
 };
 

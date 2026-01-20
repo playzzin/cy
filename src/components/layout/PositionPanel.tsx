@@ -23,9 +23,9 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
 
 
     return (
-        <aside
+        <div
             id="position-panel"
-            className={`fixed top-0 right-0 h-full w-72 bg-gradient-to-b from-slate-800 to-slate-900 shadow-xl z-50 transition-transform duration-300 ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+            className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50"
         >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-slate-700">
@@ -47,7 +47,10 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     {positions.map((pos) => (
                         <button
                             key={pos.id}
-                            onClick={() => changePosition(pos.id)}
+                            onClick={() => {
+                                changePosition(pos.id);
+                                togglePanel('position'); // Close panel on selection
+                            }}
                             className={`relative flex flex-col items-center justify-center p-4 rounded-xl transition-all duration-200 ${currentPosition === pos.id
                                 ? `bg-gradient-to-br ${pos.color} text-white shadow-lg scale-105`
                                 : 'bg-slate-700/50 text-slate-300 hover:bg-slate-700 hover:scale-102'
@@ -76,7 +79,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     </p>
                 </div>
             </div>
-        </aside>
+        </div>
     );
 };
 
