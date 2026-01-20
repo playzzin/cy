@@ -25,7 +25,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
     return (
         <div
             id="position-panel"
-            className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50"
+            className="absolute top-full right-[-10px] w-80 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-50"
         >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-slate-700">
