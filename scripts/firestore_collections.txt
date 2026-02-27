@@ -1,0 +1,9 @@
+positions
+receivable_ledgers
+receivable_payments
+settings
+smart_memos
+system_config
+tasks
+tax_invoice_ledger
+users

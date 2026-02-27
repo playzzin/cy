@@ -1,5 +1,6 @@
-import { db } from '../config/firebase';
-import { doc, getDoc, getDocFromServer, setDoc, Timestamp } from 'firebase/firestore';
+import app from '../config/firebase';
+import { getDataConnect } from 'firebase/data-connect';
+import { connectorConfig, createSetting, listAllSettings as listSettings, updateSetting } from './dataconnectCompat';
 
 export interface PayrollDeductionItem {
     id: string;
@@ -14,20 +15,35 @@ export interface PayrollInsuranceConfig {
     healthRate: number;
     careRateOfHealth: number;
     employmentRate: number;
+    withholdingBaseDeduction?: number;
+    withholdingIncomeBaseMultiplier?: number;
+    withholdingIncomeTaxRate?: number;
+    withholdingResidentTaxRate?: number;
+    withholdingApplyAllLabor?: boolean;
+    employmentApplyBelowThreshold?: boolean;
+}
+
+export interface DailyWageStatementPeriodConfig {
+    startDay: number;
+    endDay: number;
 }
 
 export interface PayrollConfig {
     taxRate: number; // 0.033 = 3.3%
+    incomeTaxRate: number; // 0.03 = 3%
+    residentTaxRate: number; // 0.003 = 0.3%
     deductionItems: PayrollDeductionItem[];
     insuranceConfig: PayrollInsuranceConfig;
+    dailyWageStatementPeriod: DailyWageStatementPeriodConfig;
     updatedAt?: Date;
 }
 
-const COLLECTION_NAME = 'settings';
 const DOC_ID = 'payroll_config_v1';
 
 const DEFAULT_CONFIG: PayrollConfig = {
     taxRate: 0.033,
+    incomeTaxRate: 0.03,
+    residentTaxRate: 0.003,
     deductionItems: [
         { id: 'prevMonthCarryover', label: '전월이월', order: 1, isActive: true },
         { id: 'accommodation', label: '숙소비', order: 2, isActive: true },
@@ -45,14 +61,77 @@ const DEFAULT_CONFIG: PayrollConfig = {
         pensionRate: 0.045,
         healthRate: 0.03545,
         careRateOfHealth: 0.1295,
-        employmentRate: 0.009
+        employmentRate: 0.009,
+        withholdingBaseDeduction: 150000,
+        withholdingIncomeBaseMultiplier: 0.55,
+        withholdingIncomeTaxRate: 0.06,
+        withholdingResidentTaxRate: 0.1,
+        withholdingApplyAllLabor: true,
+        employmentApplyBelowThreshold: true
+    },
+    dailyWageStatementPeriod: {
+        startDay: 1,
+        endDay: 31
     }
+};
+
+const dc = getDataConnect(app, connectorConfig);
+
+const nowIso = (): string => new Date().toISOString();
+
+const parseSettingData = (raw: unknown): Record<string, unknown> | null => {
+    if (!raw) return null;
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+        } catch {
+            return null;
+        }
+    }
+    if (typeof raw === 'object') return raw as Record<string, unknown>;
+    return null;
+};
+
+const findPayrollSettingRow = async (): Promise<any | null> => {
+    const res = await listSettings(dc);
+    const rows = (res as any)?.data?.settings ?? [];
+    const found = Array.isArray(rows) ? rows.find((r: any) => String(r?.id) === DOC_ID) : null;
+    return found ?? null;
+};
+
+const ensurePayrollSettingExists = async (): Promise<void> => {
+    const existing = await findPayrollSettingRow();
+    if (existing) return;
+    await createSetting(dc, {
+        id: DOC_ID,
+        data: JSON.stringify({
+            taxRate: DEFAULT_CONFIG.taxRate,
+            incomeTaxRate: DEFAULT_CONFIG.incomeTaxRate,
+            residentTaxRate: DEFAULT_CONFIG.residentTaxRate,
+            deductionItems: DEFAULT_CONFIG.deductionItems,
+            insuranceConfig: DEFAULT_CONFIG.insuranceConfig,
+            dailyWageStatementPeriod: DEFAULT_CONFIG.dailyWageStatementPeriod,
+            updatedAt: nowIso()
+        })
+    } as any);
 };
 
 const toDateOrUndefined = (value: unknown): Date | undefined => {
     if (!value) return undefined;
     if (value instanceof Date) return value;
-    if (value instanceof Timestamp) return value.toDate();
+    if (typeof value === 'string') {
+        const d = new Date(value);
+        if (!Number.isNaN(d.getTime())) return d;
+    }
+    if (typeof value === 'object') {
+        const obj = value as any;
+        const seconds = obj?._seconds ?? obj?.seconds;
+        const nanos = obj?._nanoseconds ?? obj?.nanoseconds ?? 0;
+        if (typeof seconds === 'number' && Number.isFinite(seconds)) {
+            return new Date(seconds * 1000 + Math.floor((typeof nanos === 'number' ? nanos : 0) / 1_000_000));
+        }
+    }
     return undefined;
 };
 
@@ -63,6 +142,22 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
 
     const taxRateRaw = obj.taxRate;
     const taxRate = typeof taxRateRaw === 'number' && Number.isFinite(taxRateRaw) && taxRateRaw >= 0 ? taxRateRaw : DEFAULT_CONFIG.taxRate;
+
+    const incomeTaxRateRaw = obj.incomeTaxRate;
+    const residentTaxRateRaw = obj.residentTaxRate;
+
+    const derivedIncome = taxRate > 0 ? taxRate / 1.1 : DEFAULT_CONFIG.incomeTaxRate;
+    const derivedResident = Math.max(0, taxRate - derivedIncome);
+
+    const incomeTaxRate =
+        typeof incomeTaxRateRaw === 'number' && Number.isFinite(incomeTaxRateRaw) && incomeTaxRateRaw >= 0
+            ? incomeTaxRateRaw
+            : derivedIncome;
+
+    const residentTaxRate =
+        typeof residentTaxRateRaw === 'number' && Number.isFinite(residentTaxRateRaw) && residentTaxRateRaw >= 0
+            ? residentTaxRateRaw
+            : derivedResident;
 
     const itemsRaw = obj.deductionItems;
     const deductionItems: PayrollDeductionItem[] = Array.isArray(itemsRaw)
@@ -114,16 +209,81 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
             ? employmentRateRaw
             : DEFAULT_CONFIG.insuranceConfig.employmentRate;
 
+    const withholdingBaseDeductionRaw = insuranceObj.withholdingBaseDeduction;
+    const withholdingBaseDeduction =
+        typeof withholdingBaseDeductionRaw === 'number' && Number.isFinite(withholdingBaseDeductionRaw) && withholdingBaseDeductionRaw >= 0
+            ? Math.floor(withholdingBaseDeductionRaw)
+            : DEFAULT_CONFIG.insuranceConfig.withholdingBaseDeduction;
+
+    const withholdingIncomeBaseMultiplierRaw = insuranceObj.withholdingIncomeBaseMultiplier;
+    const withholdingIncomeBaseMultiplier =
+        typeof withholdingIncomeBaseMultiplierRaw === 'number' && Number.isFinite(withholdingIncomeBaseMultiplierRaw) && withholdingIncomeBaseMultiplierRaw >= 0
+            ? withholdingIncomeBaseMultiplierRaw
+            : DEFAULT_CONFIG.insuranceConfig.withholdingIncomeBaseMultiplier;
+
+    const withholdingIncomeTaxRateRaw = insuranceObj.withholdingIncomeTaxRate;
+    const withholdingIncomeTaxRate =
+        typeof withholdingIncomeTaxRateRaw === 'number' && Number.isFinite(withholdingIncomeTaxRateRaw) && withholdingIncomeTaxRateRaw >= 0
+            ? withholdingIncomeTaxRateRaw
+            : DEFAULT_CONFIG.insuranceConfig.withholdingIncomeTaxRate;
+
+    const withholdingResidentTaxRateRaw = insuranceObj.withholdingResidentTaxRate;
+    const withholdingResidentTaxRate =
+        typeof withholdingResidentTaxRateRaw === 'number' && Number.isFinite(withholdingResidentTaxRateRaw) && withholdingResidentTaxRateRaw >= 0
+            ? withholdingResidentTaxRateRaw
+            : DEFAULT_CONFIG.insuranceConfig.withholdingResidentTaxRate;
+
+    const withholdingApplyAllLaborRaw = insuranceObj.withholdingApplyAllLabor;
+    const withholdingApplyAllLabor =
+        typeof withholdingApplyAllLaborRaw === 'boolean'
+            ? withholdingApplyAllLaborRaw
+            : DEFAULT_CONFIG.insuranceConfig.withholdingApplyAllLabor;
+
+    const employmentApplyBelowThresholdRaw = insuranceObj.employmentApplyBelowThreshold;
+    const employmentApplyBelowThreshold =
+        typeof employmentApplyBelowThresholdRaw === 'boolean'
+            ? employmentApplyBelowThresholdRaw
+            : DEFAULT_CONFIG.insuranceConfig.employmentApplyBelowThreshold;
+
+    const dailyWageStatementPeriodRaw = obj.dailyWageStatementPeriod;
+    const dailyWageStatementPeriodObj =
+        dailyWageStatementPeriodRaw && typeof dailyWageStatementPeriodRaw === 'object'
+            ? (dailyWageStatementPeriodRaw as Record<string, unknown>)
+            : {};
+
+    const startDayRaw = dailyWageStatementPeriodObj.startDay;
+    const endDayRaw = dailyWageStatementPeriodObj.endDay;
+
+    const dailyWageStatementPeriod: DailyWageStatementPeriodConfig = {
+        startDay:
+            typeof startDayRaw === 'number' && Number.isFinite(startDayRaw) && startDayRaw >= 1 && startDayRaw <= 31
+                ? Math.floor(startDayRaw)
+                : DEFAULT_CONFIG.dailyWageStatementPeriod.startDay,
+        endDay:
+            typeof endDayRaw === 'number' && Number.isFinite(endDayRaw) && endDayRaw >= 1 && endDayRaw <= 31
+                ? Math.floor(endDayRaw)
+                : DEFAULT_CONFIG.dailyWageStatementPeriod.endDay
+    };
+
     return {
         taxRate,
+        incomeTaxRate,
+        residentTaxRate,
         deductionItems,
         insuranceConfig: {
             thresholdDays,
             pensionRate,
             healthRate,
             careRateOfHealth,
-            employmentRate
+            employmentRate,
+            withholdingBaseDeduction,
+            withholdingIncomeBaseMultiplier,
+            withholdingIncomeTaxRate,
+            withholdingResidentTaxRate,
+            withholdingApplyAllLabor,
+            employmentApplyBelowThreshold
         },
+        dailyWageStatementPeriod,
         updatedAt: toDateOrUndefined(obj.updatedAt)
     };
 };
@@ -131,37 +291,34 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
 export const payrollConfigService = {
     getConfig: async (): Promise<PayrollConfig> => {
         try {
-            const ref = doc(db, COLLECTION_NAME, DOC_ID);
-            const snapshot = await getDoc(ref);
-            if (!snapshot.exists()) {
+            const row = await findPayrollSettingRow();
+            if (!row) {
                 try {
-                    await setDoc(
-                        ref,
-                        {
-                            taxRate: DEFAULT_CONFIG.taxRate,
-                            deductionItems: DEFAULT_CONFIG.deductionItems,
-                            insuranceConfig: DEFAULT_CONFIG.insuranceConfig,
-                            updatedAt: Timestamp.now()
-                        },
-                        { merge: true }
-                    );
+                    await ensurePayrollSettingExists();
                 } catch (error) {
                     console.error('Failed to create default payroll config:', error);
                 }
-
                 return DEFAULT_CONFIG;
             }
 
-            const data = snapshot.data() as Record<string, unknown>;
-            const patch: Partial<Pick<PayrollConfig, 'taxRate' | 'deductionItems' | 'insuranceConfig'>> = {};
+            const data = parseSettingData((row as any)?.data) ?? {};
+            const patch: Partial<
+                Pick<PayrollConfig, 'taxRate' | 'incomeTaxRate' | 'residentTaxRate' | 'deductionItems' | 'insuranceConfig' | 'dailyWageStatementPeriod'>
+            > = {};
 
             if (data.taxRate === undefined) patch.taxRate = DEFAULT_CONFIG.taxRate;
+            if ((data as any).incomeTaxRate === undefined) patch.incomeTaxRate = DEFAULT_CONFIG.incomeTaxRate;
+            if ((data as any).residentTaxRate === undefined) patch.residentTaxRate = DEFAULT_CONFIG.residentTaxRate;
             if (data.deductionItems === undefined) patch.deductionItems = DEFAULT_CONFIG.deductionItems;
             if (data.insuranceConfig === undefined) patch.insuranceConfig = DEFAULT_CONFIG.insuranceConfig;
+            if ((data as any).dailyWageStatementPeriod === undefined) patch.dailyWageStatementPeriod = DEFAULT_CONFIG.dailyWageStatementPeriod;
 
             if (Object.keys(patch).length > 0) {
                 try {
-                    await setDoc(ref, { ...patch, updatedAt: Timestamp.now() }, { merge: true });
+                    await updateSetting(dc, {
+                        id: DOC_ID,
+                        data: JSON.stringify({ ...data, ...patch, updatedAt: nowIso() })
+                    } as any);
                 } catch (error) {
                     console.error('Failed to backfill payroll config defaults:', error);
                 }
@@ -175,95 +332,80 @@ export const payrollConfigService = {
     },
 
     getConfigFromServer: async (): Promise<PayrollConfig> => {
-        const ref = doc(db, COLLECTION_NAME, DOC_ID);
-        const snapshot = await getDocFromServer(ref);
-        if (!snapshot.exists()) {
-            try {
-                await setDoc(
-                    ref,
-                    {
-                        taxRate: DEFAULT_CONFIG.taxRate,
-                        deductionItems: DEFAULT_CONFIG.deductionItems,
-                        insuranceConfig: DEFAULT_CONFIG.insuranceConfig,
-                        updatedAt: Timestamp.now()
-                    },
-                    { merge: true }
-                );
-            } catch (error) {
-                console.error('Failed to create default payroll config:', error);
-            }
-
-            return DEFAULT_CONFIG;
-        }
-
-        const data = snapshot.data() as Record<string, unknown>;
-        const patch: Partial<Pick<PayrollConfig, 'taxRate' | 'deductionItems' | 'insuranceConfig'>> = {};
-
-        if (data.taxRate === undefined) patch.taxRate = DEFAULT_CONFIG.taxRate;
-        if (data.deductionItems === undefined) patch.deductionItems = DEFAULT_CONFIG.deductionItems;
-        if (data.insuranceConfig === undefined) patch.insuranceConfig = DEFAULT_CONFIG.insuranceConfig;
-
-        if (Object.keys(patch).length > 0) {
-            try {
-                await setDoc(ref, { ...patch, updatedAt: Timestamp.now() }, { merge: true });
-            } catch (error) {
-                console.error('Failed to backfill payroll config defaults:', error);
-            }
-        }
-
-        return sanitizeConfig(data);
+        return payrollConfigService.getConfig();
     },
 
     updateTaxRate: async (taxRate: number): Promise<void> => {
-        const ref = doc(db, COLLECTION_NAME, DOC_ID);
         const safe = sanitizeConfig({ taxRate });
-        await setDoc(
-            ref,
-            {
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
+        const derivedIncomeTaxRate = safe.taxRate > 0 ? safe.taxRate / 1.1 : DEFAULT_CONFIG.incomeTaxRate;
+        const derivedResidentTaxRate = Math.max(0, safe.taxRate - derivedIncomeTaxRate);
+
+        await updateSetting(dc, {
+            id: DOC_ID,
+            data: JSON.stringify({
+                ...existing,
                 taxRate: safe.taxRate,
-                updatedAt: Timestamp.now()
-            },
-            { merge: true }
-        );
+                incomeTaxRate: derivedIncomeTaxRate,
+                residentTaxRate: derivedResidentTaxRate,
+                updatedAt: nowIso()
+            })
+        } as any);
     },
 
     updateDeductionItems: async (deductionItems: PayrollDeductionItem[]): Promise<void> => {
-        const ref = doc(db, COLLECTION_NAME, DOC_ID);
         const safe = sanitizeConfig({ deductionItems });
-        await setDoc(
-            ref,
-            {
-                deductionItems: safe.deductionItems,
-                updatedAt: Timestamp.now()
-            },
-            { merge: true }
-        );
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
+        await updateSetting(dc, {
+            id: DOC_ID,
+            data: JSON.stringify({ ...existing, deductionItems: safe.deductionItems, updatedAt: nowIso() })
+        } as any);
     },
 
     updateInsuranceConfig: async (insuranceConfig: PayrollInsuranceConfig): Promise<void> => {
-        const ref = doc(db, COLLECTION_NAME, DOC_ID);
         const safe = sanitizeConfig({ insuranceConfig });
-        await setDoc(
-            ref,
-            {
-                insuranceConfig: safe.insuranceConfig,
-                updatedAt: Timestamp.now()
-            },
-            { merge: true }
-        );
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
+        await updateSetting(dc, {
+            id: DOC_ID,
+            data: JSON.stringify({ ...existing, insuranceConfig: safe.insuranceConfig, updatedAt: nowIso() })
+        } as any);
+    },
+
+    updateDailyWageStatementPeriod: async (dailyWageStatementPeriod: DailyWageStatementPeriodConfig): Promise<void> => {
+        const safe = sanitizeConfig({ dailyWageStatementPeriod });
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
+        await updateSetting(dc, {
+            id: DOC_ID,
+            data: JSON.stringify({ ...existing, dailyWageStatementPeriod: safe.dailyWageStatementPeriod, updatedAt: nowIso() })
+        } as any);
     },
 
     saveConfig: async (config: PayrollConfig): Promise<void> => {
         const safeConfig = sanitizeConfig(config);
-        const ref = doc(db, COLLECTION_NAME, DOC_ID);
-
         const payload = {
             taxRate: safeConfig.taxRate,
+            incomeTaxRate: safeConfig.incomeTaxRate,
+            residentTaxRate: safeConfig.residentTaxRate,
             deductionItems: safeConfig.deductionItems,
             insuranceConfig: safeConfig.insuranceConfig,
-            updatedAt: Timestamp.now()
+            dailyWageStatementPeriod: safeConfig.dailyWageStatementPeriod,
+            updatedAt: nowIso()
         };
 
-        await setDoc(ref, payload, { merge: true });
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        if (row) {
+            await updateSetting(dc, { id: DOC_ID, data: JSON.stringify(payload) } as any);
+        } else {
+            await createSetting(dc, { id: DOC_ID, data: JSON.stringify(payload) } as any);
+        }
     }
 };

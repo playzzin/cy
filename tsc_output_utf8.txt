@@ -1,0 +1,127 @@
+﻿src/components/card/CardBillingManager.tsx(17,58): error TS2307: Cannot find module '../../types/cardBilling' or its corresponding type declarations.
+src/components/card/CardBillingManager.tsx(565,101): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/components/card/CardBillingManager.tsx(604,89): error TS7006: Parameter 'li' implicitly has an 'any' type.
+src/components/company/CompanyManagement.tsx(25,13): error TS18048: 'c.code' is possibly 'undefined'.
+src/components/dashboard/core/PeriodSelector.tsx(3,10): error TS2724: '"../../../types/dashboard"' has no exported member named 'DashboardPeriod'. Did you mean 'DashboardKPI'?
+src/components/dashboard/executive/KPISummary.tsx(4,10): error TS2305: Module '"../../../types/dashboard"' has no exported member 'KPIItem'.
+src/components/layout/Sidebar.tsx(480,65): error TS17001: JSX elements cannot have multiple attributes with the same name.
+src/components/layout/Sidebar.tsx(579,89): error TS17001: JSX elements cannot have multiple attributes with the same name.
+src/components/layout/Sidebar.tsx(636,93): error TS17001: JSX elements cannot have multiple attributes with the same name.
+src/components/vehicle/VehicleBillingManager.tsx(526,17): error TS2739: Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/features/smart-memo/pages/MemoPage.tsx(83,44): error TS2345: Argument of type '{ uid: string; email: string | null; }' is not assignable to parameter of type 'string'.
+src/hooks/usePeriodSelector.ts(10,10): error TS2724: '"../types/dashboard"' has no exported member named 'DashboardPeriod'. Did you mean 'DashboardKPI'?
+src/pages/admin/DataConsolePage.tsx(5,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listCompanies'. Did you mean 'listAllCompanies'?
+src/pages/admin/DataConsolePage.tsx(6,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/pages/admin/DataConsolePage.tsx(7,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/pages/admin/DataConsolePage.tsx(8,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listSites'. Did you mean 'listAllSites'?
+src/pages/admin/DataConsolePage.tsx(9,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listDailyReports'. Did you mean 'listAllDailyReports'?
+src/pages/admin/DataConsolePage.tsx(10,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listDailyReportWorkers'. Did you mean 'deleteDailyReportWorker'?
+src/pages/admin/menu/components/SiteManager.tsx(158,50): error TS2339: Property 'delegationTemplatePath' does not exist on type 'SiteData'.
+src/pages/admin/RelationshipConsole.tsx(18,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/pages/admin/RelationshipConsole.tsx(19,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/pages/admin/RelationshipConsole.tsx(20,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listSites'. Did you mean 'listAllSites'?
+src/pages/admin/RelationshipConsole.tsx(21,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listCompanies'. Did you mean 'listAllCompanies'?
+src/pages/materials/MaterialMasterPage.tsx(115,70): error TS2345: Argument of type '{ category: string; itemName: string; spec: string; unit: string; safetyStock: number; description: string; isActive: boolean; }' is not assignable to parameter of type 'Partial<Omit<Material, "id" | "createdAt" | "updatedAt">>'.
+  Types of property 'category' are incompatible.
+    Type 'string' is not assignable to type '"湲고?" | "?쒖뒪???숇컮由? | "?쒖뒪??鍮꾧퀎" | undefined'.
+src/pages/materials/MaterialMasterPage.tsx(118,51): error TS2345: Argument of type '{ category: string; itemName: string; spec: string; unit: string; safetyStock: number; description: string; isActive: boolean; }' is not assignable to parameter of type 'Omit<Material, "id" | "createdAt" | "updatedAt">'.
+  Types of property 'category' are incompatible.
+    Type 'string' is not assignable to type '"湲고?" | "?쒖뒪???숇컮由? | "?쒖뒪??鍮꾧퀎"'.
+src/pages/payroll/DelegationLetterV5Page.tsx(25,53): error TS2339: Property 'delegationTemplatePath' does not exist on type 'SiteData'.
+src/pages/payroll/DelegationLetterV5Page.tsx(26,57): error TS2339: Property 'delegationTemplatePath' does not exist on type 'SiteData'.
+src/pages/payroll/TeamSettlementPage.tsx(24,42): error TS2307: Cannot find module '../../types/cardBilling' or its corresponding type declarations.
+src/pages/payroll/TeamSettlementPage.tsx(1327,51): error TS7006: Parameter 'li' implicitly has an 'any' type.
+src/pages/taxinvoice/ReceivablesManagementPage.tsx(59,50): error TS2339: Property 'getAll' does not exist on type '{ registerReceivables(invoices: TaxAffairsRecord[]): Promise<void>; getReceivables(): Promise<ReceivableLedger[]>; getPayments(receivableId: string): Promise<...>; addPayment(receivableId: string, payment: Omit<...>): Promise<...>; deletePayment(paymentId: string, receivableId: string, amount: number): Promise<...>;...'.
+src/pages/taxinvoice/ReceivablesManagementPage.tsx(109,17): error TS2322: Type 'string' is not assignable to type '"BankMatch" | "Cash" | "Corporate" | "Personal" | "Manual"'.
+src/providers/refine/dataConnectProvider.ts(4,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listCompanies'. Did you mean 'listAllCompanies'?
+src/providers/refine/dataConnectProvider.ts(5,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/providers/refine/dataConnectProvider.ts(6,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/providers/refine/dataConnectProvider.ts(7,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listSites'. Did you mean 'listAllSites'?
+src/providers/refine/dataConnectProvider.ts(8,5): error TS2724: '"../../dataconnect-generated"' has no exported member named 'listDailyReports'. Did you mean 'listAllDailyReports'?
+src/providers/refine/dataConnectProvider.ts(9,5): error TS2305: Module '"../../dataconnect-generated"' has no exported member 'getCompany'.
+src/providers/refine/dataConnectProvider.ts(10,5): error TS2305: Module '"../../dataconnect-generated"' has no exported member 'getTeam'.
+src/providers/refine/dataConnectProvider.ts(11,5): error TS2305: Module '"../../dataconnect-generated"' has no exported member 'getWorker'.
+src/services/accommodationAssignmentService.ts(6,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listAccommodationAssignments'. Did you mean 'listAllAccommodationAssignments'?
+src/services/accommodationAssignmentService.ts(10,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/services/accommodationAssignmentService.ts(11,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/services/accommodationAssignmentService.ts(12,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listAccommodations'. Did you mean 'listAllAccommodations'?
+src/services/accommodationBillingService.ts(6,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listAllAccommodationBillingLineItems'. Did you mean 'deleteAccommodationBillingLineItem'?
+src/services/accommodationBillingService.ts(14,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/services/accommodationBillingService.ts(15,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/services/accommodationService.ts(4,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listAccommodations'. Did you mean 'listAllAccommodations'?
+src/services/advancePaymentService.ts(9,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/services/advancePaymentService.ts(10,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/services/auditService.ts(3,43): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listAuditLogs'.
+src/services/cardBillingService.ts(5,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'createCardBillingDocument'. Did you mean 'listCardBillingDocuments'?
+src/services/cardBillingService.ts(6,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'deleteCardBillingDocument'. Did you mean 'listCardBillingDocuments'?
+src/services/cardBillingService.ts(11,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'updateCardBillingDocument'. Did you mean 'listCardBillingDocuments'?
+src/services/cardBillingService.ts(12,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'CreateCardBillingDocumentVariables'. Did you mean 'CreateVehicleBillingDocumentVariables'?
+src/services/cardBillingService.ts(13,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'DeleteCardBillingDocumentVariables'. Did you mean 'DeleteVehicleBillingDocumentVariables'?
+src/services/cardBillingService.ts(18,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'UpdateCardBillingDocumentVariables'. Did you mean 'UpdateVehicleBillingDocumentVariables'?
+src/services/cardBillingService.ts(20,102): error TS2307: Cannot find module '../types/cardBilling' or its corresponding type declarations.
+src/services/cardBillingService.ts(292,92): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/services/cardService.ts(5,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'createCard'.
+src/services/cardService.ts(6,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'createCardAssignment'.
+src/services/cardService.ts(7,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'createCardTransaction'.
+src/services/cardService.ts(8,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'deleteCard'.
+src/services/cardService.ts(9,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'deleteCardTransaction'. Did you mean 'listCardTransactions'?
+src/services/cardService.ts(13,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'updateCard'.
+src/services/cardService.ts(14,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'updateCardAssignment'.
+src/services/cardService.ts(15,10): error TS2305: Module '"./dataconnectCompat"' has no exported member 'CreateCardData'.
+src/services/cardService.ts(16,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'CreateCardVariables'. Did you mean 'CreateTeamVariables'?
+src/services/cardService.ts(17,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'CreateCardAssignmentVariables'. Did you mean 'CreateAgentVariables'?
+src/services/cardService.ts(18,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'CreateCardTransactionData'. Did you mean 'ListCardTransactionsData'?
+src/services/cardService.ts(19,10): error TS2305: Module '"./dataconnectCompat"' has no exported member 'CreateCardTransactionVariables'.
+src/services/cardService.ts(20,10): error TS2305: Module '"./dataconnectCompat"' has no exported member 'DeleteCardTransactionVariables'.
+src/services/cardService.ts(24,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'UpdateCardAssignmentVariables'. Did you mean 'UpdateAgentVariables'?
+src/services/cardService.ts(25,10): error TS2724: '"./dataconnectCompat"' has no exported member named 'UpdateCardVariables'. Did you mean 'UpdateTeamVariables'?
+src/services/companyService.ts(3,25): error TS2724: '"../dataconnect-generated"' has no exported member named 'listCompanies'. Did you mean 'listAllCompanies'?
+src/services/companyService.ts(3,70): error TS2305: Module '"../dataconnect-generated"' has no exported member 'getCompany'.
+src/services/companyService.ts(124,17): error TS2353: Object literal may only specify known properties, and 'address' does not exist in type 'CreateCompanyVariables'.
+src/services/componentService.ts(3,42): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSettings'.
+src/services/dispatchService.ts(104,17): error TS2353: Object literal may only specify known properties, and 'assignments' does not exist in type 'UpdateDailyDispatchVariables'.
+src/services/dispatchService.ts(113,13): error TS2353: Object literal may only specify known properties, and 'assignments' does not exist in type 'CreateDailyDispatchVariables'.
+src/services/freelancerService.ts(7,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'createFreelancer'. Did you mean 'getFreelancer'?
+src/services/freelancerService.ts(8,5): error TS2305: Module '"./dataconnectCompat"' has no exported member 'updateFreelancer'.
+src/services/freelancerService.ts(9,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'deleteFreelancer'. Did you mean 'getFreelancer'?
+src/services/freelancerService.ts(11,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'createFreelancerPayment'. Did you mean 'listFreelancerPayments'?
+src/services/freelancerService.ts(12,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'updateFreelancerPayment'. Did you mean 'listFreelancerPayments'?
+src/services/freelancerService.ts(13,5): error TS2724: '"./dataconnectCompat"' has no exported member named 'deleteFreelancerPayment'. Did you mean 'listFreelancerPayments'?
+src/services/homepageActivityService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/homepageChecklistService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/homepageEstimateService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/homepageRequestService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/laborExchangeService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/materialService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/materialService.ts(184,9): error TS2322: Type 'Timestamp' is not assignable to type 'FieldValue | Timestamp | null | undefined'.
+  Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/services/materialService.ts(185,9): error TS2322: Type 'Timestamp' is not assignable to type 'FieldValue | Timestamp | null | undefined'.
+  Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/services/materialService.ts(216,9): error TS2322: Type 'Timestamp' is not assignable to type 'FieldValue | Timestamp | null | undefined'.
+  Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/services/materialService.ts(314,18): error TS2339: Property 'vehicleNumber' does not exist on type 'TransactionFilters'.
+src/services/materialService.ts(315,110): error TS2339: Property 'vehicleNumber' does not exist on type 'TransactionFilters'.
+src/services/materialService.ts(413,18): error TS2339: Property 'vehicleNumber' does not exist on type 'TransactionFilters'.
+src/services/materialService.ts(414,110): error TS2339: Property 'vehicleNumber' does not exist on type 'TransactionFilters'.
+src/services/materialService.ts(543,17): error TS2322: Type 'Timestamp' is not assignable to type 'FieldValue | Timestamp | null | undefined'.
+  Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/services/materialService.ts(576,17): error TS2322: Type 'Timestamp' is not assignable to type 'FieldValue | Timestamp | null | undefined'.
+  Type 'Timestamp' is missing the following properties from type 'Timestamp': isEqual, toJSON
+src/services/payrollConfigService.ts(3,42): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSettings'.
+src/services/poaV5TemplateService.ts(3,27): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSettings'.
+src/services/positionService.ts(7,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listPositions'. Did you mean 'listAllPositions'?
+src/services/positionService.ts(8,5): error TS2305: Module '"../dataconnect-generated"' has no exported member 'updatePosition'.
+src/services/rolePermissionService.ts(2,30): error TS2305: Module '"@dataconnect/generated"' has no exported member 'listSystemConfigs'.
+src/services/rolePermissionService.ts(2,49): error TS2305: Module '"@dataconnect/generated"' has no exported member 'listAllSystemConfigs'.
+src/services/supportRateService.ts(3,47): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/teamService.ts(8,5): error TS2305: Module '"../dataconnect-generated"' has no exported member 'getTeam'.
+src/services/teamService.ts(9,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listCompanies'. Did you mean 'listAllCompanies'?
+src/services/teamService.ts(10,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listTeams'. Did you mean 'listAllTeams'?
+src/services/teamService.ts(11,5): error TS2724: '"../dataconnect-generated"' has no exported member named 'listWorkers'. Did you mean 'listAllWorkers'?
+src/services/teamSettlementService.ts(6,3): error TS2305: Module '"../dataconnect-generated"' has no exported member 'listSystemConfigs'.
+src/services/teamSettlementService.ts(945,57): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+src/services/teamSettlementService.ts(945,62): error TS7006: Parameter 'li' implicitly has an 'any' type.
+src/services/userMenuPositionService.ts(13,30): error TS2305: Module '"@dataconnect/generated"' has no exported member 'listSystemConfigs'.
+src/services/userMenuPositionService.ts(13,49): error TS2305: Module '"@dataconnect/generated"' has no exported member 'listAllSystemConfigs'.
+src/services/userService.ts(3,42): error TS2724: '"../dataconnect-generated"' has no exported member named 'listAppUsers'. Did you mean 'listAllAppUsers'?
+src/services/workerSiteAssignmentService.ts(3,47): error TS2305: Module '"./dataconnectCompat"' has no exported member 'listSystemConfigs'.

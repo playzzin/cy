@@ -1,12 +1,14 @@
 import React, { useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPenToSquare, faList } from '@fortawesome/free-solid-svg-icons';
+import { faPenToSquare, faList, faFileExcel } from '@fortawesome/free-solid-svg-icons';
 import DailyReportInput from './DailyReportInput';
 import DailyReportList from './DailyReportList';
+import DailyReportListV2 from './DailyReportListV2';
 
 const DailyReportPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
     const activeTab = searchParams.get('tab') || 'input';
 
     const tab = searchParams.get('tab');
@@ -49,16 +51,38 @@ const DailyReportPage: React.FC = () => {
                             <FontAwesomeIcon icon={faList} />
                             일보목록
                         </button>
+                        <button
+                            onClick={() => handleTabChange('list-v2')}
+                            className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'list-v2'
+                                ? 'border-brand-600 text-brand-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                }`}
+                        >
+                            <FontAwesomeIcon icon={faList} />
+                            일보목록v2
+                        </button>
+                        <div className="h-6 w-px bg-slate-200 mx-2 self-center mb-3"></div>
+                        <button
+                            onClick={() => navigate('/mass-upload/daily-report')}
+                            className="pb-3 text-sm font-bold border-b-2 border-transparent text-green-600 hover:text-green-700 transition-colors flex items-center gap-2"
+                        >
+                            <FontAwesomeIcon icon={faFileExcel} />
+                            엑셀 일괄 등록
+                        </button>
                     </div>
                 </div>
             </header>
 
             {/* Content Area */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 min-h-0">
                 {activeTab === 'input' ? (
                     <DailyReportInput />
+                ) : activeTab === 'list-v2' ? (
+                    <div className="h-full min-h-0 p-4 md:p-6">
+                        <DailyReportListV2 initialDate={searchParams.get('date') || undefined} />
+                    </div>
                 ) : (
-                    <div className="h-full p-4 md:p-6 overflow-auto">
+                    <div className="h-full p-4 md:p-6 overflow-hidden">
                         <DailyReportList initialDate={searchParams.get('date') || undefined} />
                     </div>
                 )}

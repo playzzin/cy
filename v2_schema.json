@@ -1,0 +1,902 @@
+[
+  {
+    "collectionName": "accommodations_v2",
+    "documents": [
+      {
+        "id": "0ff582b0e3f042c48f0d2016391641ea",
+        "schema": {
+          "currentOccupantName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "address": {
+            "type": "string",
+            "preview": "와개길 62"
+          },
+          "ownership": {
+            "type": "string",
+            "preview": "Cheongyeon"
+          },
+          "legacyIds": {
+            "type": "array (length: 1)",
+            "preview": "0ff582b0e3f042c48f0d2016391641ea"
+          },
+          "name": {
+            "type": "string",
+            "preview": "(본팀)와동 729-5 204호"
+          },
+          "currentOccupantPhone": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "normalizedName": {
+            "type": "string",
+            "preview": "본팀와동7295204호"
+          },
+          "type": {
+            "type": "string",
+            "preview": "TwoRoom"
+          },
+          "version": {
+            "type": "number",
+            "preview": "1"
+          },
+          "status": {
+            "type": "string",
+            "preview": "active"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "189a68df13eb4a4092c2ec2611156812",
+        "schema": {
+          "currentOccupantName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "address": {
+            "type": "string",
+            "preview": "항가울로 13"
+          },
+          "ownership": {
+            "type": "string",
+            "preview": "Cheongyeon"
+          },
+          "legacyIds": {
+            "type": "array (length: 1)",
+            "preview": "189a68df13eb4a4092c2ec2611156812"
+          },
+          "name": {
+            "type": "string",
+            "preview": "(본팀)사동 1431-4 402호"
+          },
+          "currentOccupantPhone": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "normalizedName": {
+            "type": "string",
+            "preview": "본팀사동14314402호"
+          },
+          "type": {
+            "type": "string",
+            "preview": "TwoRoom"
+          },
+          "version": {
+            "type": "number",
+            "preview": "1"
+          },
+          "status": {
+            "type": "string",
+            "preview": "active"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "1ffa56edf35a42fca46c11e3f5326941",
+        "schema": {
+          "currentOccupantName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "address": {
+            "type": "string",
+            "preview": "초당로 41"
+          },
+          "ownership": {
+            "type": "string",
+            "preview": "Cheongyeon"
+          },
+          "legacyIds": {
+            "type": "array (length: 1)",
+            "preview": "1ffa56edf35a42fca46c11e3f5326941"
+          },
+          "name": {
+            "type": "string",
+            "preview": "(본팀-노훈상)사동 1392-12 201호"
+          },
+          "currentOccupantPhone": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "normalizedName": {
+            "type": "string",
+            "preview": "본팀노훈상사동139212201호"
+          },
+          "type": {
+            "type": "string",
+            "preview": "TwoRoom"
+          },
+          "version": {
+            "type": "number",
+            "preview": "1"
+          },
+          "status": {
+            "type": "string",
+            "preview": "active"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "collectionName": "accommodation_assignments_v2",
+    "documents": [
+      {
+        "id": "097461ecd6484bf39f14ac4a5e41de9a",
+        "schema": {
+          "teamName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "endDate": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "97926d564ce245b5b0ba60a6b23d2a30"
+          },
+          "teamId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "source": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerName": {
+            "type": "string",
+            "preview": "채성우"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": "2026-02-11"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(김봉수팀)사동 1421-4 202호"
+          },
+          "status": {
+            "type": "string",
+            "preview": "active"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "0e55eb1e7cab414885bac0469730f529",
+        "schema": {
+          "teamName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "endDate": {
+            "type": "string",
+            "preview": "2026-02-11"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "feed03bf71e24adf83fce4447a51cc17"
+          },
+          "teamId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "source": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerName": {
+            "type": "string",
+            "preview": "임효재"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": "2026-02-10"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(임효재팀)사동 1393-3 301호"
+          },
+          "status": {
+            "type": "string",
+            "preview": "ended"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "0fed6ebd637d481c80a74ce0473209d9",
+        "schema": {
+          "teamName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "endDate": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "2025299f5ffe4aea8d162bf0bf607ab9"
+          },
+          "teamId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "source": {
+            "type": "null",
+            "preview": "null"
+          },
+          "workerName": {
+            "type": "string",
+            "preview": "김민선"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": "2026-02-11"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(임효재팀)사동 1393-3 402호"
+          },
+          "status": {
+            "type": "string",
+            "preview": "active"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "collectionName": "accommodation_contracts_v2",
+    "documents": [
+      {
+        "id": "0ff582b0e3f042c48f0d2016391641ea",
+        "schema": {
+          "paymentDay": {
+            "type": "number",
+            "preview": "1"
+          },
+          "endDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "0ff582b0e3f042c48f0d2016391641ea"
+          },
+          "deposit": {
+            "type": "number",
+            "preview": "0"
+          },
+          "monthlyRent": {
+            "type": "number",
+            "preview": "0"
+          },
+          "isReported": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "rentPayDate": {
+            "type": "number",
+            "preview": "1"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "189a68df13eb4a4092c2ec2611156812",
+        "schema": {
+          "paymentDay": {
+            "type": "number",
+            "preview": "1"
+          },
+          "endDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "189a68df13eb4a4092c2ec2611156812"
+          },
+          "deposit": {
+            "type": "number",
+            "preview": "0"
+          },
+          "monthlyRent": {
+            "type": "number",
+            "preview": "0"
+          },
+          "isReported": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "rentPayDate": {
+            "type": "number",
+            "preview": "1"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "1ffa56edf35a42fca46c11e3f5326941",
+        "schema": {
+          "paymentDay": {
+            "type": "number",
+            "preview": "1"
+          },
+          "endDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "1ffa56edf35a42fca46c11e3f5326941"
+          },
+          "deposit": {
+            "type": "number",
+            "preview": "0"
+          },
+          "monthlyRent": {
+            "type": "number",
+            "preview": "0"
+          },
+          "isReported": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "rentPayDate": {
+            "type": "number",
+            "preview": "1"
+          },
+          "startDate": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "collectionName": "accommodation_utility_policy_v2",
+    "documents": [
+      {
+        "id": "0ff582b0e3f042c48f0d2016391641ea",
+        "schema": {
+          "waterMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "0ff582b0e3f042c48f0d2016391641ea"
+          },
+          "internetFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "internetMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "electricityFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "maintenanceFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "electricityMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "maintenanceMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "waterFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "189a68df13eb4a4092c2ec2611156812",
+        "schema": {
+          "waterMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "189a68df13eb4a4092c2ec2611156812"
+          },
+          "internetFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "internetMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "electricityFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "maintenanceFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "electricityMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "maintenanceMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "waterFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "1ffa56edf35a42fca46c11e3f5326941",
+        "schema": {
+          "waterMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "1ffa56edf35a42fca46c11e3f5326941"
+          },
+          "internetFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "internetMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "electricityFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "maintenanceFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "electricityMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "maintenanceMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "gasMode": {
+            "type": "string",
+            "preview": "variable"
+          },
+          "waterFixed": {
+            "type": "null",
+            "preview": "null"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "collectionName": "accommodation_billing_targets",
+    "documents": [
+      {
+        "id": "0ff582b0e3f042c48f0d2016391641ea",
+        "schema": {
+          "teamName": {
+            "type": "string",
+            "preview": "이재욱팀"
+          },
+          "createdAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          },
+          "workerId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "0ff582b0e3f042c48f0d2016391641ea"
+          },
+          "teamId": {
+            "type": "string",
+            "preview": "9a555e0029bd44029eded169f535a2e2"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "targetType": {
+            "type": "string",
+            "preview": "team"
+          },
+          "workerName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(본팀)와동 729-5 204호"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "189a68df13eb4a4092c2ec2611156812",
+        "schema": {
+          "teamName": {
+            "type": "string",
+            "preview": "이재욱팀"
+          },
+          "createdAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          },
+          "workerId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "189a68df13eb4a4092c2ec2611156812"
+          },
+          "teamId": {
+            "type": "string",
+            "preview": "9a555e0029bd44029eded169f535a2e2"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "targetType": {
+            "type": "string",
+            "preview": "team"
+          },
+          "workerName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(본팀)사동 1431-4 402호"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "1ffa56edf35a42fca46c11e3f5326941",
+        "schema": {
+          "teamName": {
+            "type": "null",
+            "preview": "null"
+          },
+          "createdAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          },
+          "workerId": {
+            "type": "string",
+            "preview": "4aa0e978073d4693a7ae27c16e1f0b23"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "1ffa56edf35a42fca46c11e3f5326941"
+          },
+          "teamId": {
+            "type": "null",
+            "preview": "null"
+          },
+          "memo": {
+            "type": "null",
+            "preview": "null"
+          },
+          "targetType": {
+            "type": "string",
+            "preview": "worker"
+          },
+          "workerName": {
+            "type": "string",
+            "preview": "노훈상"
+          },
+          "accommodationName": {
+            "type": "string",
+            "preview": "(본팀-노훈상)사동 1392-12 201호"
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "collectionName": "accommodation_landlord_payment_v2",
+    "documents": [
+      {
+        "id": "0ff582b0e3f042c48f0d2016391641ea",
+        "schema": {
+          "accountHolder": {
+            "type": "string",
+            "preview": ""
+          },
+          "transferDay": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "0ff582b0e3f042c48f0d2016391641ea"
+          },
+          "transferAccountInfo": {
+            "type": "string",
+            "preview": ""
+          },
+          "bankName": {
+            "type": "string",
+            "preview": ""
+          },
+          "accountNumber": {
+            "type": "string",
+            "preview": ""
+          },
+          "landlordContact": {
+            "type": "string",
+            "preview": ""
+          },
+          "isAutoTransfer": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "landlordName": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "189a68df13eb4a4092c2ec2611156812",
+        "schema": {
+          "accountHolder": {
+            "type": "string",
+            "preview": ""
+          },
+          "transferDay": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "189a68df13eb4a4092c2ec2611156812"
+          },
+          "transferAccountInfo": {
+            "type": "string",
+            "preview": ""
+          },
+          "bankName": {
+            "type": "string",
+            "preview": ""
+          },
+          "accountNumber": {
+            "type": "string",
+            "preview": ""
+          },
+          "landlordContact": {
+            "type": "string",
+            "preview": ""
+          },
+          "isAutoTransfer": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "landlordName": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      },
+      {
+        "id": "1ffa56edf35a42fca46c11e3f5326941",
+        "schema": {
+          "accountHolder": {
+            "type": "string",
+            "preview": ""
+          },
+          "transferDay": {
+            "type": "null",
+            "preview": "null"
+          },
+          "accommodationId": {
+            "type": "string",
+            "preview": "1ffa56edf35a42fca46c11e3f5326941"
+          },
+          "transferAccountInfo": {
+            "type": "string",
+            "preview": ""
+          },
+          "bankName": {
+            "type": "string",
+            "preview": ""
+          },
+          "accountNumber": {
+            "type": "string",
+            "preview": ""
+          },
+          "landlordContact": {
+            "type": "string",
+            "preview": ""
+          },
+          "isAutoTransfer": {
+            "type": "boolean",
+            "preview": "false"
+          },
+          "landlordName": {
+            "type": "string",
+            "preview": ""
+          },
+          "updatedAt": {
+            "type": "timestamp",
+            "preview": "[object Object]"
+          }
+        }
+      }
+    ]
+  }
+]

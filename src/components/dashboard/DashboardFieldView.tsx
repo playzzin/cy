@@ -1,0 +1,142 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import styled from 'styled-components';
+import { useDashboardData } from '../../hooks/useDashboardData';
+import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { TodaySummaryWidget } from './widgets/TodaySummaryWidget';
+import { MyTeamStatusWidget } from './widgets/MyTeamStatusWidget';
+import { WeeklyTrendWidget } from './widgets/WeeklyTrendWidget';
+import { QuickActionsWidget } from './widgets/QuickActionsWidget';
+import { RecentReportsWidget } from './widgets/RecentReportsWidget';
+import { startOfMonth, endOfMonth, format, subDays } from 'date-fns';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+
+const Container = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding-bottom: 40px;
+`;
+
+const Grid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 24px;
+
+    @media (max-width: 1024px) {
+        display: flex;
+        flex-direction: column;
+    }
+`;
+
+const Col = styled.div<{ $span: number }>`
+    grid-column: span ${props => props.$span};
+`;
+
+export const DashboardFieldView: React.FC = () => {
+    // Determine date range for data fetching
+    // We want data for at least the last 7 days for the trend, and today for the summary.
+    // Fetching from start of month to end of month usually covers "Today", unless it's the 1st of month.
+    // To be safe for "Last 7 days" trend even at start of month, let's fetch last 30 days or start of prev month.
+    // However, useDashboardData might be designed for "This Month" view.
+    // Let's use [Today - 30 days, Today] to ensure we have trend data and today's data.
+
+    const dateRange = useMemo(() => {
+        const today = new Date();
+        const start = subDays(today, 30);
+        return {
+            start: format(start, 'yyyy-MM-dd'),
+            end: format(today, 'yyyy-MM-dd')
+        };
+    }, []);
+
+    const { data: dashboardData, loading: dashboardLoading } = useDashboardData(dateRange.start, dateRange.end);
+
+    // Separate state for Recent Reports as it's not in useDashboardData
+    const [recentReports, setRecentReports] = useState<DailyReport[]>([]);
+    const [reportsLoading, setReportsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchRecentReports = async () => {
+            try {
+                // Fetch all and slice locally for now (could be optimized later)
+                const reports = await dailyReportService.getAllReports();
+                // Sort by date desc
+                const sorted = reports.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                setRecentReports(sorted.slice(0, 5));
+            } catch (error) {
+                console.error("Failed to fetch recent reports", error);
+            } finally {
+                setReportsLoading(false);
+            }
+        };
+
+        fetchRecentReports();
+    }, []);
+
+    // Derived State for Today Summary
+    const todayStats = useMemo(() => {
+        if (!dashboardData?.dailyTrend) return null;
+
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        const todayData = dashboardData.dailyTrend.find(d => d.date === todayStr);
+
+        return {
+            totalManDay: todayData?.totalManDay || 0,
+            totalAmount: todayData?.totalAmount || 0,
+            totalWorkers: todayData?.workerCount || 0
+        };
+    }, [dashboardData]);
+
+
+    if (dashboardLoading && reportsLoading) {
+        return (
+            <div className="flex justify-center items-center h-96">
+                <FontAwesomeIcon icon={faSpinner} spin className="text-4xl text-blue-500" />
+            </div>
+        );
+    }
+
+    return (
+        <Container>
+            {/* Top Row: Today Summary - High Priority */}
+            <Grid>
+                <Col $span={12}>
+                    <TodaySummaryWidget
+                        stats={todayStats || { totalManDay: 0, totalAmount: 0, totalWorkers: 0 }}
+                        dailyTrend={dashboardData?.dailyTrend || []}
+                    />
+                </Col>
+            </Grid>
+
+            {/* Middle Row: Analytics & Team Status */}
+            <Grid>
+                <Col $span={6}>
+                    <MyTeamStatusWidget
+                        teamPerformance={dashboardData?.teamPerformance || []}
+                        dailyTrend={dashboardData?.dailyTrend || []}
+                    />
+                </Col>
+                <Col $span={6}>
+                    <WeeklyTrendWidget
+                        dailyTrend={dashboardData?.dailyTrend || []}
+                    />
+                </Col>
+            </Grid>
+
+            {/* Quick Actions */}
+            <Grid>
+                <Col $span={12}>
+                    <QuickActionsWidget />
+                </Col>
+            </Grid>
+
+            {/* Bottom: Recent Reports */}
+            <Grid>
+                <Col $span={12}>
+                    <RecentReportsWidget reports={recentReports} />
+                </Col>
+            </Grid>
+        </Container>
+    );
+};

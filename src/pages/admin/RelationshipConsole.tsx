@@ -15,10 +15,10 @@ import { workerSiteAssignmentService, WorkerSiteAssignment } from '../../service
 import app from '../../config/firebase';
 import {
     connectorConfig,
-    listWorkers,
-    listTeams,
-    listSites,
-    listCompanies,
+    listAllWorkers,
+    listAllTeams,
+    listAllSites,
+    listAllCompanies,
 } from '../../dataconnect-generated';
 import Swal from 'sweetalert2';
 
@@ -83,10 +83,10 @@ const RelationshipConsolePage: React.FC = () => {
             // Data Connect mode: read-only verification
             const dc = getDc();
             const [workerRes, teamRes, siteRes, companyRes] = await Promise.all([
-                listWorkers(dc),
-                listTeams(dc),
-                listSites(dc),
-                listCompanies(dc)
+                listAllWorkers(dc),
+                listAllTeams(dc),
+                listAllSites(dc),
+                listAllCompanies(dc)
             ]);
 
             const companiesDc: Company[] = (companyRes as any)?.data?.companies?.map((c: any) => ({
@@ -526,8 +526,8 @@ const RelationshipConsolePage: React.FC = () => {
                     <button
                         onClick={() => setShowGraphView(!showGraphView)}
                         className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-colors ${showGraphView
-                                ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
-                                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                            ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                             }`}
                     >
                         <FontAwesomeIcon icon={showGraphView ? faCompress : faExpand} />

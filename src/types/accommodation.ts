@@ -1,4 +1,4 @@
-import { FieldValue, Timestamp } from 'firebase/firestore';
+import { FieldValue, Timestamp } from './timestamp';
 
 export interface CostProfile {
     electricity: 'variable' | 'fixed' | 'included';
@@ -30,6 +30,9 @@ export interface Contract {
     accountNumber?: string;
     accountHolder?: string;
     rentPayDate?: number; // 1-31
+    isAutoTransfer?: boolean;
+    transferDay?: number;
+    transferAccountInfo?: string;
 }
 
 export interface Accommodation {
@@ -38,6 +41,7 @@ export interface Accommodation {
     address: string;
     type: 'OneRoom' | 'TwoRoom' | 'Apartment';
     status: 'active' | 'inactive';
+    ownership: 'Cheongyeon' | 'Dawon' | 'Individual';
 
     contract: Contract;
     costProfile: CostProfile;

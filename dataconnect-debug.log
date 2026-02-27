@@ -1,0 +1,967 @@
+I0227 02:36:06.866048    4468 load.go:31] Reloading schema and connectors...
+I0227 02:36:06.974822    4468 control.go:94] [/emulator/cy-connect 93bd] UpdateResources(): done
+Main schema: sources: schema\schema.gql [7224B] 
+Connector "example": sources: example\mutations.gql [22475B] example\queries.gql [9638B] 
+I0227 02:36:07.060304    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 02:36:07.096599    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 02:36:07.106740    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\relation.gql [120814B] main\query.gql [23012B] main\mutation.gql [61809B] main\implicit.gql [2150B] prelude.gql [73219B] main\input.gql [248458B] 
+I0227 02:36:07.135924    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: .guides/setup.md [1682B] package.json [863B] react\esm\index.esm.js [22115B] .guides/config.json [236B] index.cjs.js [29791B] README.md [305686B] react\index.d.ts [29235B] react\package.json [460B] react\index.cjs.js [23532B] react\README.md [308423B] index.d.ts [69305B] esm\index.esm.js [25758B] esm\package.json [17B] .guides/usage.md [3423B] react\esm\package.json [17B] 
+I0227 02:36:07.156706    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 02:36:07.159333    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.cjs.js [23088B] package.json [632B] index.d.ts [64269B] esm\index.esm.js [20715B] esm\package.json [17B] 
+I0227 02:36:07.162234    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 02:36:07.162234    4468 load.go:109] Finished reloading
+I0227 02:36:07.166014    4468 dev.go:104] Listening on address (HTTP + gRPC): 127.0.0.1:9399
+I0227 02:36:07.167094    4468 dev.go:104] Listening on address (HTTP + gRPC): [::1]:9399
+I0227 02:36:12.746862    4468 migrate.go:24] Running migration SQL:
+Step 1: CREATE EXTENSION IF NOT EXISTS "uuid-ossp"
+Step 2: CREATE TYPE "public"."status" AS ENUM ('ACTIVE', 'INACTIVE', 'ARCHIVED')
+Step 3: CREATE TABLE "public"."accommodation" ("id" text NOT NULL DEFAULT replace((uuid_generate_v4())::text, '-'::text, ''::text), "account_holder" text NULL, "account_number" text NULL, "address" text NOT NULL, "bank_name" text NULL, "billing_target_team_id" text NULL, "billing_target_team_name" text NULL, "billing_target_type" text NULL, "billing_target_worker_id" text NULL, "billing_target_worker_name" text NULL, "contract_end_date" text NULL, "contract_start_date" text NULL, "created_at" timestamptz NOT NULL, "current_occupant_name" text NULL, "current_occupant_phone" text NULL, "deposit" integer NOT NULL, "electricity_mode" text NOT NULL, "fixed_electricity" integer NULL, "fixed_gas" integer NULL, "fixed_internet" integer NULL, "fixed_maintenance" integer NULL, "fixed_water" integer NULL, "gas_mode" text NOT NULL, "internet_mode" text NOT NULL, "is_auto_transfer" boolean NULL, "is_reported" boolean NOT NULL, "landlord_contact" text NULL, "landlord_name" text NULL, "legacy_id" text NULL, "maintenance_mode" text NOT NULL, "memo" text NULL, "monthly_rent" integer NOT NULL, "name" text NOT NULL, "ownership" text NOT NULL, "payment_day" integer NOT NULL, "rent_pay_date" integer NULL, "status" text NOT NULL, "transfer_account_info" text NULL, "transfer_day" integer NULL, "type" text NOT NULL, "updated_at" timestamptz NOT NULL, "water_mode" text NOT NULL, PRIMARY KEY ("id"))
+Step 4: CREATE TABLE "public"."accommodation_assignment" ("id" text NOT NULL DEFAULT replace((uuid_generate_v4())::text, '-'::text, ''::text), "accommodation_id" text NOT NULL, "created_at" timestamptz NOT NULL, "end_date" text NULL, "legacy_id" text NULL, "memo" text NULL, "source" text NULL, "start_date" text NOT NULL, "status" text NOT NULL, "team_id" text NULL, "team_name" text NULL, "updated_at" timestamptz NOT NULL, "worker_id" text NULL, "worker_name" text NULL, PRIMARY KEY ("id"))
+Step 5: CREATE INDEX "accommodation_assignment_accommodationId_idx" ON "public"."accommodation_assignment" ("accommodation_id")
+Step 6: CREATE TABLE "public"."agent" ("id" text NOT NULL, "capabilities" text NULL, "created_at" timestamptz NOT NULL, "name" text NULL, "role" text NULL, "status" text NULL, "system_prompt" text NULL, "type" text NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 7: CREATE TABLE "public"."agent_conversation" ("id" text NOT NULL, "created_at" timestamptz NOT NULL, "main_agent_id" text NULL, "messages" text NULL, "updated_at" timestamptz NOT NULL, "user_id" text NULL, PRIMARY KEY ("id"))
+Step 8: CREATE TABLE "public"."app_user" ("id" text NOT NULL, "created_at" timestamptz NOT NULL, "display_name" text NULL, "email" text NULL, "last_login" timestamptz NULL, "linked_worker_ids" text NULL, "photo_url" text NULL, "role" text NULL, "uid" text NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 9: CREATE TABLE "public"."audit_log" ("id" text NOT NULL, "action" text NULL, "actor_email" text NULL, "actor_id" text NULL, "category" text NULL, "created_at" timestamptz NOT NULL, "details" text NULL, "target_id" text NULL, "timestamp" timestamptz NULL, PRIMARY KEY ("id"))
+Step 10: CREATE TABLE "public"."company" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "business_number" text NULL, "ceo_name" text NULL, "code" text NOT NULL, "created_at" timestamptz NOT NULL, "legacy_id" text NULL, "name" text NOT NULL, "site_manager" text NULL, "site_name" text NULL, "status" "public"."status" NOT NULL DEFAULT 'ACTIVE'::"public"."status", "type" text NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 11: CREATE TABLE "public"."daily_report" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "site_id" uuid NULL, "team_id" uuid NOT NULL, "company_name" text NULL, "created_at" timestamptz NOT NULL, "date" date NOT NULL, "legacy_id" text NULL, "responsible_team_legacy_id" text NULL, "responsible_team_name" text NULL, "site_name" text NULL, "status" text NULL, "total_amount" double precision NULL, "total_man_day" double precision NULL, "updated_at" timestamptz NOT NULL, "weather" text NULL, "work_content" text NULL, "writer_uid" text NULL, PRIMARY KEY ("id"))
+Step 12: CREATE INDEX "daily_report_siteId_idx" ON "public"."daily_report" ("site_id")
+Step 13: CREATE INDEX "daily_report_teamId_idx" ON "public"."daily_report" ("team_id")
+Step 14: CREATE TABLE "public"."daily_report_worker" ("daily_report_id" uuid NOT NULL, "worker_id" uuid NOT NULL, "amount" double precision NOT NULL, "created_at" timestamptz NOT NULL, "gongsu" double precision NOT NULL, "id" uuid NOT NULL DEFAULT uuid_generate_v4(), "legacy_team_id" text NULL, "legacy_worker_id" text NULL, "man_day" double precision NULL, "pay_type" text NULL, "role" text NULL, "salary_model" text NULL, "status" text NULL, "unit_price" double precision NOT NULL, "work_content" text NULL, "work_description" text NULL, "worker_name" text NULL, PRIMARY KEY ("daily_report_id", "worker_id"))
+Step 15: CREATE INDEX "daily_report_worker_dailyReportId_idx" ON "public"."daily_report_worker" ("daily_report_id")
+Step 16: CREATE INDEX "daily_report_worker_workerId_idx" ON "public"."daily_report_worker" ("worker_id")
+Step 17: CREATE TABLE "public"."menu_config" ("id" text NOT NULL, "config" text NOT NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 18: CREATE TABLE "public"."position" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "color" text NULL, "created_at" timestamptz NOT NULL, "icon" text NULL, "is_default" boolean NULL DEFAULT false, "legacy_id" text NULL, "name" text NOT NULL, "rank" integer NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 19: CREATE TABLE "public"."setting" ("id" text NOT NULL, "data" text NOT NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 20: CREATE TABLE "public"."site" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "address" text NULL, "code" text NULL, "created_at" timestamptz NOT NULL, "end_date" date NULL, "legacy_id" text NULL, "name" text NOT NULL, "start_date" date NULL, "status" "public"."status" NOT NULL DEFAULT 'ACTIVE'::"public"."status", "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 21: CREATE TABLE "public"."system_config" ("id" text NOT NULL, "data" text NOT NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 22: CREATE TABLE "public"."system_log" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "action" text NOT NULL, "category" text NOT NULL, "created_at" timestamptz NOT NULL, "details" text NULL, "user_email" text NULL, PRIMARY KEY ("id"))
+Step 23: CREATE TABLE "public"."team" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "company_id" uuid NULL, "leader_id" uuid NULL, "created_at" timestamptz NOT NULL, "legacy_id" text NULL, "name" text NOT NULL, "status" "public"."status" NOT NULL DEFAULT 'ACTIVE'::"public"."status", "total_man_day" double precision NULL, "type" text NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 24: CREATE INDEX "team_companyId_idx" ON "public"."team" ("company_id")
+Step 25: CREATE INDEX "team_leaderId_idx" ON "public"."team" ("leader_id")
+Step 26: CREATE TABLE "public"."worker" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "team_id" uuid NULL, "address" text NULL, "bank_account" text NULL, "bank_name" text NULL, "created_at" timestamptz NOT NULL, "is_active" boolean NULL DEFAULT true, "join_date" date NULL, "legacy_id" text NULL, "name" text NOT NULL, "pay_type" text NULL, "phone" text NULL, "resident_number" text NULL, "role" text NULL, "unit_price" double precision NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 27: CREATE INDEX "worker_teamId_idx" ON "public"."worker" ("team_id")
+Step 28: ALTER TABLE "public"."accommodation_assignment" ADD CONSTRAINT "accommodation_assignment_accommodation_id_fkey" FOREIGN KEY ("accommodation_id") REFERENCES "public"."accommodation" ("id") ON DELETE CASCADE
+Step 29: ALTER TABLE "public"."daily_report" ADD CONSTRAINT "daily_report_site_id_fkey" FOREIGN KEY ("site_id") REFERENCES "public"."site" ("id") ON DELETE SET NULL, ADD CONSTRAINT "daily_report_team_id_fkey" FOREIGN KEY ("team_id") REFERENCES "public"."team" ("id") ON DELETE CASCADE
+Step 30: ALTER TABLE "public"."daily_report_worker" ADD CONSTRAINT "daily_report_worker_daily_report_id_fkey" FOREIGN KEY ("daily_report_id") REFERENCES "public"."daily_report" ("id") ON DELETE CASCADE, ADD CONSTRAINT "daily_report_worker_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "public"."worker" ("id") ON DELETE CASCADE
+Step 31: ALTER TABLE "public"."team" ADD CONSTRAINT "team_company_id_fkey" FOREIGN KEY ("company_id") REFERENCES "public"."company" ("id") ON DELETE SET NULL, ADD CONSTRAINT "team_leader_id_fkey" FOREIGN KEY ("leader_id") REFERENCES "public"."worker" ("id") ON DELETE SET NULL
+Step 32: ALTER TABLE "public"."worker" ADD CONSTRAINT "worker_team_id_fkey" FOREIGN KEY ("team_id") REFERENCES "public"."team" ("id") ON DELETE SET NULL
+I0227 02:36:13.182198    4468 control.go:94] [/emulator/cy-connect e5cb] UpdateResources(): done
+Main schema: sources: schema\schema.gql [7224B] 
+Connector "example": sources: example\mutations.gql [22475B] example\queries.gql [9638B] 
+I0227 08:06:47.165183    4468 load.go:31] Reloading schema and connectors...
+I0227 08:06:47.368448    4468 migrate.go:24] Running migration SQL:
+Step 1: CREATE TABLE "public"."utility_record" ("accommodation_id" text NOT NULL, "year_month" text NOT NULL, "accommodation_name" text NULL, "costs" text NULL, "created_at" timestamptz NOT NULL, "id" text NOT NULL DEFAULT replace((uuid_generate_v4())::text, '-'::text, ''::text), "is_anomaly" boolean NULL, "legacy_id" text NULL, "memo" text NULL, "payment_date" text NULL, "payment_status" text NOT NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("accommodation_id", "year_month"), CONSTRAINT "utility_record_accommodation_id_fkey" FOREIGN KEY ("accommodation_id") REFERENCES "public"."accommodation" ("id") ON DELETE CASCADE)
+Step 2: CREATE INDEX "utility_record_accommodationId_idx" ON "public"."utility_record" ("accommodation_id")
+I0227 08:06:47.545817    4468 control.go:94] [/emulator/cy-connect c1b9] UpdateResources(): done
+Main schema: sources: schema\schema.gql [7797B] 
+Connector "example": sources: example\mutations.gql [22475B] example\queries.gql [9638B] 
+I0227 08:06:47.645349    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:06:47.689192    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:06:47.705128    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [2460B] main\input.gql [263114B] main\relation.gql [127655B] main\query.gql [24282B] main\mutation.gql [65338B] 
+I0227 08:06:47.744983    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: .guides/config.json [236B] index.cjs.js [29791B] package.json [863B] react\README.md [308423B] index.d.ts [69429B] esm\package.json [17B] react\package.json [460B] react\index.d.ts [29235B] react\esm\package.json [17B] react\index.cjs.js [23532B] react\esm\index.esm.js [22115B] .guides/setup.md [1682B] esm\index.esm.js [25758B] README.md [305686B] .guides/usage.md [4436B] 
+I0227 08:06:47.782384    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:06:47.786549    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.cjs.js [23088B] package.json [632B] index.d.ts [64393B] esm\index.esm.js [20715B] esm\package.json [17B] 
+I0227 08:06:47.789552    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:06:47.789552    4468 load.go:109] Finished reloading
+I0227 08:06:57.163876    4468 load.go:31] Reloading schema and connectors...
+I0227 08:06:57.575045    4468 control.go:94] [/emulator/cy-connect 5b95] UpdateResources(): done
+Main schema: sources: schema\schema.gql [7797B] 
+Connector "example": sources: example\mutations.gql [24020B] example\queries.gql [10045B] 
+I0227 08:06:57.684508    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:06:57.728253    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:06:57.742033    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [263114B] main\relation.gql [127655B] main\query.gql [24282B] main\mutation.gql [65338B] prelude.gql [73219B] main\implicit.gql [2460B] 
+I0227 08:06:57.761493    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: esm\package.json [17B] react\esm\package.json [17B] react\README.md [328142B] index.cjs.js [31816B] README.md [325843B] react\index.d.ts [31259B] react\package.json [460B] react\esm\index.esm.js [23546B] .guides/usage.md [3423B] package.json [863B] react\index.cjs.js [25069B] .guides/config.json [236B] .guides/setup.md [1682B] index.d.ts [73895B] esm\index.esm.js [27481B] 
+I0227 08:06:57.792240    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:06:57.793754    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [68415B] esm\index.esm.js [22052B] esm\package.json [17B] index.cjs.js [24605B] package.json [632B] 
+I0227 08:06:57.803283    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:06:57.803283    4468 load.go:109] Finished reloading
+I0227 08:18:07.163413    4468 load.go:31] Reloading schema and connectors...
+I0227 08:18:07.358678    4468 migrate.go:24] Running migration SQL:
+Step 1: CREATE TABLE "public"."accommodation_billing_document" ("id" text NOT NULL DEFAULT replace((uuid_generate_v4())::text, '-'::text, ''::text), "issued_to_worker_id" uuid NULL, "team_id" uuid NULL, "confirmed_at" timestamptz NULL, "created_at" timestamptz NOT NULL, "issued_to_type" text NOT NULL, "issued_to_worker_name" text NULL, "memo" text NULL, "posted_advance_payment_id" text NULL, "status" text NOT NULL DEFAULT 'draft', "team_name" text NULL, "updated_at" timestamptz NOT NULL, "year_month" text NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "accommodation_billing_document_issued_to_worker_id_fkey" FOREIGN KEY ("issued_to_worker_id") REFERENCES "public"."worker" ("id") ON DELETE SET NULL, CONSTRAINT "accommodation_billing_document_team_id_fkey" FOREIGN KEY ("team_id") REFERENCES "public"."team" ("id") ON DELETE SET NULL)
+Step 2: CREATE INDEX "accommodation_billing_document_issuedToWorkerId_idx" ON "public"."accommodation_billing_document" ("issued_to_worker_id")
+Step 3: CREATE INDEX "accommodation_billing_document_teamId_idx" ON "public"."accommodation_billing_document" ("team_id")
+Step 4: CREATE TABLE "public"."accommodation_billing_line_item" ("id" text NOT NULL DEFAULT replace((uuid_generate_v4())::text, '-'::text, ''::text), "billing_document_id" text NOT NULL, "amount" integer NOT NULL, "created_at" timestamptz NOT NULL, "label" text NOT NULL, "target_field" text NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "accommodation_billing_line_item_billing_document_id_fkey" FOREIGN KEY ("billing_document_id") REFERENCES "public"."accommodation_billing_document" ("id") ON DELETE CASCADE)
+Step 5: CREATE INDEX "accommodation_billing_line_item_billingDocumentId_idx" ON "public"."accommodation_billing_line_item" ("billing_document_id")
+Step 6: CREATE TABLE "public"."advance_payment" ("id" text NOT NULL, "team_id" uuid NULL, "worker_id" uuid NULL, "accommodation" integer NULL DEFAULT 0, "deposit" integer NULL DEFAULT 0, "electricity" integer NULL DEFAULT 0, "fines" integer NULL DEFAULT 0, "gas" integer NULL DEFAULT 0, "gloves" integer NULL DEFAULT 0, "internet" integer NULL DEFAULT 0, "items" text NULL, "memo" text NULL, "prev_month_carryover" integer NULL DEFAULT 0, "private_room" integer NULL DEFAULT 0, "team_name" text NULL, "total_deduction" integer NULL DEFAULT 0, "updated_at" timestamptz NOT NULL, "water" integer NULL DEFAULT 0, "worker_name" text NULL, "year_month" text NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "advance_payment_team_id_fkey" FOREIGN KEY ("team_id") REFERENCES "public"."team" ("id") ON DELETE SET NULL, CONSTRAINT "advance_payment_worker_id_fkey" FOREIGN KEY ("worker_id") REFERENCES "public"."worker" ("id") ON DELETE SET NULL)
+Step 7: CREATE INDEX "advance_payment_teamId_idx" ON "public"."advance_payment" ("team_id")
+Step 8: CREATE INDEX "advance_payment_workerId_idx" ON "public"."advance_payment" ("worker_id")
+I0227 08:18:07.590193    4468 control.go:94] [/emulator/cy-connect 53b8] UpdateResources(): done
+Main schema: sources: schema\schema.gql [9469B] 
+Connector "example": sources: example\mutations.gql [24020B] example\queries.gql [11394B] 
+I0227 08:18:07.712485    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:18:07.755939    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:18:07.766601    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [3980B] main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] main\mutation.gql [78418B] 
+I0227 08:18:07.783602    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: index.cjs.js [33481B] README.md [339178B] react\index.d.ts [32643B] react\package.json [460B] react\index.cjs.js [26276B] .guides/usage.md [4436B] .guides/config.json [236B] package.json [863B] index.d.ts [78250B] react\esm\package.json [17B] react\README.md [340998B] .guides/setup.md [1682B] esm\index.esm.js [28813B] esm\package.json [17B] react\esm\index.esm.js [24638B] 
+I0227 08:18:07.809856    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:18:07.811956    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [72668B] esm\index.esm.js [22984B] esm\package.json [17B] index.cjs.js [25743B] package.json [632B] 
+I0227 08:18:07.815484    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:18:07.815484    4468 load.go:109] Finished reloading
+I0227 08:18:27.163465    4468 load.go:31] Reloading schema and connectors...
+I0227 08:18:27.556235    4468 control.go:94] [/emulator/cy-connect da03] UpdateResources(): done
+Main schema: sources: schema\schema.gql [9469B] 
+Connector "example": sources: example\queries.gql [11394B] example\mutations.gql [28433B] 
+I0227 08:18:27.712652    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:18:27.770429    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:18:27.783010    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] main\mutation.gql [78418B] main\implicit.gql [3980B] prelude.gql [73219B] 
+I0227 08:18:27.861930    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: .guides/usage.md [4436B] esm\package.json [17B] react\index.cjs.js [28876B] .guides/config.json [236B] index.d.ts [87097B] README.md [378961B] react\index.d.ts [36657B] react\esm\package.json [17B] react\README.md [377048B] .guides/setup.md [1682B] esm\index.esm.js [31867B] package.json [863B] react\package.json [460B] react\esm\index.esm.js [27020B] index.cjs.js [37165B] 
+I0227 08:18:27.904310    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:18:27.909454    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [80075B] esm\index.esm.js [25202B] esm\package.json [17B] index.cjs.js [28349B] package.json [632B] 
+I0227 08:18:27.912589    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:18:27.912589    4468 load.go:109] Finished reloading
+I0227 08:49:47.164359    4468 load.go:31] Reloading schema and connectors...
+I0227 08:49:47.733068    4468 control.go:94] [/emulator/cy-connect d71c] UpdateResources(): done
+Main schema: sources: schema\schema.gql [9469B] 
+Connector "example": sources: example\queries.gql [11394B] example\mutations.gql [28591B] 
+I0227 08:49:47.891519    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:49:47.951535    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:49:47.964439    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\implicit.gql [3980B] main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] main\mutation.gql [78418B] prelude.gql [73219B] 
+I0227 08:49:48.073119    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: react\package.json [460B] .guides/setup.md [1682B] .guides/config.json [236B] esm\package.json [17B] react\index.cjs.js [29272B] react\README.md [381902B] package.json [863B] README.md [383722B] react\esm\package.json [17B] index.d.ts [88071B] index.cjs.js [37695B] react\esm\index.esm.js [27389B] .guides/usage.md [4436B] esm\index.esm.js [32320B] react\index.d.ts [37214B] 
+I0227 08:49:48.095642    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:49:48.106088    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [80893B] esm\index.esm.js [25553B] esm\package.json [17B] index.cjs.js [28746B] package.json [632B] 
+I0227 08:49:48.120977    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:49:48.120977    4468 load.go:109] Finished reloading
+I0227 08:50:37.163141    4468 load.go:31] Reloading schema and connectors...
+I0227 08:50:37.564845    4468 control.go:94] [/emulator/cy-connect d67d] UpdateResources(): done
+Main schema: sources: schema\schema.gql [9469B] 
+Connector "example": sources: example\mutations.gql [28591B] example\queries.gql [11532B] 
+I0227 08:50:37.691108    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 08:50:37.734635    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 08:50:37.751117    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\query.gql [29044B] main\mutation.gql [78418B] main\implicit.gql [3980B] main\input.gql [324536B] main\relation.gql [162579B] 
+I0227 08:50:37.814440    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: .guides/setup.md [1682B] index.cjs.js [37890B] package.json [863B] react\esm\package.json [17B] react\index.cjs.js [29467B] index.d.ts [88821B] esm\index.esm.js [32515B] esm\package.json [17B] react\README.md [385352B] .guides/usage.md [4436B] README.md [387889B] react\index.d.ts [37520B] react\package.json [460B] react\esm\index.esm.js [27584B] .guides/config.json [236B] 
+I0227 08:50:37.849602    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 08:50:37.854416    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: esm\index.esm.js [25736B] esm\package.json [17B] index.cjs.js [28929B] package.json [632B] index.d.ts [81349B] 
+I0227 08:50:37.856942    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 08:50:37.856942    4468 load.go:109] Finished reloading
+I0227 11:46:27.171172    4468 load.go:31] Reloading schema and connectors...
+E0227 11:46:27.309827    4468 load.go:73] Could not load sources: 
+Errors: schema\schema.gql:428:6: On VehicleBillingDocument.vehicle @ref(fields): Incompatible foreign key reference VehicleBillingDocument.vehicleId -> Vehicle.id: type mismatch String -> UUID!
+I0227 11:46:27.315611    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [3980B] main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] main\mutation.gql [78418B] 
+I0227 11:46:27.317125    4468 load.go:74] Finished reloading
+I0227 11:49:07.163131    4468 load.go:31] Reloading schema and connectors...
+E0227 11:49:07.184051    4468 load.go:73] Could not load sources: 
+Errors: schema\schema.gql:428:6: On VehicleBillingDocument.vehicle @ref(fields): Incompatible foreign key reference VehicleBillingDocument.vehicleId -> Vehicle.id: type mismatch String -> UUID!
+I0227 11:49:07.186652    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\mutation.gql [78418B] main\implicit.gql [3980B] prelude.gql [73219B] main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] 
+I0227 11:49:07.186652    4468 load.go:74] Finished reloading
+I0227 11:50:17.163071    4468 load.go:31] Reloading schema and connectors...
+E0227 11:50:17.182900    4468 load.go:73] Could not load sources: 
+Errors: schema\schema.gql:428:6: On VehicleBillingDocument.vehicle @ref(fields): Incompatible foreign key reference VehicleBillingDocument.vehicleId -> Vehicle.id: type mismatch String -> UUID!
+I0227 11:50:17.185529    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [324536B] main\relation.gql [162579B] main\query.gql [29044B] main\mutation.gql [78418B] prelude.gql [73219B] main\implicit.gql [3980B] 
+I0227 11:50:17.185529    4468 load.go:74] Finished reloading
+I0227 13:21:17.163794    4468 load.go:31] Reloading schema and connectors...
+I0227 13:21:17.551161    4468 migrate.go:24] Running migration SQL:
+Step 1: CREATE TABLE "public"."daily_dispatch" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" timestamptz NOT NULL, "date" text NOT NULL, "legacy_id" text NULL, "site_id" text NULL, "site_name" text NULL, "status" text NULL, "team_id" text NULL, "team_name" text NULL, "worker_id" text NULL, "worker_name" text NULL, PRIMARY KEY ("id"))
+Step 2: CREATE TABLE "public"."payment" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "amount" integer NOT NULL, "created_at" timestamptz NOT NULL, "date" text NOT NULL, "legacy_id" text NULL, "memo" text NULL, "method" text NULL, "type" text NULL, PRIMARY KEY ("id"))
+Step 3: CREATE TABLE "public"."receivable" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "amount" integer NOT NULL, "company_name" text NULL, "created_at" timestamptz NOT NULL, "date" text NOT NULL, "legacy_id" text NULL, "status" text NULL, PRIMARY KEY ("id"))
+Step 4: CREATE TABLE "public"."smart_memo_category" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "color" text NULL, "created_at" timestamptz NOT NULL, "icon" text NULL, "legacy_id" text NULL, "name" text NOT NULL, "order" integer NULL DEFAULT 0, "user_id" text NOT NULL, PRIMARY KEY ("id"))
+Step 5: CREATE TABLE "public"."tax_invoice" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "amount" integer NOT NULL, "company_name" text NULL, "created_at" timestamptz NOT NULL, "date" text NOT NULL, "legacy_id" text NULL, "status" text NULL, "tax" integer NOT NULL, "total" integer NOT NULL, PRIMARY KEY ("id"))
+Step 6: CREATE TABLE "public"."smart_memo" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "category_id" uuid NULL, "category_legacy_id" text NULL, "checklist_items" text NULL, "color" text NULL, "content" text NULL, "created_at" timestamptz NOT NULL, "h" integer NULL, "is_collapsed" boolean NULL DEFAULT false, "is_pinned" boolean NULL DEFAULT false, "legacy_id" text NULL, "order" integer NULL DEFAULT 0, "prev_h" integer NULL, "prev_w" integer NULL, "priority" text NULL, "scope" text NOT NULL DEFAULT 'private', "tags" text NULL, "title" text NULL, "type" text NOT NULL DEFAULT 'text', "updated_at" timestamptz NOT NULL, "user_id" text NOT NULL, "w" integer NULL, "x" integer NULL, "y" integer NULL, PRIMARY KEY ("id"), CONSTRAINT "smart_memo_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."smart_memo_category" ("id") ON DELETE SET NULL)
+Step 7: CREATE INDEX "smart_memo_categoryId_idx" ON "public"."smart_memo" ("category_id")
+Step 8: CREATE TABLE "public"."vehicle" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "created_at" timestamptz NOT NULL, "legacy_id" text NULL, "license_plate" text NOT NULL, "memo" text NULL, "model" text NULL, "owner" text NULL, "status" text NULL DEFAULT 'active', "type" text NULL, "updated_at" timestamptz NOT NULL, PRIMARY KEY ("id"))
+Step 9: CREATE TABLE "public"."vehicle_assignment" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "vehicle_id" uuid NOT NULL, "created_at" timestamptz NOT NULL, "end_date" text NULL, "legacy_id" text NULL, "memo" text NULL, "start_date" text NOT NULL, "status" text NULL DEFAULT 'active', "team_id" text NULL, "team_name" text NULL, "updated_at" timestamptz NOT NULL, "worker_id" text NULL, "worker_name" text NULL, PRIMARY KEY ("id"), CONSTRAINT "vehicle_assignment_vehicle_id_fkey" FOREIGN KEY ("vehicle_id") REFERENCES "public"."vehicle" ("id") ON DELETE CASCADE)
+Step 10: CREATE INDEX "vehicle_assignment_vehicleId_idx" ON "public"."vehicle_assignment" ("vehicle_id")
+Step 11: CREATE TABLE "public"."vehicle_billing_document" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "vehicle_id" uuid NULL, "amount" integer NOT NULL, "created_at" timestamptz NOT NULL, "license_plate" text NULL, "memo" text NULL, "status" text NULL DEFAULT 'draft', "updated_at" timestamptz NOT NULL, "year_month" text NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "vehicle_billing_document_vehicle_id_fkey" FOREIGN KEY ("vehicle_id") REFERENCES "public"."vehicle" ("id") ON DELETE SET NULL)
+Step 12: CREATE INDEX "vehicle_billing_document_vehicleId_idx" ON "public"."vehicle_billing_document" ("vehicle_id")
+Step 13: CREATE TABLE "public"."vehicle_expense" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "vehicle_id" uuid NOT NULL, "amount" integer NOT NULL, "created_at" timestamptz NOT NULL, "date" text NOT NULL, "legacy_id" text NULL, "memo" text NULL, "odometer" integer NULL, "type" text NOT NULL, PRIMARY KEY ("id"), CONSTRAINT "vehicle_expense_vehicle_id_fkey" FOREIGN KEY ("vehicle_id") REFERENCES "public"."vehicle" ("id") ON DELETE CASCADE)
+Step 14: CREATE INDEX "vehicle_expense_vehicleId_idx" ON "public"."vehicle_expense" ("vehicle_id")
+W0227 13:21:17.970264    4468 control.go:68] [/emulator/cy-connect 93cd] connector "example" has errors: example\queries.gql:583:26: Expected Name, found $
+
+sources: example\mutations.gql [41216B] example\queries.gql [19271B] 
+I0227 13:21:17.970264    4468 control.go:94] [/emulator/cy-connect 93cd] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\queries.gql [19271B] example\mutations.gql [41216B] 
+E0227 13:21:17.979329    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:583:26: Expected Name, found $
+I0227 13:21:17.983482    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] 
+I0227 13:21:17.983482    4468 load.go:74] Finished reloading
+I0227 13:21:37.163145    4468 load.go:31] Reloading schema and connectors...
+W0227 13:21:37.616536    4468 control.go:68] [/emulator/cy-connect 6f8c] connector "example" has errors: example\mutations.gql:816:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:828:18: Variable "$categoryId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:863:25: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:873:18: Variable "$categoryId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:887:25: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:900:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:918:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:928:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:944:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:964:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:975:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:992:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:994:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:999:17: Variable "$startDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1000:15: Variable "$endDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1018:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1019:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1024:17: Variable "$startDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1025:15: Variable "$endDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1032:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1046:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1048:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1049:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1066:30: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1067:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1068:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1077:30: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1090:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1092:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1109:38: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1111:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1120:38: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1134:6: Field "config" is not defined by type "Agent_Data".
+example\mutations.gql:1144:6: Field "summary" is not defined by type "AgentConversation_Data".
+example\mutations.gql:1145:6: Field "status" is not defined by type "AgentConversation_Data".
+example\mutations.gql:1164:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1166:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1188:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1189:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1201:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1214:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1216:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1232:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1233:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1242:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1256:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1258:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1276:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1277:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1287:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1299:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1301:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1315:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1316:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1324:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1330:4: Unknown argument "id" on field "Mutation.utilityRecord_delete".
+example\mutations.gql:1329:2: There can be only one operation named "DeleteUtilityRecord".
+
+sources: example\queries.gql [19320B] example\mutations.gql [41216B] 
+I0227 13:21:37.616536    4468 control.go:94] [/emulator/cy-connect 6f8c] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [41216B] example\queries.gql [19320B] 
+E0227 13:21:37.628127    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:816:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:828:18: Variable "$categoryId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:863:25: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:873:18: Variable "$categoryId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:887:25: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:900:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:918:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:928:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:944:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:964:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:975:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:992:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:994:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:999:17: Variable "$startDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1000:15: Variable "$endDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1018:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1019:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1024:17: Variable "$startDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1025:15: Variable "$endDate" of type "Date" used in position expecting type "String".
+example\mutations.gql:1032:33: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1046:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1048:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1049:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1066:30: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1067:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1068:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1077:30: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1090:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1092:17: Variable "$vehicleId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1109:38: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1111:17: Variable "$vehicleId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1120:38: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1134:6: Field "config" is not defined by type "Agent_Data".
+example\mutations.gql:1144:6: Field "summary" is not defined by type "AgentConversation_Data".
+example\mutations.gql:1145:6: Field "status" is not defined by type "AgentConversation_Data".
+example\mutations.gql:1164:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1166:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1188:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1189:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1201:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1214:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1216:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1232:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1233:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1242:23: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1256:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1258:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1276:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1277:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1287:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1299:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:1301:12: Variable "$date" of type "Date!" used in position expecting type "String".
+example\mutations.gql:1315:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1316:12: Variable "$date" of type "Date" used in position expecting type "String".
+example\mutations.gql:1324:26: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1330:4: Unknown argument "id" on field "Mutation.utilityRecord_delete".
+example\mutations.gql:1329:2: There can be only one operation named "DeleteUtilityRecord".
+I0227 13:21:37.630643    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\mutation.gql [114788B] main\implicit.gql [4847B] prelude.gql [73219B] main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] 
+I0227 13:21:37.630643    4468 load.go:74] Finished reloading
+I0227 13:22:57.163747    4468 load.go:31] Reloading schema and connectors...
+I0227 13:22:57.578479    4468 control.go:94] [/emulator/cy-connect 1575] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40866B] example\queries.gql [19320B] 
+I0227 13:22:57.765827    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 13:22:57.894462    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 13:22:57.925976    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\relation.gql [230236B] main\query.gql [42324B] prelude.gql [73219B] main\mutation.gql [114788B] main\implicit.gql [4847B] main\input.gql [460510B] 
+I0227 13:22:57.962952    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: esm\index.esm.js [58598B] package.json [863B] react\package.json [460B] react\esm\index.esm.js [49962B] .guides/usage.md [4436B] index.d.ts [156521B] esm\package.json [17B] index.cjs.js [68291B] react\index.d.ts [69011B] react\esm\package.json [17B] react\index.cjs.js [53363B] react\README.md [685705B] .guides/config.json [236B] .guides/setup.md [1682B] README.md [699299B] 
+I0227 13:22:58.051723    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 13:22:58.069513    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [140336B] esm\index.esm.js [46363B] esm\package.json [17B] index.cjs.js [52120B] package.json [632B] 
+I0227 13:22:58.075601    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 13:22:58.075601    4468 load.go:109] Finished reloading
+I0227 13:23:27.163793    4468 load.go:31] Reloading schema and connectors...
+W0227 13:23:27.625314    4468 control.go:68] [/emulator/cy-connect de0e] connector "example" has errors: example\queries.gql:390:22: Variable "$id" of type "UUID!" used in position expecting type "String".
+example\queries.gql:462:32: Variable "$id" of type "UUID!" used in position expecting type "String".
+
+sources: example\mutations.gql [40866B] example\queries.gql [19316B] 
+I0227 13:23:27.625314    4468 control.go:94] [/emulator/cy-connect de0e] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40866B] example\queries.gql [19316B] 
+E0227 13:23:27.636957    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:390:22: Variable "$id" of type "UUID!" used in position expecting type "String".
+example\queries.gql:462:32: Variable "$id" of type "UUID!" used in position expecting type "String".
+I0227 13:23:27.639994    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\query.gql [42324B] main\mutation.gql [114788B] main\implicit.gql [4847B] main\input.gql [460510B] main\relation.gql [230236B] 
+I0227 13:23:27.639994    4468 load.go:74] Finished reloading
+I0227 13:23:47.163646    4468 load.go:31] Reloading schema and connectors...
+I0227 13:23:47.621649    4468 control.go:94] [/emulator/cy-connect 03b2] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40866B] example\queries.gql [19320B] 
+I0227 13:23:47.869458    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 13:23:47.975878    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 13:23:48.003416    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] 
+I0227 13:23:48.041877    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: react\esm\index.esm.js [49962B] react\README.md [685705B] .guides/setup.md [1682B] package.json [863B] .guides/usage.md [3810B] index.d.ts [156521B] esm\package.json [17B] react\esm\package.json [17B] .guides/config.json [236B] esm\index.esm.js [58598B] index.cjs.js [68291B] react\package.json [460B] react\index.cjs.js [53363B] README.md [699299B] react\index.d.ts [69011B] 
+I0227 13:23:48.057689    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 13:23:48.063139    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.cjs.js [52120B] package.json [632B] index.d.ts [140336B] esm\index.esm.js [46363B] esm\package.json [17B] 
+I0227 13:23:48.065240    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 13:23:48.065240    4468 load.go:109] Finished reloading
+I0227 13:24:27.163164    4468 load.go:31] Reloading schema and connectors...
+W0227 13:24:27.773643    4468 control.go:68] [/emulator/cy-connect fa65] connector "example" has errors: example\mutations.gql:1323:2: There can be only one operation named "CreateAccommodation".
+example\mutations.gql:1409:2: There can be only one operation named "UpdateAccommodation".
+example\mutations.gql:1492:2: There can be only one operation named "DeleteAccommodation".
+example\mutations.gql:1498:2: There can be only one operation named "CreateAccommodationAssignment".
+example\mutations.gql:1528:2: There can be only one operation named "UpdateAccommodationAssignment".
+example\mutations.gql:1555:2: There can be only one operation named "DeleteAccommodationAssignment".
+
+sources: example\queries.gql [19320B] example\mutations.gql [47731B] 
+I0227 13:24:27.773643    4468 control.go:94] [/emulator/cy-connect fa65] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [47731B] example\queries.gql [19320B] 
+E0227 13:24:27.802127    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:1323:2: There can be only one operation named "CreateAccommodation".
+example\mutations.gql:1409:2: There can be only one operation named "UpdateAccommodation".
+example\mutations.gql:1492:2: There can be only one operation named "DeleteAccommodation".
+example\mutations.gql:1498:2: There can be only one operation named "CreateAccommodationAssignment".
+example\mutations.gql:1528:2: There can be only one operation named "UpdateAccommodationAssignment".
+example\mutations.gql:1555:2: There can be only one operation named "DeleteAccommodationAssignment".
+I0227 13:24:27.814148    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\query.gql [42324B] main\mutation.gql [114788B] main\implicit.gql [4847B] main\input.gql [460510B] main\relation.gql [230236B] 
+I0227 13:24:27.815655    4468 load.go:74] Finished reloading
+I0227 13:30:47.163747    4468 load.go:31] Reloading schema and connectors...
+I0227 13:30:47.516940    4468 control.go:94] [/emulator/cy-connect 1100] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [19320B] 
+I0227 13:30:47.659646    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 13:30:47.716436    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 13:30:47.733173    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] 
+I0227 13:30:47.747660    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: index.cjs.js [68291B] README.md [699629B] react\index.cjs.js [53363B] react\index.d.ts [69011B] react\esm\index.esm.js [49962B] react\README.md [685914B] .guides/setup.md [1682B] esm\package.json [17B] react\package.json [460B] .guides/config.json [236B] package.json [863B] react\esm\package.json [17B] .guides/usage.md [4436B] index.d.ts [156609B] esm\index.esm.js [58598B] 
+I0227 13:30:47.769919    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 13:30:47.772527    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [140424B] esm\index.esm.js [46363B] esm\package.json [17B] index.cjs.js [52120B] package.json [632B] 
+I0227 13:30:47.774932    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 13:30:47.774932    4468 load.go:109] Finished reloading
+I0227 13:31:07.163716    4468 load.go:31] Reloading schema and connectors...
+W0227 13:31:07.501200    4468 control.go:68] [/emulator/cy-connect 19f3] connector "example" has errors: example\queries.gql:116:6: Cannot query field "workers_on_dailyReport" on type "DailyReport". Did you mean "workers_via_DailyReportWorker"?
+example\queries.gql:347:6: Cannot query field "lineItems_on_billingDocument" on type "AccommodationBillingDocument".
+example\queries.gql:379:6: Cannot query field "createdAt" on type "AdvancePayment". Did you mean "updatedAt"?
+example\queries.gql:425:6: Cannot query field "updatedAt" on type "SmartMemoCategory". Did you mean "createdAt"?
+example\queries.gql:475:6: Cannot query field "updatedAt" on type "VehicleExpense". Did you mean "createdAt"?
+example\queries.gql:535:6: Cannot query field "updatedAt" on type "DailyDispatch". Did you mean "createdAt"?
+example\queries.gql:549:6: Cannot query field "updatedAt" on type "Payment". Did you mean "createdAt"?
+example\queries.gql:564:6: Cannot query field "updatedAt" on type "TaxInvoice". Did you mean "createdAt"?
+example\queries.gql:577:6: Cannot query field "updatedAt" on type "Receivable". Did you mean "createdAt"?
+
+sources: example\mutations.gql [40892B] example\queries.gql [11671B] 
+I0227 13:31:07.501200    4468 control.go:94] [/emulator/cy-connect 19f3] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [11671B] 
+E0227 13:31:07.511553    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:116:6: Cannot query field "workers_on_dailyReport" on type "DailyReport". Did you mean "workers_via_DailyReportWorker"?
+example\queries.gql:347:6: Cannot query field "lineItems_on_billingDocument" on type "AccommodationBillingDocument".
+example\queries.gql:379:6: Cannot query field "createdAt" on type "AdvancePayment". Did you mean "updatedAt"?
+example\queries.gql:425:6: Cannot query field "updatedAt" on type "SmartMemoCategory". Did you mean "createdAt"?
+example\queries.gql:475:6: Cannot query field "updatedAt" on type "VehicleExpense". Did you mean "createdAt"?
+example\queries.gql:535:6: Cannot query field "updatedAt" on type "DailyDispatch". Did you mean "createdAt"?
+example\queries.gql:549:6: Cannot query field "updatedAt" on type "Payment". Did you mean "createdAt"?
+example\queries.gql:564:6: Cannot query field "updatedAt" on type "TaxInvoice". Did you mean "createdAt"?
+example\queries.gql:577:6: Cannot query field "updatedAt" on type "Receivable". Did you mean "createdAt"?
+I0227 13:31:07.512560    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [460510B] 
+I0227 13:31:07.512560    4468 load.go:74] Finished reloading
+I0227 13:32:37.162923    4468 load.go:31] Reloading schema and connectors...
+W0227 13:32:37.522106    4468 control.go:68] [/emulator/cy-connect 34e0] connector "example" has errors: example\queries.gql:117:8: Cannot query field "dailyReportId" on type "Worker".
+example\queries.gql:118:8: Cannot query field "workerId" on type "Worker".
+example\queries.gql:119:8: Cannot query field "gongsu" on type "Worker".
+example\queries.gql:121:8: Cannot query field "amount" on type "Worker". Did you mean "_count"?
+example\queries.gql:122:8: Cannot query field "workDescription" on type "Worker".
+example\queries.gql:123:8: Cannot query field "workerName" on type "Worker". Did you mean "bankName"?
+example\queries.gql:125:8: Cannot query field "status" on type "Worker".
+example\queries.gql:126:8: Cannot query field "manDay" on type "Worker".
+example\queries.gql:128:8: Cannot query field "salaryModel" on type "Worker".
+example\queries.gql:129:8: Cannot query field "workContent" on type "Worker".
+example\queries.gql:348:6: Cannot query field "accommodationBillingLineItems_via_billingDocument" on type "AccommodationBillingDocument". Did you mean "accommodationBillingLineItems_on_billingDocument"?
+
+sources: example\queries.gql [11628B] example\mutations.gql [40892B] 
+I0227 13:32:37.522106    4468 control.go:94] [/emulator/cy-connect 34e0] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [11628B] 
+E0227 13:32:37.530907    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:117:8: Cannot query field "dailyReportId" on type "Worker".
+example\queries.gql:118:8: Cannot query field "workerId" on type "Worker".
+example\queries.gql:119:8: Cannot query field "gongsu" on type "Worker".
+example\queries.gql:121:8: Cannot query field "amount" on type "Worker". Did you mean "_count"?
+example\queries.gql:122:8: Cannot query field "workDescription" on type "Worker".
+example\queries.gql:123:8: Cannot query field "workerName" on type "Worker". Did you mean "bankName"?
+example\queries.gql:125:8: Cannot query field "status" on type "Worker".
+example\queries.gql:126:8: Cannot query field "manDay" on type "Worker".
+example\queries.gql:128:8: Cannot query field "salaryModel" on type "Worker".
+example\queries.gql:129:8: Cannot query field "workContent" on type "Worker".
+example\queries.gql:348:6: Cannot query field "accommodationBillingLineItems_via_billingDocument" on type "AccommodationBillingDocument". Did you mean "accommodationBillingLineItems_on_billingDocument"?
+I0227 13:32:37.533417    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] 
+I0227 13:32:37.533417    4468 load.go:74] Finished reloading
+I0227 13:33:27.163145    4468 load.go:31] Reloading schema and connectors...
+I0227 13:33:27.572154    4468 control.go:94] [/emulator/cy-connect e0d4] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [11616B] 
+I0227 13:33:27.724997    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 13:33:27.778401    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 13:33:27.794159    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] 
+I0227 13:33:27.832899    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: react\README.md [590709B] index.d.ts [134686B] esm\index.esm.js [49594B] package.json [863B] README.md [603536B] react\index.d.ts [59637B] react\index.cjs.js [44635B] react\package.json [460B] .guides/setup.md [1682B] .guides/config.json [236B] .guides/usage.md [4436B] esm\package.json [17B] react\esm\package.json [17B] index.cjs.js [57709B] react\esm\index.esm.js [41792B] 
+I0227 13:33:27.840014    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 13:33:27.854452    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: index.d.ts [119039B] esm\index.esm.js [39143B] esm\package.json [17B] index.cjs.js [43976B] package.json [632B] 
+I0227 13:33:27.856013    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 13:33:27.856013    4468 load.go:109] Finished reloading
+I0227 14:55:27.163753    4468 load.go:31] Reloading schema and connectors...
+I0227 14:55:27.566381    4468 control.go:94] [/emulator/cy-connect 5bf2] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [12446B] 
+I0227 14:55:27.727034    4468 codegen.go:80] [connector "example" javascriptSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+I0227 14:55:27.784698    4468 codegen.go:80] [connector "example" adminSdk] Generating sources into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+I0227 14:55:27.801909    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\mutation.gql [114788B] main\implicit.gql [4847B] prelude.gql [73219B] main\input.gql [460510B] main\relation.gql [230236B] main\query.gql [42324B] 
+I0227 14:55:27.843817    4468 collector.go:107] connector "example" javascriptSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-generated"
+Generated sources: .guides/setup.md [1682B] .guides/config.json [236B] esm\index.esm.js [50731B] index.cjs.js [58975B] package.json [863B] README.md [616262B] react\index.cjs.js [45762B] react\README.md [602983B] .guides/usage.md [4436B] index.d.ts [137791B] react\index.d.ts [60810B] react\package.json [460B] react\esm\package.json [17B] react\esm\index.esm.js [42872B] esm\package.json [17B] 
+I0227 14:55:27.875330    4468 installsdk.go:55] Package @dataconnect/generated is already installed. Skipping installation
+I0227 14:55:27.877427    4468 collector.go:107] connector "example" adminSdk wrote into "C:\\Users\\playz\\cy\\src\\dataconnect-admin-generated"
+Generated sources: esm\index.esm.js [40119B] esm\package.json [17B] index.cjs.js [45022B] package.json [632B] index.d.ts [122000B] 
+I0227 14:55:27.884636    4468 installsdk.go:55] Package @dataconnect/admin-generated is already installed. Skipping installation
+I0227 14:55:27.884636    4468 load.go:109] Finished reloading
+I0227 14:58:27.170329    4468 load.go:31] Reloading schema and connectors...
+W0227 14:58:29.175911    4468 control.go:68] [/emulator/cy-connect 92f9] connector "example" has errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [40892B] example\queries.gql [14113B] 
+I0227 14:58:29.176423    4468 control.go:94] [/emulator/cy-connect 92f9] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13289B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [14113B] 
+E0227 14:58:29.217936    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 14:58:29.221968    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\relation.gql [230236B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [460510B] 
+I0227 14:58:29.221968    4468 load.go:74] Finished reloading
+I0227 14:59:07.162979    4468 load.go:31] Reloading schema and connectors...
+I0227 14:59:07.332208    4468 migrate.go:24] Running migration SQL:
+Step 1: ALTER TABLE "public"."company" ADD COLUMN "account_holder" text NULL, ADD COLUMN "account_number" text NULL, ADD COLUMN "address" text NULL, ADD COLUMN "bank_name" text NULL, ADD COLUMN "ceo_resident_number" text NULL, ADD COLUMN "color" text NULL, ADD COLUMN "email" text NULL, ADD COLUMN "phone" text NULL
+W0227 14:59:07.538189    4468 control.go:68] [/emulator/cy-connect a407] connector "example" has errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [40892B] example\queries.gql [14113B] 
+I0227 14:59:07.538189    4468 control.go:94] [/emulator/cy-connect a407] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13474B] 
+Connector "example": sources: example\mutations.gql [40892B] example\queries.gql [14113B] 
+E0227 14:59:07.545305    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 14:59:07.547364    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [466083B] main\relation.gql [233271B] main\query.gql [42324B] main\mutation.gql [114788B] 
+I0227 14:59:07.547364    4468 load.go:74] Finished reloading
+I0227 14:59:27.163421    4468 load.go:31] Reloading schema and connectors...
+W0227 14:59:27.520455    4468 control.go:68] [/emulator/cy-connect 643f] connector "example" has errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [41279B] example\queries.gql [14113B] 
+I0227 14:59:27.520455    4468 control.go:94] [/emulator/cy-connect 643f] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13474B] 
+Connector "example": sources: example\mutations.gql [41279B] example\queries.gql [14113B] 
+E0227 14:59:27.529343    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 14:59:27.530899    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [466083B] main\relation.gql [233271B] 
+I0227 14:59:27.530899    4468 load.go:74] Finished reloading
+I0227 15:06:27.163718    4468 load.go:31] Reloading schema and connectors...
+W0227 15:06:27.487028    4468 control.go:68] [/emulator/cy-connect 1e97] connector "example" has errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [41666B] example\queries.gql [14113B] 
+I0227 15:06:27.487028    4468 control.go:94] [/emulator/cy-connect 1e97] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13474B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [14113B] 
+E0227 15:06:27.494426    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:314:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:361:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:408:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:427:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 15:06:27.496958    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4847B] main\input.gql [466083B] main\relation.gql [233271B] main\query.gql [42324B] main\mutation.gql [114788B] 
+I0227 15:06:27.496958    4468 load.go:74] Finished reloading
+I0227 15:11:27.163314    4468 load.go:31] Reloading schema and connectors...
+W0227 15:11:27.482572    4468 control.go:68] [/emulator/cy-connect 9efb] connector "example" has errors: example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+I0227 15:11:27.482572    4468 control.go:94] [/emulator/cy-connect 9efb] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13474B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+E0227 15:11:27.492395    4468 load.go:73] Could not load sources: 
+Errors: example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 15:11:27.495427    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [466083B] main\relation.gql [233271B] main\query.gql [42324B] main\mutation.gql [114788B] prelude.gql [73219B] main\implicit.gql [4847B] 
+I0227 15:11:27.495427    4468 load.go:74] Finished reloading
+I0227 15:34:37.163471    4468 load.go:31] Reloading schema and connectors...
+E0227 15:34:37.385240    4468 service.go:89] [/emulator/cy-connect 9efb] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 15:34:37.480755    4468 control.go:68] [/emulator/cy-connect df23] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:180:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:382:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+I0227 15:34:37.480755    4468 control.go:94] [/emulator/cy-connect df23] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13472B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+E0227 15:34:37.490911    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:180:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:382:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 15:34:37.493421    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4843B] main\input.gql [466025B] main\relation.gql [233271B] main\query.gql [42204B] main\mutation.gql [114548B] 
+I0227 15:34:37.493421    4468 load.go:74] Finished reloading
+I0227 15:34:47.164161    4468 load.go:31] Reloading schema and connectors...
+E0227 15:34:47.403699    4468 service.go:89] [/emulator/cy-connect df23] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 15:34:47.541625    4468 control.go:68] [/emulator/cy-connect 9cc6] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:180:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:214:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:382:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:448:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+
+sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+I0227 15:34:47.541625    4468 control.go:94] [/emulator/cy-connect 9cc6] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13470B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [14417B] 
+E0227 15:34:47.553377    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:180:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:214:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:334:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:382:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:381:2: There can be only one operation named "GetAccommodation".
+example\queries.gql:428:2: There can be only one operation named "ListAllAccommodationAssignments".
+example\queries.gql:448:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:447:2: There can be only one operation named "GetAccommodationAssignment".
+I0227 15:34:47.558833    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\input.gql [466003B] main\relation.gql [233271B] main\query.gql [42084B] main\mutation.gql [114308B] main\implicit.gql [4843B] 
+I0227 15:34:47.558833    4468 load.go:74] Finished reloading
+I0227 15:40:17.163400    4468 load.go:31] Reloading schema and connectors...
+E0227 15:40:17.325949    4468 service.go:89] [/emulator/cy-connect 9cc6] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 15:40:17.420060    4468 control.go:68] [/emulator/cy-connect 16d1] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:280:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:328:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:394:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41666B] example\queries.gql [13372B] 
+I0227 15:40:17.420060    4468 control.go:94] [/emulator/cy-connect 16d1] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13470B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [13372B] 
+E0227 15:40:17.430906    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:280:2: There can be only one operation named "ListAllAccommodations".
+example\queries.gql:328:22: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\queries.gql:394:32: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 15:40:17.435152    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\relation.gql [233271B] main\query.gql [42084B] main\mutation.gql [114308B] main\implicit.gql [4843B] main\input.gql [466003B] 
+I0227 15:40:17.435152    4468 load.go:74] Finished reloading
+I0227 15:40:47.163692    4468 load.go:31] Reloading schema and connectors...
+E0227 15:40:47.314761    4468 service.go:89] [/emulator/cy-connect 16d1] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 15:40:47.403379    4468 control.go:68] [/emulator/cy-connect 1ab9] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:280:2: There can be only one operation named "ListAllAccommodations".
+
+sources: example\mutations.gql [41666B] example\queries.gql [13368B] 
+I0227 15:40:47.403379    4468 control.go:94] [/emulator/cy-connect 1ab9] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13470B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [13368B] 
+E0227 15:40:47.411449    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\queries.gql:280:2: There can be only one operation named "ListAllAccommodations".
+I0227 15:40:47.414073    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\input.gql [466003B] main\relation.gql [233271B] main\query.gql [42084B] main\mutation.gql [114308B] main\implicit.gql [4843B] 
+I0227 15:40:47.414073    4468 load.go:74] Finished reloading
+I0227 15:54:37.163802    4468 load.go:31] Reloading schema and connectors...
+E0227 15:54:37.373685    4468 service.go:89] [/emulator/cy-connect 1ab9] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 15:54:37.498655    4468 control.go:68] [/emulator/cy-connect 34ca] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41666B] example\queries.gql [13075B] 
+I0227 15:54:37.499159    4468 control.go:94] [/emulator/cy-connect 34ca] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13470B] 
+Connector "example": sources: example\mutations.gql [41666B] example\queries.gql [13075B] 
+E0227 15:54:37.509428    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+I0227 15:54:37.512566    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\relation.gql [233271B] main\query.gql [42084B] main\mutation.gql [114308B] main\implicit.gql [4843B] main\input.gql [466003B] 
+I0227 15:54:37.512566    4468 load.go:74] Finished reloading
+I0227 16:16:37.162927    4468 load.go:31] Reloading schema and connectors...
+E0227 16:16:37.339419    4468 service.go:89] [/emulator/cy-connect 34ca] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:16:37.440814    4468 control.go:68] [/emulator/cy-connect f49c] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:594:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:647:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\queries.gql [13075B] example\mutations.gql [41666B] 
+I0227 16:16:37.440814    4468 control.go:94] [/emulator/cy-connect f49c] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13464B] 
+Connector "example": sources: example\queries.gql [13075B] example\mutations.gql [41666B] 
+E0227 16:16:37.447436    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:513:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:533:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:535:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:561:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:562:23: Variable "$accommodationId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:576:39: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:594:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:596:23: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:617:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:628:49: Variable "$accommodationId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:647:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:16:37.451094    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4841B] main\input.gql [465931B] main\relation.gql [233271B] main\query.gql [41844B] main\mutation.gql [113828B] 
+I0227 16:16:37.451094    4468 load.go:74] Finished reloading
+I0227 16:16:57.163796    4468 load.go:31] Reloading schema and connectors...
+E0227 16:16:57.332857    4468 service.go:89] [/emulator/cy-connect f49c] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:16:57.419665    4468 control.go:68] [/emulator/cy-connect e36b] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\queries.gql [13075B] example\mutations.gql [41644B] 
+I0227 16:16:57.419665    4468 control.go:94] [/emulator/cy-connect e36b] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13464B] 
+Connector "example": sources: example\mutations.gql [41644B] example\queries.gql [13075B] 
+E0227 16:16:57.429904    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:16:57.433043    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: prelude.gql [73219B] main\implicit.gql [4841B] main\input.gql [465931B] main\relation.gql [233271B] main\query.gql [41844B] main\mutation.gql [113828B] 
+I0227 16:16:57.433043    4468 load.go:74] Finished reloading
+I0227 16:25:47.162883    4468 load.go:31] Reloading schema and connectors...
+E0227 16:25:47.327939    4468 service.go:89] [/emulator/cy-connect e36b] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:25:47.415105    4468 control.go:68] [/emulator/cy-connect ff1f] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41644B] example\queries.gql [14026B] 
+I0227 16:25:47.415105    4468 control.go:94] [/emulator/cy-connect ff1f] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13464B] 
+Connector "example": sources: example\mutations.gql [41644B] example\queries.gql [14026B] 
+E0227 16:25:47.421418    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:696:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:697:25: Variable "$billingDocumentId" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:705:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:25:47.424036    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\implicit.gql [4841B] main\input.gql [465931B] main\relation.gql [233271B] prelude.gql [73219B] main\query.gql [41844B] main\mutation.gql [113828B] 
+I0227 16:25:47.424036    4468 load.go:74] Finished reloading
+I0227 16:31:47.162965    4468 load.go:31] Reloading schema and connectors...
+E0227 16:31:47.330922    4468 service.go:89] [/emulator/cy-connect ff1f] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:31:47.418174    4468 control.go:68] [/emulator/cy-connect 86e5] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1011:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1013:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1036:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1038:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1177:16: Variable "$workerId" of type "UUID!" used in position expecting type "String".
+example\mutations.gql:1179:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1181:14: Variable "$siteId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1200:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1202:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1204:14: Variable "$siteId" of type "UUID" used in position expecting type "String".
+
+sources: example\mutations.gql [41618B] example\queries.gql [14026B] 
+I0227 16:31:47.418174    4468 control.go:94] [/emulator/cy-connect 86e5] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13464B] 
+Connector "example": sources: example\mutations.gql [41618B] example\queries.gql [14026B] 
+E0227 16:31:47.425867    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:1011:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1013:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1036:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1038:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1177:16: Variable "$workerId" of type "UUID!" used in position expecting type "String".
+example\mutations.gql:1179:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1181:14: Variable "$siteId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1200:16: Variable "$workerId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1202:14: Variable "$teamId" of type "UUID" used in position expecting type "String".
+example\mutations.gql:1204:14: Variable "$siteId" of type "UUID" used in position expecting type "String".
+I0227 16:31:47.428643    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\implicit.gql [4841B] main\input.gql [465931B] main\relation.gql [233271B] main\query.gql [41844B] main\mutation.gql [113828B] prelude.gql [73219B] 
+I0227 16:31:47.428643    4468 load.go:74] Finished reloading
+I0227 16:32:07.163822    4468 load.go:31] Reloading schema and connectors...
+E0227 16:32:07.393696    4468 service.go:89] [/emulator/cy-connect 86e5] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:32:07.490081    4468 control.go:68] [/emulator/cy-connect e1f5] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:536:14: Variable "$teamId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:538:16: Variable "$workerId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:563:14: Variable "$teamId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:565:16: Variable "$workerId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41618B] example\queries.gql [14026B] 
+I0227 16:32:07.490081    4468 control.go:94] [/emulator/cy-connect e1f5] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13450B] 
+Connector "example": sources: example\mutations.gql [41618B] example\queries.gql [14026B] 
+E0227 16:32:07.499917    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:536:14: Variable "$teamId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:538:16: Variable "$workerId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:563:14: Variable "$teamId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:565:16: Variable "$workerId" of type "String" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:32:07.503109    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\mutation.gql [113828B] prelude.gql [73219B] main\implicit.gql [4841B] main\input.gql [465833B] main\relation.gql [233271B] main\query.gql [41844B] 
+I0227 16:32:07.503109    4468 load.go:74] Finished reloading
+I0227 16:32:27.163883    4468 load.go:31] Reloading schema and connectors...
+E0227 16:32:27.349648    4468 service.go:89] [/emulator/cy-connect e1f5] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:32:27.439410    4468 control.go:68] [/emulator/cy-connect 00ef] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41610B] example\queries.gql [14026B] 
+I0227 16:32:27.439410    4468 control.go:94] [/emulator/cy-connect 00ef] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13450B] 
+Connector "example": sources: example\mutations.gql [41610B] example\queries.gql [14026B] 
+E0227 16:32:27.445045    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+example\mutations.gql:674:44: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:32:27.448069    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\implicit.gql [4841B] main\input.gql [465833B] main\relation.gql [233271B] main\query.gql [41844B] main\mutation.gql [113828B] prelude.gql [73219B] 
+I0227 16:32:27.448069    4468 load.go:74] Finished reloading
+I0227 16:32:47.163546    4468 load.go:31] Reloading schema and connectors...
+E0227 16:32:47.331198    4468 service.go:89] [/emulator/cy-connect 00ef] failed to migrate schema: SQL migration error: failed to plan diffs: failed to generate diff: pq: operator does not exist: text = uuid
+W0227 16:32:47.431019    4468 control.go:68] [/emulator/cy-connect a671] connector "example" has errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+
+sources: example\mutations.gql [41608B] example\queries.gql [14026B] 
+I0227 16:32:47.431019    4468 control.go:94] [/emulator/cy-connect a671] UpdateResources(): done
+Main schema: sources: schema\schema.gql [13450B] 
+Connector "example": sources: example\mutations.gql [41608B] example\queries.gql [14026B] 
+E0227 16:32:47.440081    4468 load.go:73] Could not load sources: 
+Errors: example\mutations.gql:386:10: Variable "$id" of type "String" used in position expecting type "UUID".
+example\mutations.gql:470:29: Variable "$id" of type "String!" used in position expecting type "UUID".
+I0227 16:32:47.443095    4468 collector.go:107] schema extensions wrote into "C:\\Users\\playz\\cy\\dataconnect\\.dataconnect\\schema"
+Generated sources: main\input.gql [465833B] prelude.gql [73219B] main\relation.gql [233271B] main\query.gql [41844B] main\mutation.gql [113828B] main\implicit.gql [4841B] 
+I0227 16:32:47.443095    4468 load.go:74] Finished reloading

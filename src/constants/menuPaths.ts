@@ -12,9 +12,11 @@ export const MENU_PATHS: { [key: string]: string } = {
 
     "DB 조회": "/database/lookup",
     "일보관리": "/reports/daily",
+    "재직증명서": "/hr/certificate",
     "일보작성": "/reports/daily?tab=input",
     "일보 v2": "/reports/daily-v2",
     "일보목록": "/reports/daily?tab=list",
+    "일보목록v2": "/reports/daily?tab=list-v2",
     "AI일보": "/reports/daily?tab=lookup",
 
     "급여 지급 관리": "/payroll/wage-payment",
@@ -29,6 +31,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "지원비관리": "/payroll/rate-management?tab=support",
     "현장별 명세서": "/payroll/payslip?tab=site",
     "가불 관리": "/payroll/advance-payment",
+    "팀정산 관리": "/payroll/team-settlement",
     "가불등록": "/payroll/advance-payment?tab=register",
     "가불목록": "/payroll/advance-payment?tab=list",
     "세금/가불": "/payroll/team-payslip",
@@ -40,17 +43,13 @@ export const MENU_PATHS: { [key: string]: string } = {
 
     // 서명 관리
     "서명생성기": "/payroll/signature-generator",
+    "서명등록": "/payroll/signature-generator",
     "서명위임장": "/payroll/delegation-letter",
     "위임장v2": "/payroll/delegation-letter-v2",
-
-    // 세금계산서
-    "세금계산서 발행": "/payroll/taxinvoice/issue",
-    "세금계산서 거래장": "/payroll/taxinvoice/ledger",
-    "미수금 대시보드": "/payroll/taxinvoice/dashboard",
-    "미수금 관리": "/payroll/taxinvoice/receivables",
-    "숙소 관리": "/support/accommodation",
-    "법인차량 관리": "/support/vehicles",
-    "가불 및 공제": "/payroll/advance-payment",
+    "계좌조회": "/payroll/taxinvoice/account-inquiry",
+    "사무실 관리": "/office/management",
+    "일보 통계": "/reports/statistics",
+    "일급제 월급제 통계": "/payroll/statistics",
 
     // 자재관리
     "자재 마스터": "/materials/master",
@@ -82,11 +81,13 @@ export const MENU_PATHS: { [key: string]: string } = {
 
 
     "시스템 설정": "/settings",
+    "AI 설정": "/settings/ai",
     "시스템 메시지 설정": "/settings/system-messages",
     "통합DB": "/database/manpower-db",
     "통합DB(새창)": "/database/manpower-db?newTab=1",
     "테스트설정": "/test-settings",
     "프로필 설정": "/profile",
+    "할일": "/todo",
 
     // 지원 관리
     "지원비 설정": "/support/settings",
@@ -110,11 +111,13 @@ export const MENU_PATHS: { [key: string]: string } = {
     "현장 대량 등록": "/manpower/smart-site-registration",
     "회사 등록": "/database/company-db",
     "회사 조직도": "/company/organization",
+    "프리랜서 관리": "/manpower/freelancer",
     "회사소개": "/cheongyeon/home", // New mapping
     "인사말": "/cheongyeon/greeting",
     "대표 인사말": "/cheongyeon/greeting", // New alias
     "조직도": "/cheongyeon/organization",
     "오시는 길": "/cheongyeon/directions",
+    "기술비전": "/cheongyeon/tech-vision",
     "회사 대량 등록": "/database/smart-company-registration",
     "회사DB": "/database/company-db",
     "DB 구조도": "/jeonkuk/db-structure",
@@ -136,6 +139,7 @@ export const MENU_PATHS: { [key: string]: string } = {
 
     // 관리자 메뉴
     "팀 관리": "/manpower/team-management",
+    '작업자 요약': '/manpower/summary',
 
     // 테스트 메뉴
     "Smart Excel": "/report/excel",
@@ -151,7 +155,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "팀 엑셀 등록": "/upload/team",
     "현장 엑셀 등록": "/upload/site",
     "회사 엑셀 등록": "/upload/company",
-    "출력일보 엑셀 등록": "/upload/daily-report",
+    "출력일보 엑셀 등록": "/mass-upload/daily-report",
     "안전 업로드 가이드": "/manual/excel-guide",
 
     // 학습 메뉴
@@ -163,6 +167,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     // 개발자 도구
     "에이전트 플레이그라운드": "/admin/agent-playground",
     "메뉴관리": "/admin/menu-manager",
+    "사용자 관리": "/admin/user-management",
+    "사용자 통합 관리": "/admin/user-management",
     "권한 관리": "/admin/role-menu",
     "시스템 권한 관리": "/admin/role-menu", // Alias
     "카카오톡 관리": "/payroll/kakao-notification",
@@ -176,4 +182,12 @@ export const MENU_PATHS: { [key: string]: string } = {
     "통합 데이터 콘솔": "/manpower/refine-sites", // Alias
     "정산 시스템 설계도": "/design/settlement-architecture",
     "스마트 메모": "/memos", // Smart Memo System
+    "Smart Memo": "/memos",
+    "현장 갤러리": "/gallery/projects",
+    "프로젝트": "/gallery/projects", // Alias
+    "AI 이미지 스튜디오": "/gallery/ai-images",
+    "이미지 갤러리": "/gallery/ai-images", // Alias
+    "현장 관리 시스템": "/site/management",
+    "회사 랜딩 페이지": "/company/landing",
+    "회사소개 랜딩": "/company/landing",
 };

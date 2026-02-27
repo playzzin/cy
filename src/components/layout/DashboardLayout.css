@@ -262,6 +262,27 @@ a {
     /* Compensate for border */
 }
 
+.menu-link.has-open-btn {
+    padding-right: 14px;
+}
+
+.menu-open-new-btn {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(189, 195, 199, 0.85);
+    transition: all 0.2s ease;
+}
+
+.menu-open-new-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
+}
+
 .menu-icon {
     width: 24px;
     text-align: center;
@@ -309,6 +330,62 @@ a {
 .submenu-list a.active {
     color: #1abc9c;
     font-weight: 600;
+}
+
+.submenu-leaf-item,
+.nested-leaf-item {
+    position: relative;
+}
+
+.submenu-leaf-link,
+.nested-leaf-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-right: 18px;
+}
+
+.submenu-leaf-item.has-open-btn .submenu-leaf-link,
+.nested-leaf-item.has-open-btn .nested-leaf-link {
+    padding-right: 46px;
+}
+
+.submenu-link-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.submenu-leaf-icon {
+    width: 12px;
+    font-size: 10px;
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+
+.submenu-open-new-btn {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(148, 163, 184, 0.9);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.submenu-open-new-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.12);
 }
 
 /* =========================================
@@ -454,6 +531,22 @@ a {
 
 .submenu-item.nested-item:hover {
     padding-left: 40px;
+}
+
+.submenu-open-new-inline {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(148, 163, 184, 0.9);
+    transition: all 0.2s ease;
+}
+
+.submenu-open-new-inline:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.15);
 }
 
 .submenu-arrow {

@@ -16,6 +16,31 @@ export enum Status {
 
 
 
+export interface AccommodationAssignment_Key {
+  id: UUIDString;
+  __typename?: 'AccommodationAssignment_Key';
+}
+
+export interface AccommodationBillingDocument_Key {
+  id: UUIDString;
+  __typename?: 'AccommodationBillingDocument_Key';
+}
+
+export interface AccommodationBillingLineItem_Key {
+  id: UUIDString;
+  __typename?: 'AccommodationBillingLineItem_Key';
+}
+
+export interface Accommodation_Key {
+  id: UUIDString;
+  __typename?: 'Accommodation_Key';
+}
+
+export interface AdvancePayment_Key {
+  id: string;
+  __typename?: 'AdvancePayment_Key';
+}
+
 export interface AgentConversation_Key {
   id: string;
   __typename?: 'AgentConversation_Key';
@@ -39,6 +64,129 @@ export interface AuditLog_Key {
 export interface Company_Key {
   id: UUIDString;
   __typename?: 'Company_Key';
+}
+
+export interface CreateAccommodationAssignmentData {
+  accommodationAssignment_insert: AccommodationAssignment_Key;
+}
+
+export interface CreateAccommodationAssignmentVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  accommodationId: UUIDString;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  status?: string | null;
+  source?: string | null;
+  memo?: string | null;
+}
+
+export interface CreateAccommodationBillingDocumentData {
+  accommodationBillingDocument_insert: AccommodationBillingDocument_Key;
+}
+
+export interface CreateAccommodationBillingDocumentVariables {
+  id?: UUIDString | null;
+  yearMonth: string;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  issuedToType: string;
+  issuedToWorkerId?: UUIDString | null;
+  issuedToWorkerName?: string | null;
+  status?: string | null;
+  memo?: string | null;
+  confirmedAt?: TimestampString | null;
+  postedAdvancePaymentId?: string | null;
+}
+
+export interface CreateAccommodationBillingLineItemData {
+  accommodationBillingLineItem_insert: AccommodationBillingLineItem_Key;
+}
+
+export interface CreateAccommodationBillingLineItemVariables {
+  id?: UUIDString | null;
+  billingDocumentId: UUIDString;
+  label: string;
+  amount: number;
+  targetField: string;
+}
+
+export interface CreateAccommodationData {
+  accommodation_insert: Accommodation_Key;
+}
+
+export interface CreateAccommodationVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  name: string;
+  address: string;
+  type: string;
+  status: string;
+  ownership?: string | null;
+  electricityMode?: string | null;
+  gasMode?: string | null;
+  waterMode?: string | null;
+  internetMode?: string | null;
+  maintenanceMode?: string | null;
+  fixedElectricity?: number | null;
+  fixedGas?: number | null;
+  fixedWater?: number | null;
+  fixedInternet?: number | null;
+  fixedMaintenance?: number | null;
+  contractStartDate?: string | null;
+  contractEndDate?: string | null;
+  deposit?: number | null;
+  monthlyRent?: number | null;
+  paymentDay?: number | null;
+  landlordName?: string | null;
+  landlordContact?: string | null;
+  isReported?: boolean | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountHolder?: string | null;
+  rentPayDate?: number | null;
+  isAutoTransfer?: boolean | null;
+  transferDay?: number | null;
+  transferAccountInfo?: string | null;
+  billingTargetType?: string | null;
+  billingTargetTeamId?: string | null;
+  billingTargetTeamName?: string | null;
+  billingTargetWorkerId?: string | null;
+  billingTargetWorkerName?: string | null;
+  currentOccupantName?: string | null;
+  currentOccupantPhone?: string | null;
+  memo?: string | null;
+}
+
+export interface CreateAdvancePaymentData {
+  advancePayment_insert: AdvancePayment_Key;
+}
+
+export interface CreateAdvancePaymentVariables {
+  id: string;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  yearMonth: string;
+  items?: string | null;
+  prevMonthCarryover?: number | null;
+  accommodation?: number | null;
+  privateRoom?: number | null;
+  gloves?: number | null;
+  deposit?: number | null;
+  fines?: number | null;
+  electricity?: number | null;
+  gas?: number | null;
+  internet?: number | null;
+  water?: number | null;
+  totalDeduction?: number | null;
+  memo?: string | null;
+  updatedAt?: TimestampString | null;
 }
 
 export interface CreateAgentConversationData {
@@ -108,6 +256,31 @@ export interface CreateCompanyVariables {
   ceoName?: string | null;
   type?: string | null;
   status?: Status | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountHolder?: string | null;
+  ceoResidentNumber?: string | null;
+  color?: string | null;
+}
+
+export interface CreateDailyDispatchData {
+  dailyDispatch_insert: DailyDispatch_Key;
+}
+
+export interface CreateDailyDispatchVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  date: string;
+  workerId: UUIDString;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  siteId?: UUIDString | null;
+  siteName?: string | null;
+  status?: string | null;
 }
 
 export interface CreateDailyReportData {
@@ -162,6 +335,20 @@ export interface CreateMenuConfigVariables {
   config: string;
 }
 
+export interface CreatePaymentData {
+  payment_insert: Payment_Key;
+}
+
+export interface CreatePaymentVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  date: string;
+  amount: number;
+  type?: string | null;
+  method?: string | null;
+  memo?: string | null;
+}
+
 export interface CreatePositionData {
   position_insert: Position_Key;
 }
@@ -173,6 +360,19 @@ export interface CreatePositionVariables {
   color?: string | null;
   icon?: string | null;
   isDefault?: boolean | null;
+}
+
+export interface CreateReceivableData {
+  receivable_insert: Receivable_Key;
+}
+
+export interface CreateReceivableVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  date: string;
+  amount: number;
+  companyName?: string | null;
+  status?: string | null;
 }
 
 export interface CreateSettingData {
@@ -198,6 +398,49 @@ export interface CreateSiteVariables {
   status?: Status | null;
 }
 
+export interface CreateSmartMemoCategoryData {
+  smartMemoCategory_insert: SmartMemoCategory_Key;
+}
+
+export interface CreateSmartMemoCategoryVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  userId: string;
+  name: string;
+  color?: string | null;
+  icon?: string | null;
+  order?: number | null;
+}
+
+export interface CreateSmartMemoData {
+  smartMemo_insert: SmartMemo_Key;
+}
+
+export interface CreateSmartMemoVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  userId: string;
+  scope: string;
+  type: string;
+  title: string;
+  content?: string | null;
+  checklistItems?: string | null;
+  color?: string | null;
+  order?: number | null;
+  isPinned?: boolean | null;
+  tags?: string | null;
+  categoryId?: UUIDString | null;
+  categoryLegacyId?: string | null;
+  priority?: string | null;
+  x?: number | null;
+  y?: number | null;
+  w?: number | null;
+  h?: number | null;
+  isCollapsed?: boolean | null;
+  prevW?: number | null;
+  prevH?: number | null;
+}
+
 export interface CreateSystemConfigData {
   systemConfig_insert: SystemConfig_Key;
 }
@@ -218,6 +461,21 @@ export interface CreateSystemLogVariables {
   details?: string | null;
 }
 
+export interface CreateTaxInvoiceData {
+  taxInvoice_insert: TaxInvoice_Key;
+}
+
+export interface CreateTaxInvoiceVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  date: string;
+  amount: number;
+  tax: number;
+  total: number;
+  companyName?: string | null;
+  status?: string | null;
+}
+
 export interface CreateTeamData {
   team_insert: Team_Key;
 }
@@ -230,6 +488,85 @@ export interface CreateTeamVariables {
   type?: string | null;
   status?: Status | null;
   totalManDay?: number | null;
+}
+
+export interface CreateUtilityRecordData {
+  utilityRecord_insert: UtilityRecord_Key;
+}
+
+export interface CreateUtilityRecordVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  accommodationId: UUIDString;
+  yearMonth: string;
+  accommodationName?: string | null;
+  costs?: string | null;
+  paymentDate?: string | null;
+  paymentStatus: string;
+  memo?: string | null;
+  isAnomaly?: boolean | null;
+}
+
+export interface CreateVehicleAssignmentData {
+  vehicleAssignment_insert: VehicleAssignment_Key;
+}
+
+export interface CreateVehicleAssignmentVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  vehicleId: UUIDString;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  startDate: string;
+  endDate?: string | null;
+  status?: string | null;
+  memo?: string | null;
+}
+
+export interface CreateVehicleBillingDocumentData {
+  vehicleBillingDocument_insert: VehicleBillingDocument_Key;
+}
+
+export interface CreateVehicleBillingDocumentVariables {
+  id?: UUIDString | null;
+  yearMonth: string;
+  vehicleId: UUIDString;
+  licensePlate: string;
+  amount: number;
+  status?: string | null;
+  memo?: string | null;
+}
+
+export interface CreateVehicleData {
+  vehicle_insert: Vehicle_Key;
+}
+
+export interface CreateVehicleExpenseData {
+  vehicleExpense_insert: VehicleExpense_Key;
+}
+
+export interface CreateVehicleExpenseVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  vehicleId: UUIDString;
+  date: string;
+  type: string;
+  amount: number;
+  odometer?: number | null;
+  memo?: string | null;
+}
+
+export interface CreateVehicleVariables {
+  id?: UUIDString | null;
+  legacyId?: string | null;
+  licensePlate: string;
+  model?: string | null;
+  type?: string | null;
+  owner?: string | null;
+  status?: string | null;
+  memo?: string | null;
 }
 
 export interface CreateWorkerData {
@@ -252,6 +589,11 @@ export interface CreateWorkerVariables {
   joinDate?: DateString | null;
 }
 
+export interface DailyDispatch_Key {
+  id: UUIDString;
+  __typename?: 'DailyDispatch_Key';
+}
+
 export interface DailyReportWorker_Key {
   dailyReportId: UUIDString;
   workerId: UUIDString;
@@ -261,6 +603,38 @@ export interface DailyReportWorker_Key {
 export interface DailyReport_Key {
   id: UUIDString;
   __typename?: 'DailyReport_Key';
+}
+
+export interface DeleteAccommodationAssignmentData {
+  accommodationAssignment_delete?: AccommodationAssignment_Key | null;
+}
+
+export interface DeleteAccommodationAssignmentVariables {
+  id: UUIDString;
+}
+
+export interface DeleteAccommodationBillingLineItemData {
+  accommodationBillingLineItem_delete?: AccommodationBillingLineItem_Key | null;
+}
+
+export interface DeleteAccommodationBillingLineItemVariables {
+  id: UUIDString;
+}
+
+export interface DeleteAccommodationData {
+  accommodation_delete?: Accommodation_Key | null;
+}
+
+export interface DeleteAccommodationVariables {
+  id: UUIDString;
+}
+
+export interface DeleteAdvancePaymentData {
+  advancePayment_delete?: AdvancePayment_Key | null;
+}
+
+export interface DeleteAdvancePaymentVariables {
+  id: string;
 }
 
 export interface DeleteAppUserData {
@@ -276,6 +650,14 @@ export interface DeleteCompanyData {
 }
 
 export interface DeleteCompanyVariables {
+  id: UUIDString;
+}
+
+export interface DeleteDailyDispatchData {
+  dailyDispatch_delete?: DailyDispatch_Key | null;
+}
+
+export interface DeleteDailyDispatchVariables {
   id: UUIDString;
 }
 
@@ -304,11 +686,27 @@ export interface DeleteMenuConfigVariables {
   id: string;
 }
 
+export interface DeletePaymentData {
+  payment_delete?: Payment_Key | null;
+}
+
+export interface DeletePaymentVariables {
+  id: UUIDString;
+}
+
 export interface DeletePositionData {
   position_delete?: Position_Key | null;
 }
 
 export interface DeletePositionVariables {
+  id: UUIDString;
+}
+
+export interface DeleteReceivableData {
+  receivable_delete?: Receivable_Key | null;
+}
+
+export interface DeleteReceivableVariables {
   id: UUIDString;
 }
 
@@ -320,11 +718,76 @@ export interface DeleteSiteVariables {
   id: UUIDString;
 }
 
+export interface DeleteSmartMemoCategoryData {
+  smartMemoCategory_delete?: SmartMemoCategory_Key | null;
+}
+
+export interface DeleteSmartMemoCategoryVariables {
+  id: UUIDString;
+}
+
+export interface DeleteSmartMemoData {
+  smartMemo_delete?: SmartMemo_Key | null;
+}
+
+export interface DeleteSmartMemoVariables {
+  id: UUIDString;
+}
+
+export interface DeleteTaxInvoiceData {
+  taxInvoice_delete?: TaxInvoice_Key | null;
+}
+
+export interface DeleteTaxInvoiceVariables {
+  id: UUIDString;
+}
+
 export interface DeleteTeamData {
   team_delete?: Team_Key | null;
 }
 
 export interface DeleteTeamVariables {
+  id: UUIDString;
+}
+
+export interface DeleteUtilityRecordData {
+  utilityRecord_delete?: UtilityRecord_Key | null;
+}
+
+export interface DeleteUtilityRecordVariables {
+  accommodationId: UUIDString;
+  yearMonth: string;
+}
+
+export interface DeleteVehicleAssignmentData {
+  vehicleAssignment_delete?: VehicleAssignment_Key | null;
+}
+
+export interface DeleteVehicleAssignmentVariables {
+  id: UUIDString;
+}
+
+export interface DeleteVehicleBillingDocumentData {
+  vehicleBillingDocument_delete?: VehicleBillingDocument_Key | null;
+}
+
+export interface DeleteVehicleBillingDocumentVariables {
+  id: UUIDString;
+}
+
+export interface DeleteVehicleData {
+  vehicle_delete?: Vehicle_Key | null;
+}
+
+export interface DeleteVehicleExpenseData {
+  vehicleExpense_delete?: VehicleExpense_Key | null;
+}
+
+export interface DeleteVehicleExpenseVariables {
+  id: UUIDString;
+}
+
+export interface DeleteVehicleVariables {
   id: UUIDString;
 }
 
@@ -448,6 +911,492 @@ export interface ListAgentsData {
     createdAt: TimestampString;
     updatedAt: TimestampString;
   } & Agent_Key)[];
+}
+
+export interface ListAllAccommodationAssignmentsData {
+  accommodationAssignments: ({
+    id: UUIDString;
+  } & AccommodationAssignment_Key)[];
+}
+
+export interface ListAllAccommodationAssignmentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAccommodationBillingDocumentsData {
+  accommodationBillingDocuments: ({
+    id: UUIDString;
+  } & AccommodationBillingDocument_Key)[];
+}
+
+export interface ListAllAccommodationBillingDocumentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAccommodationBillingLineItemsData {
+  accommodationBillingLineItems: ({
+    id: UUIDString;
+  } & AccommodationBillingLineItem_Key)[];
+}
+
+export interface ListAllAccommodationBillingLineItemsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAccommodationsData {
+  accommodations: ({
+    id: UUIDString;
+  } & Accommodation_Key)[];
+}
+
+export interface ListAllAccommodationsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAdvancePaymentsData {
+  advancePayments: ({
+    id: string;
+  } & AdvancePayment_Key)[];
+}
+
+export interface ListAllAdvancePaymentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAgentConversationsData {
+  agentConversations: ({
+    id: string;
+    mainAgentId?: string | null;
+    userId?: string | null;
+    messages?: string | null;
+    createdAt: TimestampString;
+    updatedAt: TimestampString;
+  } & AgentConversation_Key)[];
+}
+
+export interface ListAllAgentConversationsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAgentsData {
+  agents: ({
+    id: string;
+    name?: string | null;
+    type?: string | null;
+    role?: string | null;
+    capabilities?: string | null;
+    systemPrompt?: string | null;
+    status?: string | null;
+    createdAt: TimestampString;
+    updatedAt: TimestampString;
+  } & Agent_Key)[];
+}
+
+export interface ListAllAgentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAppUsersData {
+  appUsers: ({
+    id: string;
+    uid?: string | null;
+    email?: string | null;
+    displayName?: string | null;
+    photoUrl?: string | null;
+    linkedWorkerIds?: string | null;
+    role?: string | null;
+    lastLogin?: TimestampString | null;
+    createdAt: TimestampString;
+    updatedAt: TimestampString;
+  } & AppUser_Key)[];
+}
+
+export interface ListAllAppUsersVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllAuditLogsData {
+  auditLogs: ({
+    id: string;
+    action?: string | null;
+    category?: string | null;
+    actorId?: string | null;
+    actorEmail?: string | null;
+    targetId?: string | null;
+    details?: string | null;
+    timestamp?: TimestampString | null;
+    createdAt: TimestampString;
+  } & AuditLog_Key)[];
+}
+
+export interface ListAllAuditLogsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllCompaniesData {
+  companies: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    code: string;
+    businessNumber?: string | null;
+    ceoName?: string | null;
+    type?: string | null;
+    status: Status;
+    createdAt: TimestampString;
+  } & Company_Key)[];
+}
+
+export interface ListAllCompaniesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllDailyDispatchesData {
+  dailyDispatches: ({
+    id: UUIDString;
+  } & DailyDispatch_Key)[];
+}
+
+export interface ListAllDailyDispatchesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllDailyReportWorkersData {
+  dailyReportWorkers: ({
+    id: UUIDString;
+    dailyReport: {
+      id: UUIDString;
+      legacyId?: string | null;
+      date: DateString;
+    } & DailyReport_Key;
+      worker: {
+        id: UUIDString;
+        legacyId?: string | null;
+        name: string;
+      } & Worker_Key;
+        gongsu: number;
+        unitPrice: number;
+        amount: number;
+        workDescription?: string | null;
+        legacyWorkerId?: string | null;
+        legacyTeamId?: string | null;
+        workerName?: string | null;
+        role?: string | null;
+        status?: string | null;
+        manDay?: number | null;
+        payType?: string | null;
+        salaryModel?: string | null;
+        workContent?: string | null;
+        createdAt: TimestampString;
+  })[];
+}
+
+export interface ListAllDailyReportWorkersVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllDailyReportsData {
+  dailyReports: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    date: DateString;
+    writerUid?: string | null;
+    companyName?: string | null;
+    responsibleTeamName?: string | null;
+    responsibleTeamLegacyId?: string | null;
+    team: {
+      id: UUIDString;
+      legacyId?: string | null;
+      name: string;
+    } & Team_Key;
+      site?: {
+        id: UUIDString;
+        legacyId?: string | null;
+        name: string;
+      } & Site_Key;
+        siteName?: string | null;
+        status?: string | null;
+        totalManDay?: number | null;
+        totalAmount?: number | null;
+        weather?: string | null;
+        workContent?: string | null;
+        createdAt: TimestampString;
+  } & DailyReport_Key)[];
+}
+
+export interface ListAllDailyReportsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllMenuConfigsData {
+  menuConfigs: ({
+    id: string;
+    config: string;
+    updatedAt: TimestampString;
+  } & MenuConfig_Key)[];
+}
+
+export interface ListAllMenuConfigsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllPaymentsData {
+  payments: ({
+    id: UUIDString;
+  } & Payment_Key)[];
+}
+
+export interface ListAllPaymentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllPositionsData {
+  positions: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    rank?: number | null;
+    color?: string | null;
+    icon?: string | null;
+    isDefault?: boolean | null;
+    createdAt: TimestampString;
+    updatedAt: TimestampString;
+  } & Position_Key)[];
+}
+
+export interface ListAllPositionsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllReceivablesData {
+  receivables: ({
+    id: UUIDString;
+  } & Receivable_Key)[];
+}
+
+export interface ListAllReceivablesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSettingsData {
+  settings: ({
+    id: string;
+    data: string;
+    updatedAt: TimestampString;
+  } & Setting_Key)[];
+}
+
+export interface ListAllSettingsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSitesData {
+  sites: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    code?: string | null;
+    address?: string | null;
+    startDate?: DateString | null;
+    endDate?: DateString | null;
+    status: Status;
+    createdAt: TimestampString;
+  } & Site_Key)[];
+}
+
+export interface ListAllSitesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSmartMemoCategoriesData {
+  smartMemoCategories: ({
+    id: UUIDString;
+  } & SmartMemoCategory_Key)[];
+}
+
+export interface ListAllSmartMemoCategoriesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSmartMemosData {
+  smartMemos: ({
+    id: UUIDString;
+  } & SmartMemo_Key)[];
+}
+
+export interface ListAllSmartMemosVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSystemConfigsData {
+  systemConfigs: ({
+    id: string;
+    data: string;
+    updatedAt: TimestampString;
+  } & SystemConfig_Key)[];
+}
+
+export interface ListAllSystemConfigsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllSystemLogsData {
+  systemLogs: ({
+    id: UUIDString;
+    category: string;
+    action: string;
+    userEmail?: string | null;
+    details?: string | null;
+    createdAt: TimestampString;
+  } & SystemLog_Key)[];
+}
+
+export interface ListAllSystemLogsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllTaxInvoicesData {
+  taxInvoices: ({
+    id: UUIDString;
+  } & TaxInvoice_Key)[];
+}
+
+export interface ListAllTaxInvoicesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllTeamsData {
+  teams: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    company?: {
+      id: UUIDString;
+      name: string;
+    } & Company_Key;
+      leader?: {
+        id: UUIDString;
+        name: string;
+      } & Worker_Key;
+        type?: string | null;
+        status: Status;
+        totalManDay?: number | null;
+        createdAt: TimestampString;
+  } & Team_Key)[];
+}
+
+export interface ListAllTeamsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllUtilityRecordsData {
+  utilityRecords: ({
+    id: UUIDString;
+  })[];
+}
+
+export interface ListAllUtilityRecordsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllVehicleAssignmentsData {
+  vehicleAssignments: ({
+    id: UUIDString;
+  } & VehicleAssignment_Key)[];
+}
+
+export interface ListAllVehicleAssignmentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllVehicleBillingDocumentsData {
+  vehicleBillingDocuments: ({
+    id: UUIDString;
+  } & VehicleBillingDocument_Key)[];
+}
+
+export interface ListAllVehicleBillingDocumentsVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllVehicleExpensesData {
+  vehicleExpenses: ({
+    id: UUIDString;
+  } & VehicleExpense_Key)[];
+}
+
+export interface ListAllVehicleExpensesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllVehiclesData {
+  vehicles: ({
+    id: UUIDString;
+  } & Vehicle_Key)[];
+}
+
+export interface ListAllVehiclesVariables {
+  limit?: number | null;
+  offset?: number | null;
+}
+
+export interface ListAllWorkersData {
+  workers: ({
+    id: UUIDString;
+    legacyId?: string | null;
+    name: string;
+    role?: string | null;
+    team?: {
+      id: UUIDString;
+      name: string;
+      company?: {
+        id: UUIDString;
+        name: string;
+      } & Company_Key;
+    } & Team_Key;
+      payType?: string | null;
+      unitPrice?: number | null;
+      phone?: string | null;
+      residentNumber?: string | null;
+      address?: string | null;
+      isActive?: boolean | null;
+      joinDate?: DateString | null;
+      createdAt: TimestampString;
+  } & Worker_Key)[];
+}
+
+export interface ListAllWorkersVariables {
+  limit?: number | null;
+  offset?: number | null;
 }
 
 export interface ListAppUsersData {
@@ -665,9 +1614,19 @@ export interface MenuConfig_Key {
   __typename?: 'MenuConfig_Key';
 }
 
+export interface Payment_Key {
+  id: UUIDString;
+  __typename?: 'Payment_Key';
+}
+
 export interface Position_Key {
   id: UUIDString;
   __typename?: 'Position_Key';
+}
+
+export interface Receivable_Key {
+  id: UUIDString;
+  __typename?: 'Receivable_Key';
 }
 
 export interface Setting_Key {
@@ -680,6 +1639,16 @@ export interface Site_Key {
   __typename?: 'Site_Key';
 }
 
+export interface SmartMemoCategory_Key {
+  id: UUIDString;
+  __typename?: 'SmartMemoCategory_Key';
+}
+
+export interface SmartMemo_Key {
+  id: UUIDString;
+  __typename?: 'SmartMemo_Key';
+}
+
 export interface SystemConfig_Key {
   id: string;
   __typename?: 'SystemConfig_Key';
@@ -690,9 +1659,141 @@ export interface SystemLog_Key {
   __typename?: 'SystemLog_Key';
 }
 
+export interface TaxInvoice_Key {
+  id: UUIDString;
+  __typename?: 'TaxInvoice_Key';
+}
+
 export interface Team_Key {
   id: UUIDString;
   __typename?: 'Team_Key';
+}
+
+export interface UpdateAccommodationAssignmentData {
+  accommodationAssignment_update?: AccommodationAssignment_Key | null;
+}
+
+export interface UpdateAccommodationAssignmentVariables {
+  id: UUIDString;
+  accommodationId?: UUIDString | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  status?: string | null;
+  source?: string | null;
+  memo?: string | null;
+}
+
+export interface UpdateAccommodationBillingDocumentData {
+  accommodationBillingDocument_update?: AccommodationBillingDocument_Key | null;
+}
+
+export interface UpdateAccommodationBillingDocumentVariables {
+  id: UUIDString;
+  yearMonth?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  issuedToType?: string | null;
+  issuedToWorkerId?: UUIDString | null;
+  issuedToWorkerName?: string | null;
+  status?: string | null;
+  memo?: string | null;
+  confirmedAt?: TimestampString | null;
+  postedAdvancePaymentId?: string | null;
+}
+
+export interface UpdateAccommodationData {
+  accommodation_update?: Accommodation_Key | null;
+}
+
+export interface UpdateAccommodationVariables {
+  id: UUIDString;
+  name?: string | null;
+  address?: string | null;
+  type?: string | null;
+  status?: string | null;
+  ownership?: string | null;
+  electricityMode?: string | null;
+  gasMode?: string | null;
+  waterMode?: string | null;
+  internetMode?: string | null;
+  maintenanceMode?: string | null;
+  fixedElectricity?: number | null;
+  fixedGas?: number | null;
+  fixedWater?: number | null;
+  fixedInternet?: number | null;
+  fixedMaintenance?: number | null;
+  contractStartDate?: string | null;
+  contractEndDate?: string | null;
+  deposit?: number | null;
+  monthlyRent?: number | null;
+  paymentDay?: number | null;
+  landlordName?: string | null;
+  landlordContact?: string | null;
+  isReported?: boolean | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountHolder?: string | null;
+  rentPayDate?: number | null;
+  isAutoTransfer?: boolean | null;
+  transferDay?: number | null;
+  transferAccountInfo?: string | null;
+  billingTargetType?: string | null;
+  billingTargetTeamId?: string | null;
+  billingTargetTeamName?: string | null;
+  billingTargetWorkerId?: string | null;
+  billingTargetWorkerName?: string | null;
+  currentOccupantName?: string | null;
+  currentOccupantPhone?: string | null;
+  memo?: string | null;
+}
+
+export interface UpdateAdvancePaymentData {
+  advancePayment_update?: AdvancePayment_Key | null;
+}
+
+export interface UpdateAdvancePaymentVariables {
+  id: string;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  yearMonth?: string | null;
+  items?: string | null;
+  prevMonthCarryover?: number | null;
+  accommodation?: number | null;
+  privateRoom?: number | null;
+  gloves?: number | null;
+  deposit?: number | null;
+  fines?: number | null;
+  electricity?: number | null;
+  gas?: number | null;
+  internet?: number | null;
+  water?: number | null;
+  totalDeduction?: number | null;
+  memo?: string | null;
+  updatedAt?: TimestampString | null;
+}
+
+export interface UpdateAgentConversationData {
+  agentConversation_update?: AgentConversation_Key | null;
+}
+
+export interface UpdateAgentConversationVariables {
+  id: string;
+}
+
+export interface UpdateAgentData {
+  agent_update?: Agent_Key | null;
+}
+
+export interface UpdateAgentVariables {
+  id: string;
+  name?: string | null;
+  status?: string | null;
 }
 
 export interface UpdateAppUserData {
@@ -722,6 +1823,30 @@ export interface UpdateCompanyVariables {
   ceoName?: string | null;
   type?: string | null;
   status?: Status | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  bankName?: string | null;
+  accountNumber?: string | null;
+  accountHolder?: string | null;
+  ceoResidentNumber?: string | null;
+  color?: string | null;
+}
+
+export interface UpdateDailyDispatchData {
+  dailyDispatch_update?: DailyDispatch_Key | null;
+}
+
+export interface UpdateDailyDispatchVariables {
+  id: UUIDString;
+  date?: string | null;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  siteId?: UUIDString | null;
+  siteName?: string | null;
+  status?: string | null;
 }
 
 export interface UpdateDailyReportData {
@@ -776,6 +1901,31 @@ export interface UpdateMenuConfigVariables {
   config: string;
 }
 
+export interface UpdatePaymentData {
+  payment_update?: Payment_Key | null;
+}
+
+export interface UpdatePaymentVariables {
+  id: UUIDString;
+  date?: string | null;
+  amount?: number | null;
+  type?: string | null;
+  method?: string | null;
+  memo?: string | null;
+}
+
+export interface UpdateReceivableData {
+  receivable_update?: Receivable_Key | null;
+}
+
+export interface UpdateReceivableVariables {
+  id: UUIDString;
+  date?: string | null;
+  amount?: number | null;
+  companyName?: string | null;
+  status?: string | null;
+}
+
 export interface UpdateSettingData {
   setting_update?: Setting_Key | null;
 }
@@ -799,6 +1949,46 @@ export interface UpdateSiteVariables {
   status?: Status | null;
 }
 
+export interface UpdateSmartMemoCategoryData {
+  smartMemoCategory_update?: SmartMemoCategory_Key | null;
+}
+
+export interface UpdateSmartMemoCategoryVariables {
+  id: UUIDString;
+  userId?: string | null;
+  name?: string | null;
+  color?: string | null;
+  icon?: string | null;
+  order?: number | null;
+}
+
+export interface UpdateSmartMemoData {
+  smartMemo_update?: SmartMemo_Key | null;
+}
+
+export interface UpdateSmartMemoVariables {
+  id: UUIDString;
+  scope?: string | null;
+  type?: string | null;
+  title?: string | null;
+  content?: string | null;
+  checklistItems?: string | null;
+  color?: string | null;
+  order?: number | null;
+  isPinned?: boolean | null;
+  tags?: string | null;
+  categoryId?: UUIDString | null;
+  categoryLegacyId?: string | null;
+  priority?: string | null;
+  x?: number | null;
+  y?: number | null;
+  w?: number | null;
+  h?: number | null;
+  isCollapsed?: boolean | null;
+  prevW?: number | null;
+  prevH?: number | null;
+}
+
 export interface UpdateSystemConfigData {
   systemConfig_update?: SystemConfig_Key | null;
 }
@@ -806,6 +1996,20 @@ export interface UpdateSystemConfigData {
 export interface UpdateSystemConfigVariables {
   id: string;
   data: string;
+}
+
+export interface UpdateTaxInvoiceData {
+  taxInvoice_update?: TaxInvoice_Key | null;
+}
+
+export interface UpdateTaxInvoiceVariables {
+  id: UUIDString;
+  date?: string | null;
+  amount?: number | null;
+  tax?: number | null;
+  total?: number | null;
+  companyName?: string | null;
+  status?: string | null;
 }
 
 export interface UpdateTeamData {
@@ -820,6 +2024,80 @@ export interface UpdateTeamVariables {
   type?: string | null;
   status?: Status | null;
   totalManDay?: number | null;
+}
+
+export interface UpdateUtilityRecordData {
+  utilityRecord_update?: UtilityRecord_Key | null;
+}
+
+export interface UpdateUtilityRecordVariables {
+  accommodationId: UUIDString;
+  yearMonth: string;
+  accommodationName?: string | null;
+  costs?: string | null;
+  paymentDate?: string | null;
+  paymentStatus?: string | null;
+  memo?: string | null;
+  isAnomaly?: boolean | null;
+}
+
+export interface UpdateVehicleAssignmentData {
+  vehicleAssignment_update?: VehicleAssignment_Key | null;
+}
+
+export interface UpdateVehicleAssignmentVariables {
+  id: UUIDString;
+  vehicleId?: UUIDString | null;
+  workerId?: UUIDString | null;
+  workerName?: string | null;
+  teamId?: UUIDString | null;
+  teamName?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  status?: string | null;
+  memo?: string | null;
+}
+
+export interface UpdateVehicleBillingDocumentData {
+  vehicleBillingDocument_update?: VehicleBillingDocument_Key | null;
+}
+
+export interface UpdateVehicleBillingDocumentVariables {
+  id: UUIDString;
+  yearMonth?: string | null;
+  vehicleId?: UUIDString | null;
+  licensePlate?: string | null;
+  amount?: number | null;
+  status?: string | null;
+  memo?: string | null;
+}
+
+export interface UpdateVehicleData {
+  vehicle_update?: Vehicle_Key | null;
+}
+
+export interface UpdateVehicleExpenseData {
+  vehicleExpense_update?: VehicleExpense_Key | null;
+}
+
+export interface UpdateVehicleExpenseVariables {
+  id: UUIDString;
+  vehicleId?: UUIDString | null;
+  date?: string | null;
+  type?: string | null;
+  amount?: number | null;
+  odometer?: number | null;
+  memo?: string | null;
+}
+
+export interface UpdateVehicleVariables {
+  id: UUIDString;
+  licensePlate?: string | null;
+  model?: string | null;
+  type?: string | null;
+  owner?: string | null;
+  status?: string | null;
+  memo?: string | null;
 }
 
 export interface UpdateWorkerData {
@@ -837,6 +2115,32 @@ export interface UpdateWorkerVariables {
   residentNumber?: string | null;
   address?: string | null;
   isActive?: boolean | null;
+}
+
+export interface UtilityRecord_Key {
+  accommodationId: UUIDString;
+  yearMonth: string;
+  __typename?: 'UtilityRecord_Key';
+}
+
+export interface VehicleAssignment_Key {
+  id: UUIDString;
+  __typename?: 'VehicleAssignment_Key';
+}
+
+export interface VehicleBillingDocument_Key {
+  id: UUIDString;
+  __typename?: 'VehicleBillingDocument_Key';
+}
+
+export interface VehicleExpense_Key {
+  id: UUIDString;
+  __typename?: 'VehicleExpense_Key';
+}
+
+export interface Vehicle_Key {
+  id: UUIDString;
+  __typename?: 'Vehicle_Key';
 }
 
 export interface Worker_Key {
@@ -1252,6 +2556,582 @@ export const createSystemLogRef: CreateSystemLogRef;
 export function createSystemLog(vars: CreateSystemLogVariables): MutationPromise<CreateSystemLogData, CreateSystemLogVariables>;
 export function createSystemLog(dc: DataConnect, vars: CreateSystemLogVariables): MutationPromise<CreateSystemLogData, CreateSystemLogVariables>;
 
+interface CreateAccommodationRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateAccommodationVariables): MutationRef<CreateAccommodationData, CreateAccommodationVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateAccommodationVariables): MutationRef<CreateAccommodationData, CreateAccommodationVariables>;
+  operationName: string;
+}
+export const createAccommodationRef: CreateAccommodationRef;
+
+export function createAccommodation(vars: CreateAccommodationVariables): MutationPromise<CreateAccommodationData, CreateAccommodationVariables>;
+export function createAccommodation(dc: DataConnect, vars: CreateAccommodationVariables): MutationPromise<CreateAccommodationData, CreateAccommodationVariables>;
+
+interface UpdateAccommodationRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAccommodationVariables): MutationRef<UpdateAccommodationData, UpdateAccommodationVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAccommodationVariables): MutationRef<UpdateAccommodationData, UpdateAccommodationVariables>;
+  operationName: string;
+}
+export const updateAccommodationRef: UpdateAccommodationRef;
+
+export function updateAccommodation(vars: UpdateAccommodationVariables): MutationPromise<UpdateAccommodationData, UpdateAccommodationVariables>;
+export function updateAccommodation(dc: DataConnect, vars: UpdateAccommodationVariables): MutationPromise<UpdateAccommodationData, UpdateAccommodationVariables>;
+
+interface DeleteAccommodationRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteAccommodationVariables): MutationRef<DeleteAccommodationData, DeleteAccommodationVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteAccommodationVariables): MutationRef<DeleteAccommodationData, DeleteAccommodationVariables>;
+  operationName: string;
+}
+export const deleteAccommodationRef: DeleteAccommodationRef;
+
+export function deleteAccommodation(vars: DeleteAccommodationVariables): MutationPromise<DeleteAccommodationData, DeleteAccommodationVariables>;
+export function deleteAccommodation(dc: DataConnect, vars: DeleteAccommodationVariables): MutationPromise<DeleteAccommodationData, DeleteAccommodationVariables>;
+
+interface CreateAccommodationAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateAccommodationAssignmentVariables): MutationRef<CreateAccommodationAssignmentData, CreateAccommodationAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateAccommodationAssignmentVariables): MutationRef<CreateAccommodationAssignmentData, CreateAccommodationAssignmentVariables>;
+  operationName: string;
+}
+export const createAccommodationAssignmentRef: CreateAccommodationAssignmentRef;
+
+export function createAccommodationAssignment(vars: CreateAccommodationAssignmentVariables): MutationPromise<CreateAccommodationAssignmentData, CreateAccommodationAssignmentVariables>;
+export function createAccommodationAssignment(dc: DataConnect, vars: CreateAccommodationAssignmentVariables): MutationPromise<CreateAccommodationAssignmentData, CreateAccommodationAssignmentVariables>;
+
+interface UpdateAccommodationAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAccommodationAssignmentVariables): MutationRef<UpdateAccommodationAssignmentData, UpdateAccommodationAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAccommodationAssignmentVariables): MutationRef<UpdateAccommodationAssignmentData, UpdateAccommodationAssignmentVariables>;
+  operationName: string;
+}
+export const updateAccommodationAssignmentRef: UpdateAccommodationAssignmentRef;
+
+export function updateAccommodationAssignment(vars: UpdateAccommodationAssignmentVariables): MutationPromise<UpdateAccommodationAssignmentData, UpdateAccommodationAssignmentVariables>;
+export function updateAccommodationAssignment(dc: DataConnect, vars: UpdateAccommodationAssignmentVariables): MutationPromise<UpdateAccommodationAssignmentData, UpdateAccommodationAssignmentVariables>;
+
+interface DeleteAccommodationAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteAccommodationAssignmentVariables): MutationRef<DeleteAccommodationAssignmentData, DeleteAccommodationAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteAccommodationAssignmentVariables): MutationRef<DeleteAccommodationAssignmentData, DeleteAccommodationAssignmentVariables>;
+  operationName: string;
+}
+export const deleteAccommodationAssignmentRef: DeleteAccommodationAssignmentRef;
+
+export function deleteAccommodationAssignment(vars: DeleteAccommodationAssignmentVariables): MutationPromise<DeleteAccommodationAssignmentData, DeleteAccommodationAssignmentVariables>;
+export function deleteAccommodationAssignment(dc: DataConnect, vars: DeleteAccommodationAssignmentVariables): MutationPromise<DeleteAccommodationAssignmentData, DeleteAccommodationAssignmentVariables>;
+
+interface CreateUtilityRecordRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateUtilityRecordVariables): MutationRef<CreateUtilityRecordData, CreateUtilityRecordVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateUtilityRecordVariables): MutationRef<CreateUtilityRecordData, CreateUtilityRecordVariables>;
+  operationName: string;
+}
+export const createUtilityRecordRef: CreateUtilityRecordRef;
+
+export function createUtilityRecord(vars: CreateUtilityRecordVariables): MutationPromise<CreateUtilityRecordData, CreateUtilityRecordVariables>;
+export function createUtilityRecord(dc: DataConnect, vars: CreateUtilityRecordVariables): MutationPromise<CreateUtilityRecordData, CreateUtilityRecordVariables>;
+
+interface UpdateUtilityRecordRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateUtilityRecordVariables): MutationRef<UpdateUtilityRecordData, UpdateUtilityRecordVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateUtilityRecordVariables): MutationRef<UpdateUtilityRecordData, UpdateUtilityRecordVariables>;
+  operationName: string;
+}
+export const updateUtilityRecordRef: UpdateUtilityRecordRef;
+
+export function updateUtilityRecord(vars: UpdateUtilityRecordVariables): MutationPromise<UpdateUtilityRecordData, UpdateUtilityRecordVariables>;
+export function updateUtilityRecord(dc: DataConnect, vars: UpdateUtilityRecordVariables): MutationPromise<UpdateUtilityRecordData, UpdateUtilityRecordVariables>;
+
+interface DeleteUtilityRecordRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteUtilityRecordVariables): MutationRef<DeleteUtilityRecordData, DeleteUtilityRecordVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteUtilityRecordVariables): MutationRef<DeleteUtilityRecordData, DeleteUtilityRecordVariables>;
+  operationName: string;
+}
+export const deleteUtilityRecordRef: DeleteUtilityRecordRef;
+
+export function deleteUtilityRecord(vars: DeleteUtilityRecordVariables): MutationPromise<DeleteUtilityRecordData, DeleteUtilityRecordVariables>;
+export function deleteUtilityRecord(dc: DataConnect, vars: DeleteUtilityRecordVariables): MutationPromise<DeleteUtilityRecordData, DeleteUtilityRecordVariables>;
+
+interface CreateAccommodationBillingDocumentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateAccommodationBillingDocumentVariables): MutationRef<CreateAccommodationBillingDocumentData, CreateAccommodationBillingDocumentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateAccommodationBillingDocumentVariables): MutationRef<CreateAccommodationBillingDocumentData, CreateAccommodationBillingDocumentVariables>;
+  operationName: string;
+}
+export const createAccommodationBillingDocumentRef: CreateAccommodationBillingDocumentRef;
+
+export function createAccommodationBillingDocument(vars: CreateAccommodationBillingDocumentVariables): MutationPromise<CreateAccommodationBillingDocumentData, CreateAccommodationBillingDocumentVariables>;
+export function createAccommodationBillingDocument(dc: DataConnect, vars: CreateAccommodationBillingDocumentVariables): MutationPromise<CreateAccommodationBillingDocumentData, CreateAccommodationBillingDocumentVariables>;
+
+interface UpdateAccommodationBillingDocumentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAccommodationBillingDocumentVariables): MutationRef<UpdateAccommodationBillingDocumentData, UpdateAccommodationBillingDocumentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAccommodationBillingDocumentVariables): MutationRef<UpdateAccommodationBillingDocumentData, UpdateAccommodationBillingDocumentVariables>;
+  operationName: string;
+}
+export const updateAccommodationBillingDocumentRef: UpdateAccommodationBillingDocumentRef;
+
+export function updateAccommodationBillingDocument(vars: UpdateAccommodationBillingDocumentVariables): MutationPromise<UpdateAccommodationBillingDocumentData, UpdateAccommodationBillingDocumentVariables>;
+export function updateAccommodationBillingDocument(dc: DataConnect, vars: UpdateAccommodationBillingDocumentVariables): MutationPromise<UpdateAccommodationBillingDocumentData, UpdateAccommodationBillingDocumentVariables>;
+
+interface CreateAccommodationBillingLineItemRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateAccommodationBillingLineItemVariables): MutationRef<CreateAccommodationBillingLineItemData, CreateAccommodationBillingLineItemVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateAccommodationBillingLineItemVariables): MutationRef<CreateAccommodationBillingLineItemData, CreateAccommodationBillingLineItemVariables>;
+  operationName: string;
+}
+export const createAccommodationBillingLineItemRef: CreateAccommodationBillingLineItemRef;
+
+export function createAccommodationBillingLineItem(vars: CreateAccommodationBillingLineItemVariables): MutationPromise<CreateAccommodationBillingLineItemData, CreateAccommodationBillingLineItemVariables>;
+export function createAccommodationBillingLineItem(dc: DataConnect, vars: CreateAccommodationBillingLineItemVariables): MutationPromise<CreateAccommodationBillingLineItemData, CreateAccommodationBillingLineItemVariables>;
+
+interface DeleteAccommodationBillingLineItemRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteAccommodationBillingLineItemVariables): MutationRef<DeleteAccommodationBillingLineItemData, DeleteAccommodationBillingLineItemVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteAccommodationBillingLineItemVariables): MutationRef<DeleteAccommodationBillingLineItemData, DeleteAccommodationBillingLineItemVariables>;
+  operationName: string;
+}
+export const deleteAccommodationBillingLineItemRef: DeleteAccommodationBillingLineItemRef;
+
+export function deleteAccommodationBillingLineItem(vars: DeleteAccommodationBillingLineItemVariables): MutationPromise<DeleteAccommodationBillingLineItemData, DeleteAccommodationBillingLineItemVariables>;
+export function deleteAccommodationBillingLineItem(dc: DataConnect, vars: DeleteAccommodationBillingLineItemVariables): MutationPromise<DeleteAccommodationBillingLineItemData, DeleteAccommodationBillingLineItemVariables>;
+
+interface CreateAdvancePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateAdvancePaymentVariables): MutationRef<CreateAdvancePaymentData, CreateAdvancePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateAdvancePaymentVariables): MutationRef<CreateAdvancePaymentData, CreateAdvancePaymentVariables>;
+  operationName: string;
+}
+export const createAdvancePaymentRef: CreateAdvancePaymentRef;
+
+export function createAdvancePayment(vars: CreateAdvancePaymentVariables): MutationPromise<CreateAdvancePaymentData, CreateAdvancePaymentVariables>;
+export function createAdvancePayment(dc: DataConnect, vars: CreateAdvancePaymentVariables): MutationPromise<CreateAdvancePaymentData, CreateAdvancePaymentVariables>;
+
+interface UpdateAdvancePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAdvancePaymentVariables): MutationRef<UpdateAdvancePaymentData, UpdateAdvancePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAdvancePaymentVariables): MutationRef<UpdateAdvancePaymentData, UpdateAdvancePaymentVariables>;
+  operationName: string;
+}
+export const updateAdvancePaymentRef: UpdateAdvancePaymentRef;
+
+export function updateAdvancePayment(vars: UpdateAdvancePaymentVariables): MutationPromise<UpdateAdvancePaymentData, UpdateAdvancePaymentVariables>;
+export function updateAdvancePayment(dc: DataConnect, vars: UpdateAdvancePaymentVariables): MutationPromise<UpdateAdvancePaymentData, UpdateAdvancePaymentVariables>;
+
+interface DeleteAdvancePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteAdvancePaymentVariables): MutationRef<DeleteAdvancePaymentData, DeleteAdvancePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteAdvancePaymentVariables): MutationRef<DeleteAdvancePaymentData, DeleteAdvancePaymentVariables>;
+  operationName: string;
+}
+export const deleteAdvancePaymentRef: DeleteAdvancePaymentRef;
+
+export function deleteAdvancePayment(vars: DeleteAdvancePaymentVariables): MutationPromise<DeleteAdvancePaymentData, DeleteAdvancePaymentVariables>;
+export function deleteAdvancePayment(dc: DataConnect, vars: DeleteAdvancePaymentVariables): MutationPromise<DeleteAdvancePaymentData, DeleteAdvancePaymentVariables>;
+
+interface CreateSmartMemoRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateSmartMemoVariables): MutationRef<CreateSmartMemoData, CreateSmartMemoVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateSmartMemoVariables): MutationRef<CreateSmartMemoData, CreateSmartMemoVariables>;
+  operationName: string;
+}
+export const createSmartMemoRef: CreateSmartMemoRef;
+
+export function createSmartMemo(vars: CreateSmartMemoVariables): MutationPromise<CreateSmartMemoData, CreateSmartMemoVariables>;
+export function createSmartMemo(dc: DataConnect, vars: CreateSmartMemoVariables): MutationPromise<CreateSmartMemoData, CreateSmartMemoVariables>;
+
+interface UpdateSmartMemoRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateSmartMemoVariables): MutationRef<UpdateSmartMemoData, UpdateSmartMemoVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateSmartMemoVariables): MutationRef<UpdateSmartMemoData, UpdateSmartMemoVariables>;
+  operationName: string;
+}
+export const updateSmartMemoRef: UpdateSmartMemoRef;
+
+export function updateSmartMemo(vars: UpdateSmartMemoVariables): MutationPromise<UpdateSmartMemoData, UpdateSmartMemoVariables>;
+export function updateSmartMemo(dc: DataConnect, vars: UpdateSmartMemoVariables): MutationPromise<UpdateSmartMemoData, UpdateSmartMemoVariables>;
+
+interface DeleteSmartMemoRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteSmartMemoVariables): MutationRef<DeleteSmartMemoData, DeleteSmartMemoVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteSmartMemoVariables): MutationRef<DeleteSmartMemoData, DeleteSmartMemoVariables>;
+  operationName: string;
+}
+export const deleteSmartMemoRef: DeleteSmartMemoRef;
+
+export function deleteSmartMemo(vars: DeleteSmartMemoVariables): MutationPromise<DeleteSmartMemoData, DeleteSmartMemoVariables>;
+export function deleteSmartMemo(dc: DataConnect, vars: DeleteSmartMemoVariables): MutationPromise<DeleteSmartMemoData, DeleteSmartMemoVariables>;
+
+interface CreateSmartMemoCategoryRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateSmartMemoCategoryVariables): MutationRef<CreateSmartMemoCategoryData, CreateSmartMemoCategoryVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateSmartMemoCategoryVariables): MutationRef<CreateSmartMemoCategoryData, CreateSmartMemoCategoryVariables>;
+  operationName: string;
+}
+export const createSmartMemoCategoryRef: CreateSmartMemoCategoryRef;
+
+export function createSmartMemoCategory(vars: CreateSmartMemoCategoryVariables): MutationPromise<CreateSmartMemoCategoryData, CreateSmartMemoCategoryVariables>;
+export function createSmartMemoCategory(dc: DataConnect, vars: CreateSmartMemoCategoryVariables): MutationPromise<CreateSmartMemoCategoryData, CreateSmartMemoCategoryVariables>;
+
+interface UpdateSmartMemoCategoryRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateSmartMemoCategoryVariables): MutationRef<UpdateSmartMemoCategoryData, UpdateSmartMemoCategoryVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateSmartMemoCategoryVariables): MutationRef<UpdateSmartMemoCategoryData, UpdateSmartMemoCategoryVariables>;
+  operationName: string;
+}
+export const updateSmartMemoCategoryRef: UpdateSmartMemoCategoryRef;
+
+export function updateSmartMemoCategory(vars: UpdateSmartMemoCategoryVariables): MutationPromise<UpdateSmartMemoCategoryData, UpdateSmartMemoCategoryVariables>;
+export function updateSmartMemoCategory(dc: DataConnect, vars: UpdateSmartMemoCategoryVariables): MutationPromise<UpdateSmartMemoCategoryData, UpdateSmartMemoCategoryVariables>;
+
+interface DeleteSmartMemoCategoryRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteSmartMemoCategoryVariables): MutationRef<DeleteSmartMemoCategoryData, DeleteSmartMemoCategoryVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteSmartMemoCategoryVariables): MutationRef<DeleteSmartMemoCategoryData, DeleteSmartMemoCategoryVariables>;
+  operationName: string;
+}
+export const deleteSmartMemoCategoryRef: DeleteSmartMemoCategoryRef;
+
+export function deleteSmartMemoCategory(vars: DeleteSmartMemoCategoryVariables): MutationPromise<DeleteSmartMemoCategoryData, DeleteSmartMemoCategoryVariables>;
+export function deleteSmartMemoCategory(dc: DataConnect, vars: DeleteSmartMemoCategoryVariables): MutationPromise<DeleteSmartMemoCategoryData, DeleteSmartMemoCategoryVariables>;
+
+interface CreateVehicleRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateVehicleVariables): MutationRef<CreateVehicleData, CreateVehicleVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateVehicleVariables): MutationRef<CreateVehicleData, CreateVehicleVariables>;
+  operationName: string;
+}
+export const createVehicleRef: CreateVehicleRef;
+
+export function createVehicle(vars: CreateVehicleVariables): MutationPromise<CreateVehicleData, CreateVehicleVariables>;
+export function createVehicle(dc: DataConnect, vars: CreateVehicleVariables): MutationPromise<CreateVehicleData, CreateVehicleVariables>;
+
+interface UpdateVehicleRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateVehicleVariables): MutationRef<UpdateVehicleData, UpdateVehicleVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateVehicleVariables): MutationRef<UpdateVehicleData, UpdateVehicleVariables>;
+  operationName: string;
+}
+export const updateVehicleRef: UpdateVehicleRef;
+
+export function updateVehicle(vars: UpdateVehicleVariables): MutationPromise<UpdateVehicleData, UpdateVehicleVariables>;
+export function updateVehicle(dc: DataConnect, vars: UpdateVehicleVariables): MutationPromise<UpdateVehicleData, UpdateVehicleVariables>;
+
+interface DeleteVehicleRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteVehicleVariables): MutationRef<DeleteVehicleData, DeleteVehicleVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteVehicleVariables): MutationRef<DeleteVehicleData, DeleteVehicleVariables>;
+  operationName: string;
+}
+export const deleteVehicleRef: DeleteVehicleRef;
+
+export function deleteVehicle(vars: DeleteVehicleVariables): MutationPromise<DeleteVehicleData, DeleteVehicleVariables>;
+export function deleteVehicle(dc: DataConnect, vars: DeleteVehicleVariables): MutationPromise<DeleteVehicleData, DeleteVehicleVariables>;
+
+interface CreateVehicleAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateVehicleAssignmentVariables): MutationRef<CreateVehicleAssignmentData, CreateVehicleAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateVehicleAssignmentVariables): MutationRef<CreateVehicleAssignmentData, CreateVehicleAssignmentVariables>;
+  operationName: string;
+}
+export const createVehicleAssignmentRef: CreateVehicleAssignmentRef;
+
+export function createVehicleAssignment(vars: CreateVehicleAssignmentVariables): MutationPromise<CreateVehicleAssignmentData, CreateVehicleAssignmentVariables>;
+export function createVehicleAssignment(dc: DataConnect, vars: CreateVehicleAssignmentVariables): MutationPromise<CreateVehicleAssignmentData, CreateVehicleAssignmentVariables>;
+
+interface UpdateVehicleAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateVehicleAssignmentVariables): MutationRef<UpdateVehicleAssignmentData, UpdateVehicleAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateVehicleAssignmentVariables): MutationRef<UpdateVehicleAssignmentData, UpdateVehicleAssignmentVariables>;
+  operationName: string;
+}
+export const updateVehicleAssignmentRef: UpdateVehicleAssignmentRef;
+
+export function updateVehicleAssignment(vars: UpdateVehicleAssignmentVariables): MutationPromise<UpdateVehicleAssignmentData, UpdateVehicleAssignmentVariables>;
+export function updateVehicleAssignment(dc: DataConnect, vars: UpdateVehicleAssignmentVariables): MutationPromise<UpdateVehicleAssignmentData, UpdateVehicleAssignmentVariables>;
+
+interface DeleteVehicleAssignmentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteVehicleAssignmentVariables): MutationRef<DeleteVehicleAssignmentData, DeleteVehicleAssignmentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteVehicleAssignmentVariables): MutationRef<DeleteVehicleAssignmentData, DeleteVehicleAssignmentVariables>;
+  operationName: string;
+}
+export const deleteVehicleAssignmentRef: DeleteVehicleAssignmentRef;
+
+export function deleteVehicleAssignment(vars: DeleteVehicleAssignmentVariables): MutationPromise<DeleteVehicleAssignmentData, DeleteVehicleAssignmentVariables>;
+export function deleteVehicleAssignment(dc: DataConnect, vars: DeleteVehicleAssignmentVariables): MutationPromise<DeleteVehicleAssignmentData, DeleteVehicleAssignmentVariables>;
+
+interface CreateVehicleExpenseRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateVehicleExpenseVariables): MutationRef<CreateVehicleExpenseData, CreateVehicleExpenseVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateVehicleExpenseVariables): MutationRef<CreateVehicleExpenseData, CreateVehicleExpenseVariables>;
+  operationName: string;
+}
+export const createVehicleExpenseRef: CreateVehicleExpenseRef;
+
+export function createVehicleExpense(vars: CreateVehicleExpenseVariables): MutationPromise<CreateVehicleExpenseData, CreateVehicleExpenseVariables>;
+export function createVehicleExpense(dc: DataConnect, vars: CreateVehicleExpenseVariables): MutationPromise<CreateVehicleExpenseData, CreateVehicleExpenseVariables>;
+
+interface UpdateVehicleExpenseRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateVehicleExpenseVariables): MutationRef<UpdateVehicleExpenseData, UpdateVehicleExpenseVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateVehicleExpenseVariables): MutationRef<UpdateVehicleExpenseData, UpdateVehicleExpenseVariables>;
+  operationName: string;
+}
+export const updateVehicleExpenseRef: UpdateVehicleExpenseRef;
+
+export function updateVehicleExpense(vars: UpdateVehicleExpenseVariables): MutationPromise<UpdateVehicleExpenseData, UpdateVehicleExpenseVariables>;
+export function updateVehicleExpense(dc: DataConnect, vars: UpdateVehicleExpenseVariables): MutationPromise<UpdateVehicleExpenseData, UpdateVehicleExpenseVariables>;
+
+interface DeleteVehicleExpenseRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteVehicleExpenseVariables): MutationRef<DeleteVehicleExpenseData, DeleteVehicleExpenseVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteVehicleExpenseVariables): MutationRef<DeleteVehicleExpenseData, DeleteVehicleExpenseVariables>;
+  operationName: string;
+}
+export const deleteVehicleExpenseRef: DeleteVehicleExpenseRef;
+
+export function deleteVehicleExpense(vars: DeleteVehicleExpenseVariables): MutationPromise<DeleteVehicleExpenseData, DeleteVehicleExpenseVariables>;
+export function deleteVehicleExpense(dc: DataConnect, vars: DeleteVehicleExpenseVariables): MutationPromise<DeleteVehicleExpenseData, DeleteVehicleExpenseVariables>;
+
+interface CreateVehicleBillingDocumentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateVehicleBillingDocumentVariables): MutationRef<CreateVehicleBillingDocumentData, CreateVehicleBillingDocumentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateVehicleBillingDocumentVariables): MutationRef<CreateVehicleBillingDocumentData, CreateVehicleBillingDocumentVariables>;
+  operationName: string;
+}
+export const createVehicleBillingDocumentRef: CreateVehicleBillingDocumentRef;
+
+export function createVehicleBillingDocument(vars: CreateVehicleBillingDocumentVariables): MutationPromise<CreateVehicleBillingDocumentData, CreateVehicleBillingDocumentVariables>;
+export function createVehicleBillingDocument(dc: DataConnect, vars: CreateVehicleBillingDocumentVariables): MutationPromise<CreateVehicleBillingDocumentData, CreateVehicleBillingDocumentVariables>;
+
+interface UpdateVehicleBillingDocumentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateVehicleBillingDocumentVariables): MutationRef<UpdateVehicleBillingDocumentData, UpdateVehicleBillingDocumentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateVehicleBillingDocumentVariables): MutationRef<UpdateVehicleBillingDocumentData, UpdateVehicleBillingDocumentVariables>;
+  operationName: string;
+}
+export const updateVehicleBillingDocumentRef: UpdateVehicleBillingDocumentRef;
+
+export function updateVehicleBillingDocument(vars: UpdateVehicleBillingDocumentVariables): MutationPromise<UpdateVehicleBillingDocumentData, UpdateVehicleBillingDocumentVariables>;
+export function updateVehicleBillingDocument(dc: DataConnect, vars: UpdateVehicleBillingDocumentVariables): MutationPromise<UpdateVehicleBillingDocumentData, UpdateVehicleBillingDocumentVariables>;
+
+interface DeleteVehicleBillingDocumentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteVehicleBillingDocumentVariables): MutationRef<DeleteVehicleBillingDocumentData, DeleteVehicleBillingDocumentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteVehicleBillingDocumentVariables): MutationRef<DeleteVehicleBillingDocumentData, DeleteVehicleBillingDocumentVariables>;
+  operationName: string;
+}
+export const deleteVehicleBillingDocumentRef: DeleteVehicleBillingDocumentRef;
+
+export function deleteVehicleBillingDocument(vars: DeleteVehicleBillingDocumentVariables): MutationPromise<DeleteVehicleBillingDocumentData, DeleteVehicleBillingDocumentVariables>;
+export function deleteVehicleBillingDocument(dc: DataConnect, vars: DeleteVehicleBillingDocumentVariables): MutationPromise<DeleteVehicleBillingDocumentData, DeleteVehicleBillingDocumentVariables>;
+
+interface UpdateAgentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAgentVariables): MutationRef<UpdateAgentData, UpdateAgentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAgentVariables): MutationRef<UpdateAgentData, UpdateAgentVariables>;
+  operationName: string;
+}
+export const updateAgentRef: UpdateAgentRef;
+
+export function updateAgent(vars: UpdateAgentVariables): MutationPromise<UpdateAgentData, UpdateAgentVariables>;
+export function updateAgent(dc: DataConnect, vars: UpdateAgentVariables): MutationPromise<UpdateAgentData, UpdateAgentVariables>;
+
+interface UpdateAgentConversationRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateAgentConversationVariables): MutationRef<UpdateAgentConversationData, UpdateAgentConversationVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateAgentConversationVariables): MutationRef<UpdateAgentConversationData, UpdateAgentConversationVariables>;
+  operationName: string;
+}
+export const updateAgentConversationRef: UpdateAgentConversationRef;
+
+export function updateAgentConversation(vars: UpdateAgentConversationVariables): MutationPromise<UpdateAgentConversationData, UpdateAgentConversationVariables>;
+export function updateAgentConversation(dc: DataConnect, vars: UpdateAgentConversationVariables): MutationPromise<UpdateAgentConversationData, UpdateAgentConversationVariables>;
+
+interface CreateDailyDispatchRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateDailyDispatchVariables): MutationRef<CreateDailyDispatchData, CreateDailyDispatchVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateDailyDispatchVariables): MutationRef<CreateDailyDispatchData, CreateDailyDispatchVariables>;
+  operationName: string;
+}
+export const createDailyDispatchRef: CreateDailyDispatchRef;
+
+export function createDailyDispatch(vars: CreateDailyDispatchVariables): MutationPromise<CreateDailyDispatchData, CreateDailyDispatchVariables>;
+export function createDailyDispatch(dc: DataConnect, vars: CreateDailyDispatchVariables): MutationPromise<CreateDailyDispatchData, CreateDailyDispatchVariables>;
+
+interface UpdateDailyDispatchRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateDailyDispatchVariables): MutationRef<UpdateDailyDispatchData, UpdateDailyDispatchVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateDailyDispatchVariables): MutationRef<UpdateDailyDispatchData, UpdateDailyDispatchVariables>;
+  operationName: string;
+}
+export const updateDailyDispatchRef: UpdateDailyDispatchRef;
+
+export function updateDailyDispatch(vars: UpdateDailyDispatchVariables): MutationPromise<UpdateDailyDispatchData, UpdateDailyDispatchVariables>;
+export function updateDailyDispatch(dc: DataConnect, vars: UpdateDailyDispatchVariables): MutationPromise<UpdateDailyDispatchData, UpdateDailyDispatchVariables>;
+
+interface DeleteDailyDispatchRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteDailyDispatchVariables): MutationRef<DeleteDailyDispatchData, DeleteDailyDispatchVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteDailyDispatchVariables): MutationRef<DeleteDailyDispatchData, DeleteDailyDispatchVariables>;
+  operationName: string;
+}
+export const deleteDailyDispatchRef: DeleteDailyDispatchRef;
+
+export function deleteDailyDispatch(vars: DeleteDailyDispatchVariables): MutationPromise<DeleteDailyDispatchData, DeleteDailyDispatchVariables>;
+export function deleteDailyDispatch(dc: DataConnect, vars: DeleteDailyDispatchVariables): MutationPromise<DeleteDailyDispatchData, DeleteDailyDispatchVariables>;
+
+interface CreatePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreatePaymentVariables): MutationRef<CreatePaymentData, CreatePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreatePaymentVariables): MutationRef<CreatePaymentData, CreatePaymentVariables>;
+  operationName: string;
+}
+export const createPaymentRef: CreatePaymentRef;
+
+export function createPayment(vars: CreatePaymentVariables): MutationPromise<CreatePaymentData, CreatePaymentVariables>;
+export function createPayment(dc: DataConnect, vars: CreatePaymentVariables): MutationPromise<CreatePaymentData, CreatePaymentVariables>;
+
+interface UpdatePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdatePaymentVariables): MutationRef<UpdatePaymentData, UpdatePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdatePaymentVariables): MutationRef<UpdatePaymentData, UpdatePaymentVariables>;
+  operationName: string;
+}
+export const updatePaymentRef: UpdatePaymentRef;
+
+export function updatePayment(vars: UpdatePaymentVariables): MutationPromise<UpdatePaymentData, UpdatePaymentVariables>;
+export function updatePayment(dc: DataConnect, vars: UpdatePaymentVariables): MutationPromise<UpdatePaymentData, UpdatePaymentVariables>;
+
+interface DeletePaymentRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeletePaymentVariables): MutationRef<DeletePaymentData, DeletePaymentVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeletePaymentVariables): MutationRef<DeletePaymentData, DeletePaymentVariables>;
+  operationName: string;
+}
+export const deletePaymentRef: DeletePaymentRef;
+
+export function deletePayment(vars: DeletePaymentVariables): MutationPromise<DeletePaymentData, DeletePaymentVariables>;
+export function deletePayment(dc: DataConnect, vars: DeletePaymentVariables): MutationPromise<DeletePaymentData, DeletePaymentVariables>;
+
+interface CreateTaxInvoiceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateTaxInvoiceVariables): MutationRef<CreateTaxInvoiceData, CreateTaxInvoiceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateTaxInvoiceVariables): MutationRef<CreateTaxInvoiceData, CreateTaxInvoiceVariables>;
+  operationName: string;
+}
+export const createTaxInvoiceRef: CreateTaxInvoiceRef;
+
+export function createTaxInvoice(vars: CreateTaxInvoiceVariables): MutationPromise<CreateTaxInvoiceData, CreateTaxInvoiceVariables>;
+export function createTaxInvoice(dc: DataConnect, vars: CreateTaxInvoiceVariables): MutationPromise<CreateTaxInvoiceData, CreateTaxInvoiceVariables>;
+
+interface UpdateTaxInvoiceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateTaxInvoiceVariables): MutationRef<UpdateTaxInvoiceData, UpdateTaxInvoiceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateTaxInvoiceVariables): MutationRef<UpdateTaxInvoiceData, UpdateTaxInvoiceVariables>;
+  operationName: string;
+}
+export const updateTaxInvoiceRef: UpdateTaxInvoiceRef;
+
+export function updateTaxInvoice(vars: UpdateTaxInvoiceVariables): MutationPromise<UpdateTaxInvoiceData, UpdateTaxInvoiceVariables>;
+export function updateTaxInvoice(dc: DataConnect, vars: UpdateTaxInvoiceVariables): MutationPromise<UpdateTaxInvoiceData, UpdateTaxInvoiceVariables>;
+
+interface DeleteTaxInvoiceRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteTaxInvoiceVariables): MutationRef<DeleteTaxInvoiceData, DeleteTaxInvoiceVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteTaxInvoiceVariables): MutationRef<DeleteTaxInvoiceData, DeleteTaxInvoiceVariables>;
+  operationName: string;
+}
+export const deleteTaxInvoiceRef: DeleteTaxInvoiceRef;
+
+export function deleteTaxInvoice(vars: DeleteTaxInvoiceVariables): MutationPromise<DeleteTaxInvoiceData, DeleteTaxInvoiceVariables>;
+export function deleteTaxInvoice(dc: DataConnect, vars: DeleteTaxInvoiceVariables): MutationPromise<DeleteTaxInvoiceData, DeleteTaxInvoiceVariables>;
+
+interface CreateReceivableRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: CreateReceivableVariables): MutationRef<CreateReceivableData, CreateReceivableVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: CreateReceivableVariables): MutationRef<CreateReceivableData, CreateReceivableVariables>;
+  operationName: string;
+}
+export const createReceivableRef: CreateReceivableRef;
+
+export function createReceivable(vars: CreateReceivableVariables): MutationPromise<CreateReceivableData, CreateReceivableVariables>;
+export function createReceivable(dc: DataConnect, vars: CreateReceivableVariables): MutationPromise<CreateReceivableData, CreateReceivableVariables>;
+
+interface UpdateReceivableRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: UpdateReceivableVariables): MutationRef<UpdateReceivableData, UpdateReceivableVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: UpdateReceivableVariables): MutationRef<UpdateReceivableData, UpdateReceivableVariables>;
+  operationName: string;
+}
+export const updateReceivableRef: UpdateReceivableRef;
+
+export function updateReceivable(vars: UpdateReceivableVariables): MutationPromise<UpdateReceivableData, UpdateReceivableVariables>;
+export function updateReceivable(dc: DataConnect, vars: UpdateReceivableVariables): MutationPromise<UpdateReceivableData, UpdateReceivableVariables>;
+
+interface DeleteReceivableRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars: DeleteReceivableVariables): MutationRef<DeleteReceivableData, DeleteReceivableVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars: DeleteReceivableVariables): MutationRef<DeleteReceivableData, DeleteReceivableVariables>;
+  operationName: string;
+}
+export const deleteReceivableRef: DeleteReceivableRef;
+
+export function deleteReceivable(vars: DeleteReceivableVariables): MutationPromise<DeleteReceivableData, DeleteReceivableVariables>;
+export function deleteReceivable(dc: DataConnect, vars: DeleteReceivableVariables): MutationPromise<DeleteReceivableData, DeleteReceivableVariables>;
+
 interface ListCompaniesRef {
   /* Allow users to create refs without passing in DataConnect */
   (): QueryRef<ListCompaniesData, undefined>;
@@ -1479,4 +3359,376 @@ export const listSystemConfigsRef: ListSystemConfigsRef;
 
 export function listSystemConfigs(): QueryPromise<ListSystemConfigsData, undefined>;
 export function listSystemConfigs(dc: DataConnect): QueryPromise<ListSystemConfigsData, undefined>;
+
+interface ListAllCompaniesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllCompaniesVariables): QueryRef<ListAllCompaniesData, ListAllCompaniesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllCompaniesVariables): QueryRef<ListAllCompaniesData, ListAllCompaniesVariables>;
+  operationName: string;
+}
+export const listAllCompaniesRef: ListAllCompaniesRef;
+
+export function listAllCompanies(vars?: ListAllCompaniesVariables): QueryPromise<ListAllCompaniesData, ListAllCompaniesVariables>;
+export function listAllCompanies(dc: DataConnect, vars?: ListAllCompaniesVariables): QueryPromise<ListAllCompaniesData, ListAllCompaniesVariables>;
+
+interface ListAllTeamsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllTeamsVariables): QueryRef<ListAllTeamsData, ListAllTeamsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllTeamsVariables): QueryRef<ListAllTeamsData, ListAllTeamsVariables>;
+  operationName: string;
+}
+export const listAllTeamsRef: ListAllTeamsRef;
+
+export function listAllTeams(vars?: ListAllTeamsVariables): QueryPromise<ListAllTeamsData, ListAllTeamsVariables>;
+export function listAllTeams(dc: DataConnect, vars?: ListAllTeamsVariables): QueryPromise<ListAllTeamsData, ListAllTeamsVariables>;
+
+interface ListAllWorkersRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllWorkersVariables): QueryRef<ListAllWorkersData, ListAllWorkersVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllWorkersVariables): QueryRef<ListAllWorkersData, ListAllWorkersVariables>;
+  operationName: string;
+}
+export const listAllWorkersRef: ListAllWorkersRef;
+
+export function listAllWorkers(vars?: ListAllWorkersVariables): QueryPromise<ListAllWorkersData, ListAllWorkersVariables>;
+export function listAllWorkers(dc: DataConnect, vars?: ListAllWorkersVariables): QueryPromise<ListAllWorkersData, ListAllWorkersVariables>;
+
+interface ListAllPositionsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllPositionsVariables): QueryRef<ListAllPositionsData, ListAllPositionsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllPositionsVariables): QueryRef<ListAllPositionsData, ListAllPositionsVariables>;
+  operationName: string;
+}
+export const listAllPositionsRef: ListAllPositionsRef;
+
+export function listAllPositions(vars?: ListAllPositionsVariables): QueryPromise<ListAllPositionsData, ListAllPositionsVariables>;
+export function listAllPositions(dc: DataConnect, vars?: ListAllPositionsVariables): QueryPromise<ListAllPositionsData, ListAllPositionsVariables>;
+
+interface ListAllSitesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSitesVariables): QueryRef<ListAllSitesData, ListAllSitesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSitesVariables): QueryRef<ListAllSitesData, ListAllSitesVariables>;
+  operationName: string;
+}
+export const listAllSitesRef: ListAllSitesRef;
+
+export function listAllSites(vars?: ListAllSitesVariables): QueryPromise<ListAllSitesData, ListAllSitesVariables>;
+export function listAllSites(dc: DataConnect, vars?: ListAllSitesVariables): QueryPromise<ListAllSitesData, ListAllSitesVariables>;
+
+interface ListAllDailyReportsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllDailyReportsVariables): QueryRef<ListAllDailyReportsData, ListAllDailyReportsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllDailyReportsVariables): QueryRef<ListAllDailyReportsData, ListAllDailyReportsVariables>;
+  operationName: string;
+}
+export const listAllDailyReportsRef: ListAllDailyReportsRef;
+
+export function listAllDailyReports(vars?: ListAllDailyReportsVariables): QueryPromise<ListAllDailyReportsData, ListAllDailyReportsVariables>;
+export function listAllDailyReports(dc: DataConnect, vars?: ListAllDailyReportsVariables): QueryPromise<ListAllDailyReportsData, ListAllDailyReportsVariables>;
+
+interface ListAllDailyReportWorkersRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllDailyReportWorkersVariables): QueryRef<ListAllDailyReportWorkersData, ListAllDailyReportWorkersVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllDailyReportWorkersVariables): QueryRef<ListAllDailyReportWorkersData, ListAllDailyReportWorkersVariables>;
+  operationName: string;
+}
+export const listAllDailyReportWorkersRef: ListAllDailyReportWorkersRef;
+
+export function listAllDailyReportWorkers(vars?: ListAllDailyReportWorkersVariables): QueryPromise<ListAllDailyReportWorkersData, ListAllDailyReportWorkersVariables>;
+export function listAllDailyReportWorkers(dc: DataConnect, vars?: ListAllDailyReportWorkersVariables): QueryPromise<ListAllDailyReportWorkersData, ListAllDailyReportWorkersVariables>;
+
+interface ListAllAppUsersRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAppUsersVariables): QueryRef<ListAllAppUsersData, ListAllAppUsersVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAppUsersVariables): QueryRef<ListAllAppUsersData, ListAllAppUsersVariables>;
+  operationName: string;
+}
+export const listAllAppUsersRef: ListAllAppUsersRef;
+
+export function listAllAppUsers(vars?: ListAllAppUsersVariables): QueryPromise<ListAllAppUsersData, ListAllAppUsersVariables>;
+export function listAllAppUsers(dc: DataConnect, vars?: ListAllAppUsersVariables): QueryPromise<ListAllAppUsersData, ListAllAppUsersVariables>;
+
+interface ListAllMenuConfigsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllMenuConfigsVariables): QueryRef<ListAllMenuConfigsData, ListAllMenuConfigsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllMenuConfigsVariables): QueryRef<ListAllMenuConfigsData, ListAllMenuConfigsVariables>;
+  operationName: string;
+}
+export const listAllMenuConfigsRef: ListAllMenuConfigsRef;
+
+export function listAllMenuConfigs(vars?: ListAllMenuConfigsVariables): QueryPromise<ListAllMenuConfigsData, ListAllMenuConfigsVariables>;
+export function listAllMenuConfigs(dc: DataConnect, vars?: ListAllMenuConfigsVariables): QueryPromise<ListAllMenuConfigsData, ListAllMenuConfigsVariables>;
+
+interface ListAllSystemLogsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSystemLogsVariables): QueryRef<ListAllSystemLogsData, ListAllSystemLogsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSystemLogsVariables): QueryRef<ListAllSystemLogsData, ListAllSystemLogsVariables>;
+  operationName: string;
+}
+export const listAllSystemLogsRef: ListAllSystemLogsRef;
+
+export function listAllSystemLogs(vars?: ListAllSystemLogsVariables): QueryPromise<ListAllSystemLogsData, ListAllSystemLogsVariables>;
+export function listAllSystemLogs(dc: DataConnect, vars?: ListAllSystemLogsVariables): QueryPromise<ListAllSystemLogsData, ListAllSystemLogsVariables>;
+
+interface ListAllAuditLogsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAuditLogsVariables): QueryRef<ListAllAuditLogsData, ListAllAuditLogsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAuditLogsVariables): QueryRef<ListAllAuditLogsData, ListAllAuditLogsVariables>;
+  operationName: string;
+}
+export const listAllAuditLogsRef: ListAllAuditLogsRef;
+
+export function listAllAuditLogs(vars?: ListAllAuditLogsVariables): QueryPromise<ListAllAuditLogsData, ListAllAuditLogsVariables>;
+export function listAllAuditLogs(dc: DataConnect, vars?: ListAllAuditLogsVariables): QueryPromise<ListAllAuditLogsData, ListAllAuditLogsVariables>;
+
+interface ListAllAgentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAgentsVariables): QueryRef<ListAllAgentsData, ListAllAgentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAgentsVariables): QueryRef<ListAllAgentsData, ListAllAgentsVariables>;
+  operationName: string;
+}
+export const listAllAgentsRef: ListAllAgentsRef;
+
+export function listAllAgents(vars?: ListAllAgentsVariables): QueryPromise<ListAllAgentsData, ListAllAgentsVariables>;
+export function listAllAgents(dc: DataConnect, vars?: ListAllAgentsVariables): QueryPromise<ListAllAgentsData, ListAllAgentsVariables>;
+
+interface ListAllAgentConversationsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAgentConversationsVariables): QueryRef<ListAllAgentConversationsData, ListAllAgentConversationsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAgentConversationsVariables): QueryRef<ListAllAgentConversationsData, ListAllAgentConversationsVariables>;
+  operationName: string;
+}
+export const listAllAgentConversationsRef: ListAllAgentConversationsRef;
+
+export function listAllAgentConversations(vars?: ListAllAgentConversationsVariables): QueryPromise<ListAllAgentConversationsData, ListAllAgentConversationsVariables>;
+export function listAllAgentConversations(dc: DataConnect, vars?: ListAllAgentConversationsVariables): QueryPromise<ListAllAgentConversationsData, ListAllAgentConversationsVariables>;
+
+interface ListAllSettingsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSettingsVariables): QueryRef<ListAllSettingsData, ListAllSettingsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSettingsVariables): QueryRef<ListAllSettingsData, ListAllSettingsVariables>;
+  operationName: string;
+}
+export const listAllSettingsRef: ListAllSettingsRef;
+
+export function listAllSettings(vars?: ListAllSettingsVariables): QueryPromise<ListAllSettingsData, ListAllSettingsVariables>;
+export function listAllSettings(dc: DataConnect, vars?: ListAllSettingsVariables): QueryPromise<ListAllSettingsData, ListAllSettingsVariables>;
+
+interface ListAllSystemConfigsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSystemConfigsVariables): QueryRef<ListAllSystemConfigsData, ListAllSystemConfigsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSystemConfigsVariables): QueryRef<ListAllSystemConfigsData, ListAllSystemConfigsVariables>;
+  operationName: string;
+}
+export const listAllSystemConfigsRef: ListAllSystemConfigsRef;
+
+export function listAllSystemConfigs(vars?: ListAllSystemConfigsVariables): QueryPromise<ListAllSystemConfigsData, ListAllSystemConfigsVariables>;
+export function listAllSystemConfigs(dc: DataConnect, vars?: ListAllSystemConfigsVariables): QueryPromise<ListAllSystemConfigsData, ListAllSystemConfigsVariables>;
+
+interface ListAllAccommodationsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAccommodationsVariables): QueryRef<ListAllAccommodationsData, ListAllAccommodationsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAccommodationsVariables): QueryRef<ListAllAccommodationsData, ListAllAccommodationsVariables>;
+  operationName: string;
+}
+export const listAllAccommodationsRef: ListAllAccommodationsRef;
+
+export function listAllAccommodations(vars?: ListAllAccommodationsVariables): QueryPromise<ListAllAccommodationsData, ListAllAccommodationsVariables>;
+export function listAllAccommodations(dc: DataConnect, vars?: ListAllAccommodationsVariables): QueryPromise<ListAllAccommodationsData, ListAllAccommodationsVariables>;
+
+interface ListAllAccommodationAssignmentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAccommodationAssignmentsVariables): QueryRef<ListAllAccommodationAssignmentsData, ListAllAccommodationAssignmentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAccommodationAssignmentsVariables): QueryRef<ListAllAccommodationAssignmentsData, ListAllAccommodationAssignmentsVariables>;
+  operationName: string;
+}
+export const listAllAccommodationAssignmentsRef: ListAllAccommodationAssignmentsRef;
+
+export function listAllAccommodationAssignments(vars?: ListAllAccommodationAssignmentsVariables): QueryPromise<ListAllAccommodationAssignmentsData, ListAllAccommodationAssignmentsVariables>;
+export function listAllAccommodationAssignments(dc: DataConnect, vars?: ListAllAccommodationAssignmentsVariables): QueryPromise<ListAllAccommodationAssignmentsData, ListAllAccommodationAssignmentsVariables>;
+
+interface ListAllUtilityRecordsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllUtilityRecordsVariables): QueryRef<ListAllUtilityRecordsData, ListAllUtilityRecordsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllUtilityRecordsVariables): QueryRef<ListAllUtilityRecordsData, ListAllUtilityRecordsVariables>;
+  operationName: string;
+}
+export const listAllUtilityRecordsRef: ListAllUtilityRecordsRef;
+
+export function listAllUtilityRecords(vars?: ListAllUtilityRecordsVariables): QueryPromise<ListAllUtilityRecordsData, ListAllUtilityRecordsVariables>;
+export function listAllUtilityRecords(dc: DataConnect, vars?: ListAllUtilityRecordsVariables): QueryPromise<ListAllUtilityRecordsData, ListAllUtilityRecordsVariables>;
+
+interface ListAllAccommodationBillingDocumentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAccommodationBillingDocumentsVariables): QueryRef<ListAllAccommodationBillingDocumentsData, ListAllAccommodationBillingDocumentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAccommodationBillingDocumentsVariables): QueryRef<ListAllAccommodationBillingDocumentsData, ListAllAccommodationBillingDocumentsVariables>;
+  operationName: string;
+}
+export const listAllAccommodationBillingDocumentsRef: ListAllAccommodationBillingDocumentsRef;
+
+export function listAllAccommodationBillingDocuments(vars?: ListAllAccommodationBillingDocumentsVariables): QueryPromise<ListAllAccommodationBillingDocumentsData, ListAllAccommodationBillingDocumentsVariables>;
+export function listAllAccommodationBillingDocuments(dc: DataConnect, vars?: ListAllAccommodationBillingDocumentsVariables): QueryPromise<ListAllAccommodationBillingDocumentsData, ListAllAccommodationBillingDocumentsVariables>;
+
+interface ListAllAccommodationBillingLineItemsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAccommodationBillingLineItemsVariables): QueryRef<ListAllAccommodationBillingLineItemsData, ListAllAccommodationBillingLineItemsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAccommodationBillingLineItemsVariables): QueryRef<ListAllAccommodationBillingLineItemsData, ListAllAccommodationBillingLineItemsVariables>;
+  operationName: string;
+}
+export const listAllAccommodationBillingLineItemsRef: ListAllAccommodationBillingLineItemsRef;
+
+export function listAllAccommodationBillingLineItems(vars?: ListAllAccommodationBillingLineItemsVariables): QueryPromise<ListAllAccommodationBillingLineItemsData, ListAllAccommodationBillingLineItemsVariables>;
+export function listAllAccommodationBillingLineItems(dc: DataConnect, vars?: ListAllAccommodationBillingLineItemsVariables): QueryPromise<ListAllAccommodationBillingLineItemsData, ListAllAccommodationBillingLineItemsVariables>;
+
+interface ListAllAdvancePaymentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllAdvancePaymentsVariables): QueryRef<ListAllAdvancePaymentsData, ListAllAdvancePaymentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllAdvancePaymentsVariables): QueryRef<ListAllAdvancePaymentsData, ListAllAdvancePaymentsVariables>;
+  operationName: string;
+}
+export const listAllAdvancePaymentsRef: ListAllAdvancePaymentsRef;
+
+export function listAllAdvancePayments(vars?: ListAllAdvancePaymentsVariables): QueryPromise<ListAllAdvancePaymentsData, ListAllAdvancePaymentsVariables>;
+export function listAllAdvancePayments(dc: DataConnect, vars?: ListAllAdvancePaymentsVariables): QueryPromise<ListAllAdvancePaymentsData, ListAllAdvancePaymentsVariables>;
+
+interface ListAllSmartMemoCategoriesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSmartMemoCategoriesVariables): QueryRef<ListAllSmartMemoCategoriesData, ListAllSmartMemoCategoriesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSmartMemoCategoriesVariables): QueryRef<ListAllSmartMemoCategoriesData, ListAllSmartMemoCategoriesVariables>;
+  operationName: string;
+}
+export const listAllSmartMemoCategoriesRef: ListAllSmartMemoCategoriesRef;
+
+export function listAllSmartMemoCategories(vars?: ListAllSmartMemoCategoriesVariables): QueryPromise<ListAllSmartMemoCategoriesData, ListAllSmartMemoCategoriesVariables>;
+export function listAllSmartMemoCategories(dc: DataConnect, vars?: ListAllSmartMemoCategoriesVariables): QueryPromise<ListAllSmartMemoCategoriesData, ListAllSmartMemoCategoriesVariables>;
+
+interface ListAllSmartMemosRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllSmartMemosVariables): QueryRef<ListAllSmartMemosData, ListAllSmartMemosVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllSmartMemosVariables): QueryRef<ListAllSmartMemosData, ListAllSmartMemosVariables>;
+  operationName: string;
+}
+export const listAllSmartMemosRef: ListAllSmartMemosRef;
+
+export function listAllSmartMemos(vars?: ListAllSmartMemosVariables): QueryPromise<ListAllSmartMemosData, ListAllSmartMemosVariables>;
+export function listAllSmartMemos(dc: DataConnect, vars?: ListAllSmartMemosVariables): QueryPromise<ListAllSmartMemosData, ListAllSmartMemosVariables>;
+
+interface ListAllVehiclesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllVehiclesVariables): QueryRef<ListAllVehiclesData, ListAllVehiclesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllVehiclesVariables): QueryRef<ListAllVehiclesData, ListAllVehiclesVariables>;
+  operationName: string;
+}
+export const listAllVehiclesRef: ListAllVehiclesRef;
+
+export function listAllVehicles(vars?: ListAllVehiclesVariables): QueryPromise<ListAllVehiclesData, ListAllVehiclesVariables>;
+export function listAllVehicles(dc: DataConnect, vars?: ListAllVehiclesVariables): QueryPromise<ListAllVehiclesData, ListAllVehiclesVariables>;
+
+interface ListAllVehicleAssignmentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllVehicleAssignmentsVariables): QueryRef<ListAllVehicleAssignmentsData, ListAllVehicleAssignmentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllVehicleAssignmentsVariables): QueryRef<ListAllVehicleAssignmentsData, ListAllVehicleAssignmentsVariables>;
+  operationName: string;
+}
+export const listAllVehicleAssignmentsRef: ListAllVehicleAssignmentsRef;
+
+export function listAllVehicleAssignments(vars?: ListAllVehicleAssignmentsVariables): QueryPromise<ListAllVehicleAssignmentsData, ListAllVehicleAssignmentsVariables>;
+export function listAllVehicleAssignments(dc: DataConnect, vars?: ListAllVehicleAssignmentsVariables): QueryPromise<ListAllVehicleAssignmentsData, ListAllVehicleAssignmentsVariables>;
+
+interface ListAllVehicleExpensesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllVehicleExpensesVariables): QueryRef<ListAllVehicleExpensesData, ListAllVehicleExpensesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllVehicleExpensesVariables): QueryRef<ListAllVehicleExpensesData, ListAllVehicleExpensesVariables>;
+  operationName: string;
+}
+export const listAllVehicleExpensesRef: ListAllVehicleExpensesRef;
+
+export function listAllVehicleExpenses(vars?: ListAllVehicleExpensesVariables): QueryPromise<ListAllVehicleExpensesData, ListAllVehicleExpensesVariables>;
+export function listAllVehicleExpenses(dc: DataConnect, vars?: ListAllVehicleExpensesVariables): QueryPromise<ListAllVehicleExpensesData, ListAllVehicleExpensesVariables>;
+
+interface ListAllVehicleBillingDocumentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllVehicleBillingDocumentsVariables): QueryRef<ListAllVehicleBillingDocumentsData, ListAllVehicleBillingDocumentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllVehicleBillingDocumentsVariables): QueryRef<ListAllVehicleBillingDocumentsData, ListAllVehicleBillingDocumentsVariables>;
+  operationName: string;
+}
+export const listAllVehicleBillingDocumentsRef: ListAllVehicleBillingDocumentsRef;
+
+export function listAllVehicleBillingDocuments(vars?: ListAllVehicleBillingDocumentsVariables): QueryPromise<ListAllVehicleBillingDocumentsData, ListAllVehicleBillingDocumentsVariables>;
+export function listAllVehicleBillingDocuments(dc: DataConnect, vars?: ListAllVehicleBillingDocumentsVariables): QueryPromise<ListAllVehicleBillingDocumentsData, ListAllVehicleBillingDocumentsVariables>;
+
+interface ListAllDailyDispatchesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllDailyDispatchesVariables): QueryRef<ListAllDailyDispatchesData, ListAllDailyDispatchesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllDailyDispatchesVariables): QueryRef<ListAllDailyDispatchesData, ListAllDailyDispatchesVariables>;
+  operationName: string;
+}
+export const listAllDailyDispatchesRef: ListAllDailyDispatchesRef;
+
+export function listAllDailyDispatches(vars?: ListAllDailyDispatchesVariables): QueryPromise<ListAllDailyDispatchesData, ListAllDailyDispatchesVariables>;
+export function listAllDailyDispatches(dc: DataConnect, vars?: ListAllDailyDispatchesVariables): QueryPromise<ListAllDailyDispatchesData, ListAllDailyDispatchesVariables>;
+
+interface ListAllPaymentsRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllPaymentsVariables): QueryRef<ListAllPaymentsData, ListAllPaymentsVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllPaymentsVariables): QueryRef<ListAllPaymentsData, ListAllPaymentsVariables>;
+  operationName: string;
+}
+export const listAllPaymentsRef: ListAllPaymentsRef;
+
+export function listAllPayments(vars?: ListAllPaymentsVariables): QueryPromise<ListAllPaymentsData, ListAllPaymentsVariables>;
+export function listAllPayments(dc: DataConnect, vars?: ListAllPaymentsVariables): QueryPromise<ListAllPaymentsData, ListAllPaymentsVariables>;
+
+interface ListAllTaxInvoicesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllTaxInvoicesVariables): QueryRef<ListAllTaxInvoicesData, ListAllTaxInvoicesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllTaxInvoicesVariables): QueryRef<ListAllTaxInvoicesData, ListAllTaxInvoicesVariables>;
+  operationName: string;
+}
+export const listAllTaxInvoicesRef: ListAllTaxInvoicesRef;
+
+export function listAllTaxInvoices(vars?: ListAllTaxInvoicesVariables): QueryPromise<ListAllTaxInvoicesData, ListAllTaxInvoicesVariables>;
+export function listAllTaxInvoices(dc: DataConnect, vars?: ListAllTaxInvoicesVariables): QueryPromise<ListAllTaxInvoicesData, ListAllTaxInvoicesVariables>;
+
+interface ListAllReceivablesRef {
+  /* Allow users to create refs without passing in DataConnect */
+  (vars?: ListAllReceivablesVariables): QueryRef<ListAllReceivablesData, ListAllReceivablesVariables>;
+  /* Allow users to pass in custom DataConnect instances */
+  (dc: DataConnect, vars?: ListAllReceivablesVariables): QueryRef<ListAllReceivablesData, ListAllReceivablesVariables>;
+  operationName: string;
+}
+export const listAllReceivablesRef: ListAllReceivablesRef;
+
+export function listAllReceivables(vars?: ListAllReceivablesVariables): QueryPromise<ListAllReceivablesData, ListAllReceivablesVariables>;
+export function listAllReceivables(dc: DataConnect, vars?: ListAllReceivablesVariables): QueryPromise<ListAllReceivablesData, ListAllReceivablesVariables>;
 

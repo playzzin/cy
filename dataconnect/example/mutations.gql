@@ -1,5 +1,5 @@
 # Create Company
-mutation CreateCompany($name: String!, $code: String!, $legacyId: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+mutation CreateCompany($name: String!, $code: String!, $legacyId: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status, $address: String, $phone: String, $email: String, $bankName: String, $accountNumber: String, $accountHolder: String, $ceoResidentNumber: String, $color: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
   company_insert(data: {
     legacyId: $legacyId,
     name: $name,
@@ -7,7 +7,15 @@ mutation CreateCompany($name: String!, $code: String!, $legacyId: String, $busin
     businessNumber: $businessNumber,
     ceoName: $ceoName,
     type: $type,
-    status: $status
+    status: $status,
+    address: $address,
+    phone: $phone,
+    email: $email,
+    bankName: $bankName,
+    accountNumber: $accountNumber,
+    accountHolder: $accountHolder,
+    ceoResidentNumber: $ceoResidentNumber,
+    color: $color
   })
 }
 
@@ -187,14 +195,22 @@ mutation DeletePosition($id: UUID!) @auth(level: USER, insecureReason: "Operatio
 
 # --- Updates ---
 
-mutation UpdateCompany($id: UUID!, $name: String, $code: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
+mutation UpdateCompany($id: UUID!, $name: String, $code: String, $businessNumber: String, $ceoName: String, $type: String, $status: Status, $address: String, $phone: String, $email: String, $bankName: String, $accountNumber: String, $accountHolder: String, $ceoResidentNumber: String, $color: String) @auth(level: USER, insecureReason: "Operation is intended for use by authenticated app users; fine-grained authorization is handled at the application level.") {
   company_update(id: $id, data: {
     name: $name,
     code: $code,
     businessNumber: $businessNumber,
     ceoName: $ceoName,
     type: $type,
-    status: $status
+    status: $status,
+    address: $address,
+    phone: $phone,
+    email: $email,
+    bankName: $bankName,
+    accountNumber: $accountNumber,
+    accountHolder: $accountHolder,
+    ceoResidentNumber: $ceoResidentNumber,
+    color: $color
   })
 }
 
@@ -320,4 +336,1001 @@ mutation CreateSystemLog($category: String!, $action: String!, $userEmail: Strin
     userEmail: $userEmail,
     details: $details
   })
+}
+
+# --- Accommodation (V2) ---
+
+mutation CreateAccommodation(
+  $id: UUID,
+  $legacyId: String,
+  $name: String!,
+  $address: String!,
+  $type: String!,
+  $status: String!,
+  $ownership: String,
+  $electricityMode: String,
+  $gasMode: String,
+  $waterMode: String,
+  $internetMode: String,
+  $maintenanceMode: String,
+  $fixedElectricity: Int,
+  $fixedGas: Int,
+  $fixedWater: Int,
+  $fixedInternet: Int,
+  $fixedMaintenance: Int,
+  $contractStartDate: String,
+  $contractEndDate: String,
+  $deposit: Int,
+  $monthlyRent: Int,
+  $paymentDay: Int,
+  $landlordName: String,
+  $landlordContact: String,
+  $isReported: Boolean,
+  $bankName: String,
+  $accountNumber: String,
+  $accountHolder: String,
+  $rentPayDate: Int,
+  $isAutoTransfer: Boolean,
+  $transferDay: Int,
+  $transferAccountInfo: String,
+  $billingTargetType: String,
+  $billingTargetTeamId: String,
+  $billingTargetTeamName: String,
+  $billingTargetWorkerId: String,
+  $billingTargetWorkerName: String,
+  $currentOccupantName: String,
+  $currentOccupantPhone: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodation_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    name: $name,
+    address: $address,
+    type: $type,
+    status: $status,
+    ownership: $ownership,
+    electricityMode: $electricityMode,
+    gasMode: $gasMode,
+    waterMode: $waterMode,
+    internetMode: $internetMode,
+    maintenanceMode: $maintenanceMode,
+    fixedElectricity: $fixedElectricity,
+    fixedGas: $fixedGas,
+    fixedWater: $fixedWater,
+    fixedInternet: $fixedInternet,
+    fixedMaintenance: $fixedMaintenance,
+    contractStartDate: $contractStartDate,
+    contractEndDate: $contractEndDate,
+    deposit: $deposit,
+    monthlyRent: $monthlyRent,
+    paymentDay: $paymentDay,
+    landlordName: $landlordName,
+    landlordContact: $landlordContact,
+    isReported: $isReported,
+    bankName: $bankName,
+    accountNumber: $accountNumber,
+    accountHolder: $accountHolder,
+    rentPayDate: $rentPayDate,
+    isAutoTransfer: $isAutoTransfer,
+    transferDay: $transferDay,
+    transferAccountInfo: $transferAccountInfo,
+    billingTargetType: $billingTargetType,
+    billingTargetTeamId: $billingTargetTeamId,
+    billingTargetTeamName: $billingTargetTeamName,
+    billingTargetWorkerId: $billingTargetWorkerId,
+    billingTargetWorkerName: $billingTargetWorkerName,
+    currentOccupantName: $currentOccupantName,
+    currentOccupantPhone: $currentOccupantPhone,
+    memo: $memo
+  })
+}
+
+mutation UpdateAccommodation(
+  $id: UUID!,
+  $name: String,
+  $address: String,
+  $type: String,
+  $status: String,
+  $ownership: String,
+  $electricityMode: String,
+  $gasMode: String,
+  $waterMode: String,
+  $internetMode: String,
+  $maintenanceMode: String,
+  $fixedElectricity: Int,
+  $fixedGas: Int,
+  $fixedWater: Int,
+  $fixedInternet: Int,
+  $fixedMaintenance: Int,
+  $contractStartDate: String,
+  $contractEndDate: String,
+  $deposit: Int,
+  $monthlyRent: Int,
+  $paymentDay: Int,
+  $landlordName: String,
+  $landlordContact: String,
+  $isReported: Boolean,
+  $bankName: String,
+  $accountNumber: String,
+  $accountHolder: String,
+  $rentPayDate: Int,
+  $isAutoTransfer: Boolean,
+  $transferDay: Int,
+  $transferAccountInfo: String,
+  $billingTargetType: String,
+  $billingTargetTeamId: String,
+  $billingTargetTeamName: String,
+  $billingTargetWorkerId: String,
+  $billingTargetWorkerName: String,
+  $currentOccupantName: String,
+  $currentOccupantPhone: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodation_update(id: $id, data: {
+    name: $name,
+    address: $address,
+    type: $type,
+    status: $status,
+    ownership: $ownership,
+    electricityMode: $electricityMode,
+    gasMode: $gasMode,
+    waterMode: $waterMode,
+    internetMode: $internetMode,
+    maintenanceMode: $maintenanceMode,
+    fixedElectricity: $fixedElectricity,
+    fixedGas: $fixedGas,
+    fixedWater: $fixedWater,
+    fixedInternet: $fixedInternet,
+    fixedMaintenance: $fixedMaintenance,
+    contractStartDate: $contractStartDate,
+    contractEndDate: $contractEndDate,
+    deposit: $deposit,
+    monthlyRent: $monthlyRent,
+    paymentDay: $paymentDay,
+    landlordName: $landlordName,
+    landlordContact: $landlordContact,
+    isReported: $isReported,
+    bankName: $bankName,
+    accountNumber: $accountNumber,
+    accountHolder: $accountHolder,
+    rentPayDate: $rentPayDate,
+    isAutoTransfer: $isAutoTransfer,
+    transferDay: $transferDay,
+    transferAccountInfo: $transferAccountInfo,
+    billingTargetType: $billingTargetType,
+    billingTargetTeamId: $billingTargetTeamId,
+    billingTargetTeamName: $billingTargetTeamName,
+    billingTargetWorkerId: $billingTargetWorkerId,
+    billingTargetWorkerName: $billingTargetWorkerName,
+    currentOccupantName: $currentOccupantName,
+    currentOccupantPhone: $currentOccupantPhone,
+    memo: $memo
+  })
+}
+
+mutation DeleteAccommodation($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodation_delete(id: $id)
+}
+
+# --- Accommodation Assignment (V2) ---
+
+mutation CreateAccommodationAssignment(
+  $id: UUID,
+  $legacyId: String,
+  $accommodationId: UUID!,
+  $teamId: UUID,
+  $teamName: String,
+  $workerId: UUID,
+  $workerName: String,
+  $startDate: String!,
+  $endDate: String,
+  $status: String,
+  $source: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationAssignment_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    accommodationId: $accommodationId,
+    teamId: $teamId,
+    teamName: $teamName,
+    workerId: $workerId,
+    workerName: $workerName,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status,
+    source: $source,
+    memo: $memo
+  })
+}
+
+mutation UpdateAccommodationAssignment(
+  $id: UUID!,
+  $accommodationId: UUID,
+  $teamId: UUID,
+  $teamName: String,
+  $workerId: UUID,
+  $workerName: String,
+  $startDate: String,
+  $endDate: String,
+  $status: String,
+  $source: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationAssignment_update(id: $id, data: {
+    accommodationId: $accommodationId,
+    teamId: $teamId,
+    teamName: $teamName,
+    workerId: $workerId,
+    workerName: $workerName,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status,
+    source: $source,
+    memo: $memo
+  })
+}
+
+mutation DeleteAccommodationAssignment($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationAssignment_delete(id: $id)
+}
+
+# --- Utility Record (V2) ---
+
+mutation CreateUtilityRecord(
+  $id: UUID,
+  $legacyId: String,
+  $accommodationId: UUID!,
+  $yearMonth: String!,
+  $accommodationName: String,
+  $costs: String,
+  $paymentDate: String,
+  $paymentStatus: String!,
+  $memo: String,
+  $isAnomaly: Boolean
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  utilityRecord_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    accommodationId: $accommodationId,
+    yearMonth: $yearMonth,
+    accommodationName: $accommodationName,
+    costs: $costs,
+    paymentDate: $paymentDate,
+    paymentStatus: $paymentStatus,
+    memo: $memo,
+    isAnomaly: $isAnomaly
+  })
+}
+
+mutation UpdateUtilityRecord(
+  $accommodationId: UUID!,
+  $yearMonth: String!,
+  $accommodationName: String,
+  $costs: String,
+  $paymentDate: String,
+  $paymentStatus: String,
+  $memo: String,
+  $isAnomaly: Boolean
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  utilityRecord_update(key: { accommodationId: $accommodationId, yearMonth: $yearMonth }, data: {
+    accommodationName: $accommodationName,
+    costs: $costs,
+    paymentDate: $paymentDate,
+    paymentStatus: $paymentStatus,
+    memo: $memo,
+    isAnomaly: $isAnomaly
+  })
+}
+
+mutation DeleteUtilityRecord($accommodationId: UUID!, $yearMonth: String!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  utilityRecord_delete(key: { accommodationId: $accommodationId, yearMonth: $yearMonth })
+}
+
+# --- Accommodation Billing (V2) ---
+
+mutation CreateAccommodationBillingDocument(
+  $id: UUID,
+  $yearMonth: String!,
+  $teamId: UUID,
+  $teamName: String,
+  $issuedToType: String!,
+  $issuedToWorkerId: UUID,
+  $issuedToWorkerName: String,
+  $status: String,
+  $memo: String,
+  $confirmedAt: Timestamp,
+  $postedAdvancePaymentId: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationBillingDocument_insert(data: {
+    id: $id,
+    yearMonth: $yearMonth,
+    teamId: $teamId,
+    teamName: $teamName,
+    issuedToType: $issuedToType,
+    issuedToWorkerId: $issuedToWorkerId,
+    issuedToWorkerName: $issuedToWorkerName,
+    status: $status,
+    memo: $memo,
+    confirmedAt: $confirmedAt,
+    postedAdvancePaymentId: $postedAdvancePaymentId
+  })
+}
+
+mutation UpdateAccommodationBillingDocument(
+  $id: UUID!,
+  $yearMonth: String,
+  $teamId: UUID,
+  $teamName: String,
+  $issuedToType: String,
+  $issuedToWorkerId: UUID,
+  $issuedToWorkerName: String,
+  $status: String,
+  $memo: String,
+  $confirmedAt: Timestamp,
+  $postedAdvancePaymentId: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationBillingDocument_update(id: $id, data: {
+    yearMonth: $yearMonth,
+    teamId: $teamId,
+    teamName: $teamName,
+    issuedToType: $issuedToType,
+    issuedToWorkerId: $issuedToWorkerId,
+    issuedToWorkerName: $issuedToWorkerName,
+    status: $status,
+    memo: $memo,
+    confirmedAt: $confirmedAt,
+    postedAdvancePaymentId: $postedAdvancePaymentId
+  })
+}
+
+mutation CreateAccommodationBillingLineItem(
+  $id: UUID,
+  $billingDocumentId: UUID!,
+  $label: String!,
+  $amount: Int!,
+  $targetField: String!
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationBillingLineItem_insert(data: {
+    id: $id,
+    billingDocumentId: $billingDocumentId,
+    label: $label,
+    amount: $amount,
+    targetField: $targetField
+  })
+}
+
+mutation DeleteAccommodationBillingLineItem($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  accommodationBillingLineItem_delete(id: $id)
+}
+
+# --- Advance Payment (V2) ---
+
+mutation CreateAdvancePayment(
+  $id: String!,
+  $workerId: UUID,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $yearMonth: String!,
+  $items: String,
+  $prevMonthCarryover: Int,
+  $accommodation: Int,
+  $privateRoom: Int,
+  $gloves: Int,
+  $deposit: Int,
+  $fines: Int,
+  $electricity: Int,
+  $gas: Int,
+  $internet: Int,
+  $water: Int,
+  $totalDeduction: Int,
+  $memo: String,
+  $updatedAt: Timestamp
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  advancePayment_insert(data: {
+    id: $id,
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    yearMonth: $yearMonth,
+    items: $items,
+    prevMonthCarryover: $prevMonthCarryover,
+    accommodation: $accommodation,
+    privateRoom: $privateRoom,
+    gloves: $gloves,
+    deposit: $deposit,
+    fines: $fines,
+    electricity: $electricity,
+    gas: $gas,
+    internet: $internet,
+    water: $water,
+    totalDeduction: $totalDeduction,
+    memo: $memo,
+    updatedAt: $updatedAt
+  })
+}
+
+mutation UpdateAdvancePayment(
+  $id: String!,
+  $workerId: UUID,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $yearMonth: String,
+  $items: String,
+  $prevMonthCarryover: Int,
+  $accommodation: Int,
+  $privateRoom: Int,
+  $gloves: Int,
+  $deposit: Int,
+  $fines: Int,
+  $electricity: Int,
+  $gas: Int,
+  $internet: Int,
+  $water: Int,
+  $totalDeduction: Int,
+  $memo: String,
+  $updatedAt: Timestamp
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  advancePayment_update(id: $id, data: {
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    yearMonth: $yearMonth,
+    items: $items,
+    prevMonthCarryover: $prevMonthCarryover,
+    accommodation: $accommodation,
+    privateRoom: $privateRoom,
+    gloves: $gloves,
+    deposit: $deposit,
+    fines: $fines,
+    electricity: $electricity,
+    gas: $gas,
+    internet: $internet,
+    water: $water,
+    totalDeduction: $totalDeduction,
+    memo: $memo,
+    updatedAt: $updatedAt
+  })
+}
+
+mutation DeleteAdvancePayment($id: String!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  advancePayment_delete(id: $id)
+}
+
+# --- Smart Memo (V2) ---
+
+mutation CreateSmartMemo(
+  $id: UUID,
+  $legacyId: String,
+  $userId: String!,
+  $scope: String!,
+  $type: String!,
+  $title: String!,
+  $content: String,
+  $checklistItems: String,
+  $color: String,
+  $order: Int,
+  $isPinned: Boolean,
+  $tags: String,
+  $categoryId: UUID,
+  $categoryLegacyId: String,
+  $priority: String,
+  $x: Int,
+  $y: Int,
+  $w: Int,
+  $h: Int,
+  $isCollapsed: Boolean,
+  $prevW: Int,
+  $prevH: Int
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemo_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    userId: $userId,
+    scope: $scope,
+    type: $type,
+    title: $title,
+    content: $content,
+    checklistItems: $checklistItems,
+    color: $color,
+    order: $order,
+    isPinned: $isPinned,
+    tags: $tags,
+    categoryId: $categoryId,
+    categoryLegacyId: $categoryLegacyId,
+    priority: $priority,
+    x: $x,
+    y: $y,
+    w: $w,
+    h: $h,
+    isCollapsed: $isCollapsed,
+    prevW: $prevW,
+    prevH: $prevH
+  })
+}
+
+mutation UpdateSmartMemo(
+  $id: UUID!,
+  $scope: String,
+  $type: String,
+  $title: String,
+  $content: String,
+  $checklistItems: String,
+  $color: String,
+  $order: Int,
+  $isPinned: Boolean,
+  $tags: String,
+  $categoryId: UUID,
+  $categoryLegacyId: String,
+  $priority: String,
+  $x: Int,
+  $y: Int,
+  $w: Int,
+  $h: Int,
+  $isCollapsed: Boolean,
+  $prevW: Int,
+  $prevH: Int
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemo_update(id: $id, data: {
+    scope: $scope,
+    type: $type,
+    title: $title,
+    content: $content,
+    checklistItems: $checklistItems,
+    color: $color,
+    order: $order,
+    isPinned: $isPinned,
+    tags: $tags,
+    categoryId: $categoryId,
+    categoryLegacyId: $categoryLegacyId,
+    priority: $priority,
+    x: $x,
+    y: $y,
+    w: $w,
+    h: $h,
+    isCollapsed: $isCollapsed,
+    prevW: $prevW,
+    prevH: $prevH
+  })
+}
+
+mutation DeleteSmartMemo($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemo_delete(id: $id)
+}
+
+mutation CreateSmartMemoCategory(
+  $id: UUID,
+  $legacyId: String,
+  $userId: String!,
+  $name: String!,
+  $color: String,
+  $icon: String,
+  $order: Int
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemoCategory_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    userId: $userId,
+    name: $name,
+    color: $color,
+    icon: $icon,
+    order: $order
+  })
+}
+
+mutation UpdateSmartMemoCategory(
+  $id: UUID!,
+  $userId: String,
+  $name: String,
+  $color: String,
+  $icon: String,
+  $order: Int
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemoCategory_update(id: $id, data: {
+    userId: $userId,
+    name: $name,
+    color: $color,
+    icon: $icon,
+    order: $order
+  })
+}
+
+mutation DeleteSmartMemoCategory($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  smartMemoCategory_delete(id: $id)
+}
+
+# --- Vehicles ---
+
+mutation CreateVehicle(
+  $id: UUID,
+  $legacyId: String,
+  $licensePlate: String!,
+  $model: String,
+  $type: String,
+  $owner: String,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicle_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    licensePlate: $licensePlate,
+    model: $model,
+    type: $type,
+    owner: $owner,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation UpdateVehicle(
+  $id: UUID!,
+  $licensePlate: String,
+  $model: String,
+  $type: String,
+  $owner: String,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicle_update(id: $id, data: {
+    licensePlate: $licensePlate,
+    model: $model,
+    type: $type,
+    owner: $owner,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation DeleteVehicle($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicle_delete(id: $id)
+}
+
+mutation CreateVehicleAssignment(
+  $id: UUID,
+  $legacyId: String,
+  $vehicleId: UUID!,
+  $workerId: UUID,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $startDate: String!,
+  $endDate: String,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleAssignment_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    vehicleId: $vehicleId,
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation UpdateVehicleAssignment(
+  $id: UUID!,
+  $vehicleId: UUID,
+  $workerId: UUID,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $startDate: String,
+  $endDate: String,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleAssignment_update(id: $id, data: {
+    vehicleId: $vehicleId,
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    startDate: $startDate,
+    endDate: $endDate,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation DeleteVehicleAssignment($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleAssignment_delete(id: $id)
+}
+
+mutation CreateVehicleExpense(
+  $id: UUID,
+  $legacyId: String,
+  $vehicleId: UUID!,
+  $date: String!,
+  $type: String!,
+  $amount: Int!,
+  $odometer: Int,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleExpense_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    vehicleId: $vehicleId,
+    date: $date,
+    type: $type,
+    amount: $amount,
+    odometer: $odometer,
+    memo: $memo
+  })
+}
+
+mutation UpdateVehicleExpense(
+  $id: UUID!,
+  $vehicleId: UUID,
+  $date: String,
+  $type: String,
+  $amount: Int,
+  $odometer: Int,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleExpense_update(id: $id, data: {
+    vehicleId: $vehicleId,
+    date: $date,
+    type: $type,
+    amount: $amount,
+    odometer: $odometer,
+    memo: $memo
+  })
+}
+
+mutation DeleteVehicleExpense($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleExpense_delete(id: $id)
+}
+
+mutation CreateVehicleBillingDocument(
+  $id: UUID,
+  $yearMonth: String!,
+  $vehicleId: UUID!,
+  $licensePlate: String!,
+  $amount: Int!,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleBillingDocument_insert(data: {
+    id: $id,
+    yearMonth: $yearMonth,
+    vehicleId: $vehicleId,
+    licensePlate: $licensePlate,
+    amount: $amount,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation UpdateVehicleBillingDocument(
+  $id: UUID!,
+  $yearMonth: String,
+  $vehicleId: UUID,
+  $licensePlate: String,
+  $amount: Int,
+  $status: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleBillingDocument_update(id: $id, data: {
+    yearMonth: $yearMonth,
+    vehicleId: $vehicleId,
+    licensePlate: $licensePlate,
+    amount: $amount,
+    status: $status,
+    memo: $memo
+  })
+}
+
+mutation DeleteVehicleBillingDocument($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  vehicleBillingDocument_delete(id: $id)
+}
+
+# --- Agents ---
+
+mutation UpdateAgent(
+  $id: String!,
+  $name: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  agent_update(id: $id, data: {
+    name: $name,
+    status: $status
+  })
+}
+
+mutation UpdateAgentConversation(
+  $id: String!
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  agentConversation_update(id: $id, data: {
+  })
+}
+
+# --- Financials ---
+
+mutation CreateDailyDispatch(
+  $id: UUID,
+  $legacyId: String,
+  $date: String!,
+  $workerId: UUID!,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $siteId: UUID,
+  $siteName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  dailyDispatch_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    date: $date,
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    siteId: $siteId,
+    siteName: $siteName,
+    status: $status
+  })
+}
+
+mutation UpdateDailyDispatch(
+  $id: UUID!,
+  $date: String,
+  $workerId: UUID,
+  $workerName: String,
+  $teamId: UUID,
+  $teamName: String,
+  $siteId: UUID,
+  $siteName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  dailyDispatch_update(id: $id, data: {
+    date: $date,
+    workerId: $workerId,
+    workerName: $workerName,
+    teamId: $teamId,
+    teamName: $teamName,
+    siteId: $siteId,
+    siteName: $siteName,
+    status: $status
+  })
+}
+
+mutation DeleteDailyDispatch($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  dailyDispatch_delete(id: $id)
+}
+
+mutation CreatePayment(
+  $id: UUID,
+  $legacyId: String,
+  $date: String!,
+  $amount: Int!,
+  $type: String,
+  $method: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  payment_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    date: $date,
+    amount: $amount,
+    type: $type,
+    method: $method,
+    memo: $memo
+  })
+}
+
+mutation UpdatePayment(
+  $id: UUID!,
+  $date: String,
+  $amount: Int,
+  $type: String,
+  $method: String,
+  $memo: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  payment_update(id: $id, data: {
+    date: $date,
+    amount: $amount,
+    type: $type,
+    method: $method,
+    memo: $memo
+  })
+}
+
+mutation DeletePayment($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  payment_delete(id: $id)
+}
+
+mutation CreateTaxInvoice(
+  $id: UUID,
+  $legacyId: String,
+  $date: String!,
+  $amount: Int!,
+  $tax: Int!,
+  $total: Int!,
+  $companyName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  taxInvoice_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    date: $date,
+    amount: $amount,
+    tax: $tax,
+    total: $total,
+    companyName: $companyName,
+    status: $status
+  })
+}
+
+mutation UpdateTaxInvoice(
+  $id: UUID!,
+  $date: String,
+  $amount: Int,
+  $tax: Int,
+  $total: Int,
+  $companyName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  taxInvoice_update(id: $id, data: {
+    date: $date,
+    amount: $amount,
+    tax: $tax,
+    total: $total,
+    companyName: $companyName,
+    status: $status
+  })
+}
+
+# --- Tax Invoice (V2 Additional) ---
+mutation DeleteTaxInvoice($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  taxInvoice_delete(id: $id)
+}
+
+mutation CreateReceivable(
+  $id: UUID,
+  $legacyId: String,
+  $date: String!,
+  $amount: Int!,
+  $companyName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  receivable_insert(data: {
+    id: $id,
+    legacyId: $legacyId,
+    date: $date,
+    amount: $amount,
+    companyName: $companyName,
+    status: $status
+  })
+}
+
+mutation UpdateReceivable(
+  $id: UUID!,
+  $date: String,
+  $amount: Int,
+  $companyName: String,
+  $status: String
+) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  receivable_update(id: $id, data: {
+    date: $date,
+    amount: $amount,
+    companyName: $companyName,
+    status: $status
+  })
+}
+
+mutation DeleteReceivable($id: UUID!) @auth(level: USER, insecureReason: "Auth handled at application level") {
+  receivable_delete(id: $id)
 }

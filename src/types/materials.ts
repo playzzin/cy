@@ -3,7 +3,7 @@ import { FieldValue, Timestamp } from 'firebase/firestore';
 // 자재 마스터
 export interface Material {
     id: string;
-    category: '시스템 동바리' | '시스템 비계' | '기타';
+    category: string;
     itemName: string; // 품명: 수직재, 수평재, 대각재 등
     spec: string; // 규격: P17, H15 등
     unit: string; // 단위: EA, SET, M 등
@@ -89,6 +89,7 @@ export interface TransactionFilters {
     materialId?: string;
     category?: string;
     transactionType?: 'inbound' | 'outbound' | 'all';
+    vehicleNumber?: string;
 }
 
 // 재고 통계

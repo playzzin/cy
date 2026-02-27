@@ -99,24 +99,33 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
                     />
                 </div>
 
-                {/* Dynamic Icon */}
-                <div
-                    className="w-6 h-6 flex items-center justify-center transition-colors duration-200"
-                    style={{ color: effectiveIconColor || '#9ca3af' }}
-                >
-                    <FontAwesomeIcon icon={IconComponent} />
-                </div>
+                {item.text === '-' ? (
+                    <div className="flex-1 select-none flex items-center justify-center">
+                        <div className="w-full border-t border-gray-600 my-2 mx-4 relative" />
+                        <span className="absolute text-xs text-gray-500 bg-gray-800 px-2">구분선</span>
+                    </div>
+                ) : (
+                    <>
+                        {/* Dynamic Icon */}
+                        <div
+                            className="w-6 h-6 flex items-center justify-center transition-colors duration-200"
+                            style={{ color: effectiveIconColor || '#9ca3af' }}
+                        >
+                            <FontAwesomeIcon icon={IconComponent} />
+                        </div>
 
-                {/* Content */}
-                <div className="flex-1 select-none flex flex-col justify-center">
-                    <span
-                        className="text-sm transition-colors duration-200"
-                        style={{ color: effectiveTextColor }}
-                    >
-                        {item.text}
-                    </span>
-                    {item.path && <span className="text-[10px] text-gray-600 font-mono leading-none mt-0.5">{item.path}</span>}
-                </div>
+                        {/* Content */}
+                        <div className="flex-1 select-none flex flex-col justify-center">
+                            <span
+                                className="text-sm transition-colors duration-200"
+                                style={{ color: effectiveTextColor }}
+                            >
+                                {item.text}
+                            </span>
+                            {item.path && <span className="text-[10px] text-gray-600 font-mono leading-none mt-0.5">{item.path}</span>}
+                        </div>
+                    </>
+                )}
 
                 {/* Indent/Outdent Actions (Hover) */}
                 <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 mr-2 transition-opacity">

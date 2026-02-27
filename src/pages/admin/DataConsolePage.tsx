@@ -1,28 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import {
-    collection,
-    getDocs,
-    doc,
-    setDoc,
-    deleteDoc,
-    query,
-    limit,
-    orderBy,
-    Timestamp,
-    serverTimestamp,
-    updateDoc
-} from 'firebase/firestore';
 import { getDataConnect } from 'firebase/data-connect';
-import { db } from '../../config/firebase';
-import { useAuth } from '../../contexts/AuthContext';
 import {
     connectorConfig,
-    listCompanies,
-    listTeams,
-    listWorkers,
-    listSites,
-    listDailyReports,
-    listDailyReportWorkers,
+    listAllCompanies,
+    listAllTeams,
+    listAllWorkers,
+    listAllSites,
+    listAllDailyReports,
+    listAllDailyReportWorkers,
 } from '../../dataconnect-generated';
 import app from '../../config/firebase';
 
@@ -170,7 +155,7 @@ const TEMPLATES: Record<string, object> = {
 const DataConsolePage: React.FC = () => {
     // State
     const [selectedCollectionId, setSelectedCollectionId] = useState<string>('workers');
-    const [dataSource, setDataSource] = useState<'firestore' | 'dataconnect'>('firestore');
+    const [dataSource] = useState<'dataconnect'>('dataconnect');
     const [rowData, setRowData] = useState<any[]>([]);
     const [columnDefs, setColumnDefs] = useState<ColDef[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
@@ -186,19 +171,23 @@ const DataConsolePage: React.FC = () => {
 
     const isReadOnly = dataSource === 'dataconnect';
 
+    const DC_OWNED_COLLECTION_IDS = useMemo(() => {
+        return ['companies', 'teams', 'workers', 'sites', 'daily_reports', 'daily_report_workers'];
+    }, []);
+
     const canUseDataConnectForCollection = useMemo(() => {
         return ['companies', 'teams', 'workers', 'sites', 'daily_reports', 'daily_report_workers'].includes(selectedCollectionId);
     }, [selectedCollectionId]);
 
     const sidebarGroups = useMemo(() => {
-        return dataSource === 'dataconnect' ? DATA_CONNECT_COLLECTION_GROUPS : COLLECTION_GROUPS;
-    }, [dataSource]);
+        return DATA_CONNECT_COLLECTION_GROUPS;
+    }, []);
 
     useEffect(() => {
-        if (dataSource !== 'dataconnect') return;
-        if (canUseDataConnectForCollection) return;
-        setSelectedCollectionId('workers');
-    }, [dataSource, canUseDataConnectForCollection]);
+        if (!canUseDataConnectForCollection) {
+            setSelectedCollectionId('workers');
+        }
+    }, [canUseDataConnectForCollection]);
 
     const getDc = useCallback(() => {
         return getDataConnect(app, connectorConfig);
@@ -217,24 +206,6 @@ const DataConsolePage: React.FC = () => {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            if (dataSource === 'firestore') {
-                // Default Limit 1000 for performance
-                const q = query(collection(db, selectedCollectionId), limit(1000));
-                const snapshot = await getDocs(q);
-
-                const docs = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    return {
-                        id: doc.id,
-                        ...data
-                    };
-                });
-
-                setRowData(docs);
-                generateColumns(docs, false);
-                return;
-            }
-
             if (!canUseDataConnectForCollection) {
                 Swal.fire({
                     icon: 'warning',
@@ -250,22 +221,22 @@ const DataConsolePage: React.FC = () => {
             let docs: any[] = [];
 
             if (selectedCollectionId === 'companies') {
-                const response = await listCompanies(dc);
+                const response = await listAllCompanies(dc);
                 docs = (response as any)?.data?.companies ?? [];
             } else if (selectedCollectionId === 'teams') {
-                const response = await listTeams(dc);
+                const response = await listAllTeams(dc);
                 docs = (response as any)?.data?.teams ?? [];
             } else if (selectedCollectionId === 'workers') {
-                const response = await listWorkers(dc);
+                const response = await listAllWorkers(dc);
                 docs = (response as any)?.data?.workers ?? [];
             } else if (selectedCollectionId === 'sites') {
-                const response = await listSites(dc);
+                const response = await listAllSites(dc);
                 docs = (response as any)?.data?.sites ?? [];
             } else if (selectedCollectionId === 'daily_reports') {
-                const response = await listDailyReports(dc);
+                const response = await listAllDailyReports(dc);
                 docs = (response as any)?.data?.dailyReports ?? [];
             } else if (selectedCollectionId === 'daily_report_workers') {
-                const response = await listDailyReportWorkers(dc);
+                const response = await listAllDailyReportWorkers(dc);
                 docs = (response as any)?.data?.dailyReportWorkers ?? [];
             }
 
@@ -283,70 +254,21 @@ const DataConsolePage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [selectedCollectionId, dataSource, canUseDataConnectForCollection, getDc]);
+    }, [selectedCollectionId, canUseDataConnectForCollection, getDc]);
 
     useEffect(() => {
         fetchData();
     }, [fetchData]);
 
-
     // Inline Edit Handler
     const onCellValueChanged = async (params: CellValueChangedEvent) => {
         if (isReadOnly) return;
-        const { data, colDef, newValue, oldValue } = params;
-        if (newValue === oldValue) return;
-
-        try {
-            const collectionId = selectedCollectionId;
-            const docId = data.id;
-
-            // Optimistic UI is already handled by grid
-
-            // Allow reverting? Not easily without more state. 
-            // We assume success or show error.
-
-            let finalValue = newValue;
-
-            // Basic Type Conversion
-            if (colDef.cellEditor === 'agNumberCellEditor' || typeof oldValue === 'number') {
-                finalValue = Number(newValue);
-                if (isNaN(finalValue)) finalValue = 0; // or revert?
-            }
-
-            await updateDoc(doc(db, collectionId, docId), {
-                [colDef.field!]: finalValue,
-                updatedAt: serverTimestamp()
-            });
-
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 1500,
-                timerProgressBar: true,
-                didOpen: (toast) => {
-                    toast.addEventListener('mouseenter', Swal.stopTimer)
-                    toast.addEventListener('mouseleave', Swal.resumeTimer)
-                }
-            });
-
-            Toast.fire({
-                icon: 'success',
-                title: 'Saved successfully'
-            });
-
-        } catch (error: any) {
-            console.error("Update failed:", error);
-            // Revert value
-            params.node.setDataValue(colDef.field!, oldValue);
-            Swal.fire({
-                toast: true,
-                position: 'top-end',
-                icon: 'error',
-                title: 'Save Failed',
-                text: error.message
-            });
-        }
+        void params;
+        await Swal.fire({
+            icon: 'info',
+            title: '읽기 전용',
+            text: 'Data Connect 콘솔은 현재 읽기 전용입니다.'
+        });
     };
 
     // Field Name Mappings (Korean Translation)
@@ -511,16 +433,17 @@ const DataConsolePage: React.FC = () => {
                     <span className="font-mono text-indigo-300 font-bold">{params.value?.toLocaleString()}</span>
                 );
                 width = 120;
-            } else if (sampleValue instanceof Timestamp || (typeof sampleValue === 'object' && sampleValue?.seconds)) {
+            } else if (typeof sampleValue === 'object' && sampleValue?.seconds) {
                 // Keep Date Read-only for now or simple text if user knows ISO
                 // Let's keep read-only for complex objects to avoid crashes
                 editable = false;
 
-                // Firestore Timestamp
+                // Timestamp-like object
                 cellRenderer = (params: ICellRendererParams) => {
                     if (!params.value) return '-';
                     try {
-                        const date = params.value instanceof Timestamp ? params.value.toDate() : new Date(params.value.seconds * 1000);
+                        const seconds = (params.value as any)?.seconds;
+                        const date = typeof seconds === 'number' ? new Date(seconds * 1000) : new Date(String(params.value));
                         return <span className='text-[11px] font-mono text-slate-300 bg-white/5 px-1.5 py-0.5 rounded border border-white/5'>{date.toLocaleString('ko-KR')}</span>;
                     } catch (e) { return 'Invalid Date'; }
                 };
@@ -561,142 +484,31 @@ const DataConsolePage: React.FC = () => {
             } as ColDef;
         });
 
-        if (!readOnly) {
-            // Add Actions Column
-            defs.unshift({
-                headerName: 'Actions',
-                field: 'actions',
-                pinned: 'right',
-                width: 100,
-                sortable: false,
-                filter: false,
-                cellRenderer: (params: ICellRendererParams) => (
-                    <div className="flex items-center gap-2 justify-center h-full">
-                        <button
-                            onClick={() => handleEditClick(params.data)}
-                            className="text-indigo-600 hover:text-indigo-800 transition-colors"
-                            title="Edit"
-                        >
-                            <FontAwesomeIcon icon={faEdit} />
-                        </button>
-                        <button
-                            onClick={() => handleDeleteClick(params.data.id)}
-                            className="text-red-500 hover:text-red-700 transition-colors"
-                            title="Delete"
-                        >
-                            <FontAwesomeIcon icon={faTrash} />
-                        </button>
-                    </div>
-                )
-            });
-        }
-
         setColumnDefs(defs);
     };
 
     // Actions
     const handleEditClick = (data: any) => {
         if (isReadOnly) return;
-        const { id, ...editableData } = data;
-        // Convert Timestamps to string for editing
-        const replacer = (key: string, value: any) => {
-            if (value && typeof value === 'object' && value.seconds !== undefined) {
-                return new Date(value.seconds * 1000).toISOString();
-            }
-            return value;
-        };
-
-        setCurrentDocId(id);
-        setJsonContent(JSON.stringify(editableData, replacer, 2));
-        setEditMode('update');
-        setJsonError(null);
-        setIsModalOpen(true);
+        void data;
     };
 
     const handleCreateClick = () => {
         if (isReadOnly) return;
-        const template = TEMPLATES[selectedCollectionId] || {};
-        setCurrentDocId('');
-        setJsonContent(JSON.stringify(template, null, 2));
-        setEditMode('create');
-        setJsonError(null);
-        setIsModalOpen(true);
     };
 
     const handleDeleteClick = async (docId: string) => {
         if (isReadOnly) return;
-        const result = await Swal.fire({
-            title: '정말 삭제하시겠습니까?',
-            text: `ID: ${docId} 문서를 삭제합니다. 복구할 수 없습니다.`,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#ef4444',
-            confirmButtonText: '삭제',
-            cancelButtonText: '취소'
-        });
-
-        if (result.isConfirmed) {
-            try {
-                await deleteDoc(doc(db, selectedCollectionId, docId));
-                Swal.fire('삭제됨', '문서가 성공적으로 삭제되었습니다.', 'success');
-                // Optimistic Update
-                setRowData(prev => prev.filter(r => r.id !== docId));
-            } catch (error: any) {
-                Swal.fire('오류', `삭제 실패: ${error.message}`, 'error');
-            }
-        }
+        void docId;
     };
 
     const handleSave = async () => {
         if (isReadOnly) return;
-        try {
-            // Validate JSON
-            let parsedData;
-            try {
-                parsedData = JSON.parse(jsonContent);
-            } catch (e: any) {
-                setJsonError(e.message);
-                return;
-            }
-
-            // Restore Timestamps (simple check for ISO strings that look like dates? maybe optional)
-            // For robust admin, we might assume user inputs ISO strings for dates.
-            // Firestore saves ISO strings as Strings unless converted to Date object.
-            // Let's iterate and convert specific keys if needed, or leave as string.
-            // Requirement usually prefers Timestamp. Auto-detect? complex. 
-            // Let's just save as is for now, standard JSON doesn't support Date objects.
-
-            if (editMode === 'create') {
-                const newId = currentDocId.trim();
-                if (newId) {
-                    await setDoc(doc(db, selectedCollectionId, newId), {
-                        ...parsedData,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp()
-                    });
-                } else {
-                    // Auto ID
-                    const newDocRef = doc(collection(db, selectedCollectionId));
-                    await setDoc(newDocRef, {
-                        ...parsedData,
-                        createdAt: serverTimestamp(),
-                        updatedAt: serverTimestamp()
-                    });
-                }
-            } else {
-                await setDoc(doc(db, selectedCollectionId, currentDocId), {
-                    ...parsedData,
-                    updatedAt: serverTimestamp()
-                }, { merge: true });
-            }
-
-            setIsModalOpen(false);
-            Swal.fire('저장 성공', '데이터가 저장되었습니다.', 'success');
-            fetchData(); // Refresh to match server state
-
-        } catch (error: any) {
-            Swal.fire('저장 실패', error.message, 'error');
-        }
+        await Swal.fire({
+            icon: 'info',
+            title: '읽기 전용',
+            text: 'Data Connect 콘솔은 현재 읽기 전용입니다.'
+        });
     };
 
     // Grid Ready
@@ -728,12 +540,13 @@ const DataConsolePage: React.FC = () => {
             const raw = d.updatedAt ?? d.createdAt;
             if (!raw) return false;
             try {
-                const date = raw instanceof Timestamp
-                    ? raw.toDate()
-                    : (typeof raw === 'string'
-                        ? new Date(raw)
-                        : new Date(raw.seconds * 1000));
-                return date > oneDayAgo;
+                const date = (typeof raw === 'string'
+                    ? new Date(raw)
+                    : (raw && typeof raw === 'object' && (raw as any).seconds != null)
+                        ? new Date((raw as any).seconds * 1000)
+                        : new Date(String(raw)));
+                if (Number.isNaN(date.getTime())) return false;
+                return date >= oneDayAgo;
             } catch {
                 return false;
             }
@@ -845,26 +658,9 @@ const DataConsolePage: React.FC = () => {
                     {/* Toolbar */}
                     <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setDataSource('firestore')}
-                                className={`h-11 px-4 rounded-xl text-sm font-bold border transition-all shadow-lg backdrop-blur-md ${dataSource === 'firestore'
-                                    ? 'bg-indigo-600 border-indigo-500/40 text-white'
-                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                                    }`}
-                                title="Firestore"
-                            >
-                                Firestore
-                            </button>
-                            <button
-                                onClick={() => setDataSource('dataconnect')}
-                                className={`h-11 px-4 rounded-xl text-sm font-bold border transition-all shadow-lg backdrop-blur-md ${dataSource === 'dataconnect'
-                                    ? 'bg-emerald-600 border-emerald-500/40 text-white'
-                                    : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
-                                    }`}
-                                title="Data Connect (Read-only)"
-                            >
+                            <div className="h-11 px-4 rounded-xl text-sm font-bold border transition-all shadow-lg backdrop-blur-md bg-emerald-600 border-emerald-500/40 text-white flex items-center">
                                 Data Connect
-                            </button>
+                            </div>
                         </div>
 
                         <div className="relative group flex-1 max-w-md">

@@ -444,7 +444,9 @@ const AdvancedMenuManager: React.FC = () => {
                 const template = data.template;
                 newItem = template === 'folder'
                     ? { id: newId, text: '새 그룹', sub: [], icon: 'faFolder' }
-                    : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
+                    : template === 'divider'
+                        ? { id: newId, text: '-' }
+                        : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
             }
 
             const dst = findRef(newMenu, overId);

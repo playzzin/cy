@@ -15,10 +15,11 @@ export interface SiteData {
     name: string;
     icon: string;
     menu: MenuItem[];
-    order?: number; // Added for customized site ordering
-    trash?: MenuItem[]; // Deleted items storage
-    deletedItems?: string[]; // Names of deleted default items (to prevent zombie items on merge)
-    positionConfig?: PositionItem[]; // Dynamic Position Configuration
+    order?: number;
+    trash?: MenuItem[];
+    deletedItems?: string[];
+    positionConfig?: PositionItem[];
+    delegationTemplatePath?: string;
 }
 
 export interface PositionItem {

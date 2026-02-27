@@ -1,4 +1,4 @@
-import { FieldValue, Timestamp } from 'firebase/firestore';
+import { FieldValue, Timestamp } from './timestamp';
 
 export type AccommodationAssignmentStatus = 'active' | 'ended';
 

@@ -1,13 +1,11 @@
 
 import { DataProvider } from "@refinedev/core";
-import { getDataConnect } from 'firebase/data-connect';
 import {
-    connectorConfig,
-    listCompanies,
-    listTeams,
-    listWorkers,
-    listSites,
-    listDailyReports,
+    listAllCompanies,
+    listAllTeams,
+    listAllWorkers,
+    listAllSites,
+    listAllDailyReports,
     getCompany,
     getTeam,
     getWorker,
@@ -30,38 +28,34 @@ import {
     Status
 } from '../../dataconnect-generated';
 
-// Initialize DataConnect (Singleton-ish access via Firebase App usually)
-import app from '../../config/firebase';
-
-// Ensure DataConnect is initialized
-const dc = getDataConnect(app, connectorConfig);
+import { dc } from '../../config/firebase';
 
 export const dataConnectProvider: DataProvider = {
     getList: async ({ resource }) => {
         // TODO: Implement pagination/filtering when GQL supports it
         try {
             if (resource === 'companies') {
-                const response = await listCompanies(dc);
+                const response = await listAllCompanies(dc);
                 const data = response.data.companies;
                 return { data: data as any[], total: data.length };
             }
             if (resource === 'teams') {
-                const response = await listTeams(dc);
+                const response = await listAllTeams(dc);
                 const data = response.data.teams;
                 return { data: data as any[], total: data.length };
             }
             if (resource === 'workers') {
-                const response = await listWorkers(dc);
+                const response = await listAllWorkers(dc);
                 const data = response.data.workers;
                 return { data: data as any[], total: data.length };
             }
             if (resource === 'sites') {
-                const response = await listSites(dc);
+                const response = await listAllSites(dc);
                 const data = response.data.sites;
                 return { data: data as any[], total: data.length };
             }
             if (resource === 'daily_reports') {
-                const response = await listDailyReports(dc);
+                const response = await listAllDailyReports(dc);
                 const data = response.data.dailyReports;
                 return { data: data as any[], total: data.length };
             }
@@ -133,6 +127,7 @@ export const dataConnectProvider: DataProvider = {
                     role: vars.role,
                     payType: vars.payType,
                     unitPrice: vars.unitPrice,
+                    totalManDay: typeof vars.totalManDay === 'number' ? vars.totalManDay : 0,
                     phone: vars.phone,
                     residentNumber: vars.residentNumber,
                     address: vars.address,
@@ -140,7 +135,7 @@ export const dataConnectProvider: DataProvider = {
                     bankName: vars.bankName,
                     isActive: true,
                     joinDate: vars.joinDate
-                });
+                } as any);
                 return { data: { id: response.data.worker_insert.id, ...variables } as any };
             }
             if (resource === 'sites') {
@@ -210,11 +205,12 @@ export const dataConnectProvider: DataProvider = {
                     role: vars.role,
                     payType: vars.payType,
                     unitPrice: vars.unitPrice,
+                    totalManDay: typeof vars.totalManDay === 'number' ? vars.totalManDay : undefined,
                     phone: vars.phone,
                     residentNumber: vars.residentNumber,
                     address: vars.address,
                     isActive: vars.isActive
-                });
+                } as any);
                 return { data: { id, ...variables } as any };
             }
             if (resource === 'sites') {

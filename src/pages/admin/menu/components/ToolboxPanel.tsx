@@ -140,6 +140,13 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                             color="bg-indigo-600"
                             payload={{ template: 'link' }}
                         />
+                        <DraggableItem
+                            id="new-divider"
+                            label="구분선 (-)"
+                            icon={faFileLines}
+                            color="bg-gray-600"
+                            payload={{ template: 'divider' }}
+                        />
                     </div>
 
                     {/* 2. System Pages (Import) */}

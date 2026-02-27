@@ -1,119 +1,204 @@
-import { db } from '../config/firebase';
-import { doc, setDoc, onSnapshot, collection } from 'firebase/firestore';
+import { dc } from '../config/firebase';
+import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './dataconnectCompat';
 import { UserRole, PermissionConfig, DEFAULT_PERMISSIONS } from '../types/roles';
-import { Position } from './positionService';
+import { Position, positionService } from './positionService';
 
-const PERMISSION_COLLECTION = 'system_config';
 const PERMISSION_DOC_ID = 'permissions';
-const POSITION_COLLECTION = 'positions';
 
 class RolePermissionService {
-    private permissions: PermissionConfig = DEFAULT_PERMISSIONS;
-    private roleMap: Map<string, UserRole> = new Map(); // Maps "Job Title" -> "UserRole"
+    private permissions: PermissionConfig = {};
     private listeners: ((permissions: PermissionConfig) => void)[] = [];
+    private pollHandle: number | null = null;
 
     constructor() {
-        this.initialize();
+        void this.initialize();
     }
 
-    private initialize() {
-        // 1. Listen for Permission Config changes
-        onSnapshot(doc(db, PERMISSION_COLLECTION, PERMISSION_DOC_ID), (docSnap) => {
-            if (docSnap.exists()) {
-                this.permissions = docSnap.data() as PermissionConfig;
-                this.notifyListeners();
-            } else {
-                // If doc doesn't exist, create it with defaults
-                this.savePermissions(DEFAULT_PERMISSIONS);
-            }
-        });
+    private async initialize() {
+        await this.refreshPermissions();
 
-        // 2. Listen for Position changes to build dynamic RoleMap
-        onSnapshot(collection(db, POSITION_COLLECTION), (snapshot) => {
-            const newRoleMap = new Map<string, UserRole>();
-
-            snapshot.docs.forEach(doc => {
-                const data = doc.data() as Position;
-                // Ensure we map the name to the systemRole
-                if (data.name && data.systemRole) {
-                    newRoleMap.set(data.name, data.systemRole);
-                }
-            });
-
-            this.roleMap = newRoleMap;
-            // Also notify listeners because access might have changed effectively
-            this.notifyListeners();
-        });
-    }
-
-    public async updatePermission(role: UserRole, menuId: string, allowed: boolean): Promise<void> {
-        const newPermissions = { ...this.permissions };
-        if (!newPermissions[role]) {
-            newPermissions[role] = {};
+        if (typeof window !== 'undefined' && this.pollHandle == null) {
+            this.pollHandle = window.setInterval(() => {
+                void this.refreshPermissions();
+            }, 10000);
         }
-        newPermissions[role][menuId] = allowed;
+    }
+
+    private async refreshPermissions(): Promise<void> {
+        try {
+            const mergeWithPositionKeys = (loaded: PermissionConfig, positions: Position[]): PermissionConfig => {
+                const merged: PermissionConfig = {};
+
+                const loadedByRole = (role: UserRole): Record<string, boolean> => {
+                    const legacy =
+                        role === UserRole.ADMIN
+                            ? (loaded as any)?.ADMIN
+                            : role === UserRole.MANAGER
+                                ? (loaded as any)?.MANAGER
+                                : (loaded as any)?.GENERAL;
+                    const legacyEng =
+                        role === UserRole.ADMIN
+                            ? (loaded as any)?.admin
+                            : role === UserRole.MANAGER
+                                ? (loaded as any)?.manager
+                                : (loaded as any)?.user;
+                    return {
+                        ...(legacyEng && typeof legacyEng === 'object' ? legacyEng : {}),
+                        ...(legacy && typeof legacy === 'object' ? legacy : {}),
+                        ...(loaded?.[role] || {})
+                    };
+                };
+
+                const baseBySystemRole: Record<UserRole, Record<string, boolean>> = {
+                    [UserRole.ADMIN]: {
+                        ...(DEFAULT_PERMISSIONS[UserRole.ADMIN] || {}),
+                        ...loadedByRole(UserRole.ADMIN)
+                    },
+                    [UserRole.MANAGER]: {
+                        ...(DEFAULT_PERMISSIONS[UserRole.MANAGER] || {}),
+                        ...loadedByRole(UserRole.MANAGER)
+                    },
+                    [UserRole.GENERAL]: {
+                        ...(DEFAULT_PERMISSIONS[UserRole.GENERAL] || {}),
+                        ...loadedByRole(UserRole.GENERAL)
+                    }
+                };
+
+                const normalizeKey = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+                const positionNames = positions
+                    .map((p) => normalizeKey(p?.name))
+                    .filter((v): v is string => Boolean(v));
+
+                // Seed per-position permissions
+                positionNames.forEach((positionName) => {
+                    const pos = positions.find((p) => normalizeKey(p?.name) === positionName);
+                    const systemRole = (pos?.systemRole as UserRole) || UserRole.GENERAL;
+                    const direct = loaded?.[positionName];
+                    merged[positionName] = {
+                        ...(baseBySystemRole[systemRole] || baseBySystemRole[UserRole.GENERAL]),
+                        ...(direct || {})
+                    };
+                });
+
+                // Always ensure a safe fallback key
+                if (!merged['일반']) {
+                    merged['일반'] = {
+                        ...(baseBySystemRole[UserRole.GENERAL] || {})
+                    };
+                }
+
+                // Preserve unknown/custom keys (including legacy values) as-is
+                if (loaded && typeof loaded === 'object') {
+                    Object.keys(loaded).forEach((key) => {
+                        const normalizedKey = normalizeKey(key);
+                        if (!normalizedKey) return;
+                        if (!merged[normalizedKey]) {
+                            merged[normalizedKey] = loaded[normalizedKey] || {};
+                        }
+                    });
+                }
+
+                return merged;
+            };
+
+            const findRowInList = (rows: any[]): any | null => {
+                if (!Array.isArray(rows)) return null;
+                return rows.find((r: any) => String(r?.id ?? '') === String(PERMISSION_DOC_ID)) ?? null;
+            };
+
+            let row: any | null = null;
+            try {
+                const response = await listSystemConfigs(dc);
+                const rows = (response as any)?.data?.systemConfigs ?? [];
+                row = findRowInList(rows);
+            } catch {
+                row = null;
+            }
+
+            if (!row) {
+                const limit = 1000;
+                let offset = 0;
+                let safety = 0;
+                while (safety < 50) {
+                    safety += 1;
+                    const response = await listAllSystemConfigs(dc, { limit, offset } as any);
+                    const rows = (response as any)?.data?.systemConfigs ?? [];
+                    const page = Array.isArray(rows) ? rows : [];
+                    if (page.length === 0) break;
+
+                    row = findRowInList(page);
+                    if (row) break;
+
+                    if (page.length < limit) break;
+                    offset += limit;
+                }
+            }
+
+            const positions = await positionService.getPositions();
+
+            if (row?.data) {
+                const parsed = JSON.parse(String(row.data));
+                this.permissions = mergeWithPositionKeys(parsed as PermissionConfig, positions);
+                this.notifyListeners();
+                return;
+            }
+
+            // Initialize with position keys derived from defaults
+            const initial = mergeWithPositionKeys(DEFAULT_PERMISSIONS, positions);
+            await this.savePermissions(initial);
+            this.permissions = initial;
+            this.notifyListeners();
+        } catch (error) {
+            console.error('Failed to refresh permissions:', error);
+        }
+    }
+
+    public async updatePermission(positionName: string, menuId: string, allowed: boolean): Promise<void> {
+        const newPermissions = { ...this.permissions };
+        const key = typeof positionName === 'string' ? positionName.trim() : '';
+        if (!key) return;
+        if (!newPermissions[key]) {
+            newPermissions[key] = {};
+        }
+        newPermissions[key][menuId] = allowed;
 
         await this.savePermissions(newPermissions);
     }
 
     private async savePermissions(permissions: PermissionConfig): Promise<void> {
-        await setDoc(doc(db, PERMISSION_COLLECTION, PERMISSION_DOC_ID), permissions);
+        const payload = JSON.stringify(permissions);
+
+        try {
+            const updated = await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+            const didUpdate = (updated as any)?.data?.systemConfig_update != null;
+            if (!didUpdate) {
+                try {
+                    await createSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                } catch {
+                    await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                }
+            }
+        } catch (error) {
+            try {
+                await createSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+            } catch {
+                await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+            }
+        }
+
         this.permissions = permissions;
     }
 
-    /**
-     * Determines the System Role (Admin/Manager/General) based on the user's Job Title.
-     */
-    public getSystemRole(jobTitle: string): UserRole {
-        // 1. Check if the jobTitle is already a System Role (e.g. "ADMIN")
-        if (Object.values(UserRole).includes(jobTitle as UserRole)) {
-            return jobTitle as UserRole;
-        }
-
-        // 2. Lookup in dynamic map (from Firestore positions)
-        if (this.roleMap.has(jobTitle)) {
-            return this.roleMap.get(jobTitle)!;
-        }
-
-        // 3. Fallback for legacy hardcoded roles (safeguard)
-        switch (jobTitle) {
-            case '관리자':
-            case 'admin':
-            case '사장': // Legacy support
-            case '실장': // Legacy support
-                return UserRole.ADMIN;
-            case '메니저':
-            case '메니저 1':
-            case '메니저 2':
-            case '메니저 3':
-            case 'manager':
-                return UserRole.MANAGER;
-            case '대표': // Now General
-            case '팀장':
-            case '반장':
-            case '일반':
-            case '신규':
-                return UserRole.GENERAL;
-            default:
-                return UserRole.GENERAL;
-        }
-    }
-
     public hasAccess(userJobTitle: string | undefined, menuId: string): boolean {
-        if (!userJobTitle) return false;
+        const positionName = typeof userJobTitle === 'string' ? userJobTitle.trim() : '';
+        const key = positionName || '일반';
 
-        // Map legacy/custom job title to System Role
-        const systemRole = this.getSystemRole(userJobTitle);
+        const roleConfig = this.permissions[key] || this.permissions['일반'];
+        if (roleConfig) return !!roleConfig[menuId];
 
-        // Check if role exists in config
-        const roleConfig = this.permissions[systemRole];
-        if (!roleConfig) {
-            // Fallback to default if not found in live config
-            const defaultConfig = DEFAULT_PERMISSIONS[systemRole];
-            return defaultConfig ? defaultConfig[menuId] : false;
-        }
-
-        return !!roleConfig[menuId];
+        const fallback = DEFAULT_PERMISSIONS[UserRole.GENERAL];
+        return fallback ? !!fallback[menuId] : false;
     }
 
     public async getPermissions(): Promise<PermissionConfig> {

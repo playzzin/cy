@@ -114,6 +114,7 @@
     "@types/file-saver": "^2.0.7",
     "@types/lodash.debounce": "^4.0.9",
     "@types/react-grid-layout": "^1.3.6",
-    "@types/xlsx": "^0.0.35"
+    "@types/xlsx": "^0.0.35",
+    "node-fetch": "^3.3.2"
   }
 }

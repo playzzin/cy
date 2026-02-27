@@ -1,4 +1,4 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "../../../types/timestamp";
 
 export type MemoPriority = 'low' | 'medium' | 'high';
 export type MemoColor = 'white' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'gray';
@@ -103,9 +103,12 @@ export interface MemoState {
     selectedMemoId: string | null; // For detailed modal view
 
     layoutVersion: number;
+    pendingMemoUpdates: Record<string, boolean>;
+    commentDrafts: Record<string, string>; // "memoId:itemId" -> text
+    recentLocalUpdates: Record<string, number>; // id -> timestamp
 
     // Actions
-    subscribeMemos: (userId: string) => () => void; // Returns unsubscribe function
+    subscribeMemos: (userRef: string | { uid?: string | null; email?: string | null }) => () => void;
     toggleMemoExpanded: (id: string) => void;
     setAllExpanded: (expanded: boolean) => void;
     setSortMode: (mode: MemoSortMode) => void;
@@ -147,4 +150,5 @@ export interface MemoState {
     toggleMemoCollapse: (id: string, updates: { isCollapsed: boolean, h?: number }) => Promise<void>;
     setMemosCollapsed: (memoIds: string[], collapsed: boolean, options?: { gridCols?: number }) => Promise<void>;
     repackMemos: (strategy?: 'date-desc' | 'date-asc' | 'title', options?: { scopeIds?: string[]; gridCols?: number }) => Promise<void>;
+    setCommentDraft: (memoId: string, itemId: string, text: string) => void;
 }

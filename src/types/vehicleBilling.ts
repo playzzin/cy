@@ -1,6 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 
 export type VehicleBillingStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE';
+export type VehicleBillingIssuedToType = 'team' | 'team_leader' | 'worker';
 
 export interface VehicleBillingCostItem {
     id: string; // Expense ID or 'fixed-rent'
@@ -20,6 +21,11 @@ export interface VehicleBillingDocument {
     // Whom to charge? (Usually the Company pays, but tracking per team is good)
     assignedTeamId?: string;
     assignedTeamName?: string;
+    teamId?: string;
+    teamName?: string;
+    issuedToType?: VehicleBillingIssuedToType;
+    issuedToWorkerId?: string;
+    issuedToWorkerName?: string;
 
     fixedCost: number; // Rent/Lease Fee
     variableCost: number; // Sum of Fuel, Tolls, etc.

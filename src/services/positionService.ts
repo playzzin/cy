@@ -1,23 +1,18 @@
-import { db } from '../config/firebase';
+import app from '../config/firebase';
+import { getDataConnect } from 'firebase/data-connect';
 import {
-    collection,
-    addDoc,
-    updateDoc,
-    deleteDoc,
-    doc,
-    getDocs,
-    query,
-    orderBy,
-    serverTimestamp,
-    Timestamp,
-    writeBatch,
-    where
-} from 'firebase/firestore';
-
+    connectorConfig,
+    createPosition as createPositionDc,
+    deletePosition as deletePositionDc,
+    listAllPositions as listPositionsDc
+} from '../dataconnect-generated';
+import { updatePosition as updatePositionDc } from './dataconnectCompat';
 import { UserRole } from '../types/roles';
+import { Timestamp } from '../types/timestamp';
 
 export interface Position {
     id?: string;
+    legacyId?: string;
     name: string;       // 직책명 (예: 안전관리자)
     rank: number;       // 서열 (낮을수록 높음, 예: 1=사장, 99=신규자)
     color: string;      // UI 표시 색상 (red, blue, green, etc.)
@@ -30,7 +25,74 @@ export interface Position {
     updatedAt?: Timestamp;
 }
 
-const COLLECTION_NAME = 'positions';
+const dc = getDataConnect(app, connectorConfig);
+
+const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+const dcPositionLegacyIdToUuid = new Map<string, string>();
+let dcPositionsLoaded = false;
+
+const loadDcPositions = async (): Promise<void> => {
+    if (dcPositionsLoaded) return;
+    const response = await listPositionsDc(dc);
+    const rows = (response as any)?.data?.positions ?? [];
+    dcPositionLegacyIdToUuid.clear();
+    for (const row of rows) {
+        const legacyId = row?.legacyId ? String(row.legacyId) : '';
+        const id = row?.id ? String(row.id) : '';
+        if (legacyId && id) dcPositionLegacyIdToUuid.set(legacyId, id);
+        if (id) dcPositionLegacyIdToUuid.set(id, id);
+    }
+    dcPositionsLoaded = true;
+};
+
+const resolvePositionUuid = async (id: string): Promise<string | null> => {
+    const raw = id ? String(id) : '';
+    if (!raw) return null;
+    if (isUuidString(raw)) return raw;
+    await loadDcPositions();
+    const existing = dcPositionLegacyIdToUuid.get(raw);
+    if (existing) return existing;
+
+    dcPositionsLoaded = false;
+    await loadDcPositions();
+    return dcPositionLegacyIdToUuid.get(raw) ?? null;
+};
+
+const toTimestamp = (value?: string | null): Timestamp | undefined => {
+    if (!value) return undefined;
+    const d = new Date(String(value));
+    if (Number.isNaN(d.getTime())) return undefined;
+    return Timestamp.fromDate(d);
+};
+
+const toSystemRole = (value: unknown): UserRole => {
+    const raw = typeof value === 'string' ? value : '';
+    if (Object.values(UserRole).includes(raw as UserRole)) {
+        return raw as UserRole;
+    }
+    return UserRole.GENERAL;
+};
+
+const mapDcPosition = (row: any): Position => {
+    const uuid = row?.id ? String(row.id) : '';
+    const legacyId = row?.legacyId ? String(row.legacyId) : undefined;
+    const id = legacyId || uuid;
+    return {
+        id,
+        legacyId,
+        name: row?.name ? String(row.name) : '',
+        rank: typeof row?.rank === 'number' ? row.rank : (row?.rank != null ? Number(row.rank) : 0),
+        color: row?.color ? String(row.color) : 'gray',
+        icon: row?.icon ? String(row.icon) : undefined,
+        iconKey: row?.iconKey ? String(row.iconKey) : undefined,
+        description: row?.description ? String(row.description) : undefined,
+        isDefault: row?.isDefault != null ? Boolean(row.isDefault) : false,
+        systemRole: toSystemRole(row?.systemRole),
+        createdAt: toTimestamp(row?.createdAt),
+        updatedAt: toTimestamp(row?.updatedAt)
+    };
+};
 
 // 기본 직책 데이터
 const DEFAULT_POSITIONS: Omit<Position, 'id'>[] = [
@@ -60,19 +122,17 @@ export const positionService = {
     // 모든 직책 조회 (서열순 정렬)
     getPositions: async (): Promise<Position[]> => {
         try {
-            const q = query(collection(db, COLLECTION_NAME), orderBy('rank', 'asc'));
-            const snapshot = await getDocs(q);
+            const response = await listPositionsDc(dc);
+            const rows = (response as any)?.data?.positions ?? [];
 
-            // 데이터가 없으면 초기화
-            if (snapshot.empty) {
+            if (!Array.isArray(rows) || rows.length === 0) {
                 await positionService.initializeDefaults();
-                return await positionService.getPositions(); // 재조회
+                return await positionService.getPositions();
             }
 
-            return snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            } as Position));
+            const mapped = rows.map(mapDcPosition);
+            mapped.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+            return mapped;
         } catch (error) {
             console.error("Error fetching positions:", error);
             return [];
@@ -86,12 +146,21 @@ export const positionService = {
             const derivedIconKey = normalizeIconKey(normalizedPosition.iconKey) || normalizeIconKey(normalizedPosition.icon);
             normalizedPosition.iconKey = derivedIconKey;
 
-            const docRef = await addDoc(collection(db, COLLECTION_NAME), {
-                ...normalizedPosition,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-            });
-            return docRef.id;
+            const response = await createPositionDc(dc, {
+                name: normalizedPosition.name,
+                legacyId: normalizedPosition.legacyId ? String(normalizedPosition.legacyId) : null,
+                rank: normalizedPosition.rank,
+                color: normalizedPosition.color,
+                icon: normalizedPosition.icon ?? null,
+                iconKey: normalizedPosition.iconKey ?? null,
+                description: normalizedPosition.description ?? null,
+                systemRole: normalizedPosition.systemRole ?? UserRole.GENERAL,
+                isDefault: normalizedPosition.isDefault ?? false
+            } as any);
+
+            dcPositionsLoaded = false;
+            const inserted = (response as any)?.data?.position_insert;
+            return inserted?.id ? String(inserted.id) : '';
         } catch (error) {
             console.error("Error adding position:", error);
             throw error;
@@ -101,7 +170,9 @@ export const positionService = {
     // 직책 수정 (기본)
     updatePosition: async (id: string, updates: Partial<Position>): Promise<void> => {
         try {
-            const docRef = doc(db, COLLECTION_NAME, id);
+            const uuid = await resolvePositionUuid(id);
+            if (!uuid) throw new Error(`Position not found: ${id}`);
+
             const normalizedUpdates: Partial<Position> = { ...updates };
             const hasIconKeyUpdate = Object.prototype.hasOwnProperty.call(normalizedUpdates, 'iconKey');
             if (hasIconKeyUpdate) {
@@ -111,10 +182,20 @@ export const positionService = {
                 const derived = normalizeIconKey(normalizedUpdates.icon);
                 if (derived) normalizedUpdates.iconKey = derived;
             }
-            await updateDoc(docRef, {
-                ...normalizedUpdates,
-                updatedAt: serverTimestamp()
-            });
+
+            await updatePositionDc(dc, {
+                id: uuid,
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'name') ? { name: normalizedUpdates.name ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'rank') ? { rank: normalizedUpdates.rank ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'color') ? { color: normalizedUpdates.color ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'icon') ? { icon: normalizedUpdates.icon ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'iconKey') ? { iconKey: normalizedUpdates.iconKey ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'description') ? { description: normalizedUpdates.description ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'systemRole') ? { systemRole: normalizedUpdates.systemRole ?? null } : {}),
+                ...(Object.prototype.hasOwnProperty.call(normalizedUpdates, 'isDefault') ? { isDefault: normalizedUpdates.isDefault ?? null } : {})
+            } as any);
+
+            dcPositionsLoaded = false;
         } catch (error) {
             console.error("Error updating position:", error);
             throw error;
@@ -124,28 +205,23 @@ export const positionService = {
     // [New] 직책명 변경 및 작업자 동기화 (Batch Update)
     updatePositionNameWithSync: async (id: string, oldName: string, newName: string): Promise<void> => {
         try {
-            const batch = writeBatch(db);
+            await positionService.updatePosition(id, { name: newName });
 
-            // 1. Position Document Update
-            const posRef = doc(db, COLLECTION_NAME, id);
-            batch.update(posRef, {
-                name: newName,
-                updatedAt: serverTimestamp()
-            });
+            const { manpowerService } = await import('./manpowerService');
+            const workers = await manpowerService.getWorkers();
+            const targetIds = workers
+                .filter(w => (w.id && String(w.role ?? '') === String(oldName)))
+                .map(w => String(w.id));
 
-            // 2. Find all workers with the old role name
-            const workersRef = collection(db, 'workers');
-            const q = query(workersRef, where('role', '==', oldName));
-            const workerSnapshot = await getDocs(q);
+            const CHUNK_SIZE = 25;
+            let synced = 0;
+            for (let i = 0; i < targetIds.length; i += CHUNK_SIZE) {
+                const chunk = targetIds.slice(i, i + CHUNK_SIZE);
+                await Promise.all(chunk.map(workerId => manpowerService.updateWorker(workerId, { role: newName })));
+                synced += chunk.length;
+            }
 
-            // 3. Queue updates for each worker
-            workerSnapshot.docs.forEach(doc => {
-                batch.update(doc.ref, { role: newName });
-            });
-
-            // 4. Commit batch
-            await batch.commit();
-            console.log(`Updated position name "${oldName}" -> "${newName}" and synced ${workerSnapshot.size} workers.`);
+            console.log(`Updated position name "${oldName}" -> "${newName}" and synced ${synced} workers.`);
 
         } catch (error) {
             console.error("Error updating position name with sync:", error);
@@ -156,11 +232,7 @@ export const positionService = {
     // [New] 직책 색상 변경
     updatePositionColor: async (id: string, newColor: string): Promise<void> => {
         try {
-            const docRef = doc(db, COLLECTION_NAME, id);
-            await updateDoc(docRef, {
-                color: newColor,
-                updatedAt: serverTimestamp()
-            });
+            await positionService.updatePosition(id, { color: newColor });
         } catch (error) {
             console.error("Error updating position color:", error);
             throw error;
@@ -170,7 +242,10 @@ export const positionService = {
     // 직책 삭제
     deletePosition: async (id: string): Promise<void> => {
         try {
-            await deleteDoc(doc(db, COLLECTION_NAME, id));
+            const uuid = await resolvePositionUuid(id);
+            if (!uuid) throw new Error(`Position not found: ${id}`);
+            await deletePositionDc(dc, { id: uuid } as any);
+            dcPositionsLoaded = false;
         } catch (error) {
             console.error("Error deleting position:", error);
             throw error;
@@ -180,14 +255,31 @@ export const positionService = {
     // 기본 직책 초기화
     initializeDefaults: async (): Promise<void> => {
         try {
-            const batchPromises = DEFAULT_POSITIONS.map(pos =>
-                addDoc(collection(db, COLLECTION_NAME), {
-                    ...pos,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp()
-                })
+            const response = await listPositionsDc(dc);
+            const rows = (response as any)?.data?.positions ?? [];
+            const existingNames = new Set(
+                Array.isArray(rows)
+                    ? rows.map((r: any) => (r?.name ? String(r.name) : '')).filter(Boolean)
+                    : []
             );
+
+            const toCreate = DEFAULT_POSITIONS.filter((pos) => !existingNames.has(pos.name));
+            const batchPromises = toCreate.map((pos) =>
+                createPositionDc(dc, {
+                    name: pos.name,
+                    legacyId: null,
+                    rank: pos.rank,
+                    color: pos.color,
+                    icon: pos.icon ?? null,
+                    iconKey: pos.iconKey ?? null,
+                    description: pos.description ?? null,
+                    systemRole: pos.systemRole ?? UserRole.GENERAL,
+                    isDefault: pos.isDefault ?? false
+                } as any)
+            );
+
             await Promise.all(batchPromises);
+            dcPositionsLoaded = false;
             console.log("Default positions initialized");
         } catch (error) {
             console.error("Error initializing default positions:", error);
@@ -197,11 +289,7 @@ export const positionService = {
     // 중복 직책 제거 (이름 기준으로 가장 오래된 것만 유지)
     removeDuplicates: async (): Promise<{ removed: number; kept: string[] }> => {
         try {
-            const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-            const positions = snapshot.docs.map(d => ({
-                id: d.id,
-                ...d.data()
-            } as Position));
+            const positions = await positionService.getPositions();
 
             // 이름별로 그룹화
             const grouped: Record<string, Position[]> = {};
@@ -222,7 +310,7 @@ export const positionService = {
                     const toDelete = positionsGroup.slice(1);
                     for (const pos of toDelete) {
                         if (pos.id) {
-                            await deleteDoc(doc(db, COLLECTION_NAME, pos.id));
+                            await positionService.deletePosition(pos.id);
                             removedCount++;
                         }
                     }
@@ -240,13 +328,11 @@ export const positionService = {
     // Specific deletion for 'Skilled Worker' request
     deleteSkilledWorker: async (): Promise<void> => {
         try {
-            const q = query(collection(db, COLLECTION_NAME));
-            const snapshot = await getDocs(q);
-            const batch = snapshot.docs.filter(d => d.data().name === '기능공');
-
-            for (const docSnapshot of batch) {
-                await deleteDoc(doc(db, COLLECTION_NAME, docSnapshot.id));
-                console.log(`Deleted legacy position: ${docSnapshot.id}`);
+            const positions = await positionService.getPositions();
+            const targets = positions.filter((p) => p.name === '기능공' && p.id);
+            for (const pos of targets) {
+                await positionService.deletePosition(pos.id!);
+                console.log(`Deleted legacy position: ${pos.id}`);
             }
         } catch (error) {
             console.error("Error deleting Skilled Worker:", error);
@@ -256,8 +342,10 @@ export const positionService = {
     // Force Reset to Defaults (Clear all and re-initialize)
     resetToDefaults: async (): Promise<void> => {
         try {
-            const snapshot = await getDocs(collection(db, COLLECTION_NAME));
-            const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+            const positions = await positionService.getPositions();
+            const deletePromises = positions
+                .filter((p) => p.id)
+                .map((p) => positionService.deletePosition(p.id!));
             await Promise.all(deletePromises);
             console.log("All existing positions cleared.");
             await positionService.initializeDefaults();

@@ -1,0 +1,102 @@
+import {
+    faShieldHalved,
+    faChartPie,
+    faClipboardList,
+    faFileInvoiceDollar,
+    faDatabase,
+    faBuilding,
+    faPhotoFilm,
+    faCartShopping,
+    faPenNib,
+    faFlask,
+    faUserGear,
+    faHardDrive,
+    faUserTie,
+    faUsers,
+    faUserTag,
+    faWrench,
+    faPersonDigging,
+    faUserPlus,
+    faListCheck,
+    faFileImport,
+    faUserGroup,
+    faHandHoldingDollar,
+    faTruckFront,
+    faHelmetSafety,
+    faSitemap,
+    faBookOpen,
+    faList,
+    faClockRotateLeft,
+    faMoneyBillWave,
+    faChartSimple,
+    faBook,
+    faGear,
+    faCrown,
+    faUserShield,
+    faHardHat,
+    faUser,
+    faQuestion
+} from '@fortawesome/free-solid-svg-icons';
+
+import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
+
+export const iconMap: Record<string, IconDefinition> = {
+    'fa-shield-halved': faShieldHalved,
+    'fa-chart-pie': faChartPie,
+    'fa-clipboard-list': faClipboardList,
+    'fa-file-invoice-dollar': faFileInvoiceDollar,
+    'fa-database': faDatabase,
+    'fa-building': faBuilding,
+    'fa-photo-film': faPhotoFilm,
+    'fa-cart-shopping': faCartShopping,
+    'fa-pen-nib': faPenNib,
+    'fa-flask': faFlask,
+    'fa-circle-info': faChartPie,
+    'fa-youtube': faPhotoFilm,
+    'fa-cash-register': faCartShopping,
+    'fa-pencil': faPenNib,
+    'fa-vial': faFlask,
+    'fa-user-gear': faUserGear,
+    'fa-hard-drive': faHardDrive,
+    'fa-user-tie': faUserTie,
+    'fa-users': faUsers,
+    'fa-user-tag': faUserTag,
+    'fa-wrench': faWrench,
+    'fa-person-digging': faPersonDigging,
+    'fa-user-plus': faUserPlus,
+    'fa-list-check': faListCheck,
+    'fa-file-import': faFileImport,
+    'fa-user-group': faUserGroup,
+    'fa-hand-holding-dollar': faHandHoldingDollar,
+    'fa-truck-front': faTruckFront,
+    'fa-helmet-safety': faHelmetSafety,
+    'fa-crown': faCrown,
+    'fa-sitemap': faSitemap,
+    'fa-book-open': faBookOpen,
+    'fa-list': faList,
+    'fa-clock-rotate-left': faClockRotateLeft,
+    'fa-money-bill-wave': faMoneyBillWave,
+    'fa-chart-simple': faChartSimple,
+    'fa-book': faBook,
+    'fa-gear': faGear,
+    'fa-user-shield': faUserShield,
+    'fa-hard-hat': faHardHat,
+    'fa-user': faUser
+};
+
+const normalizeIconName = (value: string): string => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (!trimmed) return '';
+
+    if (trimmed.includes('-')) return trimmed;
+    if (!trimmed.startsWith('fa')) return trimmed;
+    const withoutFa = trimmed.slice(2);
+    if (!withoutFa) return '';
+    const kebab = withoutFa.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+    return `fa${kebab}`;
+};
+
+export const getIcon = (iconName: string) => {
+    const normalized = normalizeIconName(iconName);
+    return iconMap[normalized] || iconMap[iconName] || faQuestion;
+};
