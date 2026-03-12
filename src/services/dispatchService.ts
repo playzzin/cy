@@ -1,12 +1,10 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import {
-    connectorConfig,
+﻿import {
     createDailyDispatch,
     updateDailyDispatch,
     deleteDailyDispatch,
-    listAllDailyDispatches
-} from './dataconnectCompat';
+    listAllDailyDispatches,
+    getDailyDispatch
+} from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 
 export interface DispatchAssignment {
@@ -23,8 +21,6 @@ export interface DailyDispatch {
     assignments: DispatchAssignment[];
     updatedAt: Timestamp;
 }
-
-const dc = getDataConnect(app, connectorConfig);
 
 const parseAssignments = (raw: unknown): DispatchAssignment[] => {
     if (!raw) return [];
@@ -54,7 +50,7 @@ export const dispatchService = {
     // List all dispatch plans
     getAllDispatches: async (): Promise<DailyDispatch[]> => {
         try {
-            const res = await listAllDailyDispatches(dc);
+            const res = await listAllDailyDispatches();
             const rows = (res as any)?.data?.dailyDispatches ?? [];
             const mapped = rows.map((row: any) => ({
                 id: String(row.id),
@@ -73,11 +69,8 @@ export const dispatchService = {
     // Get dispatch plan for a specific date
     getDispatchByDate: async (date: string): Promise<DailyDispatch | null> => {
         try {
-            const res = await listAllDailyDispatches(dc, { limit: 5000, offset: 0 } as any);
-            const rows = (res as any)?.data?.dailyDispatches ?? [];
-            const row = Array.isArray(rows)
-                ? rows.find((r: any) => String(r?.id ?? '') === String(date) || String(r?.date ?? '') === String(date))
-                : null;
+            const res = await getDailyDispatch({ id: date });
+            const row = (res as any)?.data?.dailyDispatch;
             if (!row) return null;
             return {
                 id: String(row.id),
@@ -98,7 +91,7 @@ export const dispatchService = {
 
         const existing = await dispatchService.getDispatchByDate(date);
         if (existing) {
-            await updateDailyDispatch(dc, {
+            await updateDailyDispatch({
                 id: date,
                 date,
                 assignments: assignmentsStr,
@@ -107,7 +100,7 @@ export const dispatchService = {
             return;
         }
 
-        await createDailyDispatch(dc, {
+        await createDailyDispatch({
             id: date,
             date,
             assignments: assignmentsStr,
@@ -124,7 +117,7 @@ export const dispatchService = {
     },
 
     deleteDispatch: async (id: string): Promise<void> => {
-        await deleteDailyDispatch(dc, { id: String(id) });
+        await deleteDailyDispatch({ id: String(id) });
     },
 
     deleteDispatches: async (ids: string[]): Promise<void> => {
@@ -135,3 +128,4 @@ export const dispatchService = {
         }
     }
 };
+

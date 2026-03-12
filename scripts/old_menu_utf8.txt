@@ -1,0 +1,771 @@
+﻿import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import { MenuItem, SiteDataType } from '../types/menu';
+import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
+import { MENU_PATHS } from '../constants/menuPaths';
+import { SiteDataTypeSchema } from '../types/menuSchema';
+
+export type { MenuItem, SiteDataType };
+
+const COLLECTION_NAME = 'settings';
+const DOC_ID_CANDIDATES = ['menus_v12', 'menus_v11', 'menus_v10'];
+let activeDocId = DOC_ID_CANDIDATES[0];
+
+const isPermissionDenied = (err: any): boolean => {
+    const code = err?.code;
+    return code === 'permission-denied' || code === 'PERMISSION_DENIED';
+};
+
+const getMenuDocRef = (docId: string) => doc(db, COLLECTION_NAME, docId);
+
+// Options no longer need mergeWithDefaults
+interface MenuSubscribeOptions { }
+interface MenuFetchOptions { }
+
+interface MenuListener {
+    callback: (data: SiteDataType) => void;
+}
+
+interface AllowedMenuMap {
+    [key: string]: true | AllowedMenuMap;
+}
+
+let currentConfig: SiteDataType | null = null;
+let currentRawConfig: SiteDataType | null = null;
+let unsubscribeSnapshot: Unsubscribe | null = null;
+const listeners: Set<MenuListener> = new Set();
+
+const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+const MENU_TEXT_ALIASES: Record<string, string> = {
+    '?붽툒?쐖2': '?붽툒??,
+    '?멸툑/媛遺?怨꾩궛': '?멸툑/媛遺?,
+    '?쇱슜?몃Т鍮꾩?湲됰챸?몄꽌': '?쇱슜?몃Т鍮?吏湲됰챸?몄꽌',
+    '?몃Т鍮꾩?湲됰챸?몄꽌': '?쇱슜?몃Т鍮?吏湲됰챸?몄꽌',
+    '?몃Т鍮꾩?湲됰챸?몄꽌?앹꽦湲?: '?몃Т鍮?吏湲됰챸?몄꽌 ?앹꽦湲?
+};
+
+const PATH_TO_MENU_TEXT: Record<string, string> = Object.entries(MENU_PATHS).reduce((acc, [name, path]) => {
+    if (!acc[path]) acc[path] = name;
+    return acc;
+}, {} as Record<string, string>);
+
+const DEFAULT_POSITION_CONFIG_BY_ID: Record<string, any> = (
+    DEFAULT_MENU_CONFIG.admin?.positionConfig || []
+).reduce((acc: Record<string, any>, item: any) => {
+    if (item && item.id) acc[String(item.id)] = item;
+    return acc;
+}, {} as Record<string, any>);
+
+const sanitizePositionConfig = (input: any): any[] | undefined => {
+    if (!Array.isArray(input)) return undefined;
+    const next = input
+        .map((raw: any) => {
+            const id = typeof raw?.id === 'string' ? raw.id : '';
+            const fallback = id ? DEFAULT_POSITION_CONFIG_BY_ID[id] : undefined;
+            const name = typeof raw?.name === 'string' ? raw.name : (fallback?.name ?? '');
+            const icon = typeof raw?.icon === 'string' ? raw.icon : (fallback?.icon ?? '');
+            const color = typeof raw?.color === 'string' ? raw.color : (fallback?.color ?? 'from-slate-600 to-slate-400');
+            const order = typeof raw?.order === 'number' ? raw.order : (typeof fallback?.order === 'number' ? fallback.order : undefined);
+
+            if (!id || !name || !icon || !color) return null;
+            return { id, name, icon, color, ...(order !== undefined ? { order } : {}) };
+        })
+        .filter(Boolean);
+
+    return next.length > 0 ? (next as any[]) : undefined;
+};
+
+// ALLOWED_MENU_TREE removed to support dynamic menu management
+
+
+const normalizePayrollMenuItem = (item: MenuItem): MenuItem => {
+    if (item.text !== '湲됱뿬愿由?) {
+        return item;
+    }
+
+    const rawSub = Array.isArray(item.sub) ? item.sub : [];
+    const children = rawSub
+        .map((child) => (typeof child === 'string' ? ({ text: child } as MenuItem) : (child as MenuItem)))
+        .map((child) => normalizeMenuItem(child, `payroll/${item.text}`));
+
+    const takeLeaf = (text: string): MenuItem | null => {
+        const found = children.find((c) => c.text === text && (!c.sub || c.sub.length === 0));
+        return found ? { ...found, sub: [] } : null;
+    };
+
+    const takeGroup = (text: string): MenuItem | null => {
+        const found = children.find((c) => c.text === text && Array.isArray(c.sub) && c.sub.length > 0);
+        return found ? { ...found } : null;
+    };
+
+    const dailyWage = takeLeaf('?쇨툒??);
+    const monthlyWage = takeLeaf('?붽툒??);
+    const supportTeam = takeLeaf('吏?먰?');
+
+    const looseTaxAdvance = takeLeaf('?멸툑/媛遺?);
+    const advanceGroupExisting = takeGroup('媛遺덇?由?);
+
+    // Only process sub-items if "媛遺덇?由? group exists or we have children needing grouping
+    let advanceGroup: MenuItem | null = null;
+
+    if (advanceGroupExisting) {
+        const advanceChildrenRaw = Array.isArray(advanceGroupExisting.sub) ? advanceGroupExisting.sub : [];
+        const advanceChildren = advanceChildrenRaw
+            .map((child) => (typeof child === 'string' ? ({ text: child } as MenuItem) : (child as MenuItem)))
+            .map((child) => normalizeMenuItem(child, `payroll/${item.text}/媛遺덇?由?));
+
+        const ensureAdvanceChild = (text: string): MenuItem | null => {
+            const found = advanceChildren.find((c) => c.text === text && (!c.sub || c.sub.length === 0));
+            return found ? { ...found, sub: [] } : null; // Do NOT create if missing
+        };
+
+        const advanceRegister = ensureAdvanceChild('媛遺덈벑濡?);
+        const taxAdvance = looseTaxAdvance ?? ensureAdvanceChild('?멸툑/媛遺?);
+
+        const validAdvanceSubs = [advanceRegister, taxAdvance].filter((c): c is MenuItem => c !== null);
+
+        advanceGroup = normalizeMenuItem(
+            {
+                ...advanceGroupExisting,
+                sub: validAdvanceSubs
+            },
+            `payroll/${item.text}`
+        );
+    } else {
+        // If "媛遺덇?由? doesn't exist, check for loose "?멸툑/媛遺?
+        // If user deleted "媛遺덇?由?, we respect that.
+        // We do NOT auto-create it just because '?멸툑/媛遺? exists (unless we want to preserve it).
+        // Let's assume if they deleted the group, they deleted the structure.
+        // But if '?멸툑/媛遺? was at root, it's captured in looseTaxAdvance.
+        // If looseTaxAdvance exists, we might want to keep it at root? 
+        // The original logic normalized it into the group. 
+        // Let's just keep looseTaxAdvance if we aren't enforcing the group.
+    }
+
+    const newSub = [dailyWage, monthlyWage, supportTeam, advanceGroup, (!advanceGroup && looseTaxAdvance) ? looseTaxAdvance : null]
+        .filter((c): c is MenuItem => c !== null)
+        .map(c => normalizeMenuItem(c!, `payroll/${item.text}`));
+
+    return {
+        ...item,
+        sub: newSub
+    };
+};
+
+const normalizePayrollStructure = (config: SiteDataType): SiteDataType => {
+    const next: SiteDataType = {};
+    Object.keys(config).forEach((siteKey) => {
+        const site = config[siteKey];
+        const menu = Array.isArray(site.menu) ? site.menu : [];
+        next[siteKey] = {
+            ...site,
+            menu: menu.map((item) => normalizePayrollMenuItem(item))
+        };
+    });
+    return next;
+};
+
+// prune functions removed
+
+
+const createDeterministicId = (parts: string[]): string => {
+    const input = parts.join('|');
+    let hash = 2166136261;
+    for (let i = 0; i < input.length; i++) {
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return `m_${(hash >>> 0).toString(36)}`;
+};
+
+const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
+    const base: MenuItem =
+        typeof item === 'string'
+            ? { text: item }
+            : (item && typeof item === 'object')
+                ? { ...(item as MenuItem) }
+                : ({ text: '' } as MenuItem);
+
+    const rawText = typeof base.text === 'string' ? base.text.trim() : '';
+    const rawPath = typeof base.path === 'string' ? base.path.trim() : '';
+    const rawId = typeof base.id === 'string' ? base.id.trim() : '';
+    const fromPath = rawPath ? (PATH_TO_MENU_TEXT[rawPath] || '') : '';
+    const inferredText = rawText || fromPath || rawId;
+    const normalizedText = inferredText ? (MENU_TEXT_ALIASES[inferredText] ?? inferredText) : '';
+
+    const idSeed = `${parentIdPath}/${normalizedText || rawId || 'unknown'}`;
+    const normalizedId = rawId.length > 0 ? rawId : createDeterministicId([idSeed]);
+
+    const rawSub = Array.isArray(base.sub)
+        ? base.sub.filter((c: any) => typeof c === 'string' || (c && typeof c === 'object'))
+        : [];
+    const normalizedSub = rawSub
+        .map((child: any) => normalizeMenuItem(child, `${idSeed}`))
+        .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
+
+    const normalizedPath = rawPath.length > 0 ? rawPath : (normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined);
+
+    const next: MenuItem = {
+        ...base,
+        text: normalizedText,
+        id: normalizedId,
+        path: normalizedPath,
+        sub: normalizedSub
+    };
+
+    if (!next.sub || next.sub.length === 0) {
+        delete (next as any).sub;
+    }
+
+    return next;
+};
+
+const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
+    const normalized: SiteDataType = {};
+    const safeConfig: any = config && typeof config === 'object' ? config : {};
+    Object.keys(safeConfig).forEach((siteKey) => {
+        const siteAny: any = safeConfig[siteKey];
+        const site: any = siteAny && typeof siteAny === 'object' ? siteAny : {};
+
+        const safeName = typeof site.name === 'string' && site.name.trim().length > 0 ? site.name : siteKey;
+        const safeIcon = typeof site.icon === 'string' && site.icon.trim().length > 0 ? site.icon : 'fa-globe';
+
+        const rawMenu = Array.isArray(site.menu) ? site.menu : [];
+        const rawTrash = Array.isArray(site.trash) ? site.trash : undefined;
+
+        normalized[siteKey] = {
+            ...site,
+            name: safeName,
+            icon: safeIcon,
+            menu: rawMenu
+                .map((item: any) => normalizeMenuItem(item, siteKey))
+                .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
+            trash: rawTrash
+                ? rawTrash
+                    .map((item: any) => normalizeMenuItem(item, `${siteKey}/trash`))
+                    .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0)
+                : undefined,
+            deletedItems: Array.isArray(site.deletedItems) ? site.deletedItems.filter((v: any) => typeof v === 'string') : [],
+            positionConfig: sanitizePositionConfig(site.positionConfig)
+        };
+    });
+    return normalized;
+};
+
+const pruneLargeConfig = (config: SiteDataType): SiteDataType => {
+    try {
+        const json = JSON.stringify(config);
+        const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(json).length : json.length;
+        // Firestore doc limit is 1MiB; keep a buffer.
+        if (bytes < 900_000) return config;
+
+        const next: SiteDataType = deepClone(config);
+        Object.keys(next).forEach((siteKey) => {
+            const site: any = (next as any)[siteKey];
+            if (!site || typeof site !== 'object') return;
+            if (Array.isArray(site.trash) && site.trash.length > 50) {
+                site.trash = site.trash.slice(-50);
+            }
+            if (Array.isArray(site.deletedItems) && site.deletedItems.length > 200) {
+                site.deletedItems = site.deletedItems.slice(-200);
+            }
+        });
+        return next;
+    } catch {
+        return config;
+    }
+};
+
+// Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
+
+// This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
+// But it DOES NOT merge with defaults.
+const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
+    // 1. Normalize IDs and structure
+    const normalized = normalizeSiteDataType(incomingConfig);
+
+    // 2. Fix Payroll structure specific logic
+    const structured = normalizePayrollStructure(normalized);
+
+    const final = normalizeSiteDataType(structured);
+
+    // 3. Ensure Position Config exists (Migration)
+    if (final['admin'] && !final['admin'].positionConfig) {
+        console.log('[MenuService] Auto-injecting default position config');
+        // Use a safe fallback or import from DEFAULT_MENU_CONFIG
+        // Since we are inside the module, we can use the imported constant if we avoid circular issues or just hardcode/copy.
+        // Copying from DEFAULT_MENU_CONFIG if available, or using hardcoded fallback for safety.
+        if (DEFAULT_MENU_CONFIG.admin?.positionConfig) {
+            final['admin'].positionConfig = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG.admin.positionConfig));
+        }
+    }
+
+    return final;
+};
+
+const notifyListeners = () => {
+    listeners.forEach((listener) => {
+        // Always return currentConfig (which is processed)
+        if (currentConfig) {
+            listener.callback(deepClone(currentConfig));
+        }
+    });
+};
+
+const setupSnapshotListener = () => {
+    if (unsubscribeSnapshot) {
+        return;
+    }
+
+    unsubscribeSnapshot = onSnapshot(
+        getMenuDocRef(activeDocId),
+        (snapshot) => {
+        if (!snapshot.exists()) {
+            console.warn('[MenuService] Configuration missing. Initializing with defaults...');
+            // Cold Init: Save DEFAULT_MENU_CONFIG to DB so it persists.
+            const initialConfig = deepClone(DEFAULT_MENU_CONFIG);
+
+            // We use the same processing logic to ensure it's valid before saving/using
+            const processedInitial = processIncomingConfig(initialConfig);
+
+            currentRawConfig = processedInitial;
+            currentConfig = processedInitial;
+
+            // Save async (don't block UI)
+            menuServiceV11.saveMenuConfig(processedInitial).catch(err => {
+                console.error('[MenuService] Failed to auto-initialize menu config:', err);
+            });
+
+            notifyListeners();
+            return;
+        }
+
+        const rawData = snapshot.data();
+        const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
+
+        currentRawConfig = deepClone(normalizedIncoming);
+        // Important: Just process, DO NOT MERGE with local defaults
+        currentConfig = processIncomingConfig(normalizedIncoming);
+
+        notifyListeners();
+        },
+        (error) => {
+            console.error('[MenuService] Snapshot listener error:', error);
+            if (isPermissionDenied(error)) {
+                const currentIndex = DOC_ID_CANDIDATES.indexOf(activeDocId);
+                const nextDocId = DOC_ID_CANDIDATES[currentIndex + 1];
+                if (nextDocId) {
+                    activeDocId = nextDocId;
+                    if (unsubscribeSnapshot) {
+                        unsubscribeSnapshot();
+                        unsubscribeSnapshot = null;
+                    }
+                    setupSnapshotListener();
+                }
+            }
+        }
+    );
+};
+
+export const menuServiceV11 = {
+    subscribe: (callback: (data: SiteDataType) => void, options: MenuSubscribeOptions = {}) => {
+        const listener: MenuListener = { callback };
+        listeners.add(listener);
+
+        setupSnapshotListener();
+
+        // Immediate return if we have data
+        if (currentConfig) {
+            callback(deepClone(currentConfig));
+        }
+
+        return () => {
+            listeners.delete(listener);
+            if (listeners.size === 0 && unsubscribeSnapshot) {
+                unsubscribeSnapshot();
+                unsubscribeSnapshot = null;
+            }
+        };
+    },
+
+    getMenuConfig: async (options: MenuFetchOptions = {}): Promise<SiteDataType | null> => {
+        try {
+            let firstReadableMissing: string | null = null;
+
+            for (const candidate of DOC_ID_CANDIDATES) {
+                try {
+                    const menuRef = getMenuDocRef(candidate);
+                    const docSnapshot = await getDoc(menuRef);
+
+                    if (docSnapshot.exists()) {
+                        activeDocId = candidate;
+                        const rawData = docSnapshot.data();
+                        const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
+                        return processIncomingConfig(normalizedIncoming);
+                    }
+
+                    if (!firstReadableMissing) {
+                        firstReadableMissing = candidate;
+                    }
+                } catch (err: any) {
+                    if (isPermissionDenied(err)) {
+                        continue;
+                    }
+                    throw err;
+                }
+            }
+
+            if (firstReadableMissing) {
+                activeDocId = firstReadableMissing;
+            }
+
+            console.warn('[MenuService] Config missing on fetch. Returning defaults.');
+            const initial = processIncomingConfig(deepClone(DEFAULT_MENU_CONFIG));
+            await menuServiceV11.saveMenuConfig(initial);
+            return initial;
+
+        } catch (error) {
+            console.error('Failed to fetch menu configuration:', error);
+            return null;
+        }
+    },
+
+    saveMenuConfig: async (newConfig: SiteDataType) => {
+        const normalizedConfig = processIncomingConfig(normalizeSiteDataType(newConfig));
+        const prunedConfig = pruneLargeConfig(normalizedConfig);
+        const result = SiteDataTypeSchema.safeParse(prunedConfig);
+
+        if (!result.success) {
+            const issues = result.error.issues;
+            const error: Error & { issues?: typeof issues } = new Error('Invalid Menu Configuration');
+            error.issues = issues;
+            throw error;
+        }
+
+        try {
+            const sanitizedData = JSON.parse(JSON.stringify(result.data));
+            let lastError: any = null;
+
+            const candidatesToTry = [activeDocId, ...DOC_ID_CANDIDATES.filter((d) => d !== activeDocId)];
+            for (const candidate of candidatesToTry) {
+                const menuRef = getMenuDocRef(candidate);
+                try {
+                    await setDoc(menuRef, sanitizedData, { merge: true });
+                    activeDocId = candidate;
+                    return true;
+                } catch (err: any) {
+                    try {
+                        // Fallback: some rulesets allow update but restrict set/replace semantics.
+                        await updateDoc(menuRef, sanitizedData as any);
+                        activeDocId = candidate;
+                        return true;
+                    } catch (err2: any) {
+                        lastError = err2;
+                        if (isPermissionDenied(err2)) {
+                            continue;
+                        }
+                    }
+
+                    lastError = err;
+                    if (isPermissionDenied(err)) {
+                        continue;
+                    }
+                }
+            }
+
+            throw lastError;
+        } catch (error) {
+            console.error('Failed to save menu configuration:', error);
+            throw error;
+        }
+    },
+
+    saveAsDefault: async (newDefault: SiteDataType) => {
+        const normalizedConfig = normalizeSiteDataType(newDefault);
+        const result = SiteDataTypeSchema.safeParse(normalizedConfig);
+
+        if (!result.success) {
+            throw new Error('Invalid Menu Configuration');
+        }
+
+        try {
+            const sanitizedData = JSON.parse(JSON.stringify(result.data));
+            await setDoc(doc(db, COLLECTION_NAME, 'menu_custom_defaults_v11'), sanitizedData);
+            return true;
+        } catch (error) {
+            console.error('Failed to save custom defaults:', error);
+            throw error;
+        }
+    },
+
+    getCustomDefault: async (): Promise<SiteDataType | null> => {
+        try {
+            const customDefaultRef = doc(db, COLLECTION_NAME, 'menu_custom_defaults_v11');
+            const docSnapshot = await getDoc(customDefaultRef);
+
+            if (docSnapshot.exists()) {
+                const rawData = docSnapshot.data();
+                const result = SiteDataTypeSchema.safeParse(rawData);
+                if (result.success) {
+                    return result.data;
+                }
+            }
+            return null;
+        } catch (error) {
+            console.error('Failed to get custom defaults:', error);
+            return null;
+        }
+    },
+
+    resetToDefault: async () => {
+        // Logic: Use Custom Default if exists, otherwise Manual Default
+        const customDefault = await menuServiceV11.getCustomDefault();
+        if (customDefault) {
+            await menuServiceV11.saveMenuConfig(customDefault);
+        } else {
+            // Use the local defaultMenu.ts as the "Factory Reset" source
+            await menuServiceV11.saveMenuConfig(DEFAULT_MENU_CONFIG);
+        }
+    },
+
+    ensureSystemMenuExists: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+            const adminMenu = config.admin.menu || [];
+
+            // 1. Check if "?쒖뒪??愿由? exists
+            let systemGroupIndex = adminMenu.findIndex((item) => item.text === '?쒖뒪??愿由?);
+            let systemGroup = systemGroupIndex >= 0 ? adminMenu[systemGroupIndex] : null;
+
+            if (!systemGroup) {
+                // Create new group
+                systemGroup = {
+                    text: '?쒖뒪??愿由?,
+                    icon: 'fa-gears',
+                    sub: []
+                };
+                adminMenu.push(systemGroup);
+                modified = true;
+            }
+
+            // 2. Check sub items
+            // Ensure sub is an array
+            if (!systemGroup.sub) systemGroup.sub = [];
+
+            const requiredSubs = ['硫붾돱愿由?, '?쒖뒪??硫붿떆吏 ?ㅼ젙', '?곗씠???곌껐 ?먭?'];
+            // Normalize existing subs to strings for comparison
+            const existingSubTexts = systemGroup.sub.map((s) => (typeof s === 'string' ? s : s.text));
+
+            requiredSubs.forEach((req) => {
+                if (!existingSubTexts.includes(req)) {
+                    // We can push strings directly, normalize will handle them
+                    (systemGroup!.sub as any[]).push(req);
+                    modified = true;
+                }
+            });
+
+            if (modified) {
+                console.log('[MenuService] Migrating: Adding System Menu to Admin...');
+                // We need to update the admin menu in the config
+                // If we created a new group, it's already pushed. 
+                // If we modified an existing group reference, it should be reflected in adminMenu array.
+                // However, we need to ensure the structure is correct.
+
+                // Note: systemGroup is a reference to an object inside adminMenu array (or pushed to it).
+                // So config.admin.menu is already updated.
+
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Migration Complete: System Menu added.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Migration Failed:', error);
+        }
+    },
+
+    ensureSmartMemoMenuExists: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+            const adminMenu = config.admin.menu || [];
+
+            // Check if "?ㅻ쭏??硫붾え" exists (using Korean text as in defaultMenu.ts)
+            // Also check for English "Smart Memo" just in case
+            const exists = adminMenu.some((item) => item.text === '?ㅻ쭏??硫붾え' || item.text === 'Smart Memo');
+
+            if (!exists) {
+                console.log('[MenuService] Migrating: Adding Smart Memo to Admin...');
+                adminMenu.push({
+                    text: '?ㅻ쭏??硫붾え',
+                    icon: 'fa-sticky-note'
+                });
+                modified = true;
+            }
+
+            // --- Barobill Menu Migration ---
+            // Add "移댁뭅?ㅽ넚 ?곕룞 ?ㅼ젙" to "?쒖뒪??愿由? group if exists, or root if not
+            // Re-using adminMenu reference
+            let systemGroup = adminMenu.find((item) => item.text === '?쒖뒪??愿由?);
+            if (systemGroup && systemGroup.sub) {
+                const barobillItemText = '移댁뭅?ㅽ넚 ?곕룞 ?ㅼ젙';
+                const subItems = systemGroup.sub.map(s => typeof s === 'string' ? s : s.text);
+
+                if (!subItems.includes(barobillItemText)) {
+                    console.log('[MenuService] Migrating: Adding Barobill Kakao Menu...');
+                    // Pushing string, normalize will handle it using MENU_PATHS
+                    (systemGroup.sub as any[]).push(barobillItemText);
+                    modified = true;
+                }
+            }
+            // -------------------------------
+
+            if (modified) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Migration Complete: Menu items added.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Smart Memo / Barobill Migration Failed:', error);
+        }
+    },
+
+    clearCache: () => {
+        currentConfig = null;
+        currentRawConfig = null;
+    },
+
+    syncWithPositions: async (positions: { id: string; name: string; rank: number; color: string; icon?: string; iconKey?: string; }[]) => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config || !config.admin) return;
+
+            let modified = false;
+
+            // 1. Update positionConfig in admin site
+            const newPositionConfig = [
+                { id: 'full', name: '?꾩껜 硫붾돱', icon: 'fa-shield-halved', color: 'from-red-600 to-red-400', order: 0 },
+                ...positions.map((p, index) => ({
+                    id: p.id,
+                    name: p.name,
+                    icon: p.iconKey || p.icon || 'fa-user',
+                    color: p.color || 'gray',
+                    order: (p.rank || 0) + 1
+                }))
+            ];
+
+            if (JSON.stringify(config.admin.positionConfig) !== JSON.stringify(newPositionConfig)) {
+                config.admin.positionConfig = newPositionConfig;
+                modified = true;
+            }
+
+            // 2. Ensure each position has a site entry
+            positions.forEach(pos => {
+                const siteKey = pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`;
+
+                // If this site key doesn't exist, create it
+                if (!config[siteKey]) {
+                    // Fallback to default menu if pos_general exists, otherwise empty
+                    const fallbackMenu = config['pos_general']?.menu
+                        ? JSON.parse(JSON.stringify(config['pos_general'].menu))
+                        : [];
+
+                    config[siteKey] = {
+                        name: pos.name,
+                        icon: pos.iconKey || pos.icon || 'fa-user',
+                        menu: fallbackMenu
+                    };
+                    modified = true;
+                } else {
+                    // Update metadata if changed
+                    if (config[siteKey].name !== pos.name || config[siteKey].icon !== (pos.iconKey || pos.icon)) {
+                        config[siteKey].name = pos.name;
+                        config[siteKey].icon = pos.iconKey || pos.icon || 'fa-user';
+                        modified = true;
+                    }
+                }
+            });
+
+            // 3. Remove orphaned site keys (pos_*) that no longer exist in positions list
+            const validPosKeys = new Set(positions.map(p => p.id.startsWith('pos_') ? p.id : `pos_${p.id}`));
+
+            Object.keys(config).forEach(key => {
+                if (key.startsWith('pos_') && !validPosKeys.has(key)) {
+                    delete config[key];
+                    modified = true;
+                }
+            });
+
+            if (modified) {
+                await menuServiceV11.saveMenuConfig(config);
+                console.log('[MenuService] Synced positions to menu config.');
+            }
+        } catch (error) {
+            console.error('[MenuService] Sync failed:', error);
+        }
+    },
+
+    pruneDuplicates: async () => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return;
+
+            let modified = false;
+            const seenIds = new Set<string>();
+
+            const pruneRecursive = (items: (MenuItem | string)[]): (MenuItem | string)[] => {
+                const seenText = new Set<string>();
+                const uniqueItems: (MenuItem | string)[] = [];
+
+                items.forEach(item => {
+                    const text = typeof item === 'string' ? item : item.text;
+                    const normalizedText = text.trim();
+
+                    // 1. Text Deduplication (per level)
+                    if (seenText.has(normalizedText)) {
+                        modified = true;
+                        return; // Skip duplicate text at same level
+                    }
+                    seenText.add(normalizedText);
+
+                    // 2. ID Deduplication (Global) & ID Generation
+                    if (typeof item !== 'string') {
+                        if (!item.id || seenIds.has(item.id)) {
+                            // Generate new ID if missing or duplicate
+                            item.id = `m_${Math.random().toString(36).substr(2, 9)}`;
+                            modified = true;
+                        }
+                        seenIds.add(item.id);
+
+                        if (item.sub) {
+                            item.sub = pruneRecursive(item.sub);
+                        }
+                    }
+
+                    uniqueItems.push(item);
+                });
+
+                return uniqueItems;
+            };
+
+            Object.keys(config).forEach(siteKey => {
+                const site = config[siteKey];
+                if (site.menu) {
+                    site.menu = pruneRecursive(site.menu) as MenuItem[];
+                }
+            });
+
+            if (modified) {
+                console.log('[MenuService] Duplicates (IDs/Text) pruned and fixed.');
+                await menuServiceV11.saveMenuConfig(config);
+            } else {
+                console.log('[MenuService] No duplicates found.');
+            }
+        } catch (error: any) {
+            console.error('[MenuService] Prune failed:', error);
+        }
+    }
+};

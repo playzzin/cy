@@ -23,7 +23,7 @@ const CompanyManagement: React.FC = () => {
         const filtered = companies.filter(c =>
             c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             (c.code ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-            c.ceoName.toLowerCase().includes(searchQuery.toLowerCase())
+            (c.ceoName ?? '').toLowerCase().includes(searchQuery.toLowerCase())
         );
         setFilteredCompanies(filtered);
     }, [companies, searchQuery]);

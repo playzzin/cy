@@ -82,7 +82,7 @@ const AccountLinkingModal: React.FC<AccountLinkingModalProps> = ({ onClose }) =>
     const filteredWorkers = workers.filter(w =>
         w.name.includes(workerSearch) ||
         w.teamName?.includes(workerSearch) ||
-        w.idNumber.includes(workerSearch)
+        (w.idNumber ?? '').includes(workerSearch)
     );
 
     // Sort users: Unlinked first, then by last login

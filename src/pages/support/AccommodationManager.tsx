@@ -82,7 +82,7 @@ const AccommodationManager: React.FC = () => {
             setLoading(true);
             const targetYearMonth = getCurrentYearMonth();
             const [accommodationList, teamList, companies, assignmentList, ledgerList, billingTargetList] = await Promise.all([
-                accommodationService.getAccommodations(),
+                accommodationService.listAllAccommodations(),
                 teamService.getTeams(),
                 companyService.getCompanies(),
                 accommodationService.getAssignments(),

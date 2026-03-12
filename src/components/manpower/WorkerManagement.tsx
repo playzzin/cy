@@ -269,7 +269,7 @@ const WorkerManagement: React.FC = () => {
 
             return (
                 worker.name.toLowerCase().includes(lowerSearch) ||
-                worker.idNumber.includes(lowerSearch) ||
+                (worker.idNumber ?? '').includes(lowerSearch) ||
                 (worker.contact && worker.contact.includes(lowerSearch))
             );
         });

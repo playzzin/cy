@@ -1,6 +1,9 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSetting, listAllSettings as listSettings, updateSetting } from './dataconnectCompat';
+import { db } from '../config/firebase';
+import {
+    doc,
+    getDoc,
+    setDoc
+} from 'firebase/firestore';
 
 export interface ComponentConfig {
     id: string;
@@ -19,8 +22,8 @@ export const COMPONENT_REGISTRY: ComponentConfig[] = [
     { id: 'ai-analysis', name: 'AI Analysis', category: 'FEATURE', isEnabled: true, description: 'Gemini AI integration features' },
 ];
 
-const dc = getDataConnect(app, connectorConfig);
 const SETTING_ID = 'system_components';
+const SETTING_COLLECTION = 'settings';
 
 const safeJsonParse = (value: unknown): any => {
     if (typeof value !== 'string') return null;
@@ -48,36 +51,31 @@ class ComponentService {
 
     constructor() {
         this.initializeRegistry();
-        void this.refreshFromDataConnect();
+        void this.refreshFromFirestore();
         this.subscribeToUpdates();
     }
 
-    // Ensure all registry items exist in DB
-    private async initializeRegistry() {
-        // We don't await this to avoid blocking app init, but in real app we might
-        // Check if exists, if not create
-        // To save reads, we could just setMerge, but we want to respect DB state over Registry default
-        // usually.
-        // For now, let's just listen. If missing in DB, we use Registry default.
-    }
+    private async initializeRegistry() { }
 
     private subscribeToUpdates() {
         if (typeof window === 'undefined') return;
         if (this.pollHandle != null) return;
         this.pollHandle = window.setInterval(() => {
-            void this.refreshFromDataConnect();
-        }, 10000);
+            void this.refreshFromFirestore();
+        }, 1200000); // 20분 폴링
     }
 
-    private async refreshFromDataConnect(): Promise<void> {
+    private async refreshFromFirestore(): Promise<void> {
         try {
-            const response = await listSettings(dc);
-            const rows = (response as any)?.data?.settings ?? [];
-            const row = Array.isArray(rows)
-                ? rows.find((r: any) => String(r?.id ?? '') === SETTING_ID)
-                : null;
+            const docRef = doc(db, SETTING_COLLECTION, SETTING_ID);
+            const docSnap = await getDoc(docRef);
 
-            const parsed = safeJsonParse(row?.data);
+            let parsed: any = null;
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                parsed = safeJsonParse(data.data);
+            }
+
             const configs: ComponentConfig[] = Array.isArray(parsed?.configs) ? parsed.configs : [];
 
             this.configs.clear();
@@ -111,7 +109,6 @@ class ComponentService {
         return config ? config.isEnabled : true; // Default true if unknown
     }
 
-    // Admin: Update Config
     public async updateConfig(id: string, updates: Partial<ComponentConfig>) {
         const current = this.getConfig(id) ?? (COMPONENT_REGISTRY.find(c => c.id === id) as ComponentConfig | undefined);
         const next: ComponentConfig = {
@@ -130,17 +127,10 @@ class ComponentService {
 
         const payload = safeJsonStringify({ configs: Array.from(all.values()) });
         try {
-            const updated = await updateSetting(dc, { id: SETTING_ID, data: payload } as any);
-            const didUpdate = (updated as any)?.data?.setting_update != null;
-            if (!didUpdate) {
-                await createSetting(dc, { id: SETTING_ID, data: payload } as any);
-            }
-        } catch {
-            try {
-                await createSetting(dc, { id: SETTING_ID, data: payload } as any);
-            } catch {
-                await updateSetting(dc, { id: SETTING_ID, data: payload } as any);
-            }
+            const docRef = doc(db, SETTING_COLLECTION, SETTING_ID);
+            await setDoc(docRef, { data: payload }, { merge: true });
+        } catch (error) {
+            console.error('Failed to update component config in Firestore:', error);
         }
 
         this.configs.set(id, next);

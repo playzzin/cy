@@ -121,8 +121,8 @@ const CompanyManagementPage: React.FC<CompanyManagementPageProps> = ({ defaultOp
 
     const filteredCompanies = companies.filter(company =>
         company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        company.ceoName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        company.businessNumber.includes(searchTerm)
+        (company.ceoName ?? '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (company.businessNumber ?? '').includes(searchTerm)
     );
 
     // Statistics

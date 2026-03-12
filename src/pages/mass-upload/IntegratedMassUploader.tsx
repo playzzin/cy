@@ -1444,8 +1444,10 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
                 || payTypeByWorkerNameFromDb.get(n)
             );
             const workContent = getCellString(r?.['작업내용']);
+            const siteType = normalizeSiteTypeValue(getCellString(r?.['현장구분']));
+            const paymentType = normalizePaymentMethodValue(getCellString(r?.['결제구분']));
 
-            fileByName.set(n, { name: n, manDay, unitPrice, role, payType, workContent });
+            fileByName.set(n, { name: n, manDay, unitPrice, role, payType, workContent, siteType, paymentType });
         });
 
         const toAdd: string[] = [];
@@ -1465,14 +1467,18 @@ const analyzeDailyReportMapping = async (fileRows: any[], workerRows: any[] = []
             const oldRole = getCellString(ew?.role);
             const oldPayType = getCellString(ew?.payType ?? ew?.salaryModel);
             const oldWorkContent = getCellString(ew?.workContent);
+            const oldSiteType = getCellString(ew?.siteType);
+            const oldPaymentType = getCellString(ew?.paymentType);
 
             const hasManDayDiff = typeof fw?.manDay === 'number' && fw.manDay !== oldManDay;
             const hasUnitPriceDiff = typeof fw?.unitPrice === 'number' && fw.unitPrice !== (oldUnitPrice ?? 0);
             const hasRoleDiff = fw?.role ? fw.role !== oldRole : false;
             const hasPayTypeDiff = fw?.payType ? fw.payType !== oldPayType : false;
             const hasWorkContentDiff = fw?.workContent ? fw.workContent !== oldWorkContent : false;
+            const hasSiteTypeDiff = fw?.siteType ? fw.siteType !== oldSiteType : false;
+            const hasPaymentTypeDiff = fw?.paymentType ? fw.paymentType !== oldPaymentType : false;
 
-            if (hasManDayDiff || hasUnitPriceDiff || hasRoleDiff || hasPayTypeDiff || hasWorkContentDiff) {
+            if (hasManDayDiff || hasUnitPriceDiff || hasRoleDiff || hasPayTypeDiff || hasWorkContentDiff || hasSiteTypeDiff || hasPaymentTypeDiff) {
                 toUpdate.push(name);
                 if (hasPayTypeDiff) payTypeDiffCount += 1;
             }
@@ -2765,13 +2771,20 @@ const IntegratedMassUploader: React.FC = () => {
                         </label>
                     </div>
 
-                    <div className="mt-6 flex justify-center">
+                    <div className="mt-6 flex justify-center gap-4">
                         <button
                             type="button"
                             onClick={downloadIntegratedTemplateExcel}
                             className="px-6 py-3 rounded-lg bg-green-600 text-white font-bold hover:bg-green-700 transition-colors flex items-center gap-2"
                         >
                             <FontAwesomeIcon icon={faDownload} /> 샘플 양식 다운로드
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCancel}
+                            className="px-6 py-3 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 transition-colors flex items-center gap-2"
+                        >
+                            <FontAwesomeIcon icon={faTimes} /> 데이터 초기화
                         </button>
                     </div>
                     <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4 max-w-4xl mx-auto">

@@ -108,13 +108,12 @@ const PositionManager: React.FC = () => {
         };
 
         loadAll();
-        const workerInterval = window.setInterval(loadWorkers, 30000);
-        const positionInterval = window.setInterval(loadPositions, 10000);
+
+        // Remove redundant polling to save cost. 
+        // Data is refreshed manually on actions (add/edit/delete).
 
         return () => {
             alive = false;
-            window.clearInterval(workerInterval);
-            window.clearInterval(positionInterval);
         };
     }, []);
 

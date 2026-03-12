@@ -1,0 +1,4 @@
+﻿src/pages/admin/MenuManagementPage.tsx(333,17): error TS1345: An expression of type 'void' cannot be tested for truthiness.
+src/services/agentOrchestrator.ts(250,55): error TS2554: Expected 0 arguments, but got 1.
+src/services/agentOrchestrator.ts(264,42): error TS2339: Property 'changed' does not exist on type 'void'.
+src/services/agentOrchestrator.ts(265,46): error TS2339: Property 'activeDocId' does not exist on type 'void'.

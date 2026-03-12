@@ -105,8 +105,8 @@ const PartnerTransactionLedgerPage: React.FC = () => {
                                 return {
                                     id: company.id!,
                                     name: company.name,
-                                    type: company.type,
-                                    businessNumber: company.businessNumber,
+                                    type: company.type || '',
+                                    businessNumber: company.businessNumber || '',
                                     totalSales: balance.salesTotal,
                                     totalPayments: balance.receivedTotal,
                                     receivableBalance: balance.receivableBalance,
@@ -116,8 +116,8 @@ const PartnerTransactionLedgerPage: React.FC = () => {
                                 return {
                                     id: company.id!,
                                     name: company.name,
-                                    type: company.type,
-                                    businessNumber: company.businessNumber,
+                                    type: company.type || '',
+                                    businessNumber: company.businessNumber || '',
                                     totalSales: 0,
                                     totalPayments: 0,
                                     receivableBalance: 0,

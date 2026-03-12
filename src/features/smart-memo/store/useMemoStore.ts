@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import { dc } from '../../../config/firebase';
 import {
     addDoc,
     collection,
     deleteDoc,
     deleteField,
     doc,
+    getDocs,
     onSnapshot,
     query,
     serverTimestamp,
@@ -15,27 +15,25 @@ import {
     setDoc
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
-import {
-    ListAllSmartMemosVariables,
-    ListAllSmartMemoCategoriesVariables,
-    listAllSmartMemoCategories,
-    listAllSmartMemos,
-    createSmartMemo,
-    updateSmartMemo,
-    deleteSmartMemo,
-    createSmartMemoCategory,
-    updateSmartMemoCategory,
-    deleteSmartMemoCategory
-} from '../../../dataconnect-generated';
 import { Timestamp } from '../../../types/timestamp';
 import { v4 as uuidv4 } from 'uuid';
 import { Memo, Category, MemoState } from '../types/memo';
 
 const MEMO_COLLECTION = 'smart_memos';
 const CATEGORY_COLLECTION = 'smart_memo_categories';
-let activeMemoBackend: 'dataconnect' | 'firestore' = 'firestore';
+let activeMemoBackend: 'firestore' = 'firestore';
 const memoAliasToUuid = new Map<string, string>();
 const categoryAliasToUuid = new Map<string, string>();
+
+type ListAllSmartMemoCategoriesVariables = {
+    limit?: number;
+    offset?: number;
+};
+
+type ListAllSmartMemosVariables = {
+    limit?: number;
+    offset?: number;
+};
 
 const LIST_ALL_CATEGORIES_FALLBACK_VARS: ListAllSmartMemoCategoriesVariables = {
     limit: 5000,
@@ -46,18 +44,99 @@ const LIST_ALL_MEMOS_FALLBACK_VARS: ListAllSmartMemosVariables = {
     offset: 0
 };
 
+const paginateRows = <T>(rows: T[], vars?: { limit?: number; offset?: number }): T[] => {
+    const offset = typeof vars?.offset === 'number' ? vars.offset : 0;
+    const limit = typeof vars?.limit === 'number' ? vars.limit : rows.length;
+    return rows.slice(offset, offset + limit);
+};
+
+const readCollectionRows = async (collectionName: string): Promise<any[]> => {
+    const snapshot = await getDocs(collection(db, collectionName));
+    return snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+};
+
+const listAllSmartMemos = async (vars: ListAllSmartMemosVariables = LIST_ALL_MEMOS_FALLBACK_VARS): Promise<any> => {
+    const rows = await readCollectionRows(MEMO_COLLECTION);
+    return { data: { smartMemos: paginateRows(rows, vars) } };
+};
+
+const listAllSmartMemoCategories = async (vars: ListAllSmartMemoCategoriesVariables = LIST_ALL_CATEGORIES_FALLBACK_VARS): Promise<any> => {
+    const rows = await readCollectionRows(CATEGORY_COLLECTION);
+    return { data: { smartMemoCategories: paginateRows(rows, vars) } };
+};
+
+const buildMutationPayload = (vars: Record<string, unknown>): Record<string, unknown> => {
+    const payload = stripUndefined({ ...vars }) as Record<string, unknown>;
+    delete payload.id;
+    return payload;
+};
+
+const createSmartMemo = async (vars: Record<string, unknown>): Promise<any> => {
+    const ref = doc(collection(db, MEMO_COLLECTION));
+    await setDoc(ref, buildMutationPayload({
+        ...vars,
+        createdAt: vars.createdAt ?? new Date().toISOString(),
+        updatedAt: vars.updatedAt ?? new Date().toISOString()
+    }), { merge: true });
+    return { data: { smartMemo_insert: { id: ref.id } } };
+};
+
+const updateSmartMemo = async (vars: Record<string, unknown>): Promise<any> => {
+    const id = typeof vars.id === 'string' ? vars.id.trim() : '';
+    if (!id) throw new Error('Memo id is required');
+    await setDoc(doc(db, MEMO_COLLECTION, id), buildMutationPayload({
+        ...vars,
+        updatedAt: vars.updatedAt ?? new Date().toISOString()
+    }), { merge: true });
+    return { data: { smartMemo_update: { id } } };
+};
+
+const deleteSmartMemo = async (vars: Record<string, unknown>): Promise<any> => {
+    const id = typeof vars.id === 'string' ? vars.id.trim() : '';
+    if (!id) throw new Error('Memo id is required');
+    await deleteDoc(doc(db, MEMO_COLLECTION, id));
+    return { data: { smartMemo_delete: { id } } };
+};
+
+const createSmartMemoCategory = async (vars: Record<string, unknown>): Promise<any> => {
+    const ref = doc(collection(db, CATEGORY_COLLECTION));
+    await setDoc(ref, buildMutationPayload({
+        ...vars,
+        createdAt: vars.createdAt ?? new Date().toISOString(),
+        updatedAt: vars.updatedAt ?? new Date().toISOString()
+    }), { merge: true });
+    return { data: { smartMemoCategory_insert: { id: ref.id } } };
+};
+
+const updateSmartMemoCategory = async (vars: Record<string, unknown>): Promise<any> => {
+    const id = typeof vars.id === 'string' ? vars.id.trim() : '';
+    if (!id) throw new Error('Category id is required');
+    await setDoc(doc(db, CATEGORY_COLLECTION, id), buildMutationPayload({
+        ...vars,
+        updatedAt: vars.updatedAt ?? new Date().toISOString()
+    }), { merge: true });
+    return { data: { smartMemoCategory_update: { id } } };
+};
+
+const deleteSmartMemoCategory = async (vars: Record<string, unknown>): Promise<any> => {
+    const id = typeof vars.id === 'string' ? vars.id.trim() : '';
+    if (!id) throw new Error('Category id is required');
+    await deleteDoc(doc(db, CATEGORY_COLLECTION, id));
+    return { data: { smartMemoCategory_delete: { id } } };
+};
+
 const getRows = <T = any>(response: unknown, key: string): T[] => {
     const rows = (response as any)?.data?.[key];
     return Array.isArray(rows) ? rows : [];
 };
 
 const listSmartMemosRows = async (_allowLegacyFallback: boolean = true): Promise<any[]> => {
-    const legacy = await listAllSmartMemos(dc, LIST_ALL_MEMOS_FALLBACK_VARS);
+    const legacy = await listAllSmartMemos(LIST_ALL_MEMOS_FALLBACK_VARS);
     return getRows(legacy, 'smartMemos');
 };
 
 const listSmartMemoCategoriesRows = async (_allowLegacyFallback: boolean = true): Promise<any[]> => {
-    const legacy = await listAllSmartMemoCategories(dc, LIST_ALL_CATEGORIES_FALLBACK_VARS);
+    const legacy = await listAllSmartMemoCategories(LIST_ALL_CATEGORIES_FALLBACK_VARS);
     return getRows(legacy, 'smartMemoCategories');
 };
 
@@ -66,6 +145,20 @@ const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 const toTimestamp = (value: unknown): Timestamp | null => {
     if (!value) return null;
     if (value instanceof Timestamp) return value;
+    if (typeof (value as any)?.toMillis === 'function') {
+        try {
+            return Timestamp.fromMillis((value as any).toMillis());
+        } catch {
+            return null;
+        }
+    }
+    if (typeof (value as any)?.toDate === 'function') {
+        try {
+            return Timestamp.fromDate((value as any).toDate());
+        } catch {
+            return null;
+        }
+    }
     if (typeof value === 'string') {
         const d = new Date(value);
         if (!Number.isNaN(d.getTime())) return Timestamp.fromDate(d);
@@ -83,9 +176,9 @@ const safeJsonParse = <T>(raw: unknown): T | null => {
     }
 };
 
-const toDataConnectErrorMessage = (error: unknown): string => {
+const normalizeMemoErrorMessage = (error: unknown): string => {
     const raw = error instanceof Error ? error.message : String(error);
-    const prefix = 'DataConnect error while performing request:';
+    const prefix = 'Backend error while performing request:';
     const index = raw.indexOf(prefix);
     if (index < 0) return raw;
 
@@ -358,7 +451,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             return () => { };
         }
 
-        activeMemoBackend = 'dataconnect';
+        activeMemoBackend = 'firestore';
         set({ isLoading: true });
 
         // Internal buffers for merge
@@ -612,17 +705,17 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     );
 
                 if (hasMissingCoreShape) {
-                    startFirestoreFallback('메모 상세 필드가 누락되어 Firestore 소스로 전환했습니다.');
+                    startFirestoreFallback('메모 ?�세 ?�드가 ?�락?�어 Firestore ?�스�??�환?�습?�다.');
                     return;
                 }
 
-                activeMemoBackend = 'dataconnect';
+                activeMemoBackend = 'firestore';
                 const nonPublicRows = memoRows.filter((r: any) => String(r?.scope ?? '') !== 'public');
                 privateMemos = nonPublicRows
                     .filter((r: any) => matchesUser(r?.userId))
                     .map(mapRowToMemo);
 
-                // 레거시 호환: userId 체계가 다른 과거 데이터는 전체 비공개 메모를 fallback 로드
+                // ?�거???�환: userId 체계가 ?�른 과거 ?�이?�는 ?�체 비공�?메모�?fallback 로드
                 if (privateMemos.length === 0 && nonPublicRows.length > 0) {
                     privateMemos = nonPublicRows.map(mapRowToMemo);
                 }
@@ -633,7 +726,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
 
                 updateMergedState();
             } else {
-                const message = toDataConnectErrorMessage(memosResult.reason);
+                const message = normalizeMemoErrorMessage(memosResult.reason);
                 console.error('Memo subscription error:', memosResult.reason);
                 startFirestoreFallback(message);
                 return;
@@ -661,7 +754,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     lastReportedErrorAt = 0;
                 }
             } else if (shouldFetchCategories) {
-                const message = toDataConnectErrorMessage(categoriesResult.reason);
+                const message = normalizeMemoErrorMessage(categoriesResult.reason);
                 console.error('Memo category subscription error:', categoriesResult.reason);
 
                 try {
@@ -713,11 +806,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             stop();
             stopFirestore();
         };
-
-        void tick();
-        pollTimer = setInterval(() => {
-            void tick();
-        }, 5000);
+        startFirestoreFallback('firestore');
 
         set({ unsubscribeMemos, unsubscribeCategories });
 
@@ -773,7 +862,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 }
             }
 
-            await createSmartMemo(dc, {
+            await createSmartMemo({
                 legacyId: newId,
                 userId,
                 scope,
@@ -967,7 +1056,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                         }
                     }
 
-                    await updateSmartMemo(dc, data);
+                    await updateSmartMemo(data);
                 })
             );
         } catch (error: any) {
@@ -1051,7 +1140,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 }
             }
 
-            await updateSmartMemo(dc, vars);
+            await updateSmartMemo(vars);
         } catch (error: any) {
             console.error("Failed to update memo:", error);
             set({ error: error.message });
@@ -1102,7 +1191,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 if (memo.order !== newOrder) {
                     const uuid = uuidById.get(memo.id);
                     if (!uuid) return;
-                    updates.push(updateSmartMemo(dc, { id: uuid, order: newOrder } as any));
+                    updates.push(updateSmartMemo({ id: uuid, order: newOrder } as any));
                     memo.order = newOrder;
                 }
             });
@@ -1148,7 +1237,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
 
             const resolvedId = await resolveSmartMemoUuid(id);
             if (!resolvedId) return;
-            await deleteSmartMemo(dc, { id: resolvedId } as any);
+            await deleteSmartMemo({ id: resolvedId } as any);
         } catch (error: any) {
             console.error("Failed to delete memo:", error);
             set({ error: error.message });
@@ -1170,7 +1259,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 return;
             }
 
-            await createSmartMemoCategory(dc, {
+            await createSmartMemoCategory({
                 legacyId: generateLegacyId('cat'),
                 userId,
                 name: (categoryData as any)?.name ?? '',
@@ -1205,7 +1294,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
             if ((updates as any).color !== undefined) vars.color = (updates as any).color;
             if ((updates as any).icon !== undefined) vars.icon = (updates as any).icon;
 
-            await updateSmartMemoCategory(dc, vars);
+            await updateSmartMemoCategory(vars);
         } catch (error: any) {
             console.error("Failed to update category:", error);
             set({ error: error.message });
@@ -1235,7 +1324,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     affected.map(async (r: any) => {
                         const memoUuid = r?.id ? String(r.id) : null;
                         if (!memoUuid) return;
-                        await updateSmartMemo(dc, {
+                        await updateSmartMemo({
                             id: memoUuid,
                             categoryId: null,
                             categoryLegacyId: null
@@ -1246,7 +1335,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 // ignore
             }
 
-            await deleteSmartMemoCategory(dc, { id: resolvedId } as any);
+            await deleteSmartMemoCategory({ id: resolvedId } as any);
         } catch (error: any) {
             console.error("Failed to delete category:", error);
             set({ error: error.message });
@@ -1285,7 +1374,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 newCategories.map(async (cat, index) => {
                     const uuid = uuidById.get(cat.id);
                     if (!uuid) return;
-                    await updateSmartMemoCategory(dc, { id: uuid, order: index } as any);
+                    await updateSmartMemoCategory({ id: uuid, order: index } as any);
                 })
             );
         } catch (error: any) {
@@ -1587,7 +1676,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                 ) {
                     const uuid = uuidById.get(layout.i);
                     if (!uuid) return;
-                    updates.push(updateSmartMemo(dc, {
+                    updates.push(updateSmartMemo({
                         id: uuid,
                         x: layout.x,
                         y: layout.y,
@@ -1737,7 +1826,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     targetData.prevH = null;
                 }
 
-                await updateSmartMemo(dc, targetData);
+                await updateSmartMemo(targetData);
             }
 
             await Promise.all(
@@ -1747,7 +1836,7 @@ export const useMemoStore = create<MemoState>((set, get) => ({
                     if (original && (original.x !== m.x || original.y !== m.y)) {
                         const uuid = uuidById.get(m.id);
                         if (!uuid) return;
-                        await updateSmartMemo(dc, { id: uuid, x: m.x, y: m.y } as any);
+                        await updateSmartMemo({ id: uuid, x: m.x, y: m.y } as any);
                     }
                 })
             );
@@ -1850,3 +1939,4 @@ export const useMemoStore = create<MemoState>((set, get) => ({
         }));
     }
 }));
+

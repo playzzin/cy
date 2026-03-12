@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSetting, listAllSettings as listSettings, updateSetting } from './dataconnectCompat';
+import { createSetting, listAllSettings as listSettings, updateSetting } from './firestoreCrudCompat';
 
 export interface PayrollDeductionItem {
     id: string;
@@ -45,16 +43,16 @@ const DEFAULT_CONFIG: PayrollConfig = {
     incomeTaxRate: 0.03,
     residentTaxRate: 0.003,
     deductionItems: [
-        { id: 'prevMonthCarryover', label: '전월이월', order: 1, isActive: true },
-        { id: 'accommodation', label: '숙소비', order: 2, isActive: true },
-        { id: 'privateRoom', label: '개인방', order: 3, isActive: true },
-        { id: 'gloves', label: '장갑', order: 4, isActive: true },
-        { id: 'deposit', label: '보증금', order: 5, isActive: true },
-        { id: 'fines', label: '과태료', order: 6, isActive: true },
-        { id: 'electricity', label: '전기료', order: 7, isActive: true },
-        { id: 'gas', label: '도시가스', order: 8, isActive: true },
-        { id: 'internet', label: '인터넷', order: 9, isActive: true },
-        { id: 'water', label: '수도세', order: 10, isActive: true }
+        { id: 'prevMonthCarryover', label: '\uc804\uc6d4\uc774\uc6d4', order: 1, isActive: true },
+        { id: 'accommodation', label: '\uc219\uc18c\ube44', order: 2, isActive: true },
+        { id: 'privateRoom', label: '\uac1c\uc778\ubc29', order: 3, isActive: true },
+        { id: 'gloves', label: '\uc7a5\uac11', order: 4, isActive: true },
+        { id: 'deposit', label: '\ubcf4\uc99d\uae08', order: 5, isActive: true },
+        { id: 'fines', label: '\uacfc\ud0dc\ub8cc', order: 6, isActive: true },
+        { id: 'electricity', label: '\uc804\uae30\ub8cc', order: 7, isActive: true },
+        { id: 'gas', label: '\ub3c4\uc2dc\uac00\uc2a4', order: 8, isActive: true },
+        { id: 'internet', label: '\uc778\ud130\ub137', order: 9, isActive: true },
+        { id: 'water', label: '\uc218\ub3c4\uc138', order: 10, isActive: true }
     ],
     insuranceConfig: {
         thresholdDays: 8,
@@ -75,7 +73,6 @@ const DEFAULT_CONFIG: PayrollConfig = {
     }
 };
 
-const dc = getDataConnect(app, connectorConfig);
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -94,7 +91,7 @@ const parseSettingData = (raw: unknown): Record<string, unknown> | null => {
 };
 
 const findPayrollSettingRow = async (): Promise<any | null> => {
-    const res = await listSettings(dc);
+    const res = await listSettings();
     const rows = (res as any)?.data?.settings ?? [];
     const found = Array.isArray(rows) ? rows.find((r: any) => String(r?.id) === DOC_ID) : null;
     return found ?? null;
@@ -103,7 +100,7 @@ const findPayrollSettingRow = async (): Promise<any | null> => {
 const ensurePayrollSettingExists = async (): Promise<void> => {
     const existing = await findPayrollSettingRow();
     if (existing) return;
-    await createSetting(dc, {
+    await createSetting( {
         id: DOC_ID,
         data: JSON.stringify({
             taxRate: DEFAULT_CONFIG.taxRate,
@@ -315,7 +312,7 @@ export const payrollConfigService = {
 
             if (Object.keys(patch).length > 0) {
                 try {
-                    await updateSetting(dc, {
+                    await updateSetting( {
                         id: DOC_ID,
                         data: JSON.stringify({ ...data, ...patch, updatedAt: nowIso() })
                     } as any);
@@ -343,7 +340,7 @@ export const payrollConfigService = {
         const derivedIncomeTaxRate = safe.taxRate > 0 ? safe.taxRate / 1.1 : DEFAULT_CONFIG.incomeTaxRate;
         const derivedResidentTaxRate = Math.max(0, safe.taxRate - derivedIncomeTaxRate);
 
-        await updateSetting(dc, {
+        await updateSetting( {
             id: DOC_ID,
             data: JSON.stringify({
                 ...existing,
@@ -360,7 +357,7 @@ export const payrollConfigService = {
         await ensurePayrollSettingExists();
         const row = await findPayrollSettingRow();
         const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
-        await updateSetting(dc, {
+        await updateSetting( {
             id: DOC_ID,
             data: JSON.stringify({ ...existing, deductionItems: safe.deductionItems, updatedAt: nowIso() })
         } as any);
@@ -371,7 +368,7 @@ export const payrollConfigService = {
         await ensurePayrollSettingExists();
         const row = await findPayrollSettingRow();
         const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
-        await updateSetting(dc, {
+        await updateSetting( {
             id: DOC_ID,
             data: JSON.stringify({ ...existing, insuranceConfig: safe.insuranceConfig, updatedAt: nowIso() })
         } as any);
@@ -382,7 +379,7 @@ export const payrollConfigService = {
         await ensurePayrollSettingExists();
         const row = await findPayrollSettingRow();
         const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
-        await updateSetting(dc, {
+        await updateSetting( {
             id: DOC_ID,
             data: JSON.stringify({ ...existing, dailyWageStatementPeriod: safe.dailyWageStatementPeriod, updatedAt: nowIso() })
         } as any);
@@ -403,9 +400,9 @@ export const payrollConfigService = {
         await ensurePayrollSettingExists();
         const row = await findPayrollSettingRow();
         if (row) {
-            await updateSetting(dc, { id: DOC_ID, data: JSON.stringify(payload) } as any);
+            await updateSetting( { id: DOC_ID, data: JSON.stringify(payload) } as any);
         } else {
-            await createSetting(dc, { id: DOC_ID, data: JSON.stringify(payload) } as any);
+            await createSetting( { id: DOC_ID, data: JSON.stringify(payload) } as any);
         }
     }
 };

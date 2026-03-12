@@ -315,7 +315,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
         return (
             worker.name.toLowerCase().includes(lowerSearch) ||
-            worker.idNumber.includes(lowerSearch) ||
+            (worker.idNumber ?? '').includes(lowerSearch) ||
             (worker.contact && worker.contact.includes(lowerSearch))
         );
     });

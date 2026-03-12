@@ -116,7 +116,7 @@ function IntegratedDatabase() {
                 siteService.getSites(),
                 companyService.getCompanies(),
                 dailyReportService.getDBStats(), // Optimized: Count only
-                dailyReportService.getReportsByRange(startDateStr, endDateStr)
+                dailyReportService.getReports({ startDate: startDateStr, endDate: endDateStr })
             ]);
 
             calculateStats(workersData, teamsData, sitesData, companiesData, reportStats);

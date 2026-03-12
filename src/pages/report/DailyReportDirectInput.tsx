@@ -430,7 +430,7 @@ const DailyReportDirectInput: React.FC = () => {
                             ...newRows[rowIndex],
                             siteId: report.siteId,
                             manDay: prevWorker.manDay,
-                            workContent: prevWorker.workContent,
+                            workContent: prevWorker.workContent || '',
                             status: prevWorker.status
                         };
                         matchCount++;

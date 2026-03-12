@@ -1,8 +1,5 @@
-import { toast } from '../utils/swal';
-import { app } from '../firebase/config';
-import { getDataConnect } from 'firebase/data-connect';
+﻿import { toast } from '../utils/swal';
 import {
-    connectorConfig,
     listAllAccommodationAssignments,
     createAccommodationAssignment,
     updateAccommodationAssignment,
@@ -10,7 +7,7 @@ import {
     listAllWorkers,
     listAllTeams,
     listAllAccommodations,
-} from '../dataconnect-generated';
+} from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { z } from 'zod';
 import { format, parseISO, subDays } from 'date-fns';
@@ -19,8 +16,6 @@ import {
     AccommodationAssignmentSource,
     AccommodationAssignmentStatus
 } from '../types/accommodationAssignment';
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -63,7 +58,7 @@ let dcAssignmentsCache: any[] = [];
 
 const loadDcWorkers = async (): Promise<void> => {
     if (dcWorkersLoaded) return;
-    const res = await listAllWorkers(dc);
+    const res = await listAllWorkers();
     const rows = (res as any)?.data?.workers ?? [];
     dcWorkerLegacyIdToUuid.clear();
     rows.forEach((w: any) => {
@@ -77,7 +72,7 @@ const loadDcWorkers = async (): Promise<void> => {
 
 const loadDcTeams = async (): Promise<void> => {
     if (dcTeamsLoaded) return;
-    const res = await listAllTeams(dc);
+    const res = await listAllTeams();
     const rows = (res as any)?.data?.teams ?? [];
     dcTeamLegacyIdToUuid.clear();
     rows.forEach((t: any) => {
@@ -91,7 +86,7 @@ const loadDcTeams = async (): Promise<void> => {
 
 const loadDcAccommodations = async (): Promise<void> => {
     if (dcAccommodationsLoaded) return;
-    const res = await listAllAccommodations(dc);
+    const res = await listAllAccommodations();
     const rows = (res as any)?.data?.accommodations ?? [];
     dcAccommodationLegacyIdToUuid.clear();
     rows.forEach((a: any) => {
@@ -105,7 +100,7 @@ const loadDcAccommodations = async (): Promise<void> => {
 
 const loadDcAssignments = async (): Promise<void> => {
     if (dcAssignmentsLoaded) return;
-    const res = await listAllAccommodationAssignments(dc);
+    const res = await listAllAccommodationAssignments();
     const rows = (res as any)?.data?.accommodationAssignments ?? [];
 
     dcAssignmentsCache = rows;
@@ -200,17 +195,17 @@ const omitUndefined = (value: Record<string, unknown>): Record<string, unknown> 
     return Object.fromEntries(entries);
 };
 
-const DateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '날짜 형식은 YYYY-MM-DD 이어야 합니다.');
+const DateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, '?좎쭨 ?뺤떇? YYYY-MM-DD ?댁뼱???⑸땲??');
 
 // Status and Source are validated as strings, type narrowing happens at runtime
 const StatusSchema = z.string().refine(
     (val): val is AccommodationAssignmentStatus => val === 'active' || val === 'ended',
-    { message: 'status는 active 또는 ended이어야 합니다.' }
+    { message: 'status??active ?먮뒗 ended?댁뼱???⑸땲??' }
 );
 
 const SourceSchema = z.string().refine(
     (val): val is AccommodationAssignmentSource => val === 'team' || val === 'worker',
-    { message: 'source는 team 또는 worker이어야 합니다.' }
+    { message: 'source??team ?먮뒗 worker?댁뼱???⑸땲??' }
 );
 
 const AssignmentSchema = z.object({
@@ -259,13 +254,13 @@ export const accommodationAssignmentService = {
         });
 
         const workerUuid = await resolveWorkerUuid(String(parsed.workerId));
-        if (!workerUuid) throw new Error('작업자를 찾을 수 없습니다.');
+        if (!workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
         const teamUuid = parsed.teamId ? await resolveTeamUuid(String(parsed.teamId)) : null;
         const accommodationUuid = await resolveAccommodationUuid(String(parsed.accommodationId));
-        if (!accommodationUuid) throw new Error('숙소를 찾을 수 없습니다.');
+        if (!accommodationUuid) throw new Error('?숈냼瑜?李얠쓣 ???놁뒿?덈떎.');
 
         const legacyId = (assignment as any)?.legacyId;
-        const res = await createAccommodationAssignment(dc, {
+        const res = await createAccommodationAssignment({
             legacyId: legacyId ? String(legacyId) : null,
             workerId: workerUuid,
             teamId: teamUuid ?? null,
@@ -284,7 +279,7 @@ export const accommodationAssignmentService = {
         if (!id) throw new Error('Failed to create accommodation assignment');
 
         dcAssignmentsLoaded = false;
-        toast.saved('숙소 배정', 1);
+        toast.saved('?숈냼 諛곗젙', 1);
         return id;
     },
 
@@ -306,9 +301,9 @@ export const accommodationAssignmentService = {
 
         // Preload FK maps once
         const responses = await Promise.all([
-            listAllWorkers(dc),
-            listAllTeams(dc),
-            listAllAccommodations(dc)
+            listAllWorkers(),
+            listAllTeams(),
+            listAllAccommodations()
         ]);
 
         const chunkSize = 50;
@@ -321,7 +316,7 @@ export const accommodationAssignmentService = {
                 const accommodationUuid = await resolveAccommodationUuid(String(item.accommodationId));
                 if (!accommodationUuid) return null;
 
-                const res = await createAccommodationAssignment(dc, {
+                const res = await createAccommodationAssignment({
                     legacyId: null,
                     workerId: workerUuid,
                     teamId: teamUuid ?? null,
@@ -346,17 +341,17 @@ export const accommodationAssignmentService = {
         }
 
         dcAssignmentsLoaded = false;
-        toast.saved('숙소 배정', assignments.length);
+        toast.saved('?숈냼 諛곗젙', assignments.length);
         return ids;
     },
 
     updateAssignment: async (id: string, updates: AssignmentUpdate): Promise<void> => {
-        if (!id) throw new Error('배정 ID가 필요합니다.');
+        if (!id) throw new Error('諛곗젙 ID媛 ?꾩슂?⑸땲??');
 
         const parsedUpdates = AssignmentSchema.partial().parse(updates);
 
         const uuid = await resolveAssignmentUuid(id);
-        if (!uuid) throw new Error('배정을 찾을 수 없습니다.');
+        if (!uuid) throw new Error('諛곗젙??李얠쓣 ???놁뒿?덈떎.');
 
         const data = omitUndefined(parsedUpdates as unknown as Record<string, unknown>);
         if (Object.keys(data).length === 0) return;
@@ -374,21 +369,21 @@ export const accommodationAssignmentService = {
         if (data.source !== undefined) vars.source = data.source ?? null;
         if (data.memo !== undefined) vars.memo = data.memo ?? null;
 
-        await updateAccommodationAssignment(dc, vars as any);
+        await updateAccommodationAssignment(vars as any);
 
         dcAssignmentsLoaded = false;
-        toast.updated('숙소 배정');
+        toast.updated('?숈냼 諛곗젙');
     },
 
     endAssignment: async (id: string, endDate: string): Promise<void> => {
-        if (!id) throw new Error('배정 ID가 필요합니다.');
+        if (!id) throw new Error('諛곗젙 ID媛 ?꾩슂?⑸땲??');
         const parsedEndDate = DateStringSchema.parse(endDate);
 
         const uuid = await resolveAssignmentUuid(id);
-        if (!uuid) throw new Error('배정을 찾을 수 없습니다.');
-        await updateAccommodationAssignment(dc, { id: uuid, status: 'ended', endDate: parsedEndDate } as any);
+        if (!uuid) throw new Error('諛곗젙??李얠쓣 ???놁뒿?덈떎.');
+        await updateAccommodationAssignment({ id: uuid, status: 'ended', endDate: parsedEndDate } as any);
         dcAssignmentsLoaded = false;
-        toast.updated('숙소 배정');
+        toast.updated('?숈냼 諛곗젙');
     },
 
     endAssignmentsBatch: async (ids: string[], endDate: string): Promise<void> => {
@@ -401,21 +396,21 @@ export const accommodationAssignmentService = {
             await Promise.all(chunk.map(async (id) => {
                 const uuid = await resolveAssignmentUuid(id);
                 if (!uuid) return;
-                await updateAccommodationAssignment(dc, { id: uuid, status: 'ended', endDate: parsedEndDate } as any);
+                await updateAccommodationAssignment({ id: uuid, status: 'ended', endDate: parsedEndDate } as any);
             }));
         }
 
         dcAssignmentsLoaded = false;
-        toast.updated('숙소 배정');
+        toast.updated('?숈냼 諛곗젙');
     },
 
     deleteAssignment: async (id: string): Promise<void> => {
-        if (!id) throw new Error('배정 ID가 필요합니다.');
+        if (!id) throw new Error('諛곗젙 ID媛 ?꾩슂?⑸땲??');
         const uuid = await resolveAssignmentUuid(id);
         if (!uuid) return;
-        await deleteAccommodationAssignment(dc, { id: uuid } as any);
+        await deleteAccommodationAssignment({ id: uuid } as any);
         dcAssignmentsLoaded = false;
-        toast.deleted('숙소 배정', 1);
+        toast.deleted('?숈냼 諛곗젙', 1);
     },
 
     getAssignment: async (id: string): Promise<AccommodationAssignment | null> => {
@@ -505,3 +500,6 @@ export const accommodationAssignmentService = {
             .sort((a, b) => toMillis(b.createdAt as Timestamp | undefined) - toMillis(a.createdAt as Timestamp | undefined));
     }
 };
+
+
+

@@ -16,6 +16,7 @@ export interface Freelancer {
     createdAt?: Timestamp | null;
     updatedAt?: Timestamp | null;
     unitPrice?: number;
+    legacyId?: string;
 }
 
 export interface FreelancerPayment {
@@ -33,4 +34,5 @@ export interface FreelancerPayment {
     memo?: string;
     createdAt?: Timestamp | null;
     updatedAt?: Timestamp | null;
+    legacyId?: string;
 }

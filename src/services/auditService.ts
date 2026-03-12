@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createAuditLog, listAllAuditLogs } from '../dataconnect-generated';
+﻿import { createAuditLog, listAllAuditLogs } from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 
 export interface AuditLog {
@@ -16,8 +14,6 @@ export interface AuditLog {
     timestamp: Timestamp;
     ip?: string; // Optional
 }
-
-const dc = getDataConnect(app, connectorConfig);
 
 const generateId = (): string => {
     const c: any = typeof crypto !== 'undefined' ? crypto : undefined;
@@ -51,7 +47,7 @@ export const auditService = {
     // Write a log entry
     log: async (logData: Omit<AuditLog, 'id' | 'timestamp'>): Promise<void> => {
         try {
-            await createAuditLog(dc, {
+            await createAuditLog({
                 id: generateId(),
                 action: logData.action ?? null,
                 category: logData.category ?? null,
@@ -71,30 +67,34 @@ export const auditService = {
     // Fetch logs with basic filtering
     getLogs: async (limitCount: number = 100, category?: string, actorId?: string): Promise<AuditLog[]> => {
         try {
-            const res = await listAllAuditLogs(dc);
-            const rows = (res as any)?.data?.auditLogs ?? [];
-            const mapped = rows
-                .map((row: any): AuditLog => {
-                    const rawTimestamp = row?.timestamp ?? row?.createdAt;
-                    return {
-                        id: row?.id ? String(row.id) : undefined,
-                        action: row?.action ? String(row.action) : '',
-                        category: row?.category ? String(row.category) : '',
-                        actorId: row?.actorId ? String(row.actorId) : '',
-                        actorEmail: row?.actorEmail ? String(row.actorEmail) : '',
-                        targetId: row?.targetId ? String(row.targetId) : undefined,
-                        details: safeJsonParse(row?.details),
-                        timestamp: toTimestamp(rawTimestamp)
-                    } as AuditLog;
-                })
-                .filter((l: AuditLog) => (category ? l.category === category : true))
-                .filter((l: AuditLog) => (actorId ? l.actorId === actorId : true));
+            const where: any = {};
+            if (category) where.category = { eq: category };
+            if (actorId) where.actorId = { eq: actorId };
 
-            mapped.sort((a: AuditLog, b: AuditLog) => (b.timestamp?.toMillis?.() ?? 0) - (a.timestamp?.toMillis?.() ?? 0));
-            return mapped.slice(0, limitCount);
+            const res = await listAllAuditLogs({
+                limit: limitCount,
+                where: Object.keys(where).length > 0 ? where : undefined,
+                orderBy: [{ timestamp: 'DESC' }]
+            } as any);
+
+            const rows = (res as any)?.data?.auditLogs ?? [];
+            return rows.map((row: any): AuditLog => {
+                const rawTimestamp = row?.timestamp ?? row?.createdAt;
+                return {
+                    id: row?.id ? String(row.id) : undefined,
+                    action: row?.action ? String(row.action) : '',
+                    category: row?.category ? String(row.category) : '',
+                    actorId: row?.actorId ? String(row.actorId) : '',
+                    actorEmail: row?.actorEmail ? String(row.actorEmail) : '',
+                    targetId: row?.targetId ? String(row.targetId) : undefined,
+                    details: safeJsonParse(row?.details),
+                    timestamp: toTimestamp(rawTimestamp)
+                } as AuditLog;
+            });
         } catch (error) {
             console.error("Failed to fetch logs", error);
             return [];
         }
     }
 };
+

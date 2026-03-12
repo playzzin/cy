@@ -651,8 +651,8 @@ const TeamBasedPaymentDraftPage: React.FC = () => {
                 const workerTeamTypeById = new Map<string, string>();
                 const workerCompanyIdById = new Map<string, string>();
                 allWorkers.forEach((w) => {
-                    workerTeamTypeById.set(w.id, w.teamType);
-                    workerCompanyIdById.set(w.id, w.companyId ?? '');
+                    workerTeamTypeById.set(w.id || '', w.teamType || '');
+                    workerCompanyIdById.set(w.id || '', w.companyId ?? '');
                 });
 
                 const teamCompanyIdById = new Map<string, string>();

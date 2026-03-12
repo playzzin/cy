@@ -159,7 +159,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
 
     // Filter Logic
     const filteredCompanies = companies.filter(company => {
-        if (activeTab === 'company' && !['시공사', '미지정'].includes(company.type)) return false;
+        if (activeTab === 'company' && !['시공사', '미지정'].includes(company.type || '')) return false;
         if (activeTab === 'partner' && company.type !== '협력사') return false;
         if (activeTab === 'client' && company.type !== '건설사') return false;
 

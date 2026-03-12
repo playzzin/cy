@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, listSettings, createSetting, updateSetting } from './dataconnectCompat';
+﻿import { listSettings, createSetting, updateSetting } from './firestoreCrudCompat';
 
 export type PoaV5MappingDocItem = {
     schemaVersion: number;
@@ -14,8 +12,6 @@ export type PoaV5MappingsDoc = Record<string, PoaV5MappingDocItem>;
 const DOC_ID = 'poa_v5_mappings_v1';
 const SCHEMA_VERSION = 1;
 
-const dc = getDataConnect(app, connectorConfig);
-
 const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const safeJsonParse = <T>(raw: unknown): T | null => {
@@ -28,7 +24,7 @@ const safeJsonParse = <T>(raw: unknown): T | null => {
 };
 
 const listSettingsMap = async (): Promise<Map<string, string>> => {
-    const res = await listSettings(dc);
+    const res = await listSettings();
     const rows = (res as any)?.data?.settings ?? [];
     const map = new Map<string, string>();
     rows.forEach((r: any) => {
@@ -42,10 +38,10 @@ const listSettingsMap = async (): Promise<Map<string, string>> => {
 const upsertSettingData = async (id: string, dataObj: any) => {
     const data = JSON.stringify(dataObj);
     try {
-        await updateSetting(dc, { id, data } as any);
+        await updateSetting({ id, data } as any);
         return true;
     } catch (err) {
-        await createSetting(dc, { id, data } as any);
+        await createSetting({ id, data } as any);
         return true;
     }
 };
@@ -108,3 +104,4 @@ export const poaV5TemplateService = {
         await upsertSettingData(DOC_ID, updated);
     }
 };
+

@@ -6,7 +6,7 @@
  *  2. 쿼리 검증 + 자동 보정 레이어 -> 잘못된 날짜/타입 자동 수정
  *  3. 강화된 한국어 fuzzyMatch -> 건설업 용어, 접미사 제거, 부분매칭
  *  4. 디버그 메타데이터 -> 파싱 결과, 원본 건수, 필터 후 건수
- *  5. 에러 회복 + 친절한 안내 -> DataConnect 실패 시 명확한 메시지
+ *  5. 에러 회복 + 친절한 안내 -> 백엔드 실패 시 명확한 메시지
  *  6. 복합 필터 조합 지원 -> "12월 1팀 일급제 현장별 공수"
  *  7. 모든 집계를 항상 생성 -> analysisType에 따라 UI가 선택 표시
  */
@@ -605,7 +605,7 @@ async function executeAndAggregate(query: AnalyticsQuery): Promise<RawQueryResul
         reports = await dailyReportService.getReportsByRange(query.startDate, query.endDate);
     } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes('DataConnect') || msg.includes('getDataConnect') || msg.includes('fetch')) {
+        if (msg.includes('Failed to fetch') || msg.includes('fetch') || msg.includes('network')) {
             throw new Error(`데이터베이스 연결 오류: 서버에 접속할 수 없습니다.\n원인: ${msg.substring(0, 100)}\n해결: 페이지를 새로고침하거나 잠시 후 다시 시도해주세요.`);
         }
         throw error;

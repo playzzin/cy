@@ -1,85 +1,81 @@
-/**
- * 세금계산서 Firestore 서비스
+﻿/**
+ * ?멸툑怨꾩궛??Firestore ?쒕퉬??
  * 
- * 세금계산서 발행 기록을 Firestore에 저장하고 관리합니다.
- * 바로빌 API 연동과는 별도로 내부 기록용입니다.
+ * ?멸툑怨꾩궛??諛쒗뻾 湲곕줉??Firestore????ν븯怨?愿由ы빀?덈떎.
+ * 諛붾줈鍮?API ?곕룞怨쇰뒗 蹂꾨룄濡??대? 湲곕줉?⑹엯?덈떎.
  */
 
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
 import {
-    connectorConfig,
     listAllTaxInvoices as listAllTaxInvoicesQuery,
     createTaxInvoice,
     updateTaxInvoice,
-    deleteTaxInvoice
-} from './dataconnectCompat';
+    deleteTaxInvoice,
+    getTaxInvoice
+} from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 
-// 세금계산서 타입
-export type TaxInvoiceType = 'sales' | 'purchase'; // 매출 / 매입
+// ?멸툑怨꾩궛?????
+export type TaxInvoiceType = 'sales' | 'purchase'; // 留ㅼ텧 / 留ㅼ엯
 
-// 세금계산서 상태
+// ?멸툑怨꾩궛???곹깭
 export type TaxInvoiceStatus =
-    | 'draft'      // 작성중
-    | 'issued'     // 발행완료
-    | 'received'   // 수취완료
-    | 'cancelled'; // 취소
+    | 'draft'      // ?묒꽦以?
+    | 'issued'     // 諛쒗뻾?꾨즺
+    | 'received'   // ?섏랬?꾨즺
+    | 'cancelled'; // 痍⑥냼
 
-// 세금계산서 기록 인터페이스
+// ?멸툑怨꾩궛??湲곕줉 ?명꽣?섏씠??
 export interface TaxInvoiceRecord {
     id?: string;
 
-    // 기본 정보
-    invoiceNum: string;              // 세금계산서 번호
-    invoiceDate: string;             // 발행일 (YYYY-MM-DD)
-    type: TaxInvoiceType;            // 매출/매입
-    status: TaxInvoiceStatus;        // 상태
+    // 湲곕낯 ?뺣낫
+    invoiceNum: string;              // ?멸툑怨꾩궛??踰덊샇
+    invoiceDate: string;             // 諛쒗뻾??(YYYY-MM-DD)
+    type: TaxInvoiceType;            // 留ㅼ텧/留ㅼ엯
+    status: TaxInvoiceStatus;        // ?곹깭
 
-    // 공급자 정보
-    invoicerCorpNum: string;         // 공급자 사업자번호
-    invoicerCorpName: string;        // 공급자 상호
-    invoicerCeoName?: string;        // 공급자 대표자명
-    invoicerAddr?: string;           // 공급자 주소
+    // 怨듦툒???뺣낫
+    invoicerCorpNum: string;         // 怨듦툒???ъ뾽?먮쾲??
+    invoicerCorpName: string;        // 怨듦툒???곹샇
+    invoicerCeoName?: string;        // 怨듦툒????쒖옄紐?
+    invoicerAddr?: string;           // 怨듦툒??二쇱냼
 
-    // 공급받는자 정보
-    invoiceeCorpNum?: string;        // 공급받는자 사업자번호 (수기일 경우 선택)
-    invoiceeCorpName: string;        // 공급받는자 상호 (필수)
-    invoiceeCeoName?: string;        // 공급받는자 대표자명
-    invoiceeAddr?: string;           // 공급받는자 주소
-    invoiceeCompanyId?: string;      // Firestore company ID (연결용, 수기일 경우 없음)
+    // 怨듦툒諛쏅뒗???뺣낫
+    invoiceeCorpNum?: string;        // 怨듦툒諛쏅뒗???ъ뾽?먮쾲??(?섍린??寃쎌슦 ?좏깮)
+    invoiceeCorpName: string;        // 怨듦툒諛쏅뒗???곹샇 (?꾩닔)
+    invoiceeCeoName?: string;        // 怨듦툒諛쏅뒗????쒖옄紐?
+    invoiceeAddr?: string;           // 怨듦툒諛쏅뒗??二쇱냼
+    invoiceeCompanyId?: string;      // Firestore company ID (?곌껐?? ?섍린??寃쎌슦 ?놁쓬)
 
-    // 금액 정보
-    supplyAmount: number;            // 공급가액
-    taxAmount: number;               // 세액
-    totalAmount: number;             // 합계금액
+    // 湲덉븸 ?뺣낫
+    supplyAmount: number;            // 怨듦툒媛??
+    taxAmount: number;               // ?몄븸
+    totalAmount: number;             // ?⑷퀎湲덉븸
 
-    // 출처 정보
-    source: 'barobill' | 'manual' | 'excel'; // 바로빌API / 수기입력 / 엑셀업로드
+    // 異쒖쿂 ?뺣낫
+    source: 'barobill' | 'manual' | 'excel'; // 諛붾줈鍮똀PI / ?섍린?낅젰 / ?묒??낅줈??
 
-    // 품목 요약
-    itemName?: string;               // 대표 품목명
-    itemCount?: number;              // 품목 수
+    // ?덈ぉ ?붿빟
+    itemName?: string;               // ????덈ぉ紐?
+    itemCount?: number;              // ?덈ぉ ??
 
-    // 연결 정보 (Firestore 참조)
-    siteId?: string;                 // 현장 ID
-    siteName?: string;               // 현장명
-    teamId?: string;                 // 팀 ID
-    teamName?: string;               // 팀명
+    // ?곌껐 ?뺣낫 (Firestore 李몄“)
+    siteId?: string;                 // ?꾩옣 ID
+    siteName?: string;               // ?꾩옣紐?
+    teamId?: string;                 // ? ID
+    teamName?: string;               // ?紐?
 
-    // 바로빌 연동 정보
-    barobillSendKey?: string;        // 바로빌 전송키
-    barobillStatus?: string;         // 바로빌 상태
-    barobillNtsResult?: string;      // 국세청 전송 결과
+    // 諛붾줈鍮??곕룞 ?뺣낫
+    barobillSendKey?: string;        // 諛붾줈鍮??꾩넚??
+    barobillStatus?: string;         // 諛붾줈鍮??곹깭
+    barobillNtsResult?: string;      // 援?꽭泥??꾩넚 寃곌낵
 
-    // 메타 정보
-    memo?: string;                   // 비고
+    // 硫뷀? ?뺣낫
+    memo?: string;                   // 鍮꾧퀬
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
-    createdBy?: string;              // 작성자
+    createdBy?: string;              // ?묒꽦??
 }
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -105,10 +101,10 @@ const toTimestamp = (value: unknown): Timestamp | undefined => {
 const mapTaxInvoiceRowToRecord = (row: any): TaxInvoiceRecord => {
     const invoiceeCompanyId = row?.invoiceeCompany?.id
         ? String(row.invoiceeCompany.id)
-        : (row?.invoiceeCompanyLegacyId ? String(row.invoiceeCompanyLegacyId) : undefined);
+        : (row?.invoiceeCompanyId ? String(row.invoiceeCompanyId) : (row?.invoiceeCompanyLegacyId ? String(row.invoiceeCompanyLegacyId) : undefined));
 
-    const siteId = row?.site?.id ? String(row.site.id) : (row?.siteLegacyId ? String(row.siteLegacyId) : undefined);
-    const teamId = row?.team?.id ? String(row.team.id) : (row?.teamLegacyId ? String(row.teamLegacyId) : undefined);
+    const siteId = row?.site?.id ? String(row.site.id) : (row?.siteId ? String(row.siteId) : (row?.siteLegacyId ? String(row.siteLegacyId) : undefined));
+    const teamId = row?.team?.id ? String(row.team.id) : (row?.teamId ? String(row.teamId) : (row?.teamLegacyId ? String(row.teamLegacyId) : undefined));
 
     return {
         id: row?.id ? String(row.id) : undefined,
@@ -145,15 +141,15 @@ const mapTaxInvoiceRowToRecord = (row: any): TaxInvoiceRecord => {
     } as TaxInvoiceRecord;
 };
 
-const listAllTaxInvoices = async (): Promise<TaxInvoiceRecord[]> => {
-    const res = await listAllTaxInvoicesQuery(dc, { limit: 5000, offset: 0 } as any);
+const listAllTaxInvoices = async (limit: number = 1000): Promise<TaxInvoiceRecord[]> => {
+    const res = await listAllTaxInvoicesQuery({ limit, offset: 0 } as any);
     const rows = (res as any)?.data?.taxInvoices ?? [];
     return rows.map(mapTaxInvoiceRowToRecord);
 };
 
 export const taxInvoiceFirestoreService = {
     /**
-     * 세금계산서 추가
+     * ?멸툑怨꾩궛??異붽?
      */
     addTaxInvoice: async (
         record: Omit<TaxInvoiceRecord, 'id' | 'createdAt' | 'updatedAt'>
@@ -170,7 +166,7 @@ export const taxInvoiceFirestoreService = {
         const teamId = rawTeamId && isUuidString(rawTeamId) ? rawTeamId : null;
         const teamLegacyId = rawTeamId && !isUuidString(rawTeamId) ? rawTeamId : null;
 
-        const res = await createTaxInvoice(dc, {
+        const res = await createTaxInvoice({
             legacyId: null,
             invoiceNum: record.invoiceNum,
             invoiceDate: record.invoiceDate,
@@ -209,7 +205,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 세금계산서 수정
+     * ?멸툑怨꾩궛???섏젙
      */
     updateTaxInvoice: async (id: string, updates: Partial<TaxInvoiceRecord>): Promise<void> => {
         const vars: any = { id: String(id) };
@@ -261,23 +257,25 @@ export const taxInvoiceFirestoreService = {
         }
 
         vars.updatedAt = new Date().toISOString();
-        await updateTaxInvoice(dc, vars);
+        await updateTaxInvoice(vars);
     },
 
     /**
-     * 세금계산서 삭제
+     * ?멸툑怨꾩궛????젣
      */
     deleteTaxInvoice: async (id: string): Promise<void> => {
-        await deleteTaxInvoice(dc, { id: String(id) } as any);
+        await deleteTaxInvoice({ id: String(id) } as any);
     },
 
     /**
-     * 세금계산서 ID로 조회
+     * ?멸툑怨꾩궛??ID濡?議고쉶
      */
     getTaxInvoiceById: async (id: string): Promise<TaxInvoiceRecord | null> => {
         try {
-            const all = await listAllTaxInvoices();
-            return all.find(r => String(r.id) === String(id)) ?? null;
+            if (!isUuidString(id)) return null;
+            const res = await getTaxInvoice({ id });
+            const row = (res as any)?.data?.taxInvoice;
+            return row ? mapTaxInvoiceRowToRecord(row) : null;
         } catch (e) {
             console.error(e);
             return null;
@@ -285,7 +283,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 전체 세금계산서 조회 (최신순)
+     * ?꾩껜 ?멸툑怨꾩궛??議고쉶 (理쒖떊??
      */
     getTaxInvoices: async (limitCount?: number): Promise<TaxInvoiceRecord[]> => {
         const rows = await listAllTaxInvoices();
@@ -294,7 +292,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 타입별 조회 (매출/매입)
+     * ??낅퀎 議고쉶 (留ㅼ텧/留ㅼ엯)
      */
     getTaxInvoicesByType: async (type: TaxInvoiceType): Promise<TaxInvoiceRecord[]> => {
         const rows = await listAllTaxInvoices();
@@ -304,7 +302,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 거래처별 조회 (공급받는자 기준)
+     * 嫄곕옒泥섎퀎 議고쉶 (怨듦툒諛쏅뒗??湲곗?)
      */
     getTaxInvoicesByCompany: async (companyId: string): Promise<TaxInvoiceRecord[]> => {
         const rows = await listAllTaxInvoices();
@@ -320,7 +318,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 거래처명별 조회 (수기 입력 데이터용)
+     * 嫄곕옒泥섎챸蹂?議고쉶 (?섍린 ?낅젰 ?곗씠?곗슜)
      */
     getTaxInvoicesByCompanyName: async (companyName: string): Promise<TaxInvoiceRecord[]> => {
         const rows = await listAllTaxInvoices();
@@ -330,7 +328,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 현장별 조회
+     * ?꾩옣蹂?議고쉶
      */
     getTaxInvoicesBySite: async (siteId: string): Promise<TaxInvoiceRecord[]> => {
         const rows = await listAllTaxInvoices();
@@ -343,7 +341,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 기간별 조회
+     * 湲곌컙蹂?議고쉶
      */
     getTaxInvoicesByDateRange: async (
         startDate: string,
@@ -360,7 +358,7 @@ export const taxInvoiceFirestoreService = {
     },
 
     /**
-     * 거래처별 합계 계산
+     * 嫄곕옒泥섎퀎 ?⑷퀎 怨꾩궛
      */
     calculateCompanyTotals: async (companyId: string): Promise<{
         salesTotal: number;
@@ -389,3 +387,4 @@ export const taxInvoiceFirestoreService = {
         };
     }
 };
+

@@ -1904,7 +1904,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     processedData.push({
                         workerId: agg.workerId,
                         workerName: workerDetails.name,
-                        idNumber: workerDetails.idNumber,
+                        idNumber: workerDetails.idNumber || '',
                         companyId: agg.companyId,
                         companyName: agg.companyName,
                         teamId: agg.teamId,

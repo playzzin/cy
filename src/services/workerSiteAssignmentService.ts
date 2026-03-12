@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from './dataconnectCompat';
+﻿import { createSystemConfig, listSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { toast } from '../utils/swal';
 
@@ -22,7 +20,6 @@ export interface WorkerSiteAssignment {
     updatedAt?: Timestamp;
 }
 
-const dc = getDataConnect(app, connectorConfig);
 const SYSTEM_CONFIG_ID = 'worker_site_assignments';
 
 type StoredWorkerSiteAssignment = Omit<WorkerSiteAssignment, 'createdAt' | 'updatedAt'> & {
@@ -71,7 +68,7 @@ const deserializeAssignment = (a: StoredWorkerSiteAssignment): WorkerSiteAssignm
 };
 
 const loadAllAssignments = async (): Promise<WorkerSiteAssignment[]> => {
-    const response = await listSystemConfigs(dc);
+    const response = await listSystemConfigs();
     const rows = (response as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === SYSTEM_CONFIG_ID) : null;
     const parsed = safeJsonParse<{ assignments?: StoredWorkerSiteAssignment[] }>(row?.data, {} as any);
@@ -86,16 +83,16 @@ const saveAllAssignments = async (assignments: WorkerSiteAssignment[]): Promise<
     });
 
     try {
-        const res = await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+        const res = await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         const didUpdate = (res as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     }
 };
@@ -122,7 +119,7 @@ export const workerSiteAssignmentService = {
         };
 
         await saveAllAssignments([...all, next]);
-        toast.saved('현장 배정', 1);
+        toast.saved('?꾩옣 諛곗젙', 1);
 
         if (assignment.isPrimary) {
             await workerSiteAssignmentService.setPrimaryAssignment(assignment.workerId, id);
@@ -151,7 +148,7 @@ export const workerSiteAssignmentService = {
         nextAll[idx] = next;
         await saveAllAssignments(nextAll);
 
-        toast.updated('현장 배정');
+        toast.updated('?꾩옣 諛곗젙');
 
         if (workerId) {
             if (updates.isPrimary === true) {
@@ -169,7 +166,7 @@ export const workerSiteAssignmentService = {
 
         const nextAll = all.filter((a) => String(a.id ?? '') !== String(id));
         await saveAllAssignments(nextAll);
-        toast.deleted('현장 배정', 1);
+        toast.deleted('?꾩옣 諛곗젙', 1);
 
         if (workerId) {
             await workerSiteAssignmentService.syncWorkerPrimarySite(workerId);
@@ -256,3 +253,4 @@ export const workerSiteAssignmentService = {
         });
     }
 };
+

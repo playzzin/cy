@@ -89,7 +89,7 @@ const DailyReportExcelPage: React.FC = () => {
                 // Auto-fill logic can go here (e.g. if Worker found but Team empty, fill Team)
                 teamName: (!row.teamName && worker && worker.teamName) ? worker.teamName : row.teamName,
                 // If Unit Price 0, fill from worker
-                unitPrice: (row.unitPrice === 0 && worker) ? worker.unitPrice : row.unitPrice,
+                unitPrice: (row.unitPrice === 0 && worker) ? (worker.unitPrice ?? row.unitPrice) : row.unitPrice,
                 role: (!row.role && worker) ? (worker.role || '조공') : (row.role || '조공')
             };
         });

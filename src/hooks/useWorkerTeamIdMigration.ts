@@ -11,9 +11,10 @@ export const useWorkerTeamIdMigration = () => {
     const [result, setResult] = useState<{ updated: number; skipped: number } | null>(null);
 
     useEffect(() => {
+        /* 
+        // 과도한 백엔드 과금이 발생하여 마이그레이션 로직을 긴급 중단합니다.
         const MIGRATION_KEY = 'migration_worker_teamid_202512';
 
-        // 이미 완료된 경우 스킵
         if (localStorage.getItem(MIGRATION_KEY) === 'done') {
             setStatus('done');
             return;
@@ -24,7 +25,6 @@ export const useWorkerTeamIdMigration = () => {
             console.log('[Migration] Starting worker.teamId migration...');
 
             try {
-                // 작업자 마스터 조회
                 const workers = await manpowerService.getWorkers();
                 const workerMap = new Map<string, { teamId?: string; teamName?: string }>();
                 workers.forEach(w => {
@@ -33,26 +33,14 @@ export const useWorkerTeamIdMigration = () => {
                     }
                 });
 
-                console.log(`[Migration] Loaded ${workerMap.size} workers from master`);
-
-                // 2025년 1월부터 12월까지 마이그레이션 실행
                 const migrationResult = await dailyReportService.migrateWorkerTeamIds(
                     '2025-01-01',
                     '2025-12-31',
                     workerMap
                 );
 
-                console.log('[Migration] Result:', migrationResult);
-                setResult({ updated: migrationResult.updated, skipped: migrationResult.skipped });
-
-                // 완료 플래그 저장
                 localStorage.setItem(MIGRATION_KEY, 'done');
                 setStatus('done');
-
-                if (migrationResult.updated > 0) {
-                    console.log(`[Migration] ✅ Successfully updated ${migrationResult.updated} reports`);
-                }
-
             } catch (error) {
                 console.error('[Migration] Error:', error);
                 setStatus('error');
@@ -60,6 +48,8 @@ export const useWorkerTeamIdMigration = () => {
         };
 
         runMigration();
+        */
+        setStatus('done');
     }, []);
 
     return { status, result };

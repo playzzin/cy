@@ -1,55 +1,51 @@
 /**
- * 입금/지급 Firestore 서비스
+ * ?낃툑/吏湲?Firestore ?쒕퉬??
  * 
- * 입금 및 지급 기록을 관리하여 거래처별 잔액을 계산합니다.
+ * ?낃툑 諛?吏湲?湲곕줉??愿由ы븯??嫄곕옒泥섎퀎 ?붿븸??怨꾩궛?⑸땲??
  */
 
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
 import {
-    connectorConfig,
     listAllPayments as listAllPaymentsQuery,
     createPayment,
     updatePayment,
-    deletePayment
-} from './dataconnectCompat';
+    deletePayment,
+    getPayment
+} from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 
-// 입금/지급 타입
-export type PaymentType = 'in' | 'out'; // 입금 / 지급
+// ?낃툑/吏湲????
+export type PaymentType = 'in' | 'out'; // ?낃툑 / 吏湲?
 
-// 입금/지급 기록 인터페이스
+// ?낃툑/吏湲?湲곕줉 ?명꽣?섏씠??
 export interface PaymentRecord {
     id?: string;
 
-    // 기본 정보
-    date: string;                    // 입금/지급일 (YYYY-MM-DD)
-    type: PaymentType;               // 입금/지급 구분
-    amount: number;                  // 금액
+    // 湲곕낯 ?뺣낫
+    date: string;                    // ?낃툑/吏湲됱씪 (YYYY-MM-DD)
+    type: PaymentType;               // ?낃툑/吏湲?援щ텇
+    amount: number;                  // 湲덉븸
 
-    // 거래처 정보
-    companyId?: string;              // 거래처 ID (Firestore, 선택)
-    companyName: string;             // 거래처명 (필수)
+    // 嫄곕옒泥??뺣낫
+    companyId?: string;              // 嫄곕옒泥?ID (Firestore, ?좏깮)
+    companyName: string;             // 嫄곕옒泥섎챸 (?꾩닔)
 
-    // 연결 정보 (선택)
-    siteId?: string;                 // 현장 ID
-    siteName?: string;               // 현장명
-    teamName?: string;               // 팀명 (추가)
-    taxInvoiceId?: string;           // 연결된 세금계산서 ID
+    // ?곌껐 ?뺣낫 (?좏깮)
+    siteId?: string;                 // ?꾩옣 ID
+    siteName?: string;               // ?꾩옣紐?
+    teamName?: string;               // ?紐?(異붽?)
+    taxInvoiceId?: string;           // ?곌껐???멸툑怨꾩궛??ID
 
-    // 추가 정보
-    bankName?: string;               // 은행명
-    accountNumber?: string;          // 계좌번호
-    category?: string;               // 분류 (식대, 자재, 노무비 등)
-    memo?: string;                   // 비고
+    // 異붽? ?뺣낫
+    bankName?: string;               // ??됰챸
+    accountNumber?: string;          // 怨꾩쥖踰덊샇
+    category?: string;               // 遺꾨쪟 (?앸?, ?먯옱, ?몃Т鍮???
+    memo?: string;                   // 鍮꾧퀬
 
-    // 메타 정보
+    // 硫뷀? ?뺣낫
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
     createdBy?: string;
 }
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -75,13 +71,13 @@ const toTimestamp = (value: unknown): Timestamp | undefined => {
 const mapPaymentRowToRecord = (row: any): PaymentRecord => {
     const companyId = row?.company?.id
         ? String(row.company.id)
-        : (row?.companyLegacyId ? String(row.companyLegacyId) : undefined);
+        : (row?.companyId ? String(row.companyId) : (row?.companyLegacyId ? String(row.companyLegacyId) : undefined));
     const siteId = row?.site?.id
         ? String(row.site.id)
-        : (row?.siteLegacyId ? String(row.siteLegacyId) : undefined);
+        : (row?.siteId ? String(row.siteId) : (row?.siteLegacyId ? String(row.siteLegacyId) : undefined));
     const taxInvoiceId = row?.taxInvoice?.id
         ? String(row.taxInvoice.id)
-        : (row?.taxInvoiceLegacyId ? String(row.taxInvoiceLegacyId) : undefined);
+        : (row?.taxInvoiceId ? String(row.taxInvoiceId) : (row?.taxInvoiceLegacyId ? String(row.taxInvoiceLegacyId) : undefined));
 
     return {
         id: row?.id ? String(row.id) : undefined,
@@ -104,15 +100,15 @@ const mapPaymentRowToRecord = (row: any): PaymentRecord => {
     } as PaymentRecord;
 };
 
-const listAllPayments = async (): Promise<PaymentRecord[]> => {
-    const res = await listAllPaymentsQuery(dc, { limit: 5000, offset: 0 } as any);
+const listAllPayments = async (limit: number = 1000): Promise<PaymentRecord[]> => {
+    const res = await listAllPaymentsQuery({ limit, offset: 0 } as any);
     const rows = (res as any)?.data?.payments ?? [];
     return rows.map(mapPaymentRowToRecord);
 };
 
 export const paymentFirestoreService = {
     /**
-     * 입금/지급 추가
+     * ?낃툑/吏湲?異붽?
      */
     addPayment: async (
         record: Omit<PaymentRecord, 'id' | 'createdAt' | 'updatedAt'>
@@ -129,7 +125,7 @@ export const paymentFirestoreService = {
         const taxInvoiceId = legacyTaxInvoiceId && isUuidString(legacyTaxInvoiceId) ? legacyTaxInvoiceId : null;
         const taxInvoiceLegacyId = legacyTaxInvoiceId && !isUuidString(legacyTaxInvoiceId) ? legacyTaxInvoiceId : null;
 
-        const response = await createPayment(dc, {
+        const response = await createPayment({
             date: record.date,
             type: record.type,
             amount: record.amount,
@@ -155,7 +151,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 입금/지급 수정
+     * ?낃툑/吏湲??섏젙
      */
     updatePayment: async (id: string, updates: Partial<PaymentRecord>): Promise<void> => {
         const vars: any = { id: String(id) };
@@ -193,24 +189,25 @@ export const paymentFirestoreService = {
         }
 
         vars.updatedAt = new Date().toISOString();
-        await updatePayment(dc, vars);
+        await updatePayment(vars);
     },
 
     /**
-     * 입금/지급 삭제
+     * ?낃툑/吏湲???젣
      */
     deletePayment: async (id: string): Promise<void> => {
-        await deletePayment(dc, { id: String(id) } as any);
+        await deletePayment({ id: String(id) } as any);
     },
 
     /**
-     * ID로 조회
+     * ID濡?議고쉶
      */
     getPaymentById: async (id: string): Promise<PaymentRecord | null> => {
         try {
-            const all = await listAllPayments();
-            const found = all.find(p => String(p.id) === String(id)) ?? null;
-            return found;
+            if (!isUuidString(id)) return null;
+            const res = await getPayment({ id });
+            const row = (res as any)?.data?.payment;
+            return row ? mapPaymentRowToRecord(row) : null;
         } catch (e) {
             console.error(e);
             return null;
@@ -218,7 +215,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 전체 조회 (최신순)
+     * ?꾩껜 議고쉶 (理쒖떊??
      */
     getPayments: async (): Promise<PaymentRecord[]> => {
         const rows = await listAllPayments();
@@ -227,7 +224,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 거래처별 조회
+     * 嫄곕옒泥섎퀎 議고쉶
      */
     getPaymentsByCompany: async (companyId: string): Promise<PaymentRecord[]> => {
         const rows = await listAllPayments();
@@ -241,7 +238,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 거래처명별 조회 (수기 입력 데이터용)
+     * 嫄곕옒泥섎챸蹂?議고쉶 (?섍린 ?낅젰 ?곗씠?곗슜)
      */
     getPaymentsByCompanyName: async (companyName: string): Promise<PaymentRecord[]> => {
         const rows = await listAllPayments();
@@ -251,7 +248,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 현장별 조회
+     * ?꾩옣蹂?議고쉶
      */
     getPaymentsBySite: async (siteId: string): Promise<PaymentRecord[]> => {
         const rows = await listAllPayments();
@@ -265,7 +262,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 기간별 조회
+     * 湲곌컙蹂?議고쉶
      */
     getPaymentsByDateRange: async (
         startDate: string,
@@ -278,7 +275,7 @@ export const paymentFirestoreService = {
     },
 
     /**
-     * 거래처별 입금/지급 합계
+     * 嫄곕옒泥섎퀎 ?낃툑/吏湲??⑷퀎
      */
     calculateCompanyPaymentTotals: async (companyId: string): Promise<{
         totalIn: number;
@@ -307,29 +304,29 @@ export const paymentFirestoreService = {
 };
 
 /**
- * 통합 잔액 계산 서비스
- * 세금계산서 + 입금/지급을 합쳐서 실제 잔액을 계산
+ * ?듯빀 ?붿븸 怨꾩궛 ?쒕퉬??
+ * ?멸툑怨꾩궛??+ ?낃툑/吏湲됱쓣 ?⑹퀜???ㅼ젣 ?붿븸??怨꾩궛
  */
 export const balanceCalculationService = {
     /**
-     * 거래처별 미수금/미지급 잔액 계산
+     * 嫄곕옒泥섎퀎 誘몄닔湲?誘몄?湲??붿븸 怨꾩궛
      * 
-     * 미수금 = 매출 세금계산서 합계 - 입금 합계
-     * 미지급 = 매입 세금계산서 합계 - 지급 합계
+     * 誘몄닔湲?= 留ㅼ텧 ?멸툑怨꾩궛???⑷퀎 - ?낃툑 ?⑷퀎
+     * 誘몄?湲?= 留ㅼ엯 ?멸툑怨꾩궛???⑷퀎 - 吏湲??⑷퀎
      */
     calculateCompanyBalance: async (companyId: string): Promise<{
-        salesTotal: number;       // 매출 합계
-        purchaseTotal: number;    // 매입 합계
-        receivedTotal: number;    // 입금 합계
-        paidTotal: number;        // 지급 합계
-        receivableBalance: number; // 미수금 (매출 - 입금)
-        payableBalance: number;    // 미지급 (매입 - 지급)
+        salesTotal: number;       // 留ㅼ텧 ?⑷퀎
+        purchaseTotal: number;    // 留ㅼ엯 ?⑷퀎
+        receivedTotal: number;    // ?낃툑 ?⑷퀎
+        paidTotal: number;        // 吏湲??⑷퀎
+        receivableBalance: number; // 誘몄닔湲?(留ㅼ텧 - ?낃툑)
+        payableBalance: number;    // 誘몄?湲?(留ㅼ엯 - 吏湲?
     }> => {
-        // 세금계산서 데이터 가져오기
+        // ?멸툑怨꾩궛???곗씠??媛?몄삤湲?
         const { taxInvoiceFirestoreService } = await import('./taxInvoiceFirestoreService');
         const invoiceTotals = await taxInvoiceFirestoreService.calculateCompanyTotals(companyId);
 
-        // 입금/지급 데이터 가져오기
+        // ?낃툑/吏湲??곗씠??媛?몄삤湲?
         const paymentTotals = await paymentFirestoreService.calculateCompanyPaymentTotals(companyId);
 
         return {
@@ -343,8 +340,8 @@ export const balanceCalculationService = {
     },
 
     /**
-     * 거래처별 거래 내역 (시간순 정렬)
-     * 세금계산서 + 입금/지급을 합쳐서 잔액 누적 계산
+     * 嫄곕옒泥섎퀎 嫄곕옒 ?댁뿭 (?쒓컙???뺣젹)
+     * ?멸툑怨꾩궛??+ ?낃툑/吏湲됱쓣 ?⑹퀜???붿븸 ?꾩쟻 怨꾩궛
      */
     getCompanyTransactionHistory: async (companyId: string): Promise<Array<{
         date: string;
@@ -360,13 +357,13 @@ export const balanceCalculationService = {
     }>> => {
         const { taxInvoiceFirestoreService } = await import('./taxInvoiceFirestoreService');
 
-        // 세금계산서 가져오기
+        // ?멸툑怨꾩궛??媛?몄삤湲?
         const invoices = await taxInvoiceFirestoreService.getTaxInvoicesByCompany(companyId);
 
-        // 입금/지급 가져오기
+        // ?낃툑/吏湲?媛?몄삤湲?
         const payments = await paymentFirestoreService.getPaymentsByCompany(companyId);
 
-        // 거래 내역 통합
+        // 嫄곕옒 ?댁뿭 ?듯빀
         type Transaction = {
             date: string;
             description: string;
@@ -382,16 +379,16 @@ export const balanceCalculationService = {
 
         const transactions: Transaction[] = [];
 
-        // 세금계산서 → 거래 내역
+        // ?멸툑怨꾩궛????嫄곕옒 ?댁뿭
         invoices.forEach(inv => {
             if (inv.status === 'cancelled') return;
 
             transactions.push({
                 date: inv.invoiceDate,
-                description: inv.itemName || '세금계산서',
+                description: inv.itemName || "\uC138\uAE08\uACC4\uC0B0\uC11C",
                 saleAmount: inv.type === 'sales' ? inv.totalAmount : 0,
                 paymentAmount: 0,
-                balance: 0, // 나중에 계산
+                balance: 0, // ?섏쨷??怨꾩궛
                 type: 'invoice',
                 sourceId: inv.id || '',
                 siteName: inv.siteName,
@@ -400,11 +397,11 @@ export const balanceCalculationService = {
             });
         });
 
-        // 입금/지급 → 거래 내역
+        // ?낃툑/吏湲???嫄곕옒 ?댁뿭
         payments.forEach(pay => {
             transactions.push({
                 date: pay.date,
-                description: pay.type === 'in' ? '입금' : '지급',
+                description: pay.type === 'in' ? "\uC785\uAE08" : "\uC9C0\uAE09",
                 saleAmount: 0,
                 paymentAmount: pay.type === 'in' ? pay.amount : 0,
                 balance: 0,
@@ -416,10 +413,10 @@ export const balanceCalculationService = {
             });
         });
 
-        // 날짜 순 정렬
+        // ?좎쭨 ???뺣젹
         transactions.sort((a, b) => a.date.localeCompare(b.date));
 
-        // 잔액 누적 계산
+        // ?붿븸 ?꾩쟻 怨꾩궛
         let runningBalance = 0;
         transactions.forEach(tx => {
             runningBalance += tx.saleAmount - tx.paymentAmount;
@@ -430,7 +427,7 @@ export const balanceCalculationService = {
     },
 
     /**
-     * 거래처명별 잔액 계산 (수기 입력 데이터용)
+     * 嫄곕옒泥섎챸蹂??붿븸 怨꾩궛 (?섍린 ?낅젰 ?곗씠?곗슜)
      */
     calculateCompanyBalanceByName: async (companyName: string): Promise<{
         salesTotal: number;
@@ -442,7 +439,7 @@ export const balanceCalculationService = {
     }> => {
         const { taxInvoiceFirestoreService } = await import('./taxInvoiceFirestoreService');
 
-        // 세금계산서 (이름으로 조회)
+        // ?멸툑怨꾩궛??(?대쫫?쇰줈 議고쉶)
         const invoices = await taxInvoiceFirestoreService.getTaxInvoicesByCompanyName(companyName);
         let salesTotal = 0;
         let purchaseTotal = 0;
@@ -456,7 +453,7 @@ export const balanceCalculationService = {
             }
         });
 
-        // 입금/지급 (이름으로 조회)
+        // ?낃툑/吏湲?(?대쫫?쇰줈 議고쉶)
         const payments = await paymentFirestoreService.getPaymentsByCompanyName(companyName);
         let totalIn = 0;
         let totalOut = 0;
@@ -480,7 +477,7 @@ export const balanceCalculationService = {
     },
 
     /**
-     * 거래처명별 거래 내역 (수기 입력 데이터용)
+     * 嫄곕옒泥섎챸蹂?嫄곕옒 ?댁뿭 (?섍린 ?낅젰 ?곗씠?곗슜)
      */
     getCompanyTransactionHistoryByName: async (companyName: string): Promise<Array<{
         date: string;
@@ -519,7 +516,7 @@ export const balanceCalculationService = {
 
             transactions.push({
                 date: inv.invoiceDate,
-                description: inv.itemName || '세금계산서',
+                description: inv.itemName || "\uC138\uAE08\uACC4\uC0B0\uC11C",
                 saleAmount: inv.type === 'sales' ? inv.totalAmount : 0,
                 paymentAmount: 0,
                 balance: 0,
@@ -534,7 +531,7 @@ export const balanceCalculationService = {
         payments.forEach(pay => {
             transactions.push({
                 date: pay.date,
-                description: pay.type === 'in' ? '입금' : '지급',
+                description: pay.type === 'in' ? "\uC785\uAE08" : "\uC9C0\uAE09",
                 saleAmount: 0,
                 paymentAmount: pay.type === 'in' ? pay.amount : 0,
                 balance: 0,
@@ -557,3 +554,4 @@ export const balanceCalculationService = {
         return transactions;
     }
 };
+

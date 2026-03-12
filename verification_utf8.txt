@@ -1,0 +1,10 @@
+﻿--- Migration Verification ---
+materials: 0 documents
+materialInbounds: 0 documents
+materialOutbounds: 0 documents
+accommodations: 0 documents
+accommodationUtilityRecords: 0 documents
+accommodationAssignments: 0 documents
+vehicles: 0 documents
+vehicleAssignments: 0 documents
+vehicleExpenses: 0 documents

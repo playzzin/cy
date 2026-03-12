@@ -368,7 +368,7 @@ export async function queryWorkerSalary(params: {
 
                 workerReports.push({
                     date: dateStr,
-                    siteName: report.siteName,
+                    siteName: report.siteName || '',
                     manDay: workerData.manDay,
                     unitPrice: workerData.unitPrice || worker.unitPrice || 0
                 });

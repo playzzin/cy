@@ -1,9 +1,11 @@
-import { dc, db } from '../config/firebase';
+import { db } from '../config/firebase';
 import { collection, writeBatch, getDocs, limit, query } from 'firebase/firestore';
-import * as DC from '@dataconnect/generated';
+import * as DC from './firestoreCrudCompat';
 import * as ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+
+const compatContext: any = undefined;
 
 // ==========================================
 // 1. Interfaces & Types
@@ -18,11 +20,11 @@ export interface BackupResult {
 
 interface CollectionHandler {
     dataKey: string; // Key in the unwrapped response (e.g., 'companies')
-    listFn?: (dc: any, vars?: any) => Promise<any>;
-    listAllFn?: (dc: any, vars: any) => Promise<any>;
-    createFn?: (dc: any, vars: any) => Promise<any>;
-    updateFn?: (dc: any, vars: any) => Promise<any>;
-    deleteFn?: (dc: any, vars: any) => Promise<any>;
+    listFn?: (ctx: any, vars?: any) => Promise<any>;
+    listAllFn?: (ctx: any, vars: any) => Promise<any>;
+    createFn?: (ctx: any, vars: any) => Promise<any>;
+    updateFn?: (ctx: any, vars: any) => Promise<any>;
+    deleteFn?: (ctx: any, vars: any) => Promise<any>;
     useFirestoreFallback: boolean; // For List/Delete if SDK is missing/incomplete
 }
 
@@ -252,20 +254,20 @@ export const fetchCollectionData = async (collectionId: string): Promise<any[]> 
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     }
 
-    // DataConnect Query
+    // Compat query
     // - listAll* 계열: (dcOrVars, vars)로 페이지네이션 가능
-    // - list* 계열: (dc) 단일 호출(추가 인자 무시)로 전체 조회
+    // - list* 계열: compat context 단일 호출(추가 인자 무시)로 전체 조회
     const supportsPaging = typeof handler.listFn === 'function' && handler.listFn.length >= 2;
 
     if (!supportsPaging) {
         try {
             // list* 계열은 전체 조회 쿼리로 생성되어 vars가 없습니다.
             // @ts-ignore
-            const response = await handler.listFn(dc);
+            const response = await handler.listFn(compatContext);
             return unwrap(response, handler.dataKey);
         } catch (error) {
             if (handler.useFirestoreFallback) {
-                console.warn(`DataConnect list failed for ${collectionId}, falling back to Firestore.`, error);
+                console.warn(`Compat list failed for ${collectionId}, falling back to Firestore.`, error);
                 const snapshot = await getDocs(collection(db, collectionId));
                 return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             }
@@ -278,7 +280,7 @@ export const fetchCollectionData = async (collectionId: string): Promise<any[]> 
     while (true) {
         try {
             // @ts-ignore
-            const response = await handler.listFn(dc, { limit: BATCH_SIZE, offset });
+            const response = await handler.listFn(compatContext, { limit: BATCH_SIZE, offset });
             const results = unwrap(response, handler.dataKey);
 
             if (!results || results.length === 0) break;
@@ -287,7 +289,7 @@ export const fetchCollectionData = async (collectionId: string): Promise<any[]> 
             offset += BATCH_SIZE;
         } catch (error) {
             if (handler.useFirestoreFallback) {
-                console.warn(`DataConnect list failed for ${collectionId}, falling back to Firestore.`, error);
+                console.warn(`Compat list failed for ${collectionId}, falling back to Firestore.`, error);
                 const snapshot = await getDocs(collection(db, collectionId));
                 return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             }
@@ -316,7 +318,7 @@ export const fetchCollectionSample = async (collectionId: string, sampleSize: nu
     if (handler.listAllFn) {
         try {
             // @ts-ignore
-            const response = await handler.listAllFn(dc, { limit: sampleSize, offset: 0 });
+            const response = await handler.listAllFn(compatContext, { limit: sampleSize, offset: 0 });
             const rows = unwrap(response, handler.dataKey);
             return Array.isArray(rows) ? rows : [];
         } catch {
@@ -328,7 +330,7 @@ export const fetchCollectionSample = async (collectionId: string, sampleSize: nu
         try {
             const supportsVars = typeof handler.listFn === 'function' && handler.listFn.length >= 2;
             // @ts-ignore
-            const response = supportsVars ? await handler.listFn(dc, { limit: sampleSize, offset: 0 }) : await handler.listFn(dc);
+            const response = supportsVars ? await handler.listFn(compatContext, { limit: sampleSize, offset: 0 }) : await handler.listFn(compatContext);
             const rows = unwrap(response, handler.dataKey);
             return Array.isArray(rows) ? rows.slice(0, sampleSize) : [];
         } catch (error) {
@@ -388,9 +390,9 @@ export const resetCollection = async (collectionId: string): Promise<number> => 
     const handler = HANDLERS[collectionId];
     let deletedCount = 0;
 
-    // Strategy 1: DataConnect Delete
+    // Strategy 1: handler delete
     if (handler && handler.deleteFn) {
-        // Fetch all IDs first (DataConnect doesn't support "Delete All" usually)
+        // Fetch all IDs first and delete them one by one via the compat handler.
         const items = await fetchCollectionData(collectionId);
         for (const item of items) {
             try {
@@ -401,10 +403,10 @@ export const resetCollection = async (collectionId: string): Promise<number> => 
                     pk.workerId = item.worker.id;
                 }
                 // @ts-ignore
-                await handler.deleteFn(dc, pk);
+                await handler.deleteFn(compatContext, pk);
                 deletedCount++;
             } catch (e) {
-                console.error(`Failed to delete ${collectionId} item via DC`, e);
+                console.error(`Failed to delete ${collectionId} item via compat handler`, e);
             }
         }
         return deletedCount;
@@ -470,8 +472,8 @@ export const restoreBatchData = async (
 // Internal Helper
 const upsertHelper = async (
     item: any,
-    createFn: (dc: any, vars: any) => Promise<any>,
-    updateFn?: (dc: any, vars: any) => Promise<any>
+    createFn: (ctx: any, vars: any) => Promise<any>,
+    updateFn?: (ctx: any, vars: any) => Promise<any>
 ) => {
     // 1. Determine Identity
     const hasId = !!item.id;
@@ -481,7 +483,7 @@ const upsertHelper = async (
     if ((hasId || hasDailyReportWorkerKey) && updateFn) {
         try {
             // @ts-ignore
-            await updateFn(dc, item);
+            await updateFn(compatContext, item);
             return; // Success
         } catch (error) {
             // Assume failure means "Not Found" or "Partial Key Error" -> Fallback to Create
@@ -492,7 +494,7 @@ const upsertHelper = async (
     // 3. Fallback to Create
     // Remove null/undefined fields explicitly if needed, but SDK usually handles optional
     // @ts-ignore
-    await createFn(dc, item);
+    await createFn(compatContext, item);
 };
 
 export const getCollectionCapabilities = (collectionId: string) => {
@@ -500,7 +502,11 @@ export const getCollectionCapabilities = (collectionId: string) => {
     return {
         canRestore: !!handler && !!handler.createFn,
         canUpsert: !!handler && !!handler.createFn && !!handler.updateFn,
-        canResetViaDataConnect: !!handler && !!handler.deleteFn,
+        canReset: !!handler && !!handler.deleteFn,
         canResetViaFirestore: true
     };
 };
+
+
+
+

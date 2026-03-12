@@ -2,9 +2,6 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "dataconnect": {
-    "source": "dataconnect"
-  },
   "hosting": {
     "public": "build",
     "ignore": [
@@ -41,10 +38,6 @@
     },
     "functions": {
       "port": 5001
-    },
-    "dataconnect": {
-      "port": 9399,
-      "dataDir": "dataconnect/.dataconnect/pgliteData"
     },
     "ui": {
       "enabled": true

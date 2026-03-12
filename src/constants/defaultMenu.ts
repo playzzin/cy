@@ -16,12 +16,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: ["통합 현황판", "인원전체내역조회"]
             },
             {
-                text: "통합DB", icon: "fa-circle-info"
+                text: "통합DB", icon: "fa-circle-info", path: "/database/manpower-db"
             },
             {
                 text: "출력 관리",
                 icon: "fa-clipboard-list",
-                sub: ["일보작성", "일보목록", "일보목록v2"]
+                sub: ["일보작성", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
             },
             {
                 text: "지원 관리",
@@ -77,14 +77,9 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 sub: ["정산 시스템 설계도", "DB 설계도", "급여 정산 설계도"]
             },
             {
-                text: "세금계산서 발행",
-                icon: "fa-file-invoice",
-                path: "/payroll/taxinvoice/issue"
-            },
-            {
-                text: "세무내역",
+                text: "세무 관리",
                 icon: "fa-file-invoice-dollar",
-                path: "/payroll/tax-affairs"
+                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)"]
             },
             {
                 text: "노무비 지급명세서 생성기",

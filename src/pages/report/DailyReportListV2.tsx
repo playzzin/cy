@@ -101,6 +101,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 startDate,
                 endDate
             });
+            console.log('[DailyReportListV2] Fetched rows count:', data.length);
+            if (data.length > 0) {
+                console.log('[DailyReportListV2] Sample row:', data[0]);
+                console.log('[DailyReportListV2] siteType check:', data.map(r => r.siteType).filter(Boolean).slice(0, 3));
+            }
             setRows(data);
         } catch (error) {
             console.error('[DailyReportListV2] Failed to fetch rows', error);
@@ -520,9 +525,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     return { ...row, ...updates };
                 }
 
-                // Propagate Report-Level Fields (siteType)
-                if (isSameReport && updates.siteType !== undefined) {
-                    return { ...row, siteType: updates.siteType };
+                // Propagate Report-Level Fields (siteType, paymentType)
+                if (isSameReport) {
+                    const reportLevelUpdates: any = {};
+                    if (updates.siteType !== undefined) reportLevelUpdates.siteType = updates.siteType;
+                    if (updates.paymentType !== undefined) reportLevelUpdates.paymentType = updates.paymentType;
+                    
+                    if (Object.keys(reportLevelUpdates).length > 0) {
+                        return { ...row, ...reportLevelUpdates };
+                    }
                 }
 
                 return row;

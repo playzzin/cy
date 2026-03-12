@@ -1,0 +1,192 @@
+﻿src/components/accommodation/UtilityLedger.tsx(118,22): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/accommodation/UtilityLedger.tsx(118,52): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/company/CompanyForm.tsx(20,9): error TS2353: Object literal may only specify known properties, and 'ceoResidentNumber' does not exist in type 'Partial<Company> | (() => Partial<Company>)'.
+src/components/company/CompanyForm.tsx(39,17): error TS2353: Object literal may only specify known properties, and 'ceoResidentNumber' does not exist in type 'SetStateAction<Partial<Company>>'.
+src/components/company/CompanyForm.tsx(170,61): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Partial<Company>'.
+src/components/layout/DashboardLayout.tsx(147,44): error TS2339: Property 'runOneTimeMigrations' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/components/layout/DashboardLayout.tsx(147,74): error TS7006: Parameter 'err' implicitly has an 'any' type.
+src/components/manpower/SiteForm.tsx(44,19): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(44,46): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(91,68): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(125,83): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(176,92): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(183,66): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/components/manpower/SiteForm.tsx(418,56): error TS2339: Property 'siteType' does not exist on type 'Partial<Site>'.
+src/components/manpower/SiteForm.tsx(419,87): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'SetStateAction<Partial<Site>>'.
+src/components/manpower/SiteForm.tsx(441,66): error TS2339: Property 'paymentMethod' does not exist on type 'Partial<Site>'.
+src/components/manpower/SiteForm.tsx(442,95): error TS2353: Object literal may only specify known properties, and 'paymentMethod' does not exist in type 'SetStateAction<Partial<Site>>'.
+src/components/manpower/SiteForm.tsx(452,66): error TS2339: Property 'paymentMethod' does not exist on type 'Partial<Site>'.
+src/components/manpower/SiteForm.tsx(453,95): error TS2353: Object literal may only specify known properties, and 'paymentMethod' does not exist in type 'SetStateAction<Partial<Site>>'.
+src/components/structure/InteractiveOrgChart.tsx(56,51): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/structure/InteractiveOrgChart.tsx(56,86): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/vehicle/VehicleBillingManager.tsx(93,72): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/vehicle/VehicleBillingManager.tsx(109,92): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/vehicle/VehicleBillingManager.tsx(112,19): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/components/vehicle/VehicleBillingManager.tsx(112,62): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/admin/MenuManagementPage.tsx(288,45): error TS2339: Property 'checkMenusV12Exists' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/pages/admin/MenuManagementPage.tsx(290,39): error TS2339: Property 'getActiveDocId' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/pages/admin/MenuManagementPage.tsx(332,50): error TS2339: Property 'initializeMenusV12' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/pages/admin/MenuManagementPage.tsx(352,43): error TS2339: Property 'parseMenuConfigJson' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/pages/admin/MenuManagementPage.tsx(388,50): error TS2551: Property 'getMenuConfigRaw' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'. Did you mean 'getMenuConfig'?
+src/pages/admin/UserManagementPage.tsx(272,34): error TS2339: Property 'refreshFromServer' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/pages/database/CompanyDatabase.tsx(214,28): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Company'.
+src/pages/database/CompanyDatabase.tsx(214,56): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Company'.
+src/pages/database/CompanyDatabase.tsx(447,153): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Company'.
+src/pages/database/CompanyDatabase.tsx(447,185): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Company'.
+src/pages/database/SiteDatabase.tsx(51,19): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/pages/database/SiteDatabase.tsx(51,46): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/pages/database/SiteDatabase.tsx(732,90): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/database/SiteDatabase.tsx(733,126): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site>'.
+src/pages/database/SiteDatabase.tsx(743,90): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/database/SiteDatabase.tsx(744,126): error TS2353: Object literal may only specify known properties, and 'paymentMethod' does not exist in type 'Partial<Site>'.
+src/pages/gallery/ProjectGalleryPage.tsx(65,9): error TS2353: Object literal may only specify known properties, and 'imageUrl' does not exist in type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(65,24): error TS2339: Property 'imageUrl' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(66,22): error TS2339: Property 'photos' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(194,31): error TS2339: Property 'imageUrl' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(239,39): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(239,72): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(245,58): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(245,79): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(264,30): error TS2339: Property 'photos' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(294,47): error TS2339: Property 'imageUrl' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(340,43): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(358,47): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(358,74): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(363,76): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/gallery/ProjectGalleryPage.tsx(421,55): error TS7006: Parameter 'photo' implicitly has an 'any' type.
+src/pages/gallery/ProjectGalleryPage.tsx(421,62): error TS7006: Parameter 'idx' implicitly has an 'any' type.
+src/pages/jeonkuk/TotalPersonnelHistoryPage.tsx(184,22): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/jeonkuk/TotalPersonnelHistoryPage.tsx(184,52): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/jeonkuk/TotalPersonnelHistoryPage.tsx(429,78): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/jeonkuk/TotalPersonnelHistoryPage.tsx(430,87): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/manpower/FreelancerPage.tsx(124,22): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/manpower/FreelancerPage.tsx(124,52): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/manpower/FreelancerPage.tsx(124,86): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/manpower/FreelancerPage.tsx(133,22): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/manpower/FreelancerPage.tsx(133,52): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/manpower/FreelancerPage.tsx(268,29): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1139,33): error TS2353: Object literal may only specify known properties, and 'ceoResidentNumber' does not exist in type 'Omit<Company, "id" | "createdAt" | "updatedAt">'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1233,55): error TS2339: Property 'siteType' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1234,60): error TS2339: Property 'paymentMethod' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1235,56): error TS2339: Property 'startDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1236,54): error TS2339: Property 'endDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1258,33): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site> & Pick<Site, "name" | "address" | "status" | "code">'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1258,55): error TS2339: Property 'siteType' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1259,60): error TS2339: Property 'paymentMethod' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1260,56): error TS2339: Property 'startDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1261,54): error TS2339: Property 'endDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1506,33): error TS2353: Object literal may only specify known properties, and 'paymentMethod' does not exist in type 'Partial<Site> & Pick<Site, "name" | "address" | "status" | "code">'.
+src/pages/mass-upload/IntegratedDailyReportUploader.tsx(1541,51): error TS2339: Property 'paymentMethod' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(332,30): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(333,30): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(334,31): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(335,31): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(533,55): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(542,60): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(597,64): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(605,69): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1117,56): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1121,52): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1124,67): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1125,44): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1127,77): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(1128,44): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2055,25): error TS2353: Object literal may only specify known properties, and 'startDate' does not exist in type 'Partial<Site> & Pick<Site, "name" | "address" | "status" | "code">'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2086,21): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2086,52): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2087,62): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2099,54): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2100,50): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2117,54): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2118,50): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2119,52): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2120,62): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2276,61): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2277,66): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2334,33): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site> & Pick<Site, "name" | "address" | "status" | "code">'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2361,104): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2362,119): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2367,29): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site>'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2367,68): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2368,78): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2372,68): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2373,78): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2561,115): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/IntegratedMassUploader.tsx(2562,130): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/mass-upload/SiteMassUploader.tsx(108,56): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/SiteMassUploader.tsx(175,48): error TS2339: Property 'startDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/SiteMassUploader.tsx(176,46): error TS2339: Property 'endDate' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/SiteMassUploader.tsx(177,47): error TS2339: Property 'siteType' does not exist on type 'Partial<Site>'.
+src/pages/mass-upload/SiteMassUploader.tsx(177,96): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/mass-upload/SiteMassUploader.tsx(204,25): error TS2353: Object literal may only specify known properties, and 'siteType' does not exist in type 'Partial<Site> & Pick<Site, "name" | "address" | "status" | "code">'.
+src/pages/mass-upload/SiteMassUploader.tsx(204,74): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/payroll/AdvancePaymentPage.tsx(982,50): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/AdvancePaymentPage.tsx(1072,97): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/payroll/DelegationLetterPage.tsx(331,43): error TS2339: Property 'ceoResidentNumber' does not exist on type 'Company'.
+src/pages/payroll/LaborCostStatementGeneratorPage.tsx(291,28): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/LaborCostStatementGeneratorPage.tsx(298,63): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/LaborCostStatementGeneratorPage.tsx(302,47): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/LaborExchangePage.tsx(289,22): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/payroll/LaborExchangePage.tsx(289,45): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/payroll/LaborExchangePage.tsx(299,25): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/pages/payroll/LaborExchangePage.tsx(299,51): error TS2339: Property 'legacyId' does not exist on type 'Company'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(1640,37): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(1821,49): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(1838,52): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/payroll/PayrollStatisticsPage.tsx(238,13): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/PayrollStatisticsPage.tsx(238,33): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/payroll/PayrollStatisticsPage.tsx(501,53): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/payroll/TeamSettlementPage.tsx(531,18): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/payroll/TeamSettlementPage.tsx(531,56): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportGridInput.tsx(392,39): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/report/DailyReportGridInput.tsx(392,64): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/report/DailyReportGridInput.tsx(396,77): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/report/DailyReportGridInput.tsx(400,39): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/report/DailyReportGridInput.tsx(400,69): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/report/DailyReportGridInput.tsx(404,77): error TS2339: Property 'paymentMethod' does not exist on type 'Site'.
+src/pages/report/DailyReportList.tsx(128,92): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportList.tsx(128,113): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportListV2.tsx(132,32): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(132,52): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(144,32): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportListV2.tsx(144,52): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportListV2.tsx(182,58): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportListV2.tsx(182,90): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/report/DailyReportListV2.tsx(192,58): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(192,90): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(202,58): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(202,90): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(429,64): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/report/DailyReportListV2.tsx(446,69): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/site/SiteManagementPage.tsx(341,118): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/site/SiteManagementPage.tsx(341,144): error TS2339: Property 'endDate' does not exist on type 'Site'.
+src/pages/site/SiteManagementPage.tsx(511,39): error TS2339: Property 'imageUrl' does not exist on type 'Site'.
+src/pages/site/SiteManagementPage.tsx(512,52): error TS2339: Property 'imageUrl' does not exist on type 'Site'.
+src/pages/site/SiteManagementPage.tsx(543,53): error TS2339: Property 'startDate' does not exist on type 'Site'.
+src/pages/support/AccommodationManager.tsx(173,48): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/support/SupportRateManagementPage.tsx(29,62): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/support/SupportRateManagementPage.tsx(58,58): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/pages/support/SupportStatusPage.tsx(79,83): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/pages/support/SupportStatusPage.tsx(85,83): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/pages/taxinvoice/TaxInvoicePage.tsx(112,56): error TS2339: Property 'getMyCompanyInfo' does not exist on type '{ addCompany: (company: Omit<Company, "id" | "createdAt" | "updatedAt">) => Promise<string>; updateCompany: (id: string, company: Partial<Company>) => Promise<...>; ... 8 more ...; incrementManDayByTeam: (teamId: string, amount: number) => Promise<...>; }'.
+src/pages/taxinvoice/TaxInvoicePage.tsx(375,42): error TS2339: Property 'saveMyCompanyInfo' does not exist on type '{ addCompany: (company: Omit<Company, "id" | "createdAt" | "updatedAt">) => Promise<string>; updateCompany: (id: string, company: Partial<Company>) => Promise<...>; ... 8 more ...; incrementManDayByTeam: (teamId: string, amount: number) => Promise<...>; }'.
+src/services/agentOrchestrator.ts(250,36): error TS2339: Property 'announceMenuChange' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/services/agentOrchestrator.ts(253,53): error TS2339: Property 'refreshFromServer' does not exist on type '{ subscribe: (callback: (data: SiteDataType) => void, options?: MenuSubscribeOptions) => () => void; getMenuConfig: (options?: MenuFetchOptions) => Promise<...>; ... 8 more ...; pruneDuplicates: () => Promise<...>; }'.
+src/services/laborExchangeService.ts(148,19): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/laborExchangeService.ts(148,58): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/laborExchangeService.ts(156,19): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/services/laborExchangeService.ts(156,58): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/services/supportRateService.ts(231,19): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/supportRateService.ts(231,58): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/supportRateService.ts(231,86): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(170,78): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(172,18): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(172,56): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(393,27): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(393,47): error TS2339: Property 'legacyId' does not exist on type 'Team'.
+src/services/teamSettlementService.ts(428,27): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/services/teamSettlementService.ts(428,47): error TS2339: Property 'legacyId' does not exist on type 'Site'.
+src/services/teamSettlementService.ts(583,15): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/services/teamSettlementService.ts(583,42): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/services/teamSettlementService.ts(583,69): error TS2339: Property 'siteType' does not exist on type 'Site'.
+src/services/teamSettlementService.ts(583,94): error TS2339: Property 'siteType' does not exist on type 'Site'.

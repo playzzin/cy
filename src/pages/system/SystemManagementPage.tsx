@@ -84,7 +84,7 @@ const SystemManagementPage: React.FC = () => {
 
                 const sampleId = String(json?.teams?.[0]?.id ?? json?.workers?.[0]?.id ?? '');
                 if (sampleId && isUuidString(sampleId)) {
-                    alert('이 백업 파일은 Data Connect(UUID) 기반으로 생성되었습니다.\n현재 복구 기능은 Firestore(legacy id) 백업만 지원합니다.\n필요 시 마이그레이션 스크립트를 사용하세요.');
+                    alert('이 백업 파일은 legacy UUID 기반으로 생성되었습니다.\n현재 복구 기능은 Firestore(legacyId) 백업만 지원합니다.');
                     return;
                 }
 
@@ -133,7 +133,7 @@ const SystemManagementPage: React.FC = () => {
                     try {
                         await manpowerService.updateWorker(legacyId, { ...(w as any) });
                     } catch {
-                        await manpowerService.addWorker({ ...(w as any), legacyId, id: undefined } as any, false);
+                        await manpowerService.addWorker({ ...(w as any), legacyId, id: undefined } as any);
                     }
                     processedItems++;
                     setProgress({ current: processedItems, total: totalItems, message: `workers 복구 중... (${processedItems}/${totalItems})` });

@@ -28,15 +28,15 @@ interface HeaderProps {
     positions: PositionItem[];
 }
 
-const Header: React.FC<HeaderProps> = ({ 
-    toggleSidebar, 
-    togglePanel, 
-    currentSiteData, 
+const Header: React.FC<HeaderProps> = ({
+    toggleSidebar,
+    togglePanel,
+    currentSiteData,
     isAdmin,
     isPositionPanelOpen,
     currentPosition,
     changePosition,
-    positions 
+    positions
 }) => {
     const { currentUser, logout } = useAuth();
     const navigate = useNavigate();
@@ -78,9 +78,9 @@ const Header: React.FC<HeaderProps> = ({
             await userService.updateUserRole(currentUser.uid, isAdmin ? 'user' : 'admin');
             alert(`관리자 권한이 ${isAdmin ? '해제' : '부여'}되었습니다. 새로고침하세요.`);
             window.location.reload();
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            alert('변경 실패');
+            alert(`변경 실패: ${e?.message || JSON.stringify(e)}`);
         }
     };
 

@@ -62,7 +62,7 @@ const SignManagementPage: React.FC = () => {
             const formattedWorkers = workerList.map(w => ({
                 id: w.id || '',
                 name: w.name,
-                juminId: w.idNumber,
+                juminId: w.idNumber || '',
                 address: w.address || '',
                 category: w.role || '',
                 bankName: w.bankName || '',
@@ -99,9 +99,9 @@ const SignManagementPage: React.FC = () => {
                 if (workerEntry) {
                     records.push({
                         date: report.date,
-                        siteName: report.siteName,
-                        teamName: report.teamName,
-                        category: workerEntry.role,
+                        siteName: report.siteName || '',
+                        teamName: report.teamName || '',
+                        category: workerEntry.role || '',
                         manDay: workerEntry.manDay,
                         unitPrice: workerEntry.unitPrice || 0,
                         amount: (workerEntry.unitPrice || 0) * workerEntry.manDay

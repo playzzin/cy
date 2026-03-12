@@ -1,0 +1,36 @@
+﻿--- Firestore Collections Analysis ---
+Found 17 collections.
+- Collection: companies | Total Documents: 66
+  Sample IDs: 0UxximEH3SAlLPXrxO4W, 2aHwjMyNRwNSwXNS2cHU, 6D3suGa8Tvss7XKusBMV, 6ye17fHxgnFyG9iIqcmG, 7c4nooM3AD05DKBPCEkT, 7lqKiV3AH6aubXy1zCCO, AICdby3ptxzS8FZRTb9b, Bqv6p7gmp0foku36PT0v, E2PWdWQxVqClK4ci0oGm, ENBWwLtUxR6YAXBTI3uc
+- Collection: companies_client | Total Documents: 47
+  Sample IDs: 0UxximEH3SAlLPXrxO4W, 6ye17fHxgnFyG9iIqcmG, 7c4nooM3AD05DKBPCEkT, 7lqKiV3AH6aubXy1zCCO, AICdby3ptxzS8FZRTb9b, Bqv6p7gmp0foku36PT0v, E2PWdWQxVqClK4ci0oGm, ENBWwLtUxR6YAXBTI3uc, EQTichjoBNH5IeQcRBQy, ERTx4EZe1sHrxN5bNt5p
+- Collection: companies_main | Total Documents: 1
+  Sample IDs: OHvx1tpDGwFQVxXYzznl
+- Collection: companies_partner | Total Documents: 18
+  Sample IDs: 2aHwjMyNRwNSwXNS2cHU, 6D3suGa8Tvss7XKusBMV, EWulapKRUDUNGJEE03aw, HDhj7MrGDjEfJyo6cw6y, HK5btccZdYB9roO1R4QW, QbW3a4Pqgyvdtj6PF0Du, VjAS6SdZ1bmbb5VdgqXx, YN0XVVBtTvFXfgPWNZpq, aWijYC3fACYAlD7cnJdb, deFVE7MkfLRlYxD9qOYQ
+- Collection: daily_reports | Total Documents: 521
+  Sample IDs: 06ioo1Ml6MXIKS0WmPC3, 0HyHAi3iSRuyPTITBsdh, 0IFv2zwofDAxE50onSZm, 0WnA9VhkQGDrdDPkBIrc, 0Zft9Vx68LDRKfdSITp7, 0c6BLK03CxUVFr1SnY3y, 0dxyUbnF7GIz72mm2QKk, 0jHfiD2DOeT5Ha6MoFh0, 0jxVlezDQga7g0FrWJZs, 0nA1sqePlQ9WdkOGiELA
+- Collection: positions | Total Documents: 19
+  Sample IDs: 0Ig3551n5sZssRyvq2ZD, Aw6aYJZ8tQCYVyXr2pVE, ESbRUlaniAXCATHnqa0I, FShip6GVxwSLmXxT2glE, GLd4tgFDrlcHWls1Sr9n, Jt5fqfcGoS23KCuZf7Wj, MC9v6TQSZKoASsEEPyVH, MaDYpyxJAQhJrgHW53qT, THqKwH05bLK8ch82tSuK, V7svDLMyaaCzNOSai6Ls
+- Collection: receivable_ledgers | Total Documents: 26
+  Sample IDs: nts-9s2bu36o0s8, nts-9umjqks8ss, nts-b0ue5nijep, nts-brc9mc6zck7, nts-di20mjr4aqp, nts-hqqpuw2gtcl, nts-j0tm2t51xc, nts-ku8i5xy996g, nts-lrmd7uotydk, nts-nhjiknu59no
+- Collection: receivable_payments | Total Documents: 36
+  Sample IDs: 3nm4YDTt1yeTkTbfDMdr, 5lXgcTQMN38Qdw8wxDmG, 6JxomaCuITIH4NmgU5EA, 6ZMSdi4VWiylqyaFVTUG, 8Rk8bkMpXjUyLZhLuCSv, 9LB2oWWfdXK9obd29kgK, DapgsbtVRjbzPlDQrL6a, KeM1WLuw9pLNAfm0kRMy, LpgRP0ae6Xl2DGvLM1ek, MmunHrbU3YD9dI8JvnYJ
+- Collection: settings | Total Documents: 1
+  Sample IDs: menus_v12
+- Collection: sites | Total Documents: 58
+  Sample IDs: 0qLqU7wREo5HK9iUQzGl, 2g1TvwHYqNyrqhH1pTul, 39H3mzLf4c4MWExwSD8h, 4TcTXiVG4HHQMmSSMqfb, 5GQIe4Pigo0Omep06hHR, 5v90onT4aejvm5o1Qiyc, 726ojY85VMhp0sAW0WB5, CCVisuLxwdYqWGNqyGN7, Ctx6gpHpAezWaRc1YXAb, DHTkJ7KFHAFQ4JGyl17O
+- Collection: smart_memos | Total Documents: 4
+  Sample IDs: PPRO5Dob5MWtxkvPNCc1, bszV0xYHEgOELuCaqQhE, hHsUvagURrTDQ67aduaw, sGSi5aMdOZ9POCGLW833
+- Collection: system_config | Total Documents: 1
+  Sample IDs: permissions
+- Collection: tasks | Total Documents: 35
+  Sample IDs: 37Y7IS5Gou96L1j6xRll, 3CS0IlhhzIAkqFkVhLIF, 4YeJX49Il2zYwRZ0mUvF, 5nY0QUbPSUIIAbQNK932, ALyYA8ToJSLlcyXtBjHQ, BYk4mlhBuRqD5P1SqCF8, HvHdSIU3JR6tGqk1iuIq, LHaiYaJn4dzWpbGat3Dh, LTy7Iz39a34lO5PXtCPP, LUWGzi6X3pjq02BOliHI
+- Collection: tax_invoice_ledger | Total Documents: 429
+  Sample IDs: nts-00k7kv944yq1m, nts-067uzlqgzcnx, nts-08b65gdvojm, nts-099g80wcq2pc, nts-0atko2iqtjgm, nts-0ef3mgdrjfb, nts-0hdfsjcmwx2t, nts-0hs922icnpq, nts-0jn84zpsdais, nts-0m9djadicr5
+- Collection: teams | Total Documents: 21
+  Sample IDs: 69PDDKpRzHKjG8MdMSM0, ER0sRgyYdnAyfFHzwzhb, EsTg0gnIZPgWYnmZr3n6, FFeLWjKzxjh9Ph3AzzcY, FHyTw2mneEt2MN8e6XrY, JHXl1tyFdrWkovs89YEK, OqhxFeBvJL8kAPKxf3Eu, OxcuBLmi3a2iPL7ffWIR, SUQwEtqJEhmgF0wwwzz9, YuZbuP1IqTlbqLrWPrMd
+- Collection: users | Total Documents: 5
+  Sample IDs: WZx4t56qyVVlOsHppaMySzVQVm83, ZFJdFSJx3Xg5XjUsLLa8FXNcVvW2, cexcRaBNDAgRlAUzNoHVuDPpy773, rHALiY5TioSZsyUdiPlDzVaPktE2, rtTbdiofy8VenXWIkIwnkod7x1E3
+- Collection: workers | Total Documents: 178
+  Sample IDs: 0CWCp8xhKYNOgMfktopz, 0DGg9vAjFuM3bXrsLI6Y, 0EapT6MD2QqBPqmcZ8w8, 0JKHNnTwBURAcyRKFf2T, 17q8zMnGSxzmjFW5LZsC, 1eYfAxR7StEfCz3mv1TC, 1jtNpVsX9I9BmfZRRGzf, 2Cfx7g5w75wrZod93BBZ, 2McyvOx5QFbYBk7lC6PI, 3qLKI4aju9LT8AUZW1Yd

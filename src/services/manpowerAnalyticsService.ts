@@ -1,7 +1,7 @@
 /**
  * 공수 데이터 분석 서비스
  * 
- * dailyReportService (Data Connect)를 통해 데이터를 조회하고 다양한 기준으로 집계
+ * dailyReportService (Firestore)를 통해 데이터를 조회하고 다양한 기준으로 집계
  */
 
 import { dailyReportService, DailyReport, DailyReportWorker } from './dailyReportService';
@@ -119,14 +119,13 @@ export interface SupportAnalysis {
 
 export class ManpowerAnalyticsService {
     /**
-     * 기간별 공수 데이터 조회 (Data Connect 기반)
+     * 기간별 공수 데이터 조회 (Firestore 기반)
      */
     async getManpowerByPeriod(
         startDate: string,
         endDate: string
     ): Promise<ManpowerData[]> {
-        // dailyReportService를 통해 데이터 조회 (Data Connect)
-        const reports = await dailyReportService.getReportsByRange(startDate, endDate);
+        const reports = await dailyReportService.getReports({ startDate, endDate });
 
         return reports.map(r => ({
             date: r.date,

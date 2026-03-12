@@ -36,7 +36,7 @@ export interface CardBillingDocument {
     lineItems: CardBillingCostItem[];
     statementAttachmentPaths: string[];
     memo?: string;
-
+    legacyId?: string;
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
     confirmedAt?: Timestamp;

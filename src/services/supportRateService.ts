@@ -1,20 +1,23 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+import { createSystemConfig, listSystemConfigs, updateSystemConfig } from '../services/firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { siteService } from './siteService';
 import { teamService } from './teamService';
+import { supportRateFirestoreService } from './supportRateFirestoreService';
 
-// 현장별 지원비 단가
+// ?꾩옣蹂?吏?먮퉬 ?④?
 export interface SupportRate {
     id?: string;                    // siteId
     siteId: string;
     siteName: string;
-    defaultRate: number;            // 기본 지원비 단가 (원/공수)
+    defaultRate: number;            // 湲곕낯 吏?먮퉬 ?④? (??怨듭닔)
     updatedAt?: Timestamp;
 }
 
-const dc = getDataConnect(app, connectorConfig);
+// In-memory cache for support rates
+let cachedRates: SupportRate[] | null = null;
+let lastFetchTime: number = 0;
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes cache
+
 const SYSTEM_CONFIG_ID = 'support_site_rates';
 const LEGACY_SYSTEM_CONFIG_ID = 'support_rates';
 
@@ -73,7 +76,7 @@ type LegacyTeamRate = {
 };
 
 const loadSystemConfigData = async (systemConfigId: string): Promise<unknown | null> => {
-    const response = await listSystemConfigs(dc);
+    const response = await listSystemConfigs();
     const rows = (response as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === systemConfigId) : null;
     return row?.data ?? null;
@@ -100,36 +103,48 @@ const loadLegacyTeamRates = async (): Promise<LegacyTeamRate[]> => {
         .filter((r: LegacyTeamRate) => Boolean(r.teamId));
 };
 
-const loadAllRates = async (): Promise<SupportRate[]> => {
-    const response = await listSystemConfigs(dc);
+const loadAllRates = async (forceRefresh: boolean = false): Promise<SupportRate[]> => {
+    const now = Date.now();
+    if (!forceRefresh && cachedRates && (now - lastFetchTime < CACHE_TTL)) {
+        return cachedRates;
+    }
+
+    const response = await listSystemConfigs();
     const rows = (response as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === SYSTEM_CONFIG_ID) : null;
     if (!row?.data) return [];
     const parsed = safeJsonParse<{ rates?: unknown }>(row.data, {});
     const rawRates = (parsed as { rates?: unknown }).rates;
     if (!Array.isArray(rawRates)) return [];
-    return rawRates.map(normalizeSupportRate).filter((x): x is SupportRate => x != null);
+
+    const rates = rawRates.map(normalizeSupportRate).filter((x): x is SupportRate => x != null);
+    cachedRates = rates;
+    lastFetchTime = now;
+    return rates;
 };
 
 const saveAllRates = async (rates: SupportRate[]): Promise<void> => {
     const payload = JSON.stringify({ rates });
     try {
-        const res = await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+        const res = await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         const didUpdate = (res as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     }
+    // Invalidate cache after saving
+    cachedRates = null;
+    lastFetchTime = 0;
 };
 
 export const supportRateService = {
-    // 모든 지원비 단가 조회(현장 기준)
+    // 紐⑤뱺 吏?먮퉬 ?④? 議고쉶(?꾩옣 湲곗?)
     async getAllSiteRates(): Promise<SupportRate[]> {
         try {
             return await loadAllRates();
@@ -139,7 +154,7 @@ export const supportRateService = {
         }
     },
 
-    // 현장별 지원비 단가 조회
+    // ?꾩옣蹂?吏?먮퉬 ?④? 議고쉶
     async getRateBySite(siteId: string): Promise<SupportRate | null> {
         try {
             const rates = await loadAllRates();
@@ -150,7 +165,7 @@ export const supportRateService = {
         }
     },
 
-    // 지원비 단가 저장/수정
+    // 吏?먮퉬 ?④? ????섏젙
     async saveSiteRate(rate: SupportRate): Promise<void> {
         try {
             const rates = await loadAllRates();
@@ -173,7 +188,7 @@ export const supportRateService = {
         }
     },
 
-    // 일괄 단가 적용
+    // ?쇨큵 ?④? ?곸슜
     async applyBulkSiteRate(siteIds: string[], rate: number, siteNameBySiteId?: Record<string, string>): Promise<void> {
         try {
             const normalizedRate = toFiniteNumberOrZero(rate);
@@ -305,5 +320,17 @@ export const supportRateService = {
 
         await saveAllRates(nextRates);
         return { migratedCount, skippedCount, missingRateCount };
+    },
+
+    // Firestore濡??꾩껜 ?곗씠??留덉씠洹몃젅?댁뀡 ?ㅽ뻾
+    async migrateToFirestore(): Promise<number> {
+        try {
+            const legacyRates = await loadAllRates();
+            return await supportRateFirestoreService.migrateLegacyRates(legacyRates);
+        } catch (error) {
+            console.error('Error migrating support rates to Firestore:', error);
+            throw error;
+        }
     }
 };
+

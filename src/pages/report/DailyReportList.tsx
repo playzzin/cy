@@ -108,7 +108,7 @@ const DailyReportList: React.FC<DailyReportListProps> = ({ initialDate }) => {
         if (workerSearch.trim()) {
             const lower = workerSearch.toLowerCase();
             result = result.filter(r =>
-                r.workers.some(w => w.name.toLowerCase().includes(lower) || w.role.includes(lower))
+                r.workers.some(w => w.name.toLowerCase().includes(lower) || (w.role || '').includes(lower))
             );
         }
 

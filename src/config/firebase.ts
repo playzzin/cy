@@ -1,11 +1,8 @@
-import { getApps, initializeApp } from 'firebase/app';
+﻿import { getApps, initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { connectFunctionsEmulator, getFunctions } from 'firebase/functions';
 import { getFirestore } from 'firebase/firestore';
-import { connectDataConnectEmulator, getDataConnect } from 'firebase/data-connect';
-import { connectorConfig } from '@dataconnect/generated';
-import { connectorConfig as localConnectorConfig } from '../dataconnect-generated';
 
 const REQUIRED_ENV_KEYS = [
   'REACT_APP_FIREBASE_API_KEY',
@@ -48,21 +45,6 @@ export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const db = getFirestore(app);
 
-const DATA_CONNECT_DEFAULT_LOCATION = 'asia-northeast3';
-const dataConnectLocationFromEnv =
-  typeof process.env.REACT_APP_DATACONNECT_LOCATION === 'string'
-    ? process.env.REACT_APP_DATACONNECT_LOCATION.trim()
-    : '';
-const dataConnectLocation =
-  dataConnectLocationFromEnv && dataConnectLocationFromEnv !== 'us-central1'
-    ? dataConnectLocationFromEnv
-    : DATA_CONNECT_DEFAULT_LOCATION;
-
-// NOTE: generated connectorConfig는 object export라 런타임에서 값을 덮어쓸 수 있음
-(connectorConfig as any).location = dataConnectLocation;
-(localConnectorConfig as any).location = dataConnectLocation;
-
-export const dc = getDataConnect(app, connectorConfig);
 // Kakao Functions are in asia-northeast3
 export const functions = getFunctions(app, 'asia-northeast3');
 
@@ -71,7 +53,8 @@ const shouldUseEmulators =
 
 if (shouldUseEmulators) {
   connectFunctionsEmulator(functions, 'localhost', 5001);
-  connectDataConnectEmulator(dc, 'localhost', 9399);
 }
 
 export default app;
+
+

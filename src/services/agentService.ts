@@ -1,17 +1,12 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
 import {
-    connectorConfig,
     createAgent,
     createAgentConversation,
     listAllAgentConversations,
     listAllAgents,
     updateAgent,
     updateAgentConversation
-} from '../dataconnect-generated';
+} from '../services/firestoreCrudCompat';
 import { Agent, AgentConversation, AgentMessage, AgentStatus } from '../types/agentTypes';
-
-const dc = getDataConnect(app, connectorConfig);
 
 const generateId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
@@ -159,13 +154,13 @@ const mapConversation = (row: any): AgentConversation => {
     };
 };
 
-// 에이전트 관리
+// ?먯씠?꾪듃 愿由?
 export const agentService = {
-    // 에이전트 생성
+    // ?먯씠?꾪듃 ?앹꽦
     async createAgent(agentData: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
         const id = generateId('agent');
         try {
-            await createAgent(dc, {
+            await createAgent({
                 id,
                 name: agentData.name,
                 type: agentData.type,
@@ -175,7 +170,7 @@ export const agentService = {
                 status: agentData.status
             } as any);
         } catch (error) {
-            console.warn('[agentService] Data Connect createAgent failed. Falling back to localStorage.', error);
+            console.warn('[agentService] Backend createAgent failed. Falling back to localStorage.', error);
             const now = new Date();
             const next: Agent = {
                 id,
@@ -195,15 +190,15 @@ export const agentService = {
         return id;
     },
 
-    // 에이전트 상태 업데이트
+    // ?먯씠?꾪듃 ?곹깭 ?낅뜲?댄듃
     async updateAgentStatus(agentId: string, status: AgentStatus): Promise<void> {
         try {
-            await updateAgent(dc, {
+            await updateAgent({
                 id: agentId,
                 status
             } as any);
         } catch (error) {
-            console.warn('[agentService] Data Connect updateAgentStatus failed. Falling back to localStorage.', error);
+            console.warn('[agentService] Backend updateAgentStatus failed. Falling back to localStorage.', error);
             const agents = loadLocalAgents();
             const nowIso = new Date().toISOString();
             saveLocalAgents(
@@ -212,14 +207,14 @@ export const agentService = {
         }
     },
 
-    // 모든 에이전트 조회
+    // 紐⑤뱺 ?먯씠?꾪듃 議고쉶
     async getAgents(): Promise<Agent[]> {
         try {
-            const response = await listAllAgents(dc);
+            const response = await listAllAgents();
             const rows = (response as any)?.data?.agents ?? [];
             return Array.isArray(rows) ? rows.map(mapAgent) : [];
         } catch (error) {
-            console.warn('[agentService] Data Connect listAgents failed. Falling back to localStorage.', error);
+            console.warn('[agentService] Backend listAgents failed. Falling back to localStorage.', error);
             return loadLocalAgents().map((a) => ({
                 ...a,
                 createdAt: toDate(a.createdAt),
@@ -228,30 +223,30 @@ export const agentService = {
         }
     },
 
-    // 특정 부모의 서브 에이전트들 조회
+    // ?뱀젙 遺紐⑥쓽 ?쒕툕 ?먯씠?꾪듃??議고쉶
     async getSubAgents(parentAgentId: string): Promise<Agent[]> {
-        console.warn('getSubAgents is not supported in Data Connect schema yet (missing parentAgentId).', parentAgentId);
+        console.warn('getSubAgents is not supported in Backend schema yet (missing parentAgentId).', parentAgentId);
         return [];
     }
 };
 
-// 💬 대화 관리
+// ?뮠 ???愿由?
 export const conversationService = {
-    // 대화 생성
+    // ????앹꽦
     async createConversation(
         mainAgentId: string,
         userId: string
     ): Promise<string> {
         const id = generateId('conv');
         try {
-            await createAgentConversation(dc, {
+            await createAgentConversation({
                 id,
                 mainAgentId,
                 userId,
                 messages: JSON.stringify([])
             } as any);
         } catch (error) {
-            console.warn('[conversationService] Data Connect createConversation failed. Falling back to localStorage.', error);
+            console.warn('[conversationService] Backend createConversation failed. Falling back to localStorage.', error);
             const now = new Date();
             const conv: AgentConversation = {
                 id,
@@ -267,7 +262,7 @@ export const conversationService = {
         return id;
     },
 
-    // 메시지 추가
+    // 硫붿떆吏 異붽?
     async addMessage(
         conversationId: string,
         message: { role: 'user' | 'assistant' | 'system'; content: string; agentId?: string }
@@ -286,12 +281,12 @@ export const conversationService = {
         ];
 
         try {
-            await updateAgentConversation(dc, {
+            await updateAgentConversation({
                 id: conversationId,
                 messages: serializeMessages(nextMessages)
             } as any);
         } catch (error) {
-            console.warn('[conversationService] Data Connect addMessage failed. Falling back to localStorage.', error);
+            console.warn('[conversationService] Backend addMessage failed. Falling back to localStorage.', error);
             const conversations = loadLocalConversations();
             const nowIso = new Date().toISOString();
             const updated = conversations.map((c) => {
@@ -306,10 +301,10 @@ export const conversationService = {
         }
     },
 
-    // 대화 조회
+    // ???議고쉶
     async getConversation(conversationId: string): Promise<AgentConversation | null> {
         try {
-            const response = await listAllAgentConversations(dc);
+            const response = await listAllAgentConversations();
             const rows = (response as any)?.data?.agentConversations ?? [];
             const row = Array.isArray(rows)
                 ? rows.find((r: any) => String(r?.id ?? '') === String(conversationId))
@@ -317,7 +312,7 @@ export const conversationService = {
 
             if (row) return mapConversation(row);
         } catch (error) {
-            console.warn('[conversationService] Data Connect getConversation failed. Falling back to localStorage.', error);
+            console.warn('[conversationService] Backend getConversation failed. Falling back to localStorage.', error);
         }
 
         const local = loadLocalConversations().find((c) => c.id === conversationId);
@@ -337,3 +332,4 @@ export const conversationService = {
         };
     }
 };
+

@@ -262,7 +262,7 @@ export const MenuManagementPage: React.FC = () => {
     const [jsonInput, setJsonInput] = useState('');
     const [status, setStatus] = useState<{ type: 'success' | 'error' | 'info', message: string } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [envInfo, setEnvInfo] = useState<{ projectId: string; useEmulators: boolean; dataConnectLocation?: string } | null>(null);
+    const [envInfo, setEnvInfo] = useState<{ projectId: string; useEmulators: boolean } | null>(null);
 
     // menus_v12 상태
     const [activeDocId, setActiveDocId] = useState<string>('');
@@ -293,8 +293,7 @@ export const MenuManagementPage: React.FC = () => {
     useEffect(() => {
         setEnvInfo({
             projectId: app.options.projectId ?? 'unknown',
-            useEmulators: process.env.NODE_ENV === 'development' && process.env.REACT_APP_USE_EMULATORS === 'true',
-            dataConnectLocation: process.env.REACT_APP_DATACONNECT_LOCATION
+            useEmulators: process.env.NODE_ENV === 'development' && process.env.REACT_APP_USE_EMULATORS === 'true'
         });
         loadConfig();
         checkMenusV12Status();
@@ -329,8 +328,8 @@ export const MenuManagementPage: React.FC = () => {
         if (!window.confirm('menus_v12를 기본 메뉴 설정으로 초기화하시겠습니까?\n기존 설정이 있다면 덮어씌워집니다.')) return;
         setIsLoading(true);
         try {
-            const success = await menuServiceV11.initializeMenusV12();
-            if (success) {
+            await menuServiceV11.initializeMenusV12();
+            if (true) {
                 await loadConfig();
                 setStatus({ type: 'success', message: 'menus_v12가 초기화되었습니다.' });
             } else {
@@ -474,10 +473,6 @@ export const MenuManagementPage: React.FC = () => {
                 <InfoRow>
                     <InfoLabel>Emulators</InfoLabel>
                     <InfoValue>{envInfo?.useEmulators ? 'true' : 'false'}</InfoValue>
-                </InfoRow>
-                <InfoRow>
-                    <InfoLabel>DataConnect Location Override</InfoLabel>
-                    <InfoValue>{envInfo?.dataConnectLocation ?? '(none)'}</InfoValue>
                 </InfoRow>
                 <InfoRow>
                     <InfoLabel>활성 문서 ID</InfoLabel>

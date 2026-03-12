@@ -12,6 +12,7 @@ import type { Team } from '../../services/teamService';
 import { siteService } from '../../services/siteService';
 import { companyService } from '../../services/companyService';
 import type { Company } from '../../services/companyService';
+import { dailyReportService } from '../../services/dailyReportService';
 
 interface BottomPanelProps {
     isOpen: boolean;
@@ -912,7 +913,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     companyName: resolvedSupportTeam?.companyName ?? resolvedPartnerCompany?.name ?? resolvedCompany?.name ?? '',
                     leaderName: '',
                     color: ''
-                }, false);
+                });
 
                 emitMasterDataChanged({ workers: true });
 
@@ -968,11 +969,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     parentTeamId: '',
                     parentTeamName: '',
                     memberCount: memberIds.length,
-                    assignedWorkers: memberIds,
                     memberIds,
                     memberNames,
-                    assignedSiteId: '',
-                    assignedSiteName: '',
                     siteIds: [],
                     siteNames: [],
                     totalManDay: 0,
@@ -985,7 +983,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     serviceDescription: '',
                     defaultSalaryModel: validated.type === '지원팀' ? '지원팀' : '일급제',
                     color: '',
-                    icon: '',
                     iconKey: '',
                     role: ''
                 });
@@ -1000,22 +997,28 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         companyId: teamCompanyId,
                         companyName: teamCompanyName,
                         memberCount: memberIds.length,
-                        assignedWorkers: memberIds,
                         memberIds,
-                        memberNames
+                        memberNames,
+                        siteIds: [],
+                        siteNames: [],
+                        totalManDay: 0,
+                        status: 'active'
                     },
                     ...prev
                 ]);
 
                 if (memberIds.length > 0) {
-                    await manpowerService.updateWorkersBatch(memberIds, {
-                        teamId,
-                        teamName: validated.name,
-                        teamType: validated.type,
-                        companyId: teamCompanyId,
-                        companyName: teamCompanyName,
-                        leaderName
-                    });
+                    await manpowerService.updateWorkersBatch(memberIds.map(id => ({
+                        id,
+                        updates: {
+                            teamId,
+                            teamName: validated.name,
+                            teamType: validated.type,
+                            companyId: teamCompanyId,
+                            companyName: teamCompanyName,
+                            leaderName
+                        }
+                    })));
 
                     setWorkers(prev =>
                         prev.map(worker => {
@@ -1076,7 +1079,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     responsibleTeamName: resolvedResponsibleTeam?.name ?? '',
                     companyId: resolvedCompany?.id ?? '',
                     companyName: resolvedCompany?.name ?? '',
-                    constructorCompanyId: '',
                     color: ''
                 });
 
@@ -1116,13 +1118,12 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         bankName: validated.bankName,
                         accountNumber: validated.accountNumber,
                         accountHolder: validated.accountHolder,
-                        siteName: '',
-                        siteManager: '',
                         siteIds: [],
                         siteNames: [],
                         status: 'active',
                         color: '',
                         totalManDay: 0,
+                        isMyCompany: false,
                         assignedClientCompanyIds: []
                     });
 
@@ -1141,7 +1142,12 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                             accountNumber: validated.accountNumber,
                             accountHolder: validated.accountHolder,
                             type: companyType,
-                            status: 'active'
+                            status: 'active',
+                            siteIds: [],
+                            siteNames: [],
+                            totalManDay: 0,
+                            isMyCompany: false,
+                            assignedClientCompanyIds: []
                         },
                         ...prev
                     ]);
@@ -1179,13 +1185,12 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     bankName: validated.bankName,
                     accountNumber: validated.accountNumber,
                     accountHolder: validated.accountHolder,
-                    siteName: '',
-                    siteManager: '',
                     siteIds: [],
                     siteNames: [],
                     status: 'active',
                     color: '',
                     totalManDay: 0,
+                    isMyCompany: false,
                     assignedClientCompanyIds: []
                 });
 
@@ -1204,7 +1209,12 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         accountNumber: validated.accountNumber,
                         accountHolder: validated.accountHolder,
                         type: companyType,
-                        status: 'active'
+                        status: 'active',
+                        siteIds: [],
+                        siteNames: [],
+                        totalManDay: 0,
+                        isMyCompany: false,
+                        assignedClientCompanyIds: []
                     },
                     ...prev
                 ]);
@@ -1236,11 +1246,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     parentTeamId: '',
                     parentTeamName: '',
                     memberCount: 0,
-                    assignedWorkers: [],
                     memberIds: [],
                     memberNames: [],
-                    assignedSiteId: '',
-                    assignedSiteName: '',
                     siteIds: [],
                     siteNames: [],
                     totalManDay: 0,
@@ -1253,7 +1260,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     serviceDescription: '',
                     defaultSalaryModel: '지원팀',
                     color: '',
-                    icon: '',
                     iconKey: '',
                     role: ''
                 });
@@ -1312,7 +1318,13 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         companyId: createdCompany.companyId,
                         companyName: createdCompany.companyName,
                         status: 'active',
-                        defaultSalaryModel: '지원팀'
+                        defaultSalaryModel: '지원팀',
+                        siteIds: [],
+                        siteNames: [],
+                        totalManDay: 0,
+                        memberCount: registerCeoAsLeader ? 1 : 0,
+                        memberIds: [],
+                        memberNames: []
                     },
                     ...prev
                 ]);
@@ -1360,11 +1372,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         parentTeamId: '',
                         parentTeamName: '',
                         memberCount: 0,
-                        assignedWorkers: [],
                         memberIds: [],
                         memberNames: [],
-                        assignedSiteId: '',
-                        assignedSiteName: '',
                         siteIds: [],
                         siteNames: [],
                         totalManDay: 0,
@@ -1377,7 +1386,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         serviceDescription: '',
                         defaultSalaryModel: '월급제',
                         color: '',
-                        icon: '',
                         iconKey: '',
                         role: ''
                     });
@@ -1411,7 +1419,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         memberIds: [workerId],
                         memberNames: [createdCompany.ceoName],
                         memberCount: 1
-                    } as any);
+                    });
 
                     toast.success(`${createdCompany.companyName}, 발주사팀, ${createdCompany.ceoName}(대표)을 등록했습니다.`);
                 } else {

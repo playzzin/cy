@@ -1,13 +1,10 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import {
-  connectorConfig,
+﻿import {
   createSystemConfig,
   listSystemConfigs,
   updateSystemConfig,
   type CreateSystemConfigVariables,
   type UpdateSystemConfigVariables
-} from '../dataconnect-generated';
+} from '../services/firestoreCrudCompat';
 import { accommodationBillingService } from './accommodationBillingService';
 import { accommodationAssignmentService } from './accommodationAssignmentService';
 import { accommodationService } from './accommodationService';
@@ -28,8 +25,6 @@ import {
   type TeamSettlementPurchaseItem,
   type TeamSettlementSalesItem
 } from '../types/teamSettlement';
-
-const dc = getDataConnect(app, connectorConfig);
 
 const SYSTEM_CONFIG_ID_PREFIX = 'team_settlement_';
 
@@ -246,7 +241,7 @@ export const teamSettlementService = {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
-    const res = await listSystemConfigs(dc);
+    const res = await listSystemConfigs();
     const rows = extractSystemConfigRows(res);
     const row = rows.find((r) => String(r.id ?? '') === systemId);
 
@@ -270,7 +265,7 @@ export const teamSettlementService = {
     const team = await buildTeamIdVariants(params.teamId);
     const systemId = buildSystemConfigId({ yearMonth: params.yearMonth, teamId: team.canonicalTeamId });
 
-    const res = await listSystemConfigs(dc);
+    const res = await listSystemConfigs();
     const rows = extractSystemConfigRows(res);
     const row = rows.find((r) => String(r.id ?? '') === systemId);
 
@@ -321,15 +316,15 @@ export const teamSettlementService = {
     const createVars: CreateSystemConfigVariables = { id: systemId, data: payload };
 
     try {
-      const updateRes = await updateSystemConfig(dc, updateVars);
+      const updateRes = await updateSystemConfig(updateVars);
       if (!didUpdateSystemConfig(updateRes)) {
-        await createSystemConfig(dc, createVars);
+        await createSystemConfig(createVars);
       }
     } catch {
       try {
-        await createSystemConfig(dc, createVars);
+        await createSystemConfig(createVars);
       } catch {
-        await updateSystemConfig(dc, updateVars);
+        await updateSystemConfig(updateVars);
       }
     }
   },
@@ -1101,3 +1096,5 @@ export const teamSettlementService = {
     };
   }
 };
+
+

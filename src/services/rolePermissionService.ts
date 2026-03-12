@@ -1,5 +1,6 @@
-import { dc } from '../config/firebase';
-import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './dataconnectCompat';
+﻿import { db } from '../config/firebase';
+import { onSnapshot, doc } from 'firebase/firestore';
+import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { UserRole, PermissionConfig, DEFAULT_PERMISSIONS } from '../types/roles';
 import { Position, positionService } from './positionService';
 
@@ -18,9 +19,11 @@ class RolePermissionService {
         await this.refreshPermissions();
 
         if (typeof window !== 'undefined' && this.pollHandle == null) {
-            this.pollHandle = window.setInterval(() => {
+            // Add real-time listener for critical changes (Removed redundant polling)
+            onSnapshot(doc(db, 'settings', 'menus_v11'), () => {
+                console.log("[rolePermissionService] Menu settings updated, refreshing permissions...");
                 void this.refreshPermissions();
-            }, 10000);
+            });
         }
     }
 
@@ -82,8 +85,8 @@ class RolePermissionService {
                 });
 
                 // Always ensure a safe fallback key
-                if (!merged['일반']) {
-                    merged['일반'] = {
+                if (!merged['?쇰컲']) {
+                    merged['?쇰컲'] = {
                         ...(baseBySystemRole[UserRole.GENERAL] || {})
                     };
                 }
@@ -109,7 +112,7 @@ class RolePermissionService {
 
             let row: any | null = null;
             try {
-                const response = await listSystemConfigs(dc);
+                const response = await listSystemConfigs();
                 const rows = (response as any)?.data?.systemConfigs ?? [];
                 row = findRowInList(rows);
             } catch {
@@ -122,7 +125,7 @@ class RolePermissionService {
                 let safety = 0;
                 while (safety < 50) {
                     safety += 1;
-                    const response = await listAllSystemConfigs(dc, { limit, offset } as any);
+                    const response = await listAllSystemConfigs({ limit, offset } as any);
                     const rows = (response as any)?.data?.systemConfigs ?? [];
                     const page = Array.isArray(rows) ? rows : [];
                     if (page.length === 0) break;
@@ -170,20 +173,20 @@ class RolePermissionService {
         const payload = JSON.stringify(permissions);
 
         try {
-            const updated = await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+            const updated = await updateSystemConfig({ id: PERMISSION_DOC_ID, data: payload } as any);
             const didUpdate = (updated as any)?.data?.systemConfig_update != null;
             if (!didUpdate) {
                 try {
-                    await createSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                    await createSystemConfig({ id: PERMISSION_DOC_ID, data: payload } as any);
                 } catch {
-                    await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                    await updateSystemConfig({ id: PERMISSION_DOC_ID, data: payload } as any);
                 }
             }
         } catch (error) {
             try {
-                await createSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                await createSystemConfig({ id: PERMISSION_DOC_ID, data: payload } as any);
             } catch {
-                await updateSystemConfig(dc, { id: PERMISSION_DOC_ID, data: payload } as any);
+                await updateSystemConfig({ id: PERMISSION_DOC_ID, data: payload } as any);
             }
         }
 
@@ -192,9 +195,9 @@ class RolePermissionService {
 
     public hasAccess(userJobTitle: string | undefined, menuId: string): boolean {
         const positionName = typeof userJobTitle === 'string' ? userJobTitle.trim() : '';
-        const key = positionName || '일반';
+        const key = positionName || '?쇰컲';
 
-        const roleConfig = this.permissions[key] || this.permissions['일반'];
+        const roleConfig = this.permissions[key] || this.permissions['?쇰컲'];
         if (roleConfig) return !!roleConfig[menuId];
 
         const fallback = DEFAULT_PERMISSIONS[UserRole.GENERAL];
@@ -220,3 +223,4 @@ class RolePermissionService {
 }
 
 export const rolePermissionService = new RolePermissionService();
+

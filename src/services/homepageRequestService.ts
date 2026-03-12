@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+import { createSystemConfig, listSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { homepageActivityService } from './homepageActivityService';
 
@@ -53,7 +51,6 @@ export interface ListHomepageRequestOptions {
      updatedAt?: string | null;
  };
 
- const dc = getDataConnect(app, connectorConfig);
  const SYSTEM_CONFIG_ID = 'homepage_requests';
 
  const generateId = (): string => {
@@ -100,7 +97,7 @@ export interface ListHomepageRequestOptions {
  };
 
  const loadAllRequests = async (): Promise<HomepageRequest[]> => {
-     const res = await listSystemConfigs(dc);
+     const res = await listSystemConfigs();
      const rows = (res as any)?.data?.systemConfigs ?? [];
      const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === SYSTEM_CONFIG_ID) : null;
      const parsed = safeJsonParse<{ requests?: StoredHomepageRequest[] }>(row?.data, {} as any);
@@ -115,16 +112,16 @@ export interface ListHomepageRequestOptions {
      });
 
      try {
-         const upd = await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+         const upd = await updateSystemConfig( { id: SYSTEM_CONFIG_ID, data: payload } as any);
          const didUpdate = (upd as any)?.data?.systemConfig_update != null;
          if (!didUpdate) {
-             await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+             await createSystemConfig( { id: SYSTEM_CONFIG_ID, data: payload } as any);
          }
      } catch {
          try {
-             await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+             await createSystemConfig( { id: SYSTEM_CONFIG_ID, data: payload } as any);
          } catch {
-             await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+             await updateSystemConfig( { id: SYSTEM_CONFIG_ID, data: payload } as any);
          }
      }
  };
@@ -154,9 +151,9 @@ export const homepageRequestService = {
 
         await homepageActivityService.addActivity(id, {
             type: 'status_change',
-            message: '요청이 등록되었습니다. (requested)',
+            message: '\uc694\uccad\uc774 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4. (requested)',
             createdBy: 'system',
-            createdByName: '시스템'
+            createdByName: '\uc2dc\uc2a4\ud15c'
         });
 
         return id;
@@ -210,7 +207,7 @@ export const homepageRequestService = {
 
         await homepageActivityService.addActivity(id, {
             type: 'status_change',
-            message: `요청 상태가 '${status}'(으)로 변경되었습니다.`,
+            message: `\uc694\uccad \uc0c1\ud0dc\uac00 '${status}'(\uc73c)\ub85c \ubcc0\uacbd\ub418\uc5c8\uc2b5\ub2c8\ub2e4.`,
             createdBy: actor.id,
             createdByName: actor.name
         });
@@ -224,7 +221,7 @@ export const homepageRequestService = {
 
         await homepageActivityService.addActivity(id, {
             type: 'status_change',
-            message: `담당자가 '${staff.name}'(으)로 배정되었습니다.`,
+            message: `\ub2f4\ub2f9\uc790\uac00 '${staff.name}'(\uc73c)\ub85c \ubc30\uc815\ub418\uc5c8\uc2b5\ub2c8\ub2e4.`,
             createdBy: staff.id,
             createdByName: staff.name
         });

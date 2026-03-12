@@ -1,20 +1,15 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import {
-    connectorConfig,
+﻿import {
     createVehicleBillingDocument,
     listAllVehicleBillingDocuments,
     listTeams,
     listAllVehicles,
     listWorkers,
     updateVehicleBillingDocument
-} from './dataconnectCompat';
+} from './firestoreCrudCompat';
 import { Vehicle } from '../types/vehicle';
 import { VehicleBillingDocument, VehicleBillingCostItem } from '../types/vehicleBilling';
 import { vehicleService } from './vehicleService';
 import { Timestamp } from 'firebase/firestore';
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -26,7 +21,7 @@ const dcWorkerLegacyIdToUuid = new Map<string, string>();
 
 const loadDcTeams = async (): Promise<void> => {
     if (dcTeamsLoaded) return;
-    const res = await listTeams(dc);
+    const res = await listTeams();
     const rows = (res as any)?.data?.teams ?? [];
     dcTeamLegacyIdToUuid.clear();
     for (const row of rows) {
@@ -40,7 +35,7 @@ const loadDcTeams = async (): Promise<void> => {
 
 const loadDcWorkers = async (): Promise<void> => {
     if (dcWorkersLoaded) return;
-    const res = await listWorkers(dc);
+    const res = await listWorkers();
     const rows = (res as any)?.data?.workers ?? [];
     dcWorkerLegacyIdToUuid.clear();
     for (const row of rows) {
@@ -79,7 +74,7 @@ const resolveWorkerUuid = async (id: string | undefined): Promise<string | null>
 const resolveVehicleUuid = async (id: string): Promise<string | null> => {
     if (!id) return null;
     if (isUuidString(id)) return id;
-    const res = await listAllVehicles(dc);
+    const res = await listAllVehicles();
     const rows = (res as any)?.data?.vehicles ?? [];
     const hit = Array.isArray(rows) ? rows.find((r: any) => String(r?.legacyId ?? '') === String(id)) : null;
     return hit?.id ? String(hit.id) : null;
@@ -251,20 +246,20 @@ export const vehicleBillingService = {
 
             try {
                 try {
-                    await createVehicleBillingDocument(dc, payloadV2 as any);
+                    await createVehicleBillingDocument(payloadV2 as any);
                 } catch {
-                    await createVehicleBillingDocument(dc, payloadV1 as any);
+                    await createVehicleBillingDocument(payloadV1 as any);
                 }
 
                 if (billing.confirmedAt) {
                     try {
-                        await updateVehicleBillingDocument(dc, {
+                        await updateVehicleBillingDocument({
                             id: canonicalId,
                             status: billing.status,
                             confirmedAt: billing.confirmedAt.toDate().toISOString()
                         } as any);
                     } catch {
-                        await updateVehicleBillingDocument(dc, {
+                        await updateVehicleBillingDocument({
                             id: canonicalId,
                             yearMonth: billing.yearMonth,
                             vehiclePlate: billing.vehiclePlate,
@@ -282,9 +277,9 @@ export const vehicleBillingService = {
                 }
             } catch {
                 try {
-                    await updateVehicleBillingDocument(dc, payloadV2 as any);
+                    await updateVehicleBillingDocument(payloadV2 as any);
                 } catch {
-                    await updateVehicleBillingDocument(dc, {
+                    await updateVehicleBillingDocument({
                         ...payloadV1,
                         confirmedAt: billing.confirmedAt ? billing.confirmedAt.toDate().toISOString() : null
                     } as any);
@@ -299,7 +294,7 @@ export const vehicleBillingService = {
     // Get Billings for a Month
     getBillingsByMonth: async (yearMonth: string) => {
         try {
-            const res = await listAllVehicleBillingDocuments(dc);
+            const res = await listAllVehicleBillingDocuments();
             const rows = (res as any)?.data?.vehicleBillingDocuments ?? [];
             const docs = Array.isArray(rows) ? rows : [];
 
@@ -359,3 +354,4 @@ export const vehicleBillingService = {
         }
     }
 };
+

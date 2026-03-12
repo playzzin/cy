@@ -5,9 +5,10 @@ import { teamService } from '../../services/teamService';
 import { siteService } from '../../services/siteService';
 import { companyService } from '../../services/companyService';
 import { dispatchService } from '../../services/dispatchService';
+import { coreMigrationService } from '../../services/coreMigrationService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faSync, faDownload, faUpload, faTrash, faSpinner
+    faSync, faDownload, faUpload, faTrash, faSpinner, faDatabase, faArrowRight
 } from '@fortawesome/free-solid-svg-icons';
 import { fetchCollectionData } from '../../services/backupService';
 
@@ -15,6 +16,26 @@ const DataManagementSection: React.FC = () => {
     // System Management States
     const [isLoading, setIsLoading] = useState(false);
     const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+
+    // --- Migration ---
+    const handleRunMigration = async () => {
+        if (!window.confirm('Firestore로의 데이터 이관(Batch 2)을 시작하시겠습니까?\n대상: 자재, 숙소, 차량 데이터')) return;
+
+        setIsLoading(true);
+        try {
+            await coreMigrationService.runBatch2Migration((msg) => {
+                setProgress({ current: 50, total: 100, message: msg });
+            });
+            alert('Batch 2 데이터 이관이 완료되었습니다.');
+            window.location.reload();
+        } catch (error) {
+            console.error('Migration failed:', error);
+            alert('이관 중 오류가 발생했습니다.');
+        } finally {
+            setIsLoading(false);
+            setProgress(null);
+        }
+    };
 
     // Define all collections to manage
     const COLLECTIONS = [
@@ -44,7 +65,7 @@ const DataManagementSection: React.FC = () => {
             const backupData: { [key: string]: any[] } = {};
             let totalDocs = 0;
 
-            setProgress({ current: 0, total: 100, message: `Data Connect 데이터 수집 중...` });
+            setProgress({ current: 0, total: 100, message: `운영 데이터 수집 중...` });
             const [workers, teams, sites, dailyReports, companies, dailyDispatches] = await Promise.all([
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
@@ -141,7 +162,7 @@ const DataManagementSection: React.FC = () => {
                 const sampleId = sample?.id ? String(sample.id) : '';
                 const sampleLegacyId = sample?.legacyId ? String(sample.legacyId) : '';
                 if (sampleId && isUuidString(sampleId) && !sampleLegacyId) {
-                    throw new Error('Data Connect(UUID) 기반 백업 파일은 legacyId 없이 복구할 수 없습니다.');
+                    throw new Error('legacy UUID 기반 백업 파일은 legacyId 없이 복구할 수 없습니다.');
                 }
 
                 let totalItems = 0;
@@ -194,7 +215,7 @@ const DataManagementSection: React.FC = () => {
                             try {
                                 await manpowerService.updateWorker(legacyId, item);
                             } catch {
-                                await manpowerService.addWorker({ ...(item as any), legacyId, id: undefined } as any, false);
+                                await manpowerService.addWorker({ ...(item as any), legacyId, id: undefined } as any);
                             }
                         }
 
@@ -434,6 +455,31 @@ const DataManagementSection: React.FC = () => {
                         <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>차량 관리</div>
                         <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-purple-400"></span>시스템 설정</div>
                         <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-gray-400"></span>시스템 로그</div>
+                    </div>
+                </div>
+
+                {/* 0. Firestore Migration (Batch 2) */}
+                <div className="bg-brand-50 p-6 rounded-xl border border-brand-100 mb-8 shadow-sm">
+                    <div className="flex items-start gap-4">
+                        <div className="bg-brand-100 p-3 rounded-lg text-brand-600">
+                            <FontAwesomeIcon icon={faDatabase} size="lg" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="font-bold text-slate-800 mb-1">Firestore 데이터 이관 (Batch 2)</h3>
+                            <p className="text-sm text-slate-600 mb-4">
+                                <span className="font-bold text-brand-700">자재, 숙소, 차량</span> 데이터의 Firestore 적재 상태를 점검합니다.<br />
+                                이 작업은 기존 데이터를 삭제하지 않으며, 동일한 ID가 있을 경우 업데이트(Merge)합니다.
+                            </p>
+                            <button
+                                onClick={handleRunMigration}
+                                disabled={isLoading}
+                                className="bg-brand-600 text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-brand-700 transition shadow-md flex items-center gap-2 disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faSync} spin={isLoading} />
+                                데이터 이관 실행
+                                <FontAwesomeIcon icon={faArrowRight} />
+                            </button>
+                        </div>
                     </div>
                 </div>
 

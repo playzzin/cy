@@ -360,7 +360,7 @@ const DelegationBuilderPage: React.FC = () => {
 
     const filteredWorkers = useMemo(() => {
         return workers.filter(w =>
-            w.name.includes(searchTerm) || w.idNumber.includes(searchTerm)
+            w.name.includes(searchTerm) || (w.idNumber ?? '').includes(searchTerm)
         );
     }, [workers, searchTerm]);
 

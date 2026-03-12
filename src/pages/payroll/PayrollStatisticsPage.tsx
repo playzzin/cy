@@ -307,7 +307,7 @@ const PayrollStatisticsPage: React.FC = () => {
             id: `${report.date}_${rw.workerId}_${report.teamId}_${Math.random()}`,
             date: report.date,
             teamId: report.teamId,
-            teamName: report.teamName,
+            teamName: report.teamName || '',
             workerId: rw.workerId,
             workerName: rw.name,
             manDay,
@@ -479,7 +479,7 @@ const PayrollStatisticsPage: React.FC = () => {
           if (resolveSalaryModel(rw, worker) !== '월급제') return;
 
           const teamId = (worker?.teamId || report.teamId || '').trim();
-          const teamName = resolveTeamName(teamId, report.teamName);
+          const teamName = resolveTeamName(teamId, report.teamName || '');
           const manDay = toNumber(rw.manDay);
           const amount = manDay * toNumber(rw.unitPrice ?? worker?.unitPrice ?? 0);
 
@@ -496,7 +496,7 @@ const PayrollStatisticsPage: React.FC = () => {
             workEntries: [...prev.workEntries, {
               date: report.date,
               siteId: report.siteId,
-              siteName: report.siteName,
+              siteName: report.siteName || '',
               clientCompanyId: (siteMap.get(report.siteId)?.clientCompanyId || '').trim(),
               isLabor: (siteMap.get(report.siteId)?.paymentMethod || '').trim() === '노무',
               manDay,

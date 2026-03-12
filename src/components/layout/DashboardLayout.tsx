@@ -181,7 +181,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     };
 
                     await loadAndApply();
-                    const timer = setInterval(loadAndApply, 30000);
+                    const timer = setInterval(loadAndApply, 600000); // 10분 폴링 (비용 최적화)
 
                     return () => {
                         cancelled = true;

@@ -63,7 +63,7 @@ const DailyReportV2Page: React.FC = () => {
     const fetchReports = async () => {
         setLoading(true);
         try {
-            const reports = await dailyReportService.getReportsByRange(date, date);
+            const reports = await dailyReportService.getReports({ startDate: date, endDate: date });
             const gridData: any[] = [];
 
             reports.forEach(report => {
@@ -152,17 +152,16 @@ const DailyReportV2Page: React.FC = () => {
                 report.totalManDay += parseFloat(row.manDay) || 0;
             }
 
+            // Optimized Batch Save
             for (const report of Array.from(reportsToSave.values())) {
-                for (const worker of report.workers) {
-                    await dailyReportService.addWorkerToReport(
-                        report.date,
-                        report.teamId,
-                        report.teamName,
-                        report.siteId,
-                        report.siteName,
-                        worker
-                    );
-                }
+                await dailyReportService.addWorkersToReportBatch({
+                    date: report.date,
+                    teamId: report.teamId,
+                    teamName: report.teamName,
+                    siteId: report.siteId,
+                    siteName: report.siteName,
+                    workers: report.workers
+                });
             }
 
             Swal.fire('Success', '일보가 저장되었습니다.', 'success');

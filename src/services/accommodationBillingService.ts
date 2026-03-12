@@ -1,7 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import {
-    connectorConfig,
+﻿import {
     listAllAccommodationBillingDocuments,
     listAllAccommodationBillingLineItems,
     createAccommodationBillingDocument,
@@ -13,15 +10,13 @@ import {
     updateAdvancePayment,
     listAllTeams,
     listAllWorkers
-} from './dataconnectCompat';
+} from './firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import {
     AccommodationBillingDocument,
     AccommodationBillingLineItem,
     AccommodationBillingTargetField
 } from '../types/accommodationBilling';
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -42,7 +37,7 @@ const dcWorkerLegacyIdToUuid = new Map<string, string>();
 
 const loadDcTeams = async (): Promise<void> => {
     if (dcTeamsLoaded) return;
-    const res = await listAllTeams(dc);
+    const res = await listAllTeams();
     const rows = (res as any)?.data?.teams ?? [];
     dcTeamLegacyIdToUuid.clear();
     rows.forEach((t: any) => {
@@ -56,7 +51,7 @@ const loadDcTeams = async (): Promise<void> => {
 
 const loadDcWorkers = async (): Promise<void> => {
     if (dcWorkersLoaded) return;
-    const res = await listAllWorkers(dc);
+    const res = await listAllWorkers();
     const rows = (res as any)?.data?.workers ?? [];
     dcWorkerLegacyIdToUuid.clear();
     rows.forEach((w: any) => {
@@ -235,8 +230,8 @@ export const accommodationBillingService = {
         yearMonth: string;
     }): Promise<AccommodationBillingDocument[]> {
         const [docsRes, itemsRes] = await Promise.all([
-            listAllAccommodationBillingDocuments(dc),
-            listAllAccommodationBillingLineItems(dc)
+            listAllAccommodationBillingDocuments(),
+            listAllAccommodationBillingLineItems()
         ]);
 
         const docs = (docsRes as any)?.data?.accommodationBillingDocuments ?? [];
@@ -248,7 +243,7 @@ export const accommodationBillingService = {
         const filteredDocs = docs.filter((d: any) => {
             if (String(d?.yearMonth ?? '') !== String(params.yearMonth)) return false;
 
-            // 전팀 조회인 경우 월만 맞으면 통과
+            // ?꾪? 議고쉶??寃쎌슦 ?붾쭔 留욎쑝硫??듦낵
             if (isAllTeams) return true;
 
             const dcTeamId = d?.team?.id ? String(d.team.id) : '';
@@ -304,14 +299,14 @@ export const accommodationBillingService = {
         const issuedToType = issuedToTypeRaw === 'team_leader' ? 'team' : issuedToTypeRaw;
         const shouldRequireWorker = issuedToType === 'worker';
         const workerUuid = shouldRequireWorker ? await resolveWorkerUuid(docData.issuedToWorkerId ?? '') : null;
-        if (!teamUuid) throw new Error('팀을 찾을 수 없습니다.');
-        if (shouldRequireWorker && !workerUuid) throw new Error('작업자를 찾을 수 없습니다.');
+        if (!teamUuid) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
+        if (shouldRequireWorker && !workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
         const issuedToWorkerName = issuedToType === 'team'
             ? (docData.teamName ?? '')
             : (docData.issuedToWorkerName ?? null);
 
-        const updateRes = await updateAccommodationBillingDocument(dc, {
+        const updateRes = await updateAccommodationBillingDocument({
             id: docData.id,
             yearMonth: docData.yearMonth ?? null,
             teamId: teamUuid,
@@ -327,7 +322,7 @@ export const accommodationBillingService = {
 
         const updatedOk = (updateRes as any)?.data?.accommodationBillingDocument_update;
         if (!updatedOk) {
-            await createAccommodationBillingDocument(dc, {
+            await createAccommodationBillingDocument({
                 id: docData.id,
                 yearMonth: docData.yearMonth,
                 teamId: teamUuid,
@@ -342,21 +337,21 @@ export const accommodationBillingService = {
             } as any);
         }
 
-        const listItemsRes = await listAllAccommodationBillingLineItems(dc);
+        const listItemsRes = await listAllAccommodationBillingLineItems();
         const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
         const toDelete = existingItems.filter((li: any) => String(li?.billingDocument?.id ?? '') === String(docData.id));
         await Promise.all(
             toDelete.map(async (li: any) => {
                 const liId = li?.id ? String(li.id) : '';
                 if (!liId) return;
-                await deleteAccommodationBillingLineItem(dc, { id: liId } as any);
+                await deleteAccommodationBillingLineItem({ id: liId } as any);
             })
         );
 
         await Promise.all(
             (docData.lineItems ?? []).map(async (li) => {
                 const id = String(li.id);
-                await createAccommodationBillingLineItem(dc, {
+                await createAccommodationBillingLineItem({
                     id,
                     billingDocumentId: docData.id,
                     label: li.label ?? null,
@@ -371,20 +366,20 @@ export const accommodationBillingService = {
 
     async confirmAndPostToAdvancePayment(billingId: string): Promise<void> {
         const [docsRes, itemsRes] = await Promise.all([
-            listAllAccommodationBillingDocuments(dc),
-            listAllAccommodationBillingLineItems(dc)
+            listAllAccommodationBillingDocuments(),
+            listAllAccommodationBillingLineItems()
         ]);
         const docs = (docsRes as any)?.data?.accommodationBillingDocuments ?? [];
         const items = (itemsRes as any)?.data?.accommodationBillingLineItems ?? [];
 
         const row = docs.find((d: any) => String(d?.id ?? '') === String(billingId));
-        if (!row) throw new Error('청구서를 찾을 수 없습니다.');
+        if (!row) throw new Error('泥?뎄?쒕? 李얠쓣 ???놁뒿?덈떎.');
         if (String(row?.status ?? '') === 'confirmed') return;
 
         const rawIssuedToType = row?.issuedToType ? String(row.issuedToType) : 'worker';
         const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
         if (issuedToType === 'team') {
-            await updateAccommodationBillingDocument(dc, {
+            await updateAccommodationBillingDocument({
                 id: billingId,
                 status: 'confirmed',
                 confirmedAt: new Date().toISOString(),
@@ -418,13 +413,13 @@ export const accommodationBillingService = {
         };
 
         if (!billing.teamId || !billing.yearMonth || !billing.issuedToWorkerId) {
-            throw new Error('청구서 필수 정보가 누락되었습니다.');
+            throw new Error('泥?뎄???꾩닔 ?뺣낫媛 ?꾨씫?섏뿀?듬땲??');
         }
 
         const teamUuid = await resolveTeamUuid(billing.teamId);
         const workerUuid = await resolveWorkerUuid(billing.issuedToWorkerId);
-        if (!teamUuid) throw new Error('팀을 찾을 수 없습니다.');
-        if (!workerUuid) throw new Error('작업자를 찾을 수 없습니다.');
+        if (!teamUuid) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
+        if (!workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
         const advanceId = this.buildAdvancePaymentId({
             teamId: billing.teamId,
@@ -432,7 +427,7 @@ export const accommodationBillingService = {
             yearMonth: billing.yearMonth
         });
 
-        const advancesRes = await listAllAdvancePayments(dc);
+        const advancesRes = await listAllAdvancePayments();
         const advances = (advancesRes as any)?.data?.advancePayments ?? [];
         const existing = advances.find((a: any) => String(a?.id ?? '') === String(advanceId));
 
@@ -508,16 +503,16 @@ export const accommodationBillingService = {
             updatedAt: new Date().toISOString()
         };
 
-        const updateRes = await updateAdvancePayment(dc, payload);
+        const updateRes = await updateAdvancePayment(payload);
         const ok = (updateRes as any)?.data?.advancePayment_update;
         if (!ok) {
-            await createAdvancePayment(dc, {
+            await createAdvancePayment({
                 ...payload,
                 items: existing?.items ?? null
             } as any);
         }
 
-        await updateAccommodationBillingDocument(dc, {
+        await updateAccommodationBillingDocument({
             id: billingId,
             status: 'confirmed',
             confirmedAt: new Date().toISOString(),
@@ -531,3 +526,4 @@ export const accommodationBillingService = {
         return lineItems.reduce((sum, li) => sum + (Number.isFinite(li.amount) ? li.amount : 0), 0);
     }
 };
+

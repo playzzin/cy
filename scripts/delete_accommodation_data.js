@@ -19,7 +19,7 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-// 삭제할 컬렉션 목록 (Data Connect로 이전 완료된 데이터)
+// 삭제할 컬렉션 목록 (legacy backend로 이전 완료된 데이터)
 const collectionsToDelete = [
     'accommodations',
     'accommodation_list',

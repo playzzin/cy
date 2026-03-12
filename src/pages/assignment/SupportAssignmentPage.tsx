@@ -214,7 +214,7 @@ const SupportAssignmentPage: React.FC = () => {
                     originalTeamId: originalTeamId,
                     originalTeamName: originalTeamName,
                     currentTeamId: teamId,
-                    currentTeamName: report.teamName,
+                    currentTeamName: report.teamName || '',
                     isSupport: originalTeamId !== teamId
                 };
 
@@ -277,9 +277,9 @@ const SupportAssignmentPage: React.FC = () => {
                     await dailyReportService.addWorkerToReport(
                         targetReport.date,
                         targetReport.teamId,
-                        targetReport.teamName,
+                        targetReport.teamName || '',
                         targetReport.siteId,
-                        targetReport.siteName,
+                        targetReport.siteName || '',
                         workerDetails
                     );
                 }

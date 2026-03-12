@@ -239,7 +239,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
 
                     if (!existing) {
                         teamMap.set(report.teamId, {
-                            name: report.teamName,
+                            name: report.teamName || '',
                             lastDate: report.date,
                             totalManDay: newTotal
                         });

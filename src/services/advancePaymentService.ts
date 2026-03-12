@@ -1,14 +1,11 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
 import {
-    connectorConfig,
     listAllAdvancePayments,
     createAdvancePayment,
     updateAdvancePayment,
     deleteAdvancePayment,
     listAllWorkers,
     listAllTeams
-} from '../dataconnect-generated';
+} from '../services/firestoreCrudCompat';
 
 export interface AdvancePayment {
     id?: string;
@@ -22,23 +19,21 @@ export interface AdvancePayment {
     items?: Record<string, number>;
 
     // Explicit Columns from Image
-    prevMonthCarryover: number; // 전월이월
-    accommodation: number;      // 숙소비
-    privateRoom: number;        // 개인방
-    gloves: number;            // 장갑
-    deposit: number;           // 보증금
-    fines: number;             // 과태료
-    electricity: number;       // 전기료
-    gas: number;               // 도시가스
-    internet: number;          // 인터넷
-    water: number;             // 수도세
+    prevMonthCarryover: number; // ?꾩썡?댁썡
+    accommodation: number;      // ?숈냼鍮?
+    privateRoom: number;        // 媛쒖씤諛?
+    gloves: number;            // ?κ컩
+    deposit: number;           // 蹂댁쬆湲?
+    fines: number;             // 怨쇳깭猷?
+    electricity: number;       // ?꾧린猷?
+    gas: number;               // ?꾩떆媛??
+    internet: number;          // ?명꽣??
+    water: number;             // ?섎룄??
 
-    totalDeduction: number;    // 공제 합계 (Calculated)
+    totalDeduction: number;    // 怨듭젣 ?⑷퀎 (Calculated)
     memo?: string;
     updatedAt?: Date;
 }
-
-const dc = getDataConnect(app, connectorConfig);
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -56,7 +51,7 @@ const loadDcWorkers = async (): Promise<void> => {
     const rows: any[] = [];
 
     while (true) {
-        const res = await listAllWorkers(dc, { limit, offset } as any);
+        const res = await listAllWorkers({ limit, offset } as any);
         const pageRows = (res as any)?.data?.workers ?? [];
         if (Array.isArray(pageRows)) rows.push(...pageRows);
         if (!Array.isArray(pageRows) || pageRows.length < limit) break;
@@ -64,8 +59,8 @@ const loadDcWorkers = async (): Promise<void> => {
     }
 
     if (rows.length === 0) {
-        // fallback: generated query가 환경에 따라 제한이 있을 수 있으므로 기존 listWorkers도 시도
-        const fallbackRes = await listAllWorkers(dc);
+        // fallback: generated query媛 ?섍꼍???곕씪 ?쒗븳???덉쓣 ???덉쑝誘濡?湲곗〈 listWorkers???쒕룄
+        const fallbackRes = await listAllWorkers();
         const fallbackRows = (fallbackRes as any)?.data?.workers ?? [];
         if (Array.isArray(fallbackRows)) rows.push(...fallbackRows);
     }
@@ -88,7 +83,7 @@ const loadDcTeams = async (): Promise<void> => {
     const rows: any[] = [];
 
     while (true) {
-        const res = await listAllTeams(dc, { limit, offset } as any);
+        const res = await listAllTeams({ limit, offset } as any);
         const pageRows = (res as any)?.data?.teams ?? [];
         if (Array.isArray(pageRows)) rows.push(...pageRows);
         if (!Array.isArray(pageRows) || pageRows.length < limit) break;
@@ -97,7 +92,7 @@ const loadDcTeams = async (): Promise<void> => {
 
     if (rows.length === 0) {
         // fallback
-        const fallbackRes = await listAllTeams(dc);
+        const fallbackRes = await listAllTeams();
         const fallbackRows = (fallbackRes as any)?.data?.teams ?? [];
         if (Array.isArray(fallbackRows)) rows.push(...fallbackRows);
     }
@@ -169,7 +164,7 @@ const parseAdvancePaymentCompositeId = (
     if (!id) return null;
 
     // Expected: {teamId}_{workerId}_{YYYY-MM}
-    // teamId/workerId 자체에 '_'가 포함될 가능성이 낮다는 전제(현행 생성 로직 기준)
+    // teamId/workerId ?먯껜??'_'媛 ?ы븿??媛?μ꽦????떎???꾩젣(?꾪뻾 ?앹꽦 濡쒖쭅 湲곗?)
     const parts = id.split('_');
     if (parts.length < 3) return null;
 
@@ -200,7 +195,7 @@ const isAlreadyExistsError = (error: unknown): boolean => {
     const codeFromField = typeof asAny?.code === 'string' ? asAny.code : (typeof asAny?.code === 'number' ? String(asAny.code) : '');
     const detailsFromField = typeof asAny?.details === 'string' ? asAny.details : '';
 
-    // Data Connect / GraphQL 에러 상세 (errors 배열) 확인
+    // Backend / GraphQL ?먮윭 ?곸꽭 (errors 諛곗뿴) ?뺤씤
     const errorsFromField = Array.isArray(asAny?.errors) ? (asAny.errors as any[]) : [];
     const errorDetails = errorsFromField
         .map(err => {
@@ -231,7 +226,7 @@ const isAlreadyExistsError = (error: unknown): boolean => {
         .join(' | ')
         .toLowerCase();
 
-    // 중복 관련 키워드 대폭 확장
+    // 以묐났 愿???ㅼ썙??????뺤옣
     const hasAlreadyExists = normalized.includes('already') && normalized.includes('exists');
     const hasDuplicate = normalized.includes('duplicate');
     const hasUnique = normalized.includes('unique');
@@ -256,7 +251,7 @@ const isOpaqueSqlFailureOnAdvancePaymentInsert = (error: unknown): boolean => {
 
     const normalized = `${message} | ${fallback}`.toLowerCase();
 
-    // Data Connect가 DB 상세를 숨길 때 혹은 SQL 실행 자체가 실패했을 때
+    // 백엔드媛 DB ?곸꽭瑜??④만 ???뱀? SQL ?ㅽ뻾 ?먯껜媛 ?ㅽ뙣?덉쓣 ??
     return (normalized.includes('partial-error') || normalized.includes('sql execution failed'))
         && (normalized.includes('advancepayment') || normalized.includes('insert'));
 };
@@ -267,7 +262,7 @@ export const advancePaymentService = {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
             const teamUuid = await resolveTeamUuid(teamId);
-            const res = await listAllAdvancePayments(dc);
+            const res = await listAllAdvancePayments();
             const rows = (res as any)?.data?.advancePayments ?? [];
 
             return rows
@@ -319,7 +314,7 @@ export const advancePaymentService = {
     getAdvancePaymentsByYearMonth: async (year: number, month: number): Promise<AdvancePayment[]> => {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-            const res = await listAllAdvancePayments(dc);
+            const res = await listAllAdvancePayments();
             const rows = (res as any)?.data?.advancePayments ?? [];
 
             return rows
@@ -373,10 +368,10 @@ export const advancePaymentService = {
                 resolveTeamUuid(data.teamId),
                 resolveWorkerUuid(data.workerId)
             ]);
-            if (!teamUuid) throw new Error('존재하지 않는 팀입니다.');
+            if (!teamUuid) throw new Error('議댁옱?섏? ?딅뒗 ??낅땲??');
             if (!workerUuid) {
-                // Data Connect의 Worker UUID 매핑이 누락되어도(legacyId 미이관/limit 등) 운영상 저장이 깨지지 않도록 허용
-                // workerId FK는 nullable이므로 null로 저장하고, 화면/조회는 composite id에서 legacy workerId를 복원한다.
+                // 백엔드??Worker UUID 留ㅽ븨???꾨씫?섏뼱??legacyId 誘몄씠愿/limit ?? ?댁쁺????μ씠 源⑥?吏 ?딅룄濡??덉슜
+                // workerId FK??nullable?대?濡?null濡???ν븯怨? ?붾㈃/議고쉶??composite id?먯꽌 legacy workerId瑜?蹂듭썝?쒕떎.
                 console.warn('[advancePaymentService.saveAdvancePayment] Worker UUID resolve failed. Saving with workerId=null.', {
                     legacyWorkerId: data.workerId,
                     docId
@@ -413,15 +408,15 @@ export const advancePaymentService = {
             }
 
             try {
-                await createAdvancePayment(dc, payload);
+                await createAdvancePayment(payload);
             } catch (error) {
                 const shouldTryUpdate = isAlreadyExistsError(error) || isOpaqueSqlFailureOnAdvancePaymentInsert(error);
                 if (!shouldTryUpdate) throw error;
 
                 try {
-                    await updateAdvancePayment(dc, payload);
+                    await updateAdvancePayment(payload);
                 } catch (updateError) {
-                    // update까지 실패하면 중복이 아니라 데이터/제약 문제일 확률이 높으므로 원 에러를 유지하되 로그를 남김
+                    // update源뚯? ?ㅽ뙣?섎㈃ 以묐났???꾨땲???곗씠???쒖빟 臾몄젣???뺣쪧???믪쑝誘濡????먮윭瑜??좎??섎릺 濡쒓렇瑜??④?
                     console.error('[advancePaymentService.saveAdvancePayment] Fallback update also failed.', {
                         originalError: error,
                         updateError: updateError,
@@ -441,10 +436,11 @@ export const advancePaymentService = {
     deleteAdvancePayment: async (id: string) => {
         try {
             if (!id) return;
-            await deleteAdvancePayment(dc, { id } as any);
+            await deleteAdvancePayment({ id } as any);
         } catch (error) {
             console.error("Error deleting advance payment:", error);
             throw error;
         }
     }
 };
+

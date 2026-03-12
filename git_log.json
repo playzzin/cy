@@ -1,0 +1,82 @@
+[
+  {
+    "hash": "c80bb432b4333cf3ab28e7b385db241fa1501177",
+    "date": "2026-02-28 05:42:40 +0900",
+    "msg": "feat: 2026-02-28 현재 상태 전체 저장 (335 files updated)"
+  },
+  {
+    "hash": "f38c16eefaad903dcf543ebcdfc0db8c29cf93b8",
+    "date": "2026-01-20 09:42:20 +0900",
+    "msg": "feat: Adjust position panel styling for right alignment"
+  },
+  {
+    "hash": "37ee0c35d65bf26f4aa2ffe560f735f91e2a4c79",
+    "date": "2026-01-20 09:33:45 +0900",
+    "msg": "feat(layout): 직책 모드 패널을 헤더 드롭다운으로 변경"
+  },
+  {
+    "hash": "fcd239cd60e085b1893024b31396b4085e3fec72",
+    "date": "2026-01-09 10:01:26 +0900",
+    "msg": "feat: Enhance Delegation Letter V2 with robust input binding and visual improvements"
+  },
+  {
+    "hash": "56736063bc60fded3fe3e6e357b4a49b99b30977",
+    "date": "2026-01-06 15:50:16 +0900",
+    "msg": "Fix Smart Memo errors and add Firestore backup script"
+  },
+  {
+    "hash": "a3fa5b121330d1992463b8fe6f6c80b9f420684f",
+    "date": "2026-01-04 11:46:10 +0900",
+    "msg": "refactor: DailyReportList card layout and inline editing"
+  },
+  {
+    "hash": "4b9baad2310ea7d48fc6ef7f9ad2d7f9fc08152a",
+    "date": "2026-01-03 11:27:48 +0900",
+    "msg": "Feat: Memo UX improvements and DB backup utility"
+  },
+  {
+    "hash": "e119e5178221d5538e56e619fd2301f7e198f7cd",
+    "date": "2026-01-02 07:52:03 +0900",
+    "msg": "feat(smart-memo): implement comments for checklist items"
+  },
+  {
+    "hash": "dbc59e0346c2393a742edef0b417a42b925c41c8",
+    "date": "2026-01-01 22:52:57 +0900",
+    "msg": "feat: Upgrade Settlement Architecture Page & Simplify Memo Renderer"
+  },
+  {
+    "hash": "46df9d4ce1cd15f34ae77fd72f27bac3eca7ef5f",
+    "date": "2026-01-01 19:01:56 +0900",
+    "msg": "feat: Smart Memo features & Menu Management fixes"
+  },
+  {
+    "hash": "60061ec7c26c1e5438fdae773704e2608138b230",
+    "date": "2025-12-30 18:36:19 +0900",
+    "msg": "feat: 클라우드 저장소 고도화 및 엑셀 에디터 적용"
+  },
+  {
+    "hash": "4f322b1facdd6fcd567c2318f1a60db06403dd71",
+    "date": "2025-12-29 01:31:31 +0900",
+    "msg": "Fix: Menu Manager UI layout, Batch Icon Edit, and Empty State handling"
+  },
+  {
+    "hash": "1aa2c92526b113cd7d11733b2e968db44c4adfb0",
+    "date": "2025-12-28 16:34:27 +0900",
+    "msg": "refactor: Enhance Menu Manager, implement dynamic role mapping, and remove legacy hardcoded files"
+  },
+  {
+    "hash": "935b5faa38243eb1faaa2d01c2bbb90a2d21f9c0",
+    "date": "2025-12-26 11:44:40 +0900",
+    "msg": "refactor: 입출고 페이지 병렬(Grid) 레이아웃 적용"
+  },
+  {
+    "hash": "aa623f187629badaa9056fec417dd4189671fa11",
+    "date": "2025-12-23 07:39:14 +0900",
+    "msg": "Update project structure and gitignore"
+  },
+  {
+    "hash": "f81e97b0d0716456febb4746d56fda602c64f1d8",
+    "date": "2025-12-23 05:54:42 +0900",
+    "msg": "Initial commit (Clean)"
+  }
+]

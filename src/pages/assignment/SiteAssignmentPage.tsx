@@ -146,8 +146,9 @@ const SiteAssignmentPage: React.FC = () => {
             };
 
             sites.forEach(site => {
-                if (newColumns[site.status]) {
-                    newColumns[site.status].items.push(site);
+                const status = site.status || 'planned';
+                if (newColumns[status]) {
+                    newColumns[status].items.push(site);
                 } else {
                     // Fallback for unknown status
                     newColumns['planned'].items.push(site);

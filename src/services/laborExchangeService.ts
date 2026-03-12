@@ -1,12 +1,9 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+import { createSystemConfig, listSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { dailyReportService } from './dailyReportService';
 import { siteService } from './siteService';
 import { supportRateService } from './supportRateService';
 import { teamService } from './teamService';
 
-const dc = getDataConnect(app, connectorConfig);
 
 type LaborExchangeSnapshot = {
     yearMonth: string;
@@ -38,7 +35,7 @@ const getSystemConfigIdForYearMonth = (yearMonth: string): string => {
 
 const loadSnapshotForYearMonth = async (yearMonth: string): Promise<LaborExchangeSnapshot | null> => {
     const id = getSystemConfigIdForYearMonth(yearMonth);
-    const response = await listSystemConfigs(dc);
+    const response = await listSystemConfigs();
     const rows = (response as unknown as { data?: { systemConfigs?: unknown } })?.data?.systemConfigs;
     if (!Array.isArray(rows)) return null;
     const row = rows.find((r: any) => String(r?.id ?? '') === id) as any;
@@ -64,16 +61,16 @@ const saveSnapshotForYearMonth = async (snapshot: LaborExchangeSnapshot): Promis
     const payload = JSON.stringify(snapshot);
 
     try {
-        const res = await updateSystemConfig(dc, { id, data: payload } as any);
+        const res = await updateSystemConfig({ id, data: payload } as any);
         const didUpdate = (res as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id, data: payload } as any);
+            await updateSystemConfig({ id, data: payload } as any);
         }
     }
 };
@@ -232,7 +229,7 @@ export const laborExchangeService = {
                     exchangeItems.push({
                         date: report.date,
                         siteId: report.siteId,
-                        siteName: report.siteName,
+                        siteName: report.siteName || '',
                         reportTeamId: String(reportTeamUuid),
                         reportTeamName,
                         workerTeamId: String(workerTeamUuid),

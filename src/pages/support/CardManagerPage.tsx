@@ -51,7 +51,7 @@ export const CardManagerPage: React.FC = () => {
             setSelectableTeams(allowedTeams);
         } catch (e) {
             console.error(e);
-            toast.error('카드 목록을 불러오지 못했습니다. Data Connect 배포 상태를 확인해주세요.');
+            toast.error('카드 목록을 불러오지 못했습니다. Firestore 설정을 확인해주세요.');
             setCards([]);
         } finally {
             setLoadingCards(false);

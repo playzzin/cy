@@ -1,0 +1,9 @@
+﻿src/services/menuServiceV11.ts(777,24): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(780,19): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(781,23): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(784,24): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(787,21): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(788,25): error TS1005: ';' expected.
+src/services/menuServiceV11.ts(789,1): error TS1109: Expression expected.
+src/services/menuServiceV11.ts(789,2): error TS1005: ',' expected.
+src/services/menuServiceV11.ts(790,1): error TS1005: '}' expected.

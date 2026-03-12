@@ -109,7 +109,7 @@ const ExcelDataGuideViewer: React.FC = () => {
             <div className="mb-8">
                 <h1 className="text-3xl font-bold text-slate-800 flex items-center gap-3 mb-2">
                     <FontAwesomeIcon icon={faFileExcel} className="text-green-600" />
-                    엑셀 데이터 연결 구조도 (Data Connection Map)
+                    엑셀 데이터 연결 구조도
                 </h1>
                 <p className="text-slate-600 text-lg">
                     각 엑셀 파일의 <strong>어떤 항목(열)</strong>이 서로 연결되는지 보여주는 가이드입니다.<br />

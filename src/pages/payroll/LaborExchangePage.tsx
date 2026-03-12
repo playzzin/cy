@@ -74,30 +74,22 @@ const LaborExchangePage: React.FC = () => {
                 ]);
                 setTeams(teamsData);
                 setCompanies(companiesData);
-                if (teamsData.length > 0) {
-                    setSelectedTeamId(teamsData[0].id!);
-                }
-            } catch (error) {
-                console.error('Failed to load teams:', error);
-                toast.error('팀 목록 로드 실패');
-            }
-        };
-        loadTeams();
-    }, []);
 
-    useEffect(() => {
-        const loadWorkers = async () => {
-            try {
+                if (teamsData.length > 0 && !selectedTeamId) {
+                    setSelectedTeamId(teamsData[0].id || '');
+                }
+
                 const workers = await manpowerService.getWorkers();
                 setWorkerProfiles(workers);
             } catch (error) {
-                console.error('Failed to load worker profiles:', error);
+                console.error('Failed to load initial data:', error);
+                toast.error('기초 데이터 로드 실패');
             }
         };
-        loadWorkers();
-    }, []);
+        loadTeams();
+    }, [selectedTeamId]);
 
-    // Load exchange report
+    // Load report data
     useEffect(() => {
         if (!selectedTeamId) return;
 
@@ -534,38 +526,40 @@ const LaborExchangePage: React.FC = () => {
         document.body.removeChild(link);
     };
 
-    const handleMigration = async () => {
-        const result = await Swal.fire({
-            title: '데이터 마이그레이션',
-            text: '2024년 1월 1일부터 현재까지의 일보 데이터에 대해 작업자 소속팀 정보를 업데이트하시겠습니까?',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '실행',
-            cancelButtonText: '취소'
-        });
-
-        if (result.isConfirmed) {
-            setLoading(true);
-            try {
-                const startDate = '2024-01-01';
-                const endDate = new Date().toISOString().split('T')[0];
-
-                const workers = await manpowerService.getWorkers();
-                const workerMap = new Map<string, { teamId?: string }>();
-                workers.forEach(w => {
-                    if (w.id) workerMap.set(w.id, { teamId: w.teamId });
-                });
-
-                const migrationResult = await dailyReportService.migrateWorkerTeamIds(startDate, endDate, workerMap);
-                toast.success(`마이그레이션 완료: ${migrationResult.updated}건 업데이트됨`);
-            } catch (error) {
-                console.error(error);
-                toast.error('마이그레이션 실패');
-            } finally {
-                setLoading(false);
+    /*
+        const handleMigration = async () => {
+            const result = await Swal.fire({
+                title: '데이터 마이그레이션',
+                text: '2024년 1월 1일부터 현재까지의 일보 데이터에 대해 작업자 소속팀 정보를 업데이트하시겠습니까?',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '실행',
+                cancelButtonText: '취소'
+            });
+    
+            if (result.isConfirmed) {
+                setLoading(true);
+                try {
+                    const startDate = '2024-01-01';
+                    const endDate = new Date().toISOString().split('T')[0];
+    
+                    const workers = await manpowerService.getWorkers();
+                    const workerMap = new Map<string, { teamId?: string }>();
+                    workers.forEach(w => {
+                        if (w.id) workerMap.set(w.id, { teamId: w.teamId });
+                    });
+    
+                    const migrationResult = await dailyReportService.migrateWorkerTeamIds(startDate, endDate, workerMap);
+                    toast.success(`마이그레이션 완료: ${migrationResult.updated}건 업데이트됨`);
+                } catch (error) {
+                    console.error(error);
+                    toast.error('마이그레이션 실패');
+                } finally {
+                    setLoading(false);
+                }
             }
-        }
-    };
+        };
+    */
 
     // 총합계 계산
     const outgoingTotal = useMemo(() => ({
@@ -626,12 +620,15 @@ const LaborExchangePage: React.FC = () => {
                             <FontAwesomeIcon icon={faFileExcel} />
                             교류내역 CSV
                         </button>
+                        {/* 
                         <button
                             onClick={handleMigration}
                             className="px-4 py-2 bg-slate-600 hover:bg-slate-700 text-white rounded-lg text-sm font-medium flex items-center gap-2"
                         >
+                            <FontAwesomeIcon icon={faExchangeAlt} />
                             DB 마이그레이션
                         </button>
+                        */}
                     </div>
                 </div>
 
@@ -887,7 +884,7 @@ const LaborExchangePage: React.FC = () => {
                                     총합계 ({currentSites.length}현장 / {currentTotal.workers}명)
                                 </div>
                                 <div className="text-right">
-                                    <div className="text-2xl font-bold">
+                                    <div className="2xl font-bold">
                                         {formatCurrency(currentTotal.amount)}원
                                     </div>
                                     <div className="text-sm opacity-80">

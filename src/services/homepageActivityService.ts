@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+﻿import { createSystemConfig, listSystemConfigs, updateSystemConfig } from '../services/firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 
 export type HomepageActivityType = 'status_change' | 'estimate' | 'checklist' | 'comment';
@@ -17,7 +15,6 @@ export interface HomepageActivity {
 
 type StoredHomepageActivity = Omit<HomepageActivity, 'createdAt'> & { createdAt?: string | null };
 
-const dc = getDataConnect(app, connectorConfig);
 const KEY_PREFIX = 'homepage_activities_';
 
 const generateId = (): string => {
@@ -46,7 +43,7 @@ const toTimestamp = (value?: string | null): Timestamp | undefined => {
 
 const loadActivities = async (requestId: string): Promise<HomepageActivity[]> => {
     const id = `${KEY_PREFIX}${requestId}`;
-    const res = await listSystemConfigs(dc);
+    const res = await listSystemConfigs();
     const rows = (res as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === id) : null;
     const parsed = safeJsonParse<{ activities?: StoredHomepageActivity[] }>(row?.data, {} as any);
@@ -68,16 +65,16 @@ const saveActivities = async (requestId: string, activities: HomepageActivity[])
     });
 
     try {
-        const upd = await updateSystemConfig(dc, { id, data: payload } as any);
+        const upd = await updateSystemConfig({ id, data: payload } as any);
         const didUpdate = (upd as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id, data: payload } as any);
+            await updateSystemConfig({ id, data: payload } as any);
         }
     }
 };
@@ -108,3 +105,4 @@ export const homepageActivityService = {
         });
     }
 };
+

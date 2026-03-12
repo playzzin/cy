@@ -18,6 +18,7 @@ export interface Card {
     currentAssigneeType?: CardAssigneeType;
     currentAssigneeName?: string;
     memo?: string;
+    legacyId?: string;
     createdAt?: Timestamp | null;
     updatedAt?: Timestamp | null;
 }
@@ -32,6 +33,7 @@ export interface CardAssignmentRecord {
     startDate: string;
     endDate?: string;
     note?: string;
+    legacyId?: string;
     createdAt?: Timestamp;
     updatedAt?: Timestamp;
 }
@@ -47,5 +49,6 @@ export interface CardTransaction {
     amount: number;
     memo?: string;
     evidenceUrl?: string;
+    legacyId?: string;
     createdAt?: Timestamp;
 }

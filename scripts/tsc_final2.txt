@@ -1,0 +1,11 @@
+﻿src/services/agentOrchestrator.ts(264,17): error TS1109: Expression expected.
+src/services/agentOrchestrator.ts(264,24): error TS1127: Invalid character.
+src/services/agentOrchestrator.ts(264,30): error TS1127: Invalid character.
+src/services/agentOrchestrator.ts(264,52): error TS1005: ';' expected.
+src/services/agentOrchestrator.ts(264,71): error TS1434: Unexpected keyword or identifier.
+src/services/agentOrchestrator.ts(264,98): error TS1127: Invalid character.
+src/services/agentOrchestrator.ts(264,100): error TS1127: Invalid character.
+src/services/agentOrchestrator.ts(265,42): error TS1005: ';' expected.
+src/services/agentOrchestrator.ts(265,60): error TS1127: Invalid character.
+src/services/agentOrchestrator.ts(266,34): error TS1005: ';' expected.
+src/services/agentOrchestrator.ts(266,36): error TS1127: Invalid character.

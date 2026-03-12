@@ -135,7 +135,7 @@ const WeeklyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     // Filter for '주급제'
                     if (workerDetails && workerDetails.salaryModel === '주급제') {
                         if (!workerAggregates[reportWorker.workerId]) {
-                            workerAggregates[reportWorker.workerId] = { manDay: 0, teamName: report.teamName, totalAmount: 0, unitPrices: [] };
+                            workerAggregates[reportWorker.workerId] = { manDay: 0, teamName: report.teamName || '', totalAmount: 0, unitPrices: [] };
                         }
                         const snapshotUnitPrice = reportWorker.unitPrice ?? workerDetails.unitPrice ?? 0;
                         workerAggregates[reportWorker.workerId].manDay += reportWorker.manDay;

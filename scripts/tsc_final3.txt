@@ -1,0 +1,47 @@
+﻿src/services/agentOrchestrator.ts(271,13): error TS1472: 'catch' or 'finally' expected.
+src/services/agentOrchestrator.ts(495,5): error TS1434: Unexpected keyword or identifier.
+src/services/agentOrchestrator.ts(495,37): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(495,46): error TS1005: ';' expected.
+src/services/agentOrchestrator.ts(496,13): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(497,20): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(497,83): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(500,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(506,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(508,19): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(508,63): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(509,19): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(509,61): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(511,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(518,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(521,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(527,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(529,19): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(529,23): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(529,67): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(531,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(537,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(540,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(546,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(548,17): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(548,31): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(552,19): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(552,53): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(556,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(556,20): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(560,18): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(563,13): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(563,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(569,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(572,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(577,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(579,19): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(579,23): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(579,67): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(581,17): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(587,15): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(589,20): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(589,66): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(590,20): error TS1005: ':' expected.
+src/services/agentOrchestrator.ts(590,26): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(592,11): error TS1005: ',' expected.
+src/services/agentOrchestrator.ts(606,1): error TS1128: Declaration or statement expected.

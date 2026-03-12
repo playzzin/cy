@@ -200,9 +200,9 @@ const StatusManagementPage: React.FC = () => {
         if (activeTab === 'company') {
             allItems = companies.map(c => ({ id: c.id!, name: c.name, status: c.status || 'active', type: 'company', originalData: c }));
         } else if (activeTab === 'site') {
-            allItems = sites.map(s => ({ id: s.id!, name: s.name, status: s.status, type: 'site', originalData: s }));
+            allItems = sites.map(s => ({ id: s.id!, name: s.name, status: s.status || 'planned', type: 'site', originalData: s }));
         } else {
-            allItems = workers.map(w => ({ id: w.id!, name: w.name, status: w.status, type: 'worker', originalData: w }));
+            allItems = workers.map(w => ({ id: w.id!, name: w.name, status: w.status || '', type: 'worker', originalData: w }));
         }
 
         currentItem = allItems.find(i => i.id === id);

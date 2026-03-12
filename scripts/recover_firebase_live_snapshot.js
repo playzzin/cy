@@ -49,7 +49,7 @@ function mapToTargetPath(normalizedPath) {
   if (!normalizedPath) return null;
   if (normalizedPath.startsWith("src/")) return normalizedPath;
   if (normalizedPath.startsWith("public/")) return normalizedPath;
-  if (normalizedPath.startsWith("dataconnect-generated/")) return normalizedPath;
+
 
   if (
     /^(components|pages|services|utils|hooks|contexts|types|constants|features|config|store|lib|styles|assets|routes|providers|widgets|data|schemas|generated|models|theme)\//.test(

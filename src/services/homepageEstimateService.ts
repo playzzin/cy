@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+﻿import { createSystemConfig, listSystemConfigs, updateSystemConfig } from '../services/firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { homepageActivityService } from './homepageActivityService';
 
@@ -63,7 +61,6 @@ type StoredHomepageEstimate = Omit<HomepageEstimate, 'createdAt' | 'updatedAt'> 
     updatedAt?: string | null;
 };
 
-const dc = getDataConnect(app, connectorConfig);
 const SYSTEM_CONFIG_ID = 'homepage_estimates';
 
 const generateId = (): string => {
@@ -108,7 +105,7 @@ const deserializeEstimate = (e: StoredHomepageEstimate): HomepageEstimate => {
 };
 
 const loadAllEstimates = async (): Promise<HomepageEstimate[]> => {
-    const res = await listSystemConfigs(dc);
+    const res = await listSystemConfigs();
     const rows = (res as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === SYSTEM_CONFIG_ID) : null;
     const parsed = safeJsonParse<{ estimates?: StoredHomepageEstimate[] }>(row?.data, {} as any);
@@ -123,16 +120,16 @@ const saveAllEstimates = async (estimates: HomepageEstimate[]): Promise<void> =>
     });
 
     try {
-        const upd = await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+        const upd = await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         const didUpdate = (upd as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await createSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id: SYSTEM_CONFIG_ID, data: payload } as any);
+            await updateSystemConfig({ id: SYSTEM_CONFIG_ID, data: payload } as any);
         }
     }
 };
@@ -210,7 +207,7 @@ export const homepageEstimateService = {
 
         await homepageActivityService.addActivity(input.requestId, {
             type: 'estimate',
-            message: `견적 v${newVersion} 이(가) 생성되었습니다.`,
+            message: `寃ъ쟻 v${newVersion} ??媛) ?앹꽦?섏뿀?듬땲??`,
             createdBy: actor.id,
             createdByName: actor.name
         });
@@ -277,9 +274,10 @@ export const homepageEstimateService = {
 
         await homepageActivityService.addActivity(current.requestId, {
             type: 'estimate',
-            message: `견적 v${current.version} 이(가) 수정되었습니다.`,
+            message: `寃ъ쟻 v${current.version} ??媛) ?섏젙?섏뿀?듬땲??`,
             createdBy: actor.id,
             createdByName: actor.name
         });
     }
 };
+

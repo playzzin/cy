@@ -195,7 +195,7 @@ const WorkerTable: React.FC<WorkerTableProps> = ({
                                         if (col.id === 'status') return (
                                             <td key={col.id} className="px-4 py-3 whitespace-nowrap">
                                                 <button
-                                                    onClick={() => onStatusToggle(worker.id!, worker.status)}
+                                                    onClick={() => onStatusToggle(worker.id!, worker.status || '')}
                                                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${worker.status === '재직' ? 'bg-green-500' : 'bg-slate-300'
                                                         }`}
                                                 >

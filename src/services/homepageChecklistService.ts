@@ -1,6 +1,4 @@
-import app from '../config/firebase';
-import { getDataConnect } from 'firebase/data-connect';
-import { connectorConfig, createSystemConfig, listSystemConfigs, updateSystemConfig } from '../dataconnect-generated';
+﻿import { createSystemConfig, listSystemConfigs, updateSystemConfig } from '../services/firestoreCrudCompat';
 import { Timestamp } from '../types/timestamp';
 import { homepageActivityService } from './homepageActivityService';
 
@@ -48,7 +46,6 @@ type StoredChecklistItem = Omit<HomepageChecklistItem, 'dueDate' | 'completedAt'
     updatedAt?: string | null;
 };
 
-const dc = getDataConnect(app, connectorConfig);
 const KEY_PREFIX = 'homepage_checklist_';
 
 const generateId = (): string => {
@@ -98,7 +95,7 @@ const deserializeItem = (i: StoredChecklistItem): HomepageChecklistItem => {
 
 const loadItems = async (requestId: string): Promise<HomepageChecklistItem[]> => {
     const id = `${KEY_PREFIX}${requestId}`;
-    const res = await listSystemConfigs(dc);
+    const res = await listSystemConfigs();
     const rows = (res as any)?.data?.systemConfigs ?? [];
     const row = Array.isArray(rows) ? rows.find((r: any) => String(r?.id ?? '') === id) : null;
     const parsed = safeJsonParse<{ items?: StoredChecklistItem[] }>(row?.data, {} as any);
@@ -114,16 +111,16 @@ const saveItems = async (requestId: string, items: HomepageChecklistItem[]): Pro
     });
 
     try {
-        const upd = await updateSystemConfig(dc, { id, data: payload } as any);
+        const upd = await updateSystemConfig({ id, data: payload } as any);
         const didUpdate = (upd as any)?.data?.systemConfig_update != null;
         if (!didUpdate) {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         }
     } catch {
         try {
-            await createSystemConfig(dc, { id, data: payload } as any);
+            await createSystemConfig({ id, data: payload } as any);
         } catch {
-            await updateSystemConfig(dc, { id, data: payload } as any);
+            await updateSystemConfig({ id, data: payload } as any);
         }
     }
 };
@@ -163,7 +160,7 @@ export const homepageChecklistService = {
 
         await homepageActivityService.addActivity(requestId, {
             type: 'checklist',
-            message: `체크리스트 항목 "${input.title}" 이(가) 추가되었습니다.`,
+            message: `泥댄겕由ъ뒪????ぉ "${input.title}" ??媛) 異붽??섏뿀?듬땲??`,
             createdBy: actor.id,
             createdByName: actor.name
         });
@@ -221,7 +218,7 @@ export const homepageChecklistService = {
         if (statusChanged) {
             await homepageActivityService.addActivity(requestId, {
                 type: 'checklist',
-                message: `체크리스트 항목 "${current.title}" 상태가 '${newStatus}'(으)로 변경되었습니다.`,
+                message: `泥댄겕由ъ뒪????ぉ "${current.title}" ?곹깭媛 '${newStatus}'(??濡?蹂寃쎈릺?덉뒿?덈떎.`,
                 createdBy: actor.id,
                 createdByName: actor.name
             });
@@ -241,3 +238,4 @@ export const homepageChecklistService = {
         return { total, done, percentage };
     }
 };
+

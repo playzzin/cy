@@ -101,8 +101,8 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                         wMap.set(key, {
                             workerId: key,
                             name: w.name,
-                            role: w.role,
-                            teamName: report.teamName, // Assume worker belongs to reporting team roughly
+                            role: w.role || '',
+                            teamName: report.teamName || '', // Assume worker belongs to reporting team roughly
                             totalManDay: manDay,
                             lastWorkDate: report.date || '',
                             companyName: report.companyName || report.partnerName || '자체/직영'

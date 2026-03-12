@@ -105,7 +105,7 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
         }
 
         // 1. 주민번호로 정확 매칭 시도
-        const idMatch = existingWorkers.find(w => isSameIdNumber(w.idNumber, data.idNumber || ''));
+        const idMatch = existingWorkers.find(w => isSameIdNumber(w.idNumber || '', data.idNumber || ''));
 
         if (idMatch) {
             // 기존 작업자 발견 - 채울 필드 확인
