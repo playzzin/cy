@@ -9,9 +9,13 @@ type LedgerSideNumberField =
     | 'lodging'
     | 'electricity'
     | 'gas'
-    | 'water';
+    | 'water'
+    | 'internet'
+    | 'management'
+    | 'fine'
+    | 'other';
 
-interface LedgerSideInput {
+export interface LedgerSideInput {
     carry: number;
     carrySecond: number;
     currentAdvance: number;
@@ -20,12 +24,18 @@ interface LedgerSideInput {
     electricity: number;
     gas: number;
     water: number;
+    internet: number;
+    management: number;
+    fine: number;
+    other: number;
 }
 
-interface LedgerManualInput {
+export interface LedgerManualInput {
     invoice: LedgerSideInput;
     labor: LedgerSideInput;
     personalMemo: string;
+    assignmentType?: 'corporate' | 'labor'; // Legacy row-level field
+    itemAssignments?: Record<string, 'corporate' | 'labor'>; // 추가: 개별 항목 분류
 }
 
 interface PayrollConfigLike {
@@ -85,6 +95,8 @@ export interface MonthlyAdvanceLedgerRow {
     laborGrossAmount: number;
     workEntries?: MonthlyAdvanceLedgerWorkEntry[];
     statementTaxAmounts?: MonthlyAdvanceLedgerTaxAmounts;
+    assignmentType?: 'corporate' | 'labor';
+    manual?: LedgerManualInput; // Added
 }
 
 interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
@@ -113,11 +125,17 @@ interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
 
 interface Props {
     rows: MonthlyAdvanceLedgerRow[];
-    payrollConfig?: PayrollConfigLike | null;
-    withholdingThreshold?: number;
+    payrollConfig: any | null;
+    withholdingThreshold: number;
     applyInsurance?: boolean;
     applyBusinessIncome?: boolean;
     clientCompanyNameById?: Record<string, string>;
+    onInputsChange?: (inputs: Record<string, LedgerManualInput>) => void;
+    visibleSections?: {
+        utilities?: boolean;
+        advances?: boolean;
+        taxes?: boolean;
+    };
 }
 
 interface LaborGroupSummary {
@@ -140,12 +158,18 @@ const createEmptySideInput = (): LedgerSideInput => ({
     electricity: 0,
     gas: 0,
     water: 0,
+    internet: 0,
+    management: 0,
+    fine: 0,
+    other: 0,
 });
 
-const createEmptyManualInput = (): LedgerManualInput => ({
+const createEmptyManualInput = (defaultAssignment?: 'corporate' | 'labor'): LedgerManualInput => ({
     invoice: createEmptySideInput(),
     labor: createEmptySideInput(),
     personalMemo: '',
+    assignmentType: defaultAssignment ?? 'corporate',
+    itemAssignments: {},
 });
 
 const toSafeAmount = (value: string): number => {
@@ -173,21 +197,42 @@ const getSalaryModelLabelClassName = (salaryModel?: string): string => {
 const LedgerInputCell: React.FC<{
     value: number;
     onChange: (next: number) => void;
+    assignment?: 'corporate' | 'labor';
+    onAssignmentChange?: (next: 'corporate' | 'labor') => void;
     className?: string;
-}> = ({ value, onChange, className = '' }) => (
-    <input
-        type="number"
-        min={0}
-        step={1000}
-        value={value === 0 ? '' : String(value)}
-        onChange={(e) => onChange(toSafeAmount(e.target.value))}
-        className={`w-full bg-transparent text-right text-[11px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${className}`}
-        placeholder="-"
-    />
+    placeholder?: string;
+}> = ({ value, onChange, assignment, onAssignmentChange, className = '', placeholder = '-' }) => (
+    <div className="flex flex-col gap-0.5 group">
+        <div className="flex items-center gap-1">
+            <input
+                type="number"
+                min={0}
+                step={1000}
+                value={value === 0 ? '' : String(value)}
+                onChange={(e) => onChange(toSafeAmount(e.target.value))}
+                className={`w-full bg-white/50 border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1 text-right text-[11px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
+                placeholder={placeholder}
+            />
+            {onAssignmentChange && (
+                <button
+                    type="button"
+                    onClick={() => onAssignmentChange(assignment === 'corporate' ? 'labor' : 'corporate')}
+                    className={`shrink-0 w-3.5 h-3.5 flex items-center justify-center rounded-[2px] text-[8px] font-bold transition-colors ${
+                        assignment === 'corporate'
+                            ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                            : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+                    }`}
+                    title={assignment === 'corporate' ? '법인 분류 (클릭 시 노무로 변경)' : '노무 분류 (클릭 시 법인으로 변경)'}
+                >
+                    {assignment === 'corporate' ? '법' : '노'}
+                </button>
+            )}
+        </div>
+    </div>
 );
 
 const sumSideDeductions = (side: LedgerSideInput): number =>
-    side.lodging + side.electricity + side.gas + side.water;
+    side.lodging + side.electricity + side.gas + side.water + side.internet + side.management + side.fine + side.other;
 
 const sumSideAdvances = (side: LedgerSideInput): number =>
     side.carry + side.carrySecond + side.currentAdvance + side.currentAdvanceSecond;
@@ -195,13 +240,20 @@ const sumSideAdvances = (side: LedgerSideInput): number =>
 const MonthlyAdvanceLedger: React.FC<Props> = ({
     rows,
     payrollConfig,
-    withholdingThreshold = 7,
+    withholdingThreshold,
     applyInsurance = false,
     applyBusinessIncome = false,
     clientCompanyNameById = {},
+    onInputsChange,
+    visibleSections,
 }) => {
     const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>({});
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
+    const showUtilities = visibleSections?.utilities !== false;
+    const showAdvances = visibleSections?.advances !== false;
+    const showTaxes = visibleSections?.taxes !== false;
+    const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 6 : 0);
+    const tableMinWidth = 788 + (showUtilities ? 344 : 0) + (showAdvances ? 372 : 0) + (showTaxes ? 434 : 0);
 
     useEffect(() => {
         setInputsByRowKey((prev) => {
@@ -209,18 +261,32 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             rows.forEach((row) => {
                 const existing = prev[row.rowKey];
                 if (!existing) {
-                    next[row.rowKey] = createEmptyManualInput();
+                    // Use row.manual if it exists (freshly fetched from DB), otherwise create empty
+                    next[row.rowKey] = row.manual ? {
+                        ...createEmptyManualInput(row.assignmentType),
+                        ...row.manual,
+                        invoice: { ...createEmptySideInput(), ...row.manual.invoice },
+                        labor: { ...createEmptySideInput(), ...row.manual.labor },
+                        itemAssignments: row.manual.itemAssignments ?? {},
+                    } : createEmptyManualInput(row.assignmentType);
                     return;
                 }
+                // If it already exists in state, we keep it but ensure fields are complete
                 next[row.rowKey] = {
                     invoice: { ...createEmptySideInput(), ...existing.invoice },
                     labor: { ...createEmptySideInput(), ...existing.labor },
                     personalMemo: existing.personalMemo ?? '',
+                    assignmentType: existing.assignmentType ?? row.assignmentType ?? 'labor',
+                    itemAssignments: existing.itemAssignments ?? {},
                 };
             });
             return next;
         });
     }, [rows]);
+
+    useEffect(() => {
+        onInputsChange?.(inputsByRowKey);
+    }, [inputsByRowKey, onInputsChange]);
 
     const updateSideField = useCallback(
         (rowKey: string, side: LedgerSide, field: LedgerSideNumberField, value: number) => {
@@ -254,14 +320,45 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
         });
     }, []);
 
+    const updateAssignmentType = useCallback((rowKey: string, value: 'corporate' | 'labor') => {
+        setInputsByRowKey((prev) => {
+            const base = prev[rowKey] ?? createEmptyManualInput();
+            // 전체 분류가 바뀌면 모든 개별 항목 분류도 초기화하거나 동기화할 수 있지만, 
+            // 여기서는 전체 분류 필드만 업데이트합니다.
+            return {
+                ...prev,
+                [rowKey]: {
+                    ...base,
+                    assignmentType: value,
+                },
+            };
+        });
+    }, []);
+
+    const updateItemAssignment = useCallback((rowKey: string, itemKey: string, value: 'corporate' | 'labor') => {
+        setInputsByRowKey((prev) => {
+            const base = prev[rowKey] ?? createEmptyManualInput();
+            return {
+                ...prev,
+                [rowKey]: {
+                    ...base,
+                    itemAssignments: {
+                        ...(base.itemAssignments ?? {}),
+                        [itemKey]: value,
+                    },
+                },
+            };
+        });
+    }, []);
+
     const getLaborGroupSummaries = useCallback(
         (row: MonthlyAdvanceLedgerRow): LaborGroupSummary[] => {
             const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
             const normalizeText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
-            const insuranceThreshold = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.thresholdDays)));
+            const insuranceThreshold = Math.max(0, Math.floor(toNumber((payrollConfig as any)?.insuranceConfig?.thresholdDays)));
             const withholdingApplyAllLabor =
-                typeof payrollConfig?.insuranceConfig?.withholdingApplyAllLabor === 'boolean'
-                    ? payrollConfig.insuranceConfig.withholdingApplyAllLabor
+                typeof (payrollConfig as any)?.insuranceConfig?.withholdingApplyAllLabor === 'boolean'
+                    ? (payrollConfig as any).insuranceConfig.withholdingApplyAllLabor
                     : true;
 
             const getSiteKey = (entry: MonthlyAdvanceLedgerWorkEntry): string => {
@@ -404,6 +501,8 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
         ]
     );
 
+
+
     const computedRows = useMemo<ComputedLedgerRow[]>(() => {
         const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
         const normalizeText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
@@ -424,12 +523,12 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             toNumber(payrollConfig?.insuranceConfig?.withholdingResidentTaxRate ?? payrollConfig?.residentTaxRate ?? 0.1)
         );
         const withholdingApplyAllLabor =
-            typeof payrollConfig?.insuranceConfig?.withholdingApplyAllLabor === 'boolean'
-                ? payrollConfig.insuranceConfig.withholdingApplyAllLabor
+            typeof (payrollConfig as any)?.insuranceConfig?.withholdingApplyAllLabor === 'boolean'
+                ? (payrollConfig as any).insuranceConfig.withholdingApplyAllLabor
                 : true;
         const employmentApplyBelowThreshold =
-            typeof payrollConfig?.insuranceConfig?.employmentApplyBelowThreshold === 'boolean'
-                ? payrollConfig.insuranceConfig.employmentApplyBelowThreshold
+            typeof (payrollConfig as any)?.insuranceConfig?.employmentApplyBelowThreshold === 'boolean'
+                ? (payrollConfig as any).insuranceConfig.employmentApplyBelowThreshold
                 : true;
         const businessIncomeRate = 0.03;
         const businessResidentRate = 0.003;
@@ -619,9 +718,37 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                 const insuranceTotal = pension + health + care + employment;
                 const businessTotal = businessIncomeTax + businessResidentTax;
                 const corporateBaseBeforeUtility = floorWon(invoiceGrossAmount - invoiceAdvanceTotal - businessTotal);
-                const utilityAppliedToCorporate = Math.min(Math.max(0, corporateBaseBeforeUtility), utilityTotal);
-                const utilityShiftedToPersonal = Math.max(0, utilityTotal - utilityAppliedToCorporate);
                 const personalBaseBeforeUtility = floorWon(laborGrossAmount - laborAdvanceTotal - insuranceTotal - incomeTax - residentTax);
+
+                const assignmentType = manual.assignmentType ?? row.assignmentType ?? 'labor';
+                
+                const utilityFields: Array<{ key: LedgerSideNumberField }> = [
+                    { key: 'lodging' },
+                    { key: 'electricity' },
+                    { key: 'gas' },
+                    { key: 'water' },
+                    { key: 'internet' },
+                    { key: 'management' },
+                    { key: 'fine' },
+                    { key: 'other' },
+                ];
+
+                let utilityAppliedToCorporate = 0;
+                let utilityShiftedToPersonal = 0;
+
+                utilityFields.forEach((field) => {
+                    const invoiceVal = toNumber(manual.invoice[field.key as keyof LedgerSideInput]);
+                    const laborVal = toNumber(manual.labor[field.key as keyof LedgerSideInput]);
+                    const itemTotal = invoiceVal + laborVal;
+                    if (itemTotal <= 0) return;
+
+                    const itemAssignment = manual.itemAssignments?.[field.key] ?? assignmentType;
+                    if (itemAssignment === 'corporate') {
+                        utilityAppliedToCorporate += itemTotal;
+                    } else {
+                        utilityShiftedToPersonal += itemTotal;
+                    }
+                });
 
                 const corporateNet = Math.max(0, floorWon(corporateBaseBeforeUtility - utilityAppliedToCorporate));
                 const personalNet = Math.max(0, floorWon(personalBaseBeforeUtility - utilityShiftedToPersonal));
@@ -795,44 +922,56 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             </div>
 
             <div className="flex-1 min-h-0 overflow-auto bg-white">
-                <table className="w-full min-w-[2400px] border-collapse text-[11px] leading-tight">
+                <table className="w-full border-collapse text-[11px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
                     <thead className="sticky top-0 z-20">
                         <tr className="bg-slate-200 text-slate-800">
                             <th className="border border-slate-400 px-2 py-1.5 w-10">No</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-20">이름</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-14">구분</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-14">분류</th>
+                            <th className="border border-slate-400 px-1.5 py-1.5 w-[76px]">공제 분류</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-16 bg-sky-100">공수</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-[72px]">단가</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-[84px] bg-yellow-100">세전 금액</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[68px]">숙소비<br />인터넷</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[68px]">전기세<br />관리비</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[68px]">도시가스<br />과태료</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[68px]">수도세<br />기타</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-slate-300">합계</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">
-                                <span className="block">전달 법인가불</span>
-                                <span className="block text-[10px] text-slate-700">전달 노무가불</span>
-                            </th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">
-                                <span className="block">전달 법인가불</span>
-                                <span className="block text-[10px] text-slate-700">전달 노무가불</span>
-                            </th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">
-                                <span className="block">당월 법인가불</span>
-                                <span className="block text-[10px] text-slate-700">당월 노무가불</span>
-                            </th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">
-                                <span className="block">당월 법인가불</span>
-                                <span className="block text-[10px] text-slate-700">당월 노무가불</span>
-                            </th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[76px] bg-emerald-200">가불 합계</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">국민연금<br />장기요양</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">건강보험<br />+고용보험</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-amber-100">갑근세<br />지방세</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-100">사업소득세<br />지방소득세</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">4대 보험 합계</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-200">3.3% 합계</th>
+                            {showUtilities && (
+                                <>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">숙소비<br />인터넷</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">전기세<br />관리비</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">도시가스<br />과태료</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">수도세<br />기타</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-slate-300">합계</th>
+                                </>
+                            )}
+                            {showAdvances && (
+                                <>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
+                                        <span className="block whitespace-nowrap text-[10px]">전달 법인가불</span>
+                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">전달 노무가불</span>
+                                    </th>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
+                                        <span className="block whitespace-nowrap text-[10px]">전달 법인가불</span>
+                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">전달 노무가불</span>
+                                    </th>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
+                                        <span className="block whitespace-nowrap text-[10px]">당월 법인가불</span>
+                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">당월 노무가불</span>
+                                    </th>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
+                                        <span className="block whitespace-nowrap text-[10px]">당월 법인가불</span>
+                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">당월 노무가불</span>
+                                    </th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[76px] bg-emerald-200">가불 합계</th>
+                                </>
+                            )}
+                            {showTaxes && (
+                                <>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">국민연금<br />장기요양</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">건강보험<br />+고용보험</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-amber-100">갑근세<br />지방세</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-100">사업소득세<br />지방소득세</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">4대 보험 합계</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-200">3.3% 합계</th>
+                                </>
+                            )}
                             <th className="border border-slate-400 px-2 py-1.5 w-[86px] bg-emerald-200">법 인</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-[86px] bg-lime-200">개 인</th>
                             <th className="border border-slate-400 px-2 py-1.5 w-[120px] bg-lime-100">메모</th>
@@ -841,7 +980,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     <tbody>
                         {groupedRows.length === 0 && (
                             <tr>
-                                <td colSpan={26} className="border border-slate-300 px-3 py-8 text-center text-slate-500">
+                                <td colSpan={totalColumnCount} className="border border-slate-300 px-3 py-8 text-center text-slate-500">
                                     조회된 월급제/일급제 데이터가 없습니다.
                                 </td>
                             </tr>
@@ -849,7 +988,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                         {groupedRows.map((group) => (
                             <React.Fragment key={group.teamName}>
                                 <tr className="bg-slate-700 text-white">
-                                    <td colSpan={26} className="border border-slate-600 px-3 py-1.5 text-xs font-bold">
+                                    <td colSpan={totalColumnCount} className="border border-slate-600 px-3 py-1.5 text-xs font-bold">
                                         {group.teamName} · {group.rows.length}명
                                     </td>
                                 </tr>
@@ -869,42 +1008,89 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                 <td rowSpan={2} className="border border-slate-300 px-1 text-center font-semibold">{runningNo}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 text-center font-semibold">{row.workerName}</td>
                                                 <td rowSpan={2} className={`border border-slate-300 px-1 text-center font-semibold ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
-                                                <td className="border border-slate-300 px-1 text-center bg-orange-100 font-semibold">법인</td>
+                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-blue-50/20">
+                                                    <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
+                                                        <input 
+                                                            type="radio" 
+                                                            name={`assign-${row.rowKey}`}
+                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'labor') === 'corporate'}
+                                                            onChange={() => updateAssignmentType(row.rowKey, 'corporate')}
+                                                            className="w-3 h-3 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                        />
+                                                        <span className="text-[11px] font-bold text-blue-800 tracking-wide">법인</span>
+                                                    </label>
+                                                </td>
                                                 <td className="border border-slate-300 px-2 text-right bg-lime-300 font-bold">{formatManDay(row.invoiceManDay)}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
                                                 <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.invoiceGrossAmount)}</td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.invoice.lodging} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.invoice.electricity} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.invoice.gas} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.invoice.water} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.invoiceDeductionTotal)}</td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.invoice.carry} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carry', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.invoice.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carrySecond', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.invoice.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.invoice.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-200 text-yellow-900 font-semibold">{formatAmount(row.invoiceAdvanceTotal)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.pension)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.health)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.incomeTax)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessIncomeTax)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.insuranceTotal)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-bold">{formatAmount(row.businessTotal)}</td>
+                                                {showUtilities && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-1 bg-white">
+                                                            <LedgerInputCell
+                                                                value={row.manual.invoice.lodging}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)}
+                                                                assignment={row.manual.itemAssignments?.lodging ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'lodging', v)}
+                                                                placeholder="숙소"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-white">
+                                                            <LedgerInputCell
+                                                                value={row.manual.invoice.electricity}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)}
+                                                                assignment={row.manual.itemAssignments?.electricity ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'electricity', v)}
+                                                                placeholder="전기"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-white">
+                                                            <LedgerInputCell
+                                                                value={row.manual.invoice.gas}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)}
+                                                                assignment={row.manual.itemAssignments?.gas ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'gas', v)}
+                                                                placeholder="가스"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-white">
+                                                            <LedgerInputCell
+                                                                value={row.manual.invoice.water}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)}
+                                                                assignment={row.manual.itemAssignments?.water ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'water', v)}
+                                                                placeholder="수도"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.invoiceDeductionTotal)}</td>
+                                                    </>
+                                                )}
+                                                {showAdvances && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.invoice.carry} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carry', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.invoice.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carrySecond', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.invoice.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.invoice.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-200 text-yellow-900 font-semibold">{formatAmount(row.invoiceAdvanceTotal)}</td>
+                                                    </>
+                                                )}
+                                                {showTaxes && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.pension)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.health)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.incomeTax)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessIncomeTax)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.insuranceTotal)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-bold">{formatAmount(row.businessTotal)}</td>
+                                                    </>
+                                                )}
                                                 <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-emerald-200 font-bold align-top">{formatAmount(row.corporateNet)}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-lime-200 font-bold align-top">{formatAmount(row.personalNet)}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 bg-lime-100 align-top">
@@ -919,50 +1105,91 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                 </td>
                                             </tr>
                                             <tr className="odd:bg-white even:bg-slate-50/60">
-                                                <td className="border border-slate-300 px-1 text-center bg-orange-50 font-semibold">노무</td>
+                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-emerald-50/20">
+                                                    <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
+                                                        <input 
+                                                            type="radio" 
+                                                            name={`assign-${row.rowKey}`}
+                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'labor') === 'labor'}
+                                                            onChange={() => updateAssignmentType(row.rowKey, 'labor')}
+                                                            className="w-3 h-3 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                        />
+                                                        <span className="text-[11px] font-bold text-emerald-800 tracking-wide">노무</span>
+                                                    </label>
+                                                </td>
                                                 <td className="border border-slate-300 px-2 text-right bg-yellow-300 font-bold">{formatManDay(row.laborManDay)}</td>
                                                 <td className="border border-slate-300 px-2 text-right bg-yellow-100 font-bold">{formatAmount(row.laborGrossAmount)}</td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.labor.lodging} onChange={(v) => updateSideField(row.rowKey, 'labor', 'lodging', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.labor.electricity} onChange={(v) => updateSideField(row.rowKey, 'labor', 'electricity', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.labor.gas} onChange={(v) => updateSideField(row.rowKey, 'labor', 'gas', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-slate-100">
-                                                    <LedgerInputCell value={row.manual.labor.water} onChange={(v) => updateSideField(row.rowKey, 'labor', 'water', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.laborDeductionTotal)}</td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.labor.carry} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.labor.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.labor.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-1 bg-yellow-50">
-                                                    <LedgerInputCell value={row.manual.labor.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} />
-                                                </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-semibold">{formatAmount(row.laborAdvanceTotal)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.care)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.employment)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.residentTax)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessResidentTax)}</td>
+                                                {showUtilities && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-1 bg-slate-50">
+                                                            <LedgerInputCell
+                                                                value={row.manual.labor.internet}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'internet', v)}
+                                                                assignment={row.manual.itemAssignments?.internet ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'internet', v)}
+                                                                placeholder="인터넷"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-slate-50">
+                                                            <LedgerInputCell
+                                                                value={row.manual.labor.management}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'management', v)}
+                                                                assignment={row.manual.itemAssignments?.management ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'management', v)}
+                                                                placeholder="관리비"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-slate-50">
+                                                            <LedgerInputCell
+                                                                value={row.manual.labor.fine}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'fine', v)}
+                                                                assignment={row.manual.itemAssignments?.fine ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'fine', v)}
+                                                                placeholder="과태료"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-slate-50">
+                                                            <LedgerInputCell
+                                                                value={row.manual.labor.other}
+                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'other', v)}
+                                                                assignment={row.manual.itemAssignments?.other ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'other', v)}
+                                                                placeholder="기타"
+                                                            />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.laborDeductionTotal)}</td>
+                                                    </>
+                                                )}
+                                                {showAdvances && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.labor.carry} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.labor.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.labor.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-1 bg-yellow-50">
+                                                            <LedgerInputCell value={row.manual.labor.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} />
+                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-semibold">{formatAmount(row.laborAdvanceTotal)}</td>
+                                                    </>
+                                                )}
+                                                {showTaxes && (
+                                                    <>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.care)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.employment)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.residentTax)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessResidentTax)}</td>
+                                                    </>
+                                                )}
                                             </tr>
-                                            {row.utilityShiftedToPersonal > 0 && (
-                                                <tr className="bg-rose-50">
-                                                    <td colSpan={26} className="border border-slate-300 px-2 py-0.5 text-[10px] text-rose-700">
-                                                        공과금 {formatAmount(row.utilityTotal)}원 중 {formatAmount(row.utilityShiftedToPersonal)}원은 법인 잔액 부족으로 개인에서 차감되었습니다.
-                                                    </td>
-                                                </tr>
-                                            )}
+                                            {/* 법인 잔액 부족 안내 메시지 제거 */}
                                             {showLaborGroupBasis && (
                                                 <tr className="bg-slate-50">
-                                                    <td colSpan={26} className="border border-slate-300 px-2 py-1 text-[10px] text-slate-700">
+                                                    <td colSpan={totalColumnCount} className="border border-slate-300 px-2 py-1 text-[10px] text-slate-700">
                                                         {laborGroupSummaries.length > 0
                                                             ? `기준그룹(노무현장+발주사): ${laborGroupSummaries
                                                                 .map((summary) => `${summary.siteName}/${summary.clientLabel} · ${formatManDay(summary.manDay)}공수 · ${resolveCategoryLabel(summary.category)}`)
@@ -974,7 +1201,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                             )}
                                             {idx === group.rows.length - 1 && (
                                                 <tr className="bg-slate-100">
-                                                    <td colSpan={26} className="border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600">
+                                                    <td colSpan={totalColumnCount} className="border border-slate-300 px-2 py-0.5 text-[10px] text-slate-600">
                                                         {row.isWithholdingTarget
                                                             ? '노무 공수(7공수 미만/8공수 이상 포함) 기준으로 갑근세/지방세가 적용되었습니다.'
                                                             : '노무 공수 또는 단가 기준 미충족으로 갑근세/지방세가 미적용입니다.'}
@@ -1000,54 +1227,66 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                     : '-'}
                             </td>
                             <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.invoiceDeductionTotal)}</div>
-                                <div className="text-slate-500">{formatAmount(totals.laborDeductionTotal)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">-</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">-</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">-</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.invoiceDeductionTotal + totals.laborDeductionTotal)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
-                                <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarry)}</div>
-                                <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarry)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
-                                <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarrySecond)}</div>
-                                <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarrySecond)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
-                                <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrent)}</div>
-                                <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrent)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
-                                <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrentSecond)}</div>
-                                <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrentSecond)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-100 font-semibold">
-                                <div className="text-cyan-800">{formatAmount(totals.invoiceAdvanceTotal)}</div>
-                                <div className="text-lime-800">{formatAmount(totals.laborAdvanceTotal)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.pension)}</div>
-                                <div className="text-slate-500">{formatAmount(totals.care)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.health)}</div>
-                                <div className="text-slate-500">{formatAmount(totals.employment)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.incomeTax)}</div>
-                                <div className="text-slate-500">{formatAmount(totals.residentTax)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">
-                                <div>{formatAmount(totals.businessIncomeTax)}</div>
-                                <div className="text-slate-500">{formatAmount(totals.businessResidentTax)}</div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-2 text-right">{formatAmount(totals.insuranceTotal)}</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.businessTotal)}</td>
+                            {showUtilities && (
+                                <>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.invoiceDeductionTotal)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.laborDeductionTotal)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.invoiceDeductionTotal + totals.laborDeductionTotal)}</div>
+                                    </td>
+                                </>
+                            )}
+                            {showAdvances && (
+                                <>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarry)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarry)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarrySecond)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarrySecond)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrent)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrent)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrentSecond)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrentSecond)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-100 font-semibold">
+                                        <div className="text-cyan-800">{formatAmount(totals.invoiceAdvanceTotal)}</div>
+                                        <div className="text-lime-800">{formatAmount(totals.laborAdvanceTotal)}</div>
+                                    </td>
+                                </>
+                            )}
+                            {showTaxes && (
+                                <>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.pension)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.care)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.health)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.employment)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.incomeTax)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.residentTax)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.businessIncomeTax)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.businessResidentTax)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">{formatAmount(totals.insuranceTotal)}</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.businessTotal)}</td>
+                                </>
+                            )}
                             <td className="border border-slate-400 px-2 py-2 text-right text-emerald-700">{formatAmount(totals.corporateNet)}</td>
                             <td className="border border-slate-400 px-2 py-2 text-right text-lime-700">{formatAmount(totals.personalNet)}</td>
                             <td className="border border-slate-400 px-2 py-2 text-center text-slate-500">-</td>

@@ -88,6 +88,7 @@ interface TaxRateSnapshot {
 }
 
 export interface PaymentData {
+    personalMemo?: string;
     workerId: string;
     workerName: string;
     idNumber: string;
@@ -355,6 +356,15 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month 
                             </div>
                         ) : (
                             <div className="p-4 border border-dashed border-slate-300 rounded-lg text-center text-xs text-slate-500 bg-white">공제 내역이 없습니다.</div>
+                        )}
+
+                        {data.personalMemo && (
+                            <div className="mt-3 p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
+                                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">개인 메모</div>
+                                <div className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                                    {data.personalMemo}
+                                </div>
+                            </div>
                         )}
 
                         <div className="flex items-center justify-between pt-2">
@@ -643,6 +653,12 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month 
                                 <span className="font-mono font-bold text-red-700">-{data.totalDeduction.toLocaleString()}원</span>
                             </div>
                         </div>
+                        {data.personalMemo && (
+                            <div className="mt-4 p-3 bg-white border border-slate-200 rounded-lg">
+                                <h4 className="text-xs font-bold text-slate-500 mb-1">메모</h4>
+                                <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{data.personalMemo}</p>
+                            </div>
+                        )}
                     </div>
                 </div>
             </section>

@@ -17,20 +17,24 @@ export interface AdvancePayment {
 
     // Dynamic deduction items (custom fields)
     items?: Record<string, number>;
+    
+    // Per-item assignment types: item key -> 'corporate' | 'labor'
+    itemAssignments?: Record<string, 'corporate' | 'labor'>;
 
-    // Explicit Columns from Image
-    prevMonthCarryover: number; // ?꾩썡?댁썡
-    accommodation: number;      // ?숈냼鍮?
-    privateRoom: number;        // 媛쒖씤諛?
-    gloves: number;            // ?κ컩
-    deposit: number;           // 蹂댁쬆湲?
-    fines: number;             // 怨쇳깭猷?
-    electricity: number;       // ?꾧린猷?
-    gas: number;               // ?꾩떆媛??
-    internet: number;          // ?명꽣??
-    water: number;             // ?섎룄??
+    // Explicit Columns
+    prevMonthCarryover: number; // 전월이월
+    accommodation: number;      // 숙소비
+    privateRoom: number;        // 개인방
+    gloves: number;            // 장갑
+    deposit: number;           // 보증금
+    fines: number;             // 과태료
+    electricity: number;       // 전기료
+    gas: number;               // 도시가스
+    internet: number;          // 인터넷
+    water: number;             // 수도료
 
-    totalDeduction: number;    // 怨듭젣 ?⑷퀎 (Calculated)
+    totalDeduction: number;    // 공제 합계 (Calculated)
+    assignmentType?: 'corporate' | 'labor'; // 분류: 법인(corporate) / 노무(labor) - Legacy row-level field
     memo?: string;
     updatedAt?: Date;
 }
@@ -59,7 +63,6 @@ const loadDcWorkers = async (): Promise<void> => {
     }
 
     if (rows.length === 0) {
-        // fallback: generated query媛 ?섍꼍???곕씪 ?쒗븳???덉쓣 ???덉쑝誘濡?湲곗〈 listWorkers???쒕룄
         const fallbackRes = await listAllWorkers();
         const fallbackRows = (fallbackRes as any)?.data?.workers ?? [];
         if (Array.isArray(fallbackRows)) rows.push(...fallbackRows);
@@ -91,7 +94,6 @@ const loadDcTeams = async (): Promise<void> => {
     }
 
     if (rows.length === 0) {
-        // fallback
         const fallbackRes = await listAllTeams();
         const fallbackRows = (fallbackRes as any)?.data?.teams ?? [];
         if (Array.isArray(fallbackRows)) rows.push(...fallbackRows);
@@ -131,6 +133,23 @@ const resolveTeamUuid = async (id: string): Promise<string | null> => {
     return dcTeamLegacyIdToUuid.get(raw) ?? null;
 };
 
+const safeJsonParseAssignmentRecord = (value: unknown): Record<string, 'corporate' | 'labor'> => {
+    if (!value || typeof value !== 'string') return {};
+    const raw = value.trim();
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        return Object.fromEntries(
+            Object.entries(parsed as Record<string, unknown>)
+                .filter(([k, v]) => typeof k === 'string' && k.trim().length > 0 && (v === 'corporate' || v === 'labor'))
+                .map(([k, v]) => [k, v as 'corporate' | 'labor'] as const)
+        );
+    } catch {
+        return {};
+    }
+};
+
 const safeJsonParseRecord = (value: unknown): Record<string, number> => {
     if (!value || typeof value !== 'string') return {};
     const raw = value.trim();
@@ -163,8 +182,6 @@ const parseAdvancePaymentCompositeId = (
     const id = String(rawId ?? '').trim();
     if (!id) return null;
 
-    // Expected: {teamId}_{workerId}_{YYYY-MM}
-    // teamId/workerId ?먯껜??'_'媛 ?ы븿??媛?μ꽦????떎???꾩젣(?꾪뻾 ?앹꽦 濡쒖쭅 湲곗?)
     const parts = id.split('_');
     if (parts.length < 3) return null;
 
@@ -188,76 +205,21 @@ const toDate = (value?: string | null): Date | undefined => {
 
 const isAlreadyExistsError = (error: unknown): boolean => {
     if (!error) return false;
-
     const asAny = error as any;
     const messageFromError = error instanceof Error ? error.message : '';
     const messageFromField = typeof asAny?.message === 'string' ? asAny.message : '';
-    const codeFromField = typeof asAny?.code === 'string' ? asAny.code : (typeof asAny?.code === 'number' ? String(asAny.code) : '');
-    const detailsFromField = typeof asAny?.details === 'string' ? asAny.details : '';
-
-    // Backend / GraphQL ?먮윭 ?곸꽭 (errors 諛곗뿴) ?뺤씤
-    const errorsFromField = Array.isArray(asAny?.errors) ? (asAny.errors as any[]) : [];
-    const errorDetails = errorsFromField
-        .map(err => {
-            const msg = err?.message || '';
-            const extCode = err?.extensions?.code || '';
-            const extDetails = err?.extensions?.details ? JSON.stringify(err.extensions.details) : '';
-            return `${msg} | ${extCode} | ${extDetails}`;
-        })
-        .join(' || ');
-
-    const fallback = (() => {
-        try {
-            return JSON.stringify(error);
-        } catch {
-            return String(error ?? '');
-        }
-    })();
-
-    const normalized = [
-        messageFromError,
-        messageFromField,
-        detailsFromField,
-        codeFromField,
-        errorDetails,
-        fallback
-    ]
-        .filter(Boolean)
-        .join(' | ')
-        .toLowerCase();
-
-    // 以묐났 愿???ㅼ썙??????뺤옣
-    const hasAlreadyExists = normalized.includes('already') && normalized.includes('exists');
-    const hasDuplicate = normalized.includes('duplicate');
-    const hasUnique = normalized.includes('unique');
-    const hasPrimaryKey = normalized.includes('primary') && normalized.includes('key');
-    const hasConstraint = normalized.includes('constraint');
-    const hasViolation = normalized.includes('violation');
-    const hasConflict = normalized.includes('409') || normalized.includes('conflict');
-
-    return hasAlreadyExists || hasDuplicate || hasUnique || hasPrimaryKey || hasConstraint || hasViolation || hasConflict;
+    const normalized = `${messageFromError} | ${messageFromField}`.toLowerCase();
+    return normalized.includes('already') && normalized.includes('exists') || normalized.includes('duplicate');
 };
 
 const isOpaqueSqlFailureOnAdvancePaymentInsert = (error: unknown): boolean => {
     const message = error instanceof Error ? error.message : '';
-
-    const fallback = (() => {
-        try {
-            return JSON.stringify(error);
-        } catch {
-            return String(error ?? '');
-        }
-    })();
-
-    const normalized = `${message} | ${fallback}`.toLowerCase();
-
-    // 백엔드媛 DB ?곸꽭瑜??④만 ???뱀? SQL ?ㅽ뻾 ?먯껜媛 ?ㅽ뙣?덉쓣 ??
+    const normalized = String(message).toLowerCase();
     return (normalized.includes('partial-error') || normalized.includes('sql execution failed'))
         && (normalized.includes('advancepayment') || normalized.includes('insert'));
 };
 
 export const advancePaymentService = {
-    // Get list by Year-Month and Team
     getAdvancePayments: async (year: number, month: number, teamId: string): Promise<AdvancePayment[]> => {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
@@ -301,6 +263,8 @@ export const advancePaymentService = {
                         internet: typeof row?.internet === 'number' ? row.internet : 0,
                         water: typeof row?.water === 'number' ? row.water : 0,
                         totalDeduction: typeof row?.totalDeduction === 'number' ? row.totalDeduction : 0,
+                        itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
+                        assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
                         memo: row?.memo ? String(row.memo) : '',
                         updatedAt: toDate(row?.updatedAt)
                     } as AdvancePayment;
@@ -347,6 +311,8 @@ export const advancePaymentService = {
                         internet: typeof row?.internet === 'number' ? row.internet : 0,
                         water: typeof row?.water === 'number' ? row.water : 0,
                         totalDeduction: typeof row?.totalDeduction === 'number' ? row.totalDeduction : 0,
+                        itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
+                        assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
                         memo: row?.memo ? String(row.memo) : '',
                         updatedAt: toDate(row?.updatedAt)
                     } as AdvancePayment;
@@ -357,33 +323,21 @@ export const advancePaymentService = {
         }
     },
 
-    // Save (Update/Insert) Logic
-    // Using a composite ID (teamId_workerId_yearMonth) to prevent duplicates per worker per month
     saveAdvancePayment: async (data: AdvancePayment) => {
         try {
-            // Create a unique ID if not provided, or ensure uniqueness
-            // Format: {teamId}_{workerId}_{yearMonth}
             const docId = `${data.teamId}_${data.workerId}_${data.yearMonth}`;
             const [teamUuid, workerUuid] = await Promise.all([
                 resolveTeamUuid(data.teamId),
                 resolveWorkerUuid(data.workerId)
             ]);
-            if (!teamUuid) throw new Error('議댁옱?섏? ?딅뒗 ??낅땲??');
-            if (!workerUuid) {
-                // 백엔드??Worker UUID 留ㅽ븨???꾨씫?섏뼱??legacyId 誘몄씠愿/limit ?? ?댁쁺????μ씠 源⑥?吏 ?딅룄濡??덉슜
-                // workerId FK??nullable?대?濡?null濡???ν븯怨? ?붾㈃/議고쉶??composite id?먯꽌 legacy workerId瑜?蹂듭썝?쒕떎.
-                console.warn('[advancePaymentService.saveAdvancePayment] Worker UUID resolve failed. Saving with workerId=null.', {
-                    legacyWorkerId: data.workerId,
-                    docId
-                });
-            }
-
+            if (!teamUuid) throw new Error('팀을 찾을 수 없습니다.');
+            
             const normalizedItems = normalizeItems(data.items);
 
             const payload: any = {
                 id: docId,
                 yearMonth: data.yearMonth,
-                workerId: workerUuid,
+                workerId: workerUuid ?? null,
                 workerName: data.workerName ?? null,
                 teamId: teamUuid,
                 teamName: data.teamName ?? null,
@@ -399,33 +353,21 @@ export const advancePaymentService = {
                 internet: data.internet ?? 0,
                 water: data.water ?? 0,
                 totalDeduction: data.totalDeduction ?? 0,
+                itemAssignments: JSON.stringify(data.itemAssignments ?? {}),
+                assignmentType: data.assignmentType ?? 'labor',
                 memo: data.memo ?? null,
                 updatedAt: new Date().toISOString()
             };
 
-            if (!workerUuid) {
-                payload.workerId = null;
-            }
-
             try {
                 await createAdvancePayment(payload);
             } catch (error) {
-                const shouldTryUpdate = isAlreadyExistsError(error) || isOpaqueSqlFailureOnAdvancePaymentInsert(error);
-                if (!shouldTryUpdate) throw error;
-
-                try {
+                if (isAlreadyExistsError(error) || isOpaqueSqlFailureOnAdvancePaymentInsert(error)) {
                     await updateAdvancePayment(payload);
-                } catch (updateError) {
-                    // update源뚯? ?ㅽ뙣?섎㈃ 以묐났???꾨땲???곗씠???쒖빟 臾몄젣???뺣쪧???믪쑝誘濡????먮윭瑜??좎??섎릺 濡쒓렇瑜??④?
-                    console.error('[advancePaymentService.saveAdvancePayment] Fallback update also failed.', {
-                        originalError: error,
-                        updateError: updateError,
-                        payload
-                    });
+                } else {
                     throw error;
                 }
             }
-
             return docId;
         } catch (error) {
             console.error("Error saving advance payment:", error);
@@ -443,4 +385,3 @@ export const advancePaymentService = {
         }
     }
 };
-

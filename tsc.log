@@ -1,0 +1,6 @@
+src/pages/payroll/MonthlyWageDraftPage.tsx(1919,40): error TS2345: Argument of type '{ workerId: string; workerName: string; idNumber: string; companyId: string; companyName: string; teamId: string; teamName: string; month: string; totalManDay: number; unitPrice: number; grossAmount: number; ... 21 more ...; errors: { ...; }; }' is not assignable to parameter of type 'PaymentData'.
+  Property 'rowKey' is missing in type '{ workerId: string; workerName: string; idNumber: string; companyId: string; companyName: string; teamId: string; teamName: string; month: string; totalManDay: number; unitPrice: number; grossAmount: number; ... 21 more ...; errors: { ...; }; }' but required in type 'PaymentData'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(2439,89): error TS2322: Type '{ icon: IconDefinition; className: string; onInputsChange: Dispatch<SetStateAction<Record<string, any>>>; }' is not assignable to type 'IntrinsicAttributes & FontAwesomeIconProps'.
+  Property 'onInputsChange' does not exist on type 'IntrinsicAttributes & FontAwesomeIconProps'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(2985,92): error TS2339: Property 'assignmentType' does not exist on type 'WorkerWorkEntry'.
+src/pages/payroll/MonthlyWageDraftPage.tsx(2989,95): error TS2339: Property 'assignmentType' does not exist on type 'WorkerWorkEntry'.
