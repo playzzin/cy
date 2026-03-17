@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import styled from 'styled-components';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -9,257 +10,703 @@ import { payrollConfigService, PayrollConfig, PayrollDeductionItem, PayrollInsur
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faEye, faEyeSlash, faFileExcel, faSearch, faSpinner, faExclamationTriangle, faCalendarDays, faCopy, faChevronUp, faChevronDown, faDownload, faFileZipper, faThumbtack, faTableColumns, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faFileExcel, faSearch, faSpinner, faExclamationTriangle, faCalendarDays, faCopy, faChevronUp, faChevronDown, faDownload, faFileZipper, faSave } from '@fortawesome/free-solid-svg-icons';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
+import { addMonths, subMonths, format } from 'date-fns';
 import { PayslipTemplate } from './components/PayslipTemplate';
-import MonthlyAdvanceLedger, { MonthlyAdvanceLedgerRow } from './components/MonthlyAdvanceLedger';
+import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
+import Swal from 'sweetalert2';
 
-interface WorkerWorkEntry {
-    date: string;
-    siteName: string;
-    siteId?: string;
-    clientCompanyId?: string;
-    isLaborSite?: boolean;
-    assignmentType?: 'corporate' | 'labor';
-    manDay: number;
-    unitPrice: number;
-    description?: string;
-    paymentMethod?: string;
-    amount?: number;
-}
+import { usePayrollData } from './hooks/usePayrollData';
+import { PaymentData, MonthlyAdvanceLedgerRow, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, WithholdingAppliedSummary, BusinessIncomeAppliedSummary } from './types/payroll';
+import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 
-interface DeductionLine {
+// --- Premium UI Styled Components ---
+const ToolbarContainer = styled.section`
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 7px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 30%),
+        linear-gradient(135deg, #f8fbff 0%, #f8fafc 52%, #ffffff 100%);
+    box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.22);
+    overflow: hidden;
+
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(120deg, rgba(255, 255, 255, 0.8), transparent 42%);
+    }
+`;
+
+const ToolbarLead = styled.div`
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+`;
+
+const ToolbarLeadMeta = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+`;
+
+const ToolbarBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    border: 1px solid #dbe4f0;
+    background: rgba(255, 255, 255, 0.96);
+    font-size: 11px;
+    font-weight: 700;
+    color: #334155;
+    backdrop-filter: blur(8px);
+`;
+
+const ToolbarGrid = styled.div`
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 5px;
+
+    @media (max-width: 1280px) {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+
+    @media (max-width: 768px) {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+`;
+
+const ToolbarCard = styled.section<{ $span?: number }>`
+    position: relative;
+    grid-column: span ${props => props.$span ?? 4};
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 100%;
+    padding: 7px;
+    border-radius: 9px;
+    border: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+    box-shadow: 0 14px 30px -24px rgba(15, 23, 42, 0.2);
+    backdrop-filter: blur(14px);
+
+    @media (max-width: 1280px) {
+        grid-column: span 3;
+    }
+
+    @media (max-width: 768px) {
+        grid-column: span 1;
+    }
+`;
+
+const ToolbarCardHeader = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
+`;
+
+const ToolbarCardTitle = styled.h3`
+    margin: 0;
+    font-size: 12px;
+    font-weight: 800;
+    color: #0f172a;
+`;
+
+const ToolbarCardDescription = styled.p`
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #94a3b8;
+    display: none;
+`;
+
+const ToolbarCardBody = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+`;
+
+const ToolbarInline = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+`;
+
+const ToolbarSectionDivider = styled.div`
+    width: 1px;
+    align-self: stretch;
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0));
+`;
+
+const YearNavigator = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #dbe4f0;
+`;
+
+const YearButton = styled.button`
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: #475569;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        background: #ffffff;
+        color: #0f172a;
+        transform: translateY(-1px);
+    }
+`;
+
+const YearText = styled.span`
+    min-width: 44px;
+    padding: 0 4px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: #0f172a;
+`;
+
+const MonthGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(12, minmax(30px, 1fr));
+    gap: 3px;
+    width: 100%;
+`;
+
+const MonthButton = styled.button<{ $active: boolean; $inRange: boolean }>`
+    height: 20px;
+    border: 1px solid ${props => (props.$active ? 'transparent' : props.$inRange ? '#bfdbfe' : '#e2e8f0')};
+    border-radius: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    color: ${props => (props.$active ? '#ffffff' : props.$inRange ? '#1e3a8a' : '#64748b')};
+    background: ${props => (props.$active
+        ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+        : props.$inRange
+            ? '#eff6ff'
+            : '#ffffff')};
+    box-shadow: ${props => (props.$active ? '0 12px 24px -16px rgba(37, 99, 235, 0.7)' : 'none')};
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+        border-color: #93c5fd;
+    }
+`;
+
+const QuickRangeGroup = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 9px;
+    background: #fff7ed;
+    border: 1px solid rgba(251, 191, 36, 0.36);
+`;
+
+const QuickRangeButton = styled.button`
+    min-height: 22px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    font-size: 10px;
+    font-weight: 800;
+    color: #9a3412;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.88);
+        color: #7c2d12;
+    }
+`;
+
+const SegmentedGroup = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    flex-wrap: wrap;
+`;
+
+const SegmentedButton = styled.button<{ $active: boolean }>`
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: ${props => (props.$active ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent')};
+    color: ${props => (props.$active ? '#ffffff' : '#64748b')};
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+        color: ${props => (props.$active ? '#ffffff' : '#0f172a')};
+    }
+`;
+
+const SelectField = styled.select`
+    min-width: 120px;
+    min-height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid #dbe3ee;
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+`;
+
+const SearchField = styled.input`
+    min-width: 100px;
+    min-height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid #dbe3ee;
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+
+    &::placeholder {
+        color: #94a3b8;
+    }
+`;
+
+const FieldCard = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px;
+    border-radius: 9px;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
+`;
+
+const FieldLabel = styled.span`
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: #94a3b8;
+`;
+
+const ToggleChipGroup = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+`;
+
+const ToggleChipButton = styled.button<{ $active: boolean }>`
+    min-height: 26px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid ${props => (props.$active ? 'rgba(37, 99, 235, 0.3)' : 'rgba(203, 213, 225, 0.95)')};
+    background: ${props => (props.$active ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.92)')};
+    color: ${props => (props.$active ? '#1d4ed8' : '#475569')};
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+    }
+`;
+
+const ActionCluster = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+`;
+
+const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'accent' | 'outline' }>`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+
+    ${props => props.$variant === 'primary' && `
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(37, 99, 235, 0.6);
+    `}
+    ${props => props.$variant === 'secondary' && `
+        background: linear-gradient(135deg, #334155 0%, #475569 100%);
+        color: white;
+        box-shadow: 0 16px 28px -22px rgba(15, 23, 42, 0.7);
+    `}
+    ${props => props.$variant === 'danger' && `
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+        color: white;
+    `}
+    ${props => props.$variant === 'success' && `
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(5, 150, 105, 0.7);
+    `}
+    ${props => props.$variant === 'warning' && `
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(245, 158, 11, 0.72);
+    `}
+    ${props => props.$variant === 'accent' && `
+        background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(249, 115, 22, 0.72);
+    `}
+    ${props => props.$variant === 'outline' && `
+        background: rgba(255, 255, 255, 0.96);
+        border-color: rgba(203, 213, 225, 0.95);
+        color: #334155;
+    `}
+
+    &:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 36px -24px rgba(15, 23, 42, 0.35);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+`;
+
+// --- Modern Switch Component ---
+const SwitchWrapper = styled.label<{ $checked: boolean }>`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 132px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid ${props => (props.$checked ? 'rgba(37, 99, 235, 0.24)' : 'rgba(226, 232, 240, 0.95)')};
+    background: ${props => (props.$checked
+        ? 'linear-gradient(135deg, rgba(219, 234, 254, 0.96) 0%, rgba(239, 246, 255, 0.94) 100%)'
+        : 'rgba(255, 255, 255, 0.96)')};
+    box-shadow: ${props => (props.$checked ? '0 18px 34px -28px rgba(37, 99, 235, 0.32)' : 'none')};
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+    }
+`;
+
+const SwitchTextGroup = styled.span`
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+`;
+
+const SwitchInput = styled.input`
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+`;
+
+const SwitchLabel = styled.span`
+    font-size: 12px;
+    font-weight: 800;
+    color: #0f172a;
+`;
+
+const SwitchState = styled.span<{ $checked: boolean }>`
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: ${props => (props.$checked ? '#2563eb' : '#94a3b8')};
+`;
+
+const Slider = styled.span<{ $checked: boolean }>`
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 38px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: ${props => (props.$checked ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : '#cbd5e1')};
+    transition: background 0.2s ease;
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 3px;
+        left: ${props => (props.$checked ? '19px' : '3px')};
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: white;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
+        transition: left 0.2s ease;
+    }
+`;
+
+const KBPreviewOverlay = styled.div`
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(2, 6, 23, 0.68);
+    backdrop-filter: blur(8px);
+`;
+
+const KBPreviewDialog = styled.div`
+    width: 100%;
+    max-width: 1180px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 28px;
+    border: 1px solid rgba(71, 85, 105, 0.68);
+    background: linear-gradient(180deg, #020617 0%, #111827 100%);
+    box-shadow: 0 36px 80px -34px rgba(2, 6, 23, 0.92);
+`;
+
+const KBPreviewHeader = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.42);
+    background:
+        radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 24%),
+        linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.94) 100%);
+`;
+
+const KBPreviewTitleRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+`;
+
+const KBPreviewTitleBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+`;
+
+const KBPreviewEyebrow = styled.span`
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #f59e0b;
+`;
+
+const KBPreviewTitle = styled.h3`
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: #f8fafc;
+`;
+
+const KBPreviewDescription = styled.p`
+    margin: 0;
+    font-size: 13px;
+    color: #94a3b8;
+`;
+
+const KBPreviewCloseButton = styled.button`
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(71, 85, 105, 0.82);
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #cbd5e1;
+    font-size: 24px;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        background: rgba(30, 41, 59, 0.96);
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+`;
+
+const KBPreviewControlsGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+
+    @media (max-width: 960px) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @media (max-width: 640px) {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+`;
+
+const KBPreviewFieldCard = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(51, 65, 85, 0.86);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.92) 100%);
+`;
+
+const KBPreviewFieldLabel = styled.label`
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #64748b;
+`;
+
+const KBPreviewFieldHint = styled.span`
+    font-size: 12px;
+    line-height: 1.45;
+    color: #94a3b8;
+`;
+
+const KBPreviewInput = styled.input`
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(71, 85, 105, 0.88);
+    background: rgba(2, 6, 23, 0.72);
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+
+    &::placeholder {
+        color: #64748b;
+    }
+`;
+
+const KBPreviewSelect = styled.select`
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(71, 85, 105, 0.88);
+    background: rgba(2, 6, 23, 0.72);
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+`;
+
+const KBPreviewTableArea = styled.div`
+    flex: 1;
+    overflow: auto;
+    padding: 20px 22px;
+    background: rgba(15, 23, 42, 0.78);
+`;
+
+const KBPreviewTable = styled.table`
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    color: #e2e8f0;
+`;
+
+const KBPreviewFooter = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 18px 22px 22px;
+    border-top: 1px solid rgba(71, 85, 105, 0.42);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.96) 100%);
+`;
+
+const KBPreviewSummary = styled.span`
+    font-size: 14px;
+    color: #cbd5e1;
+`;
+
+interface ModernSwitchProps {
     label: string;
-    amount: number;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+    compact?: boolean;
 }
 
-interface DeductionBreakdown {
-    standardLines: DeductionLine[];
-    additionalLines: DeductionLine[];
-    totalStandard: number;
-    totalAdditional: number;
-    total: number;
-    hasData: boolean;
-}
+const ModernSwitch: React.FC<ModernSwitchProps> = ({ label, checked, onChange, compact = false }) => (
+    <div style={compact ? { transform: 'scale(0.86)', transformOrigin: 'left center' } : undefined}>
+        <SwitchWrapper $checked={checked}>
+            <SwitchTextGroup>
+                <SwitchLabel>{label}</SwitchLabel>
+                <SwitchState $checked={checked}>{checked ? '적용' : '해제'}</SwitchState>
+            </SwitchTextGroup>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <SwitchInput type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+                <Slider $checked={checked} />
+            </div>
+        </SwitchWrapper>
+    </div>
+);
 
-type InsuranceAppliedReason = 'site' | 'client';
 
-interface InsuranceAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    clientCompanyId: string;
-    manDay: number;
-    amount: number;
-    reason: InsuranceAppliedReason;
-}
-
-interface InsuranceAppliedSummary {
-    thresholdManDay: number;
-    appliedManDay: number;
-    appliedAmount: number;
-    appliedSites: InsuranceAppliedSiteSummary[];
-}
-
-interface BusinessIncomeAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    manDay: number;
-    amount: number;
-    reason: '4대보험_제외';
-}
-
-interface BusinessIncomeAppliedSummary {
-    appliedManDay: number;
-    appliedAmount: number;
-    appliedSites: BusinessIncomeAppliedSiteSummary[];
-}
-
-interface WithholdingAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    manDay: number;
-    amount: number;
-    reason: '노무7이하' | '노무전체';
-}
-
-interface WithholdingAppliedSummary {
-    thresholdManDay: number;
-    appliedManDay: number;
-    appliedAmount: number;
-    grossAmount?: number;
-    appliedSites: WithholdingAppliedSiteSummary[];
-}
-
-interface TaxRateSnapshot {
-    pensionRate: number;
-    healthRate: number;
-    careRateOfHealth: number;
-    employmentRate: number;
-    incomeTaxRate: number;
-    residentTaxRate: number;
-    withholdingBaseDeduction?: number;
-    withholdingIncomeBaseMultiplier?: number;
-    businessIncomeTaxRate: number;
-    businessResidentTaxRate: number;
-}
-
-interface PaymentData {
-    rowKey: string;
-    workerId: string;
-    workerName: string;
-    idNumber: string;
-    companyId: string;
-    companyName: string;
-    teamId: string;
-    teamName: string;
-    month: string;
-    totalManDay: number;
-    unitPrice: number;
-    grossAmount: number;
-    totalDeduction: number;
-    totalAmount: number;
-    laborGrossAmount: number;
-    invoiceGrossAmount: number;
-    laborManDay: number;
-    invoiceManDay: number;
-    laborNetAmount: number;
-    invoiceNetAmount: number;
-    bankName: string;
-    bankCode: string;
-    accountNumber: string;
-    accountHolder: string;
-    displayContent: string;
-    workEntries: WorkerWorkEntry[];
-    deductionBreakdown: DeductionBreakdown;
-    taxBreakdown: DeductionBreakdown;
-    taxRateSnapshot?: TaxRateSnapshot;
-    insuranceAppliedSummary?: InsuranceAppliedSummary;
-    withholdingAppliedSummary?: WithholdingAppliedSummary;
-    businessIncomeAppliedSummary?: BusinessIncomeAppliedSummary;
-    isValid: boolean;
-    errors: {
-        bankName?: boolean;
-        bankCode?: boolean;
-        accountNumber?: boolean;
-        accountHolder?: boolean;
-    };
-}
-
-interface LedgerUtilitySideInputLike {
-    lodging?: number;
-    electricity?: number;
-    gas?: number;
-    water?: number;
-    internet?: number;
-    management?: number;
-    fine?: number;
-    other?: number;
-}
-
-interface LedgerUtilityInputLike {
-    invoice?: LedgerUtilitySideInputLike;
-    labor?: LedgerUtilitySideInputLike;
-}
-
-const BANK_CODES: { [key: string]: string } = {
-    // 은행
-    '한국은행': '001',
-    '산업은행': '002', '산업': '002', 'KDB': '002',
-    '기업은행': '003', '기업': '003', 'IBK': '003',
-    'KB국민은행': '004', '국민은행': '004', '국민': '004', 'KB': '004',
-    '수협은행': '007', '수협': '007', 'Sh수협': '007',
-    '수출입은행': '008',
-    '농협은행': '011', '농협': '011', 'NH': '011', 'NH농협': '011',
-    '농축협': '012', '지역농협': '012',
-    '우리은행': '020', '우리': '020',
-    'SC제일은행': '023', '제일은행': '023', 'SC': '023',
-    '한국씨티은행': '027', '씨티': '027', '씨티은행': '027',
-    '대구은행': '031', '대구': '031', 'iM뱅크': '031', 'DGB': '031',
-    '부산은행': '032', '부산': '032', 'BNK부산': '032',
-    '광주은행': '034', '광주': '034',
-    '제주은행': '035', '제주': '035',
-    '전북은행': '037', '전북': '037',
-    '경남은행': '039', '경남': '039', 'BNK경남': '039',
-    '새마을금고': '045', '새마을': '045', 'MG새마을': '045', 'MG': '045',
-    '신협': '048', '신협중앙회': '048', '신용협동조합': '048',
-    '상호저축은행': '050', '저축은행': '050',
-    '우체국': '071', '우체국예금': '071',
-    '하나은행': '081', '하나': '081', 'KEB하나': '081',
-    '신한은행': '088', '신한': '088',
-    '케이뱅크': '089', 'K뱅크': '089', '케이': '089',
-    '카카오뱅크': '090', '카카오': '090', '카뱅': '090',
-    '토스뱅크': '092', '토스': '092',
-
-    // 저축은행 (개별)
-    '대신저축은행': '102',
-    'SBI저축은행': '103', 'SBI': '103',
-    'HK저축은행': '104',
-    '웰컴저축은행': '105', '웰컴': '105',
-    '신한저축은행': '106',
-
-    // 증권사
-    '유안타증권': '209', '유안타': '209',
-    'KB증권': '218',
-    '상상인증권': '221',
-    '한양증권': '222',
-    '리딩투자증권': '223', '리딩': '223',
-    'BNK투자증권': '224',
-    'IBK투자증권': '225',
-    '다올투자증권': '227', '다올증권': '227',
-    '미래에셋증권': '238', '미래에셋': '238',
-    '삼성증권': '240', '삼성': '240',
-    '한국투자증권': '243', '한투': '243',
-    'NH투자증권': '247', 'NH증권': '247',
-    '교보증권': '261', '교보': '261',
-    '하이투자증권': '262', '아이엠증권': '262', '하이증권': '262',
-    '현대차증권': '263', '현대증권': '263',
-    '키움증권': '264', '키움': '264',
-    '이베스트투자증권': '265', 'LS증권': '265', '이베스트': '265',
-    'SK증권': '266',
-    '대신증권': '267', '대신': '267',
-    '한화투자증권': '269', '한화증권': '269',
-    '하나증권': '270',
-    '토스증권': '271',
-    'NH선물': '272',
-    '코리아에셋투자증권': '273',
-    'DS투자증권': '274',
-    '흥국증권': '275',
-    '유화증권': '276',
-    '에스아이증권': '277',
-    '신한투자증권': '278', '신한증권': '278',
-    'DB금융투자': '279', 'DB증권': '279',
-    '유진투자증권': '280', '유진증권': '280',
-    '메리츠증권': '287', '메리츠': '287',
-    '카카오페이증권': '288',
-    '부국증권': '290',
-    '신영증권': '291',
-};
-
-type AdvancePaymentStandardField =
-    | 'prevMonthCarryover'
-    | 'accommodation'
-    | 'privateRoom'
-    | 'gloves'
-    | 'deposit'
-    | 'fines'
-    | 'electricity'
-    | 'gas'
-    | 'internet'
-    | 'water';
-
-const STANDARD_DEDUCTION_FIELDS: Array<{ key: AdvancePaymentStandardField; label: string }> = [
-    { key: 'prevMonthCarryover', label: '전월 이월' },
-    { key: 'accommodation', label: '숙소비' },
-    { key: 'privateRoom', label: '개인방' },
-    { key: 'gloves', label: '장갑' },
-    { key: 'deposit', label: '보증금' },
-    { key: 'fines', label: '과태료' },
-    { key: 'electricity', label: '전기세' },
-    { key: 'gas', label: '도시가스' },
-    { key: 'internet', label: '인터넷' },
-    { key: 'water', label: '수도세' },
-];
 
 const buildStandardDeductionLabelMap = (): Record<string, string> =>
     STANDARD_DEDUCTION_FIELDS.reduce<Record<string, string>>((acc, { key, label }) => {
@@ -305,7 +752,6 @@ const TEMP_INSURANCE_PREFIX = '[4대보험]';
 const TEMP_BUSINESS_PREFIX = '[3.3%]';
 const TEMP_TAX_PREFIX = '[원천세]';
 const LEGACY_TAX_PREFIX = '[세금]';
-const WITHHOLDING_MAX_MAN_DAY = 7;
 
 const stripTemporaryDeductionLines = (breakdown: DeductionBreakdown): DeductionBreakdown => {
     const safe = breakdown ?? createEmptyDeductionBreakdown();
@@ -332,24 +778,43 @@ const floorWon = (value: number): number => Math.floor(toNumber(value));
 
 const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
 
-const APPLIED_UTILITY_FIELDS: Array<{ key: keyof LedgerUtilitySideInputLike; label: string }> = [
+const APPLIED_UTILITY_FIELDS: Array<{ key: keyof LedgerUtilityInputLike['invoice']; label: string }> = [
     { key: 'lodging', label: '숙소비' },
     { key: 'electricity', label: '전기세' },
     { key: 'gas', label: '도시가스' },
     { key: 'water', label: '수도세' },
-    { key: 'internet', label: '인터넷' },
-    { key: 'management', label: '관리비' },
     { key: 'fine', label: '과태료' },
     { key: 'other', label: '기타' },
 ];
 
-const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] =>
-    APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
+const APPLIED_UTILITY_LABEL_SET = new Set(APPLIED_UTILITY_FIELDS.map((field) => field.label));
+
+const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
+    if (!manual) return [];
+
+    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
+        const assignmentType = manual.assignmentType || 'labor';
+        const itemAssignments = manual.itemAssignments || {};
+        
+        let shouldInclude = false;
+        if (assignmentType === 'labor') {
+            shouldInclude = true;
+        } else if (assignmentType === 'item') {
+            if (itemAssignments[field.key] === 'labor') {
+                shouldInclude = true;
+            }
+        }
+        // assignmentType === 'corporate' (회사)인 경우는 포함하지 않음
+
+        if (!shouldInclude) return acc;
+
         const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
         if (amount <= 0) return acc;
+        
         acc.push({ label: field.label, amount });
         return acc;
     }, []);
+};
 
 const mergeDeductionBreakdownWithLines = (
     breakdown: DeductionBreakdown | undefined,
@@ -986,13 +1451,24 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [startMonth, setStartMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [endMonth, setEndMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [yearCursor, setYearCursor] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
-    const [basePaymentData, setBasePaymentData] = useState<PaymentData[]>([]);
-    const [paymentData, setPaymentData] = useState<PaymentData[]>([]);
-    const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
+    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
+    
+    // usePayrollData 훅 통합
+    const { 
+        loading, 
+        paymentData, 
+        basePaymentData,
+        setPaymentData,
+        ledgerRowsData, 
+        errorCount, 
+        refetch: fetchData 
+    } = usePayrollData(startMonth, endMonth, { 
+        selectedTeamId: selectedTeamId || undefined, 
+        selectedWorkerId: selectedWorkerId || undefined 
+    });
+
     const [bulkDisplayContent, setBulkDisplayContent] = useState<string>('월급');
-    const [bulkSender, setBulkSender] = useState<string>('㈜다원'); // 보내는사람
-    const [errorCount, setErrorCount] = useState<number>(0);
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false); // 국민은행용 미리보기
     const [showPayslipModal, setShowPayslipModal] = useState<boolean>(false);
     const [selectedPayslipRowKey, setSelectedPayslipRowKey] = useState<string>(''); // 
@@ -1004,11 +1480,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [allSites, setAllSites] = useState<Site[]>([]);
     const [showCalculationLabor, setShowCalculationLabor] = useState<boolean>(false);
     const [companies, setCompanies] = useState<Company[]>([]);
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'standard' | 'ledger'>('ledger');
+    const [toolbarExpanded, setToolbarExpanded] = useState<boolean>(false);
     const [ledgerVisibleSections, setLedgerVisibleSections] = useState({
         utilities: true,
         advances: true,
@@ -1038,7 +1513,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [utilitiesApplied, setUtilitiesApplied] = useState<boolean>(false);
     const [copying, setCopying] = useState(false);
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-    const [isFixed, setIsFixed] = useState<boolean>(true);
     const [isSaving, setIsSaving] = useState<boolean>(false);
     const [ledgerInputs, setLedgerInputs] = useState<Record<string, any>>({});
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
@@ -1048,7 +1522,85 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const handleSaveLedger = async () => {
         setIsSaving(true);
         try {
-            console.log(ledgerInputs);
+            const keys = Object.keys(ledgerInputs);
+            if (keys.length === 0) {
+                Swal.fire('알림', '저장할 데이터가 없습니다.', 'info');
+                return;
+            }
+
+            const { isConfirmed } = await Swal.fire({
+                title: '가불 대장 저장',
+                text: `${keys.length}명의 가불 데이터를 저장하시겠습니까?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '저장',
+                cancelButtonText: '취소',
+                confirmButtonColor: '#3b82f6',
+            });
+
+            if (!isConfirmed) return;
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const rowKey of keys) {
+                const parts = rowKey.split('__');
+                if (parts.length < 3) continue;
+                const [month, workerId, teamId] = parts;
+
+                const input = ledgerInputs[rowKey] as LedgerManualInput;
+                const rowData = ledgerRowsData.find((r) => (r.rowKey || (r as any).id) === rowKey);
+
+                if (!rowData) continue;
+
+                // Mapping generic fields to AdvancePayment fields
+                const items: Record<string, number> = {
+                    management: (input.invoice.management ?? 0) + (input.labor.management ?? 0),
+                    other: (input.invoice.other ?? 0) + (input.labor.other ?? 0),
+                    carrySecond: (input.invoice.carrySecond ?? 0) + (input.labor.carrySecond ?? 0),
+                    currentAdvance: (input.invoice.currentAdvance ?? 0) + (input.labor.currentAdvance ?? 0),
+                    currentAdvanceSecond: (input.invoice.currentAdvanceSecond ?? 0) + (input.labor.currentAdvanceSecond ?? 0),
+                };
+
+                const advanceData: AdvancePayment = {
+                    workerId,
+                    workerName: rowData.workerName,
+                    teamId,
+                    teamName: rowData.teamName,
+                    yearMonth: month,
+                    prevMonthCarryover: (input.invoice.carry ?? 0) + (input.labor.carry ?? 0),
+                    accommodation: (input.invoice.lodging ?? 0) + (input.labor.lodging ?? 0),
+                    electricity: (input.invoice.electricity ?? 0) + (input.labor.electricity ?? 0),
+                    gas: (input.invoice.gas ?? 0) + (input.labor.gas ?? 0),
+                    water: (input.invoice.water ?? 0) + (input.labor.water ?? 0),
+                    internet: (input.invoice.internet ?? 0) + (input.labor.internet ?? 0),
+                    fines: (input.invoice.fine ?? 0) + (input.labor.fine ?? 0),
+                    items,
+                    itemAssignments: input.itemAssignments || {},
+                    assignmentType: input.assignmentType || 'labor',
+                    memo: input.personalMemo || '',
+                    totalDeduction: 0, // Service handles calculation
+                };
+
+                try {
+                    await advancePaymentService.saveAdvancePayment(advanceData);
+                    successCount++;
+                } catch (err) {
+                    console.error(`Failed to save row ${rowKey}:`, err);
+                    failCount++;
+                }
+            }
+
+            if (failCount === 0) {
+                await Swal.fire('성공', `${successCount}명의 데이터가 저장되었습니다.`, 'success');
+            } else {
+                await Swal.fire('완료 (일부 실패)', `${successCount}명 성공, ${failCount}명 실패하였습니다.`, 'warning');
+            }
+
+            fetchData();
+        } catch (error) {
+            console.error('Error in handleSaveLedger:', error);
+            Swal.fire('오류', '저장 중 예상치 못한 오류가 발생했습니다.', 'error');
         } finally {
             setIsSaving(false);
         }
@@ -1197,6 +1749,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return from === to ? from : `${from}~${to}`;
     }, [compareYearMonth, endMonth, startMonth]);
 
+        const formatYearMonthParts = useCallback((value: string) => {
+            const [year = '-', month = '-'] = (value ?? '').split('-');
+            return {
+                year,
+                month,
+            };
+        }, []);
+
     const tableColSpan = showAccountColumns ? 15 : 11;
     const filteredPaymentData = useMemo(() => {
         const rows = paymentData;
@@ -1293,6 +1853,171 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         ]
     );
 
+    const utilityInputByPaymentRowKey = useMemo(() => {
+        const map = new Map<string, LedgerUtilityInputLike>();
+        const paymentRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+
+        const upsertUtilityInput = (paymentRowKey: string, input: LedgerUtilityInputLike) => {
+            const existing = map.get(paymentRowKey);
+            if (!existing) {
+                map.set(paymentRowKey, input);
+                return;
+            }
+
+            const mergeSide = (side: 'invoice' | 'labor') => {
+                const prevSide = existing[side];
+                const nextSide = input[side];
+                return {
+                    ...prevSide,
+                    ...nextSide,
+                    lodging: toNumber(prevSide?.lodging) + toNumber(nextSide?.lodging),
+                    electricity: toNumber(prevSide?.electricity) + toNumber(nextSide?.electricity),
+                    gas: toNumber(prevSide?.gas) + toNumber(nextSide?.gas),
+                    water: toNumber(prevSide?.water) + toNumber(nextSide?.water),
+                    fine: toNumber(prevSide?.fine) + toNumber(nextSide?.fine),
+                    other: toNumber(prevSide?.other) + toNumber(nextSide?.other),
+                };
+            };
+
+            map.set(paymentRowKey, {
+                ...existing,
+                ...input,
+                invoice: mergeSide('invoice'),
+                labor: mergeSide('labor'),
+            });
+        };
+
+        Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
+            if (!ledgerRowKey.endsWith('__월급제')) return;
+
+            const input = manual as LedgerUtilityInputLike;
+            const parts = ledgerRowKey.split('__');
+            if (parts.length < 4) return;
+            const [month, workerId, teamId] = parts;
+
+            const directPaymentKey = `${month}__${workerId}__${teamId}__월급제`;
+            if (paymentRows.some((item) => item.rowKey === directPaymentKey)) {
+                upsertUtilityInput(directPaymentKey, input);
+                return;
+            }
+
+            const candidates = paymentRows.filter((item) => item.month === month && item.workerId === workerId);
+            if (candidates.length === 0) return;
+
+            const ledgerRow = ledgerRowsData.find((row) => row.rowKey === ledgerRowKey);
+            if (ledgerRow) {
+                const normalizedLedgerTeam = normalizeTeamName(ledgerRow.teamName);
+                const matched = candidates.find((candidate) => normalizeTeamName(candidate.teamName) === normalizedLedgerTeam);
+                if (matched) {
+                    upsertUtilityInput(matched.rowKey, input);
+                    return;
+                }
+            }
+
+            if (candidates.length === 1) {
+                upsertUtilityInput(candidates[0].rowKey, input);
+            }
+        });
+
+        return map;
+    }, [basePaymentData, ledgerInputs, ledgerRowsData, normalizeTeamName, paymentData]);
+
+    const utilityInputByWorkerMonthSingle = useMemo(() => {
+        const grouped = new Map<string, LedgerUtilityInputLike[]>();
+
+        Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
+            if (!ledgerRowKey.endsWith('__월급제')) return;
+            const parts = ledgerRowKey.split('__');
+            if (parts.length < 4) return;
+            const [month, workerId] = parts;
+            const key = `${month}__${workerId}`;
+            const list = grouped.get(key) ?? [];
+            list.push(manual as LedgerUtilityInputLike);
+            grouped.set(key, list);
+        });
+
+        const singleMap = new Map<string, LedgerUtilityInputLike>();
+        grouped.forEach((list, key) => {
+            if (list.length === 1) {
+                singleMap.set(key, list[0]);
+            }
+        });
+
+        return singleMap;
+    }, [ledgerInputs]);
+
+    const mergeUtilityInput = useCallback((left: LedgerUtilityInputLike, right: LedgerUtilityInputLike): LedgerUtilityInputLike => {
+        const mergeSide = (side: 'invoice' | 'labor') => ({
+            ...left[side],
+            ...right[side],
+            lodging: toNumber(left[side]?.lodging) + toNumber(right[side]?.lodging),
+            electricity: toNumber(left[side]?.electricity) + toNumber(right[side]?.electricity),
+            gas: toNumber(left[side]?.gas) + toNumber(right[side]?.gas),
+            water: toNumber(left[side]?.water) + toNumber(right[side]?.water),
+            fine: toNumber(left[side]?.fine) + toNumber(right[side]?.fine),
+            other: toNumber(left[side]?.other) + toNumber(right[side]?.other),
+        });
+
+        return {
+            ...left,
+            ...right,
+            invoice: mergeSide('invoice'),
+            labor: mergeSide('labor'),
+        };
+    }, []);
+
+    const resolveUtilityInputForPaymentItem = useCallback((item: PaymentData): LedgerUtilityInputLike | undefined => {
+        const itemRowKey = (item as any).rowKey as string | undefined;
+        const direct = itemRowKey ? (ledgerInputs[itemRowKey] as LedgerUtilityInputLike | undefined) : undefined;
+        const mapped = itemRowKey ? utilityInputByPaymentRowKey.get(itemRowKey) : undefined;
+
+        if (direct && mapped) {
+            return mergeUtilityInput(direct, mapped);
+        }
+        if (direct || mapped) {
+            return direct ?? mapped;
+        }
+
+        const monthWorkerKey = `${item.month}__${item.workerId}`;
+        const singleFallback = utilityInputByWorkerMonthSingle.get(monthWorkerKey);
+
+        const itemTeamNormalized = normalizeTeamName(item.teamName);
+        const teamMatchedInputs = Object.entries(ledgerInputs)
+            .filter(([ledgerRowKey]) => ledgerRowKey.endsWith('__월급제'))
+            .filter(([ledgerRowKey]) => {
+                const parts = ledgerRowKey.split('__');
+                if (parts.length < 4) return false;
+                const [month, workerId] = parts;
+                return month === item.month && workerId === item.workerId;
+            })
+            .map(([ledgerRowKey, manual]) => {
+                const ledgerRow = ledgerRowsData.find((row) => row.rowKey === ledgerRowKey);
+                return {
+                    team: normalizeTeamName(ledgerRow?.teamName),
+                    input: manual as LedgerUtilityInputLike,
+                };
+            })
+            .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
+            .map((entry) => entry.input);
+
+        if (teamMatchedInputs.length > 1) {
+            return teamMatchedInputs.reduce((acc, cur) => mergeUtilityInput(acc, cur));
+        }
+
+        if (teamMatchedInputs.length === 1) {
+            return teamMatchedInputs[0];
+        }
+
+        return singleFallback;
+    }, [
+        ledgerInputs,
+        ledgerRowsData,
+        mergeUtilityInput,
+        normalizeTeamName,
+        utilityInputByPaymentRowKey,
+        utilityInputByWorkerMonthSingle,
+    ]);
+
     const payslipTarget = useMemo(() => {
         if (filteredPaymentData.length === 0) return null;
         const targetKey = selectedPayslipRowKey || `${filteredPaymentData[0].month}__${filteredPaymentData[0].workerId}__${filteredPaymentData[0].teamId}`;
@@ -1383,8 +2108,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 const baseDeductionBreakdown = stripTemporaryDeductionLines(item.deductionBreakdown);
                 const baseTaxBreakdown = stripTemporaryTaxLines(item.taxBreakdown);
 
+                const utilityInput = resolveUtilityInputForPaymentItem(item);
+
                 const utilityLines = params.applyUtilities
-                    ? buildUtilityDeductionLines(ledgerInputs[item.rowKey] as LedgerUtilityInputLike | undefined)
+                    ? buildUtilityDeductionLines(utilityInput)
                     : [];
 
                 const nextDeductionBreakdown = mergeDeductionBreakdownWithLines(baseDeductionBreakdown, utilityLines);
@@ -1438,7 +2165,102 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setInsuranceApplied(params.applyInsurance);
         setBusinessIncomeApplied(params.applyBusinessIncome);
         setUtilitiesApplied(params.applyUtilities);
-    }, [basePaymentData, ledgerInputs, normalizeTeamName, payrollConfig]);
+    }, [
+        basePaymentData,
+        ledgerInputs,
+        normalizeTeamName,
+        payrollConfig,
+        resolveUtilityInputForPaymentItem,
+        utilityInputByPaymentRowKey,
+        utilityInputByWorkerMonthSingle,
+    ]);
+
+    useEffect(() => {
+        // 가불대장 입력이 바뀌면 적용 중인 공제/세금 스위치 상태를 기준으로 명세서 금액을 동기화한다.
+        if (!insuranceApplied && !businessIncomeApplied && !utilitiesApplied) return;
+        applyCalculatedDeductions({
+            applyInsurance: insuranceApplied,
+            applyBusinessIncome: businessIncomeApplied,
+            applyUtilities: utilitiesApplied,
+        });
+    }, [
+        applyCalculatedDeductions,
+        businessIncomeApplied,
+        insuranceApplied,
+        ledgerInputs,
+        utilitiesApplied,
+    ]);
+
+    const openPayslipPreview = useCallback(() => {
+        if (filteredPaymentData.length === 0) return;
+
+        // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
+        if (insuranceApplied || businessIncomeApplied || utilitiesApplied) {
+            applyCalculatedDeductions({
+                applyInsurance: insuranceApplied,
+                applyBusinessIncome: businessIncomeApplied,
+                applyUtilities: utilitiesApplied,
+            });
+        }
+
+        setSelectedPayslipRowKey(`${filteredPaymentData[0].month}__${filteredPaymentData[0].workerId}__${filteredPaymentData[0].teamId}`);
+        setShowPayslipModal(true);
+    }, [
+        applyCalculatedDeductions,
+        businessIncomeApplied,
+        filteredPaymentData,
+        insuranceApplied,
+        utilitiesApplied,
+    ]);
+
+    const resolvedPayslipTarget = useMemo(() => {
+        if (!payslipTarget) return null;
+        if (!utilitiesApplied) return payslipTarget;
+
+        const baseRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+        const payslipRowKey = (payslipTarget as any).rowKey as string | undefined;
+        const baseItem = payslipRowKey
+            ? baseRows.find((item) => (item as any).rowKey === payslipRowKey)
+            : baseRows.find((item) => (
+                item.month === payslipTarget.month
+                && item.workerId === payslipTarget.workerId
+                && normalizeTeamName(item.teamName) === normalizeTeamName(payslipTarget.teamName)
+            ));
+
+        const utilityInput = resolveUtilityInputForPaymentItem(payslipTarget);
+
+        const utilityLines = buildUtilityDeductionLines(utilityInput);
+        const sourceDeductionBreakdown = stripTemporaryDeductionLines(baseItem?.deductionBreakdown ?? payslipTarget.deductionBreakdown);
+        const baseDeductionBreakdown = rebuildDeductionBreakdown({
+            standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !APPLIED_UTILITY_LABEL_SET.has(String(line.label ?? '').trim())),
+            additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !APPLIED_UTILITY_LABEL_SET.has(String(line.label ?? '').trim())),
+        });
+        const nextDeductionBreakdown = mergeDeductionBreakdownWithLines(baseDeductionBreakdown, utilityLines);
+        const nextTaxBreakdown = rebuildDeductionBreakdown({
+            standardLines: [...(payslipTarget.taxBreakdown?.standardLines ?? [])],
+            additionalLines: [...(payslipTarget.taxBreakdown?.additionalLines ?? [])],
+        });
+        const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
+        const nextTotalAmount = payslipTarget.grossAmount - nextTotalDeduction;
+
+        return {
+            ...payslipTarget,
+            deductionBreakdown: nextDeductionBreakdown,
+            taxBreakdown: nextTaxBreakdown,
+            totalDeduction: nextTotalDeduction,
+            totalAmount: nextTotalAmount,
+        };
+    }, [
+        basePaymentData,
+        ledgerInputs,
+        normalizeTeamName,
+        paymentData,
+        payslipTarget,
+        resolveUtilityInputForPaymentItem,
+        utilitiesApplied,
+        utilityInputByPaymentRowKey,
+        utilityInputByWorkerMonthSingle,
+    ]);
 
     const handleSaveInsuranceSettings = useCallback(async () => {
         const config = payrollConfig;
@@ -1690,433 +2512,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         return { isValid, errors };
     }, []);
-
-    const fetchData = useCallback(async () => {
-        if (!startMonth || !endMonth) return;
-        const months = buildMonthRange(startMonth, endMonth);
-        if (months.length === 0) return;
-
-        setLoading(true);
-        try {
-            const safeStart = compareYearMonth(startMonth, endMonth) <= 0 ? startMonth : endMonth;
-            const safeEnd = compareYearMonth(startMonth, endMonth) <= 0 ? endMonth : startMonth;
-
-            const [endYearStr, endMonthStr] = safeEnd.split('-');
-            const endYear = Number(endYearStr);
-            const endMonthNum = Number(endMonthStr);
-
-            const startDate = `${safeStart}-01`;
-            const lastDay = new Date(endYear, endMonthNum, 0).getDate();
-            const endDate = `${safeEnd}-${String(lastDay).padStart(2, '0')}`;
-
-            const monthlyReports = await dailyReportService.getReportsByRange(startDate, endDate);
-
-            const advancesByMonth = new Map<string, AdvancePayment[]>();
-            await Promise.all(
-                months.map(async (monthKey) => {
-                    const [yStr, mStr] = monthKey.split('-');
-                    const y = Number(yStr);
-                    const m = Number(mStr);
-                    if (!Number.isFinite(y) || !Number.isFinite(m)) {
-                        advancesByMonth.set(monthKey, []);
-                        return;
-                    }
-                    const rows = await advancePaymentService.getAdvancePaymentsByYearMonth(y, m);
-                    advancesByMonth.set(monthKey, rows);
-                })
-            );
-
-            const advances = Array.from(advancesByMonth.values()).flat();
-            const advanceByWorkerTeamKey = new Map<string, AdvancePayment[]>();
-            const advanceListByWorkerId = new Map<string, AdvancePayment[]>();
-            advances.forEach((item) => {
-                const workerId = (item.workerId ?? '').trim();
-                const teamId = (item.teamId ?? '').trim();
-                if (!workerId) return;
-                if (teamId) {
-                    const listByTeam = advanceByWorkerTeamKey.get(`${workerId}__${teamId}`) ?? [];
-                    listByTeam.push(item);
-                    advanceByWorkerTeamKey.set(`${workerId}__${teamId}`, listByTeam);
-                }
-                const list = advanceListByWorkerId.get(workerId) ?? [];
-                list.push(item);
-                advanceListByWorkerId.set(workerId, list);
-            });
-
-            const workers = allWorkers.length > 0 ? allWorkers : await manpowerService.getWorkers();
-            if (allWorkers.length === 0) {
-                setAllWorkers(workers);
-            }
-            const workerMap = new Map<string, Worker>();
-            workers.forEach(w => {
-                if (w.id) workerMap.set(w.id, w);
-            });
-
-            const sites = allSites.length > 0 ? allSites : await siteService.getSites();
-            if (allSites.length === 0) {
-                setAllSites(sites);
-            }
-            const siteMap = new Map<string, Site>();
-            sites.forEach(s => {
-                const id = (s.id ?? '').trim();
-                if (id) siteMap.set(id, s);
-                const legacyId = (s.legacyId ?? '').trim();
-                if (legacyId && !siteMap.has(legacyId)) siteMap.set(legacyId, s);
-            });
-
-            const teamMap = new Map<string, Team>();
-            allTeams.forEach(t => {
-                if (t.id) teamMap.set(t.id, t);
-            });
-
-            const allowedTeamIds = (() => {
-                if (!selectedTeamId) return null;
-
-                const selectedTeamName = allTeams.find(t => t.id === selectedTeamId)?.name ?? '';
-                const selectedTeamNameNormalized = normalizeTeamName(selectedTeamName);
-
-                const ids = new Set<string>();
-                ids.add(selectedTeamId);
-
-                allTeams.forEach(team => {
-                    if (!team.id) return;
-                    if (team.parentTeamId === selectedTeamId) {
-                        ids.add(team.id);
-                        return;
-                    }
-                    if (selectedTeamNameNormalized) {
-                        const parentNameNormalized = normalizeTeamName(team.parentTeamName ?? '');
-                        if (parentNameNormalized && parentNameNormalized === selectedTeamNameNormalized) {
-                            ids.add(team.id);
-                        }
-                    }
-                });
-
-                return ids;
-            })();
-
-            type WorkerAggregate = {
-                workerId: string;
-                companyId: string;
-                companyName: string;
-                salaryModel: '월급제' | '일급제';
-                manDay: number;
-                teamId: string;
-                teamName: string;
-                totalAmount: number;
-                laborGrossAmount: number;
-                invoiceGrossAmount: number;
-                laborManDay: number;
-                invoiceManDay: number;
-                unitPrices: number[];
-                workEntries: WorkerWorkEntry[];
-                month: string;
-            };
-            const workerAggregates: Record<string, WorkerAggregate> = {};
-            const ledgerWorkerAggregates: Record<string, WorkerAggregate> = {};
-
-            const mergeWorkerAggregate = (
-                bucket: Record<string, WorkerAggregate>,
-                aggregateKey: string,
-                params: {
-                    salaryModel: '월급제' | '일급제';
-                    workerId: string;
-                    companyId: string;
-                    companyName: string;
-                    teamId: string;
-                    teamName: string;
-                    month: string;
-                    manDay: number;
-                    unitPrice: number;
-                    isLabor: boolean;
-                    reportDate: string;
-                    siteName: string;
-                    siteId?: string;
-                    clientCompanyId?: string;
-                    description?: string;
-                    paymentMethod?: string;
-                }
-            ) => {
-                if (!bucket[aggregateKey]) {
-                    bucket[aggregateKey] = {
-                        workerId: params.workerId,
-                        companyId: params.companyId,
-                        companyName: params.companyName,
-                        salaryModel: params.salaryModel,
-                        manDay: 0,
-                        teamId: params.teamId,
-                        teamName: params.teamName,
-                        totalAmount: 0,
-                        laborGrossAmount: 0,
-                        invoiceGrossAmount: 0,
-                        laborManDay: 0,
-                        invoiceManDay: 0,
-                        unitPrices: [],
-                        workEntries: [],
-                        month: params.month,
-                    };
-                }
-
-                const target = bucket[aggregateKey];
-                const entryAmount = params.manDay * params.unitPrice;
-                target.manDay += params.manDay;
-                target.totalAmount += entryAmount;
-                if (params.isLabor) {
-                    target.laborGrossAmount += entryAmount;
-                    target.laborManDay += params.manDay;
-                } else {
-                    target.invoiceGrossAmount += entryAmount;
-                    target.invoiceManDay += params.manDay;
-                }
-
-                if (!target.unitPrices.includes(params.unitPrice)) {
-                    target.unitPrices.push(params.unitPrice);
-                }
-
-                target.workEntries.push({
-                    date: params.reportDate,
-                    siteName: params.siteName,
-                    siteId: params.siteId,
-                    clientCompanyId: params.clientCompanyId,
-                    isLaborSite: params.isLabor,
-                    manDay: params.manDay,
-                    unitPrice: params.unitPrice,
-                    description: params.description,
-                    paymentMethod: params.paymentMethod || '-',
-                    amount: entryAmount
-                });
-            };
-
-            monthlyReports.forEach(report => {
-                const reportYearMonth = (report.date ?? '').slice(0, 7);
-                if (!reportYearMonth) return;
-                if (!months.includes(reportYearMonth)) return;
-
-                const reportSite = siteMap.get(report.siteId);
-
-                const resolvedReportTeamIdFromName = (() => {
-                    const normalized = normalizeTeamName(report.teamName ?? '');
-                    if (!normalized) return '';
-                    const matched = allTeams.find(t => normalizeTeamName(t.name ?? '') === normalized);
-                    return matched?.id ?? '';
-                })();
-
-                const reportTeamId = report.teamId || resolvedReportTeamIdFromName;
-                const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
-
-                report.workers.forEach(reportWorker => {
-                    const workerDetails = workerMap.get(reportWorker.workerId);
-                    if (!workerDetails) return;
-
-                    if (selectedWorkerId && reportWorker.workerId !== selectedWorkerId) return;
-
-                    const snapshotSalaryModel =
-                        typeof reportWorker.salaryModel === 'string' && reportWorker.salaryModel.trim().length > 0
-                            ? reportWorker.salaryModel
-                            : typeof reportWorker.payType === 'string' && reportWorker.payType.trim().length > 0
-                                ? reportWorker.payType
-                                : workerDetails.salaryModel;
-
-                    const normalizedSalaryModel = (snapshotSalaryModel ?? '').trim();
-                    const isMonthlyWage = normalizedSalaryModel === '월급제';
-                    const isDailyWage = normalizedSalaryModel === '일급제';
-                    if (!isMonthlyWage && !isDailyWage) return;
-
-                    if (selectedTeamId && allowedTeamIds) {
-                        const workerTeamId = (workerDetails.teamId ?? '').trim();
-                        if (!workerTeamId || !allowedTeamIds.has(workerTeamId)) {
-                            return;
-                        }
-                    }
-
-                    const resolvedTeamIdFromName = (() => {
-                        const normalized = normalizeTeamName(reportTeamName);
-                        if (!normalized) return '';
-                        const matched = allTeams.find(t => normalizeTeamName(t.name ?? '') === normalized);
-                        return matched?.id ?? '';
-                    })();
-
-                    const resolvedTeamId = (workerDetails.teamId ?? '').trim() || reportTeamId || resolvedTeamIdFromName || reportWorker.teamId || '';
-                    const resolvedTeamName = (workerDetails.teamName ?? '').trim() || reportTeamName || teamMap.get(resolvedTeamId)?.name || '';
-
-                    const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
-                    const snapshotUnitPrice = reportWorker.unitPrice ?? workerDetails.unitPrice ?? 0;
-                    const isLabor = reportSite?.paymentMethod === '노무';
-
-                    const aggregateParams = {
-                        workerId: reportWorker.workerId,
-                        companyId: workerDetails.companyId || teamMap.get(resolvedTeamId)?.companyId || report.companyId || reportSite?.constructorCompanyId || '',
-                        companyName: workerDetails.companyName || teamMap.get(resolvedTeamId)?.companyName || report.companyName || '',
-                        teamId: safeTeamKey,
-                        teamName: resolvedTeamName,
-                        month: reportYearMonth,
-                        manDay: reportWorker.manDay,
-                        unitPrice: snapshotUnitPrice,
-                        isLabor,
-                        reportDate: report.date,
-                        siteName: report.siteName || reportSite?.name || '-',
-                        siteId: report.siteId,
-                        clientCompanyId: reportSite?.clientCompanyId || '',
-                        description: reportWorker.workContent || report.workContent || '',
-                        paymentMethod: reportSite?.paymentMethod || '-'
-                    };
-
-                    if (isMonthlyWage) {
-                        const monthlyAggregateKey = `${reportYearMonth}__${reportWorker.workerId}__${safeTeamKey}__월급제`;
-                        mergeWorkerAggregate(workerAggregates, monthlyAggregateKey, {
-                            ...aggregateParams,
-                            salaryModel: '월급제'
-                        });
-                    }
-
-                    const ledgerSalaryModel: '월급제' | '일급제' = isDailyWage ? '일급제' : '월급제';
-                    const ledgerAggregateKey = `${reportYearMonth}__${reportWorker.workerId}__${safeTeamKey}__${ledgerSalaryModel}`;
-                    mergeWorkerAggregate(ledgerWorkerAggregates, ledgerAggregateKey, {
-                        ...aggregateParams,
-                        salaryModel: ledgerSalaryModel
-                    });
-                });
-            });
-
-            const processedData: PaymentData[] = [];
-            let errCount = 0;
-
-            Object.keys(workerAggregates).forEach(key => {
-                const agg = workerAggregates[key];
-                const workerDetails = workerMap.get(agg.workerId);
-
-                if (workerDetails) {
-                    const grossAmount = agg.totalAmount;
-                    const unitPrice = agg.unitPrices.length === 1
-                        ? agg.unitPrices[0]
-                        : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (workerDetails.unitPrice || 0));
-                    const bankName = workerDetails.bankName || '';
-                    const bankCode = BANK_CODES[bankName] || '';
-                    const accountNumber = workerDetails.accountNumber || '';
-                    const accountHolder = workerDetails.accountHolder || '';
-
-                    const canonicalTeamId = (() => {
-                        const raw = (agg.teamId ?? '').trim();
-                        if (!raw) return (workerDetails.teamId ?? '').trim();
-                        if (raw.startsWith('unresolved:') || raw === 'no-team') {
-                            return (workerDetails.teamId ?? '').trim();
-                        }
-                        return raw;
-                    })();
-
-                    const advanceRecords = (() => {
-                        if (canonicalTeamId) {
-                            const primaryList = advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) ?? [];
-                            if (primaryList.length > 0) return primaryList;
-                        }
-                        return advanceListByWorkerId.get(agg.workerId) ?? [];
-                    })();
-
-                    const deductionBreakdown = buildDeductionBreakdownFromRecords(advanceRecords, deductionLabelMap);
-                    const totalDeduction = deductionBreakdown.total;
-                    const netAmount = grossAmount - totalDeduction;
-
-                    // 계산서/노무용 실지급액 비례 배분
-                    const laborProp = grossAmount > 0 ? agg.laborGrossAmount / grossAmount : 0;
-                    const laborNetAmount = Math.round(netAmount * laborProp);
-                    const invoiceNetAmount = netAmount - laborNetAmount; // 끝전 처리 방지 위해 차감 방식으로 계산
-
-                    const validation = validateItem({ bankName, bankCode, accountNumber, accountHolder });
-                    if (!validation.isValid) errCount++;
-
-                    processedData.push({
-                        rowKey: `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`,
-                        workerId: agg.workerId,
-                        workerName: workerDetails.name,
-                        idNumber: workerDetails.idNumber || '',
-                        companyId: agg.companyId,
-                        companyName: agg.companyName,
-                        teamId: agg.teamId,
-                        teamName: agg.teamName,
-                        month: agg.month,
-                        totalManDay: agg.manDay,
-                        unitPrice: unitPrice,
-                        grossAmount,
-                        laborGrossAmount: agg.laborGrossAmount,
-                        invoiceGrossAmount: agg.invoiceGrossAmount,
-                        laborManDay: agg.laborManDay,
-                        invoiceManDay: agg.invoiceManDay,
-                        totalDeduction,
-                        totalAmount: netAmount,
-                        laborNetAmount,
-                        invoiceNetAmount,
-                        bankName: bankName,
-                        bankCode: bankCode,
-                        accountNumber: accountNumber,
-                        accountHolder: accountHolder,
-                        displayContent: '월급',
-                        workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
-                        deductionBreakdown,
-                        taxBreakdown: createEmptyDeductionBreakdown(),
-                        taxRateSnapshot: undefined,
-                        insuranceAppliedSummary: undefined,
-                        withholdingAppliedSummary: undefined,
-                        businessIncomeAppliedSummary: undefined,
-                        isValid: validation.isValid,
-                        errors: validation.errors
-                    });
-                }
-            });
-
-            const processedLedgerRows: MonthlyAdvanceLedgerRow[] = Object.keys(ledgerWorkerAggregates).reduce<MonthlyAdvanceLedgerRow[]>(
-                (acc, key) => {
-                    const agg = ledgerWorkerAggregates[key];
-                    const workerDetails = workerMap.get(agg.workerId);
-                    if (!workerDetails) return acc;
-
-                    const grossAmount = agg.totalAmount;
-                    const unitPrice = agg.unitPrices.length === 1
-                        ? agg.unitPrices[0]
-                        : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (workerDetails.unitPrice || 0));
-
-                    acc.push({
-                        rowKey: `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`,
-                        month: agg.month,
-                        teamId: agg.teamId,
-                        teamName: agg.teamName,
-                        workerId: agg.workerId,
-                        workerName: workerDetails.name,
-                        salaryModel: agg.salaryModel,
-                        invoiceManDay: agg.invoiceManDay,
-                        laborManDay: agg.laborManDay,
-                        unitPrice,
-                        invoiceGrossAmount: agg.invoiceGrossAmount,
-                        laborGrossAmount: agg.laborGrossAmount,
-                        workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
-                    });
-
-                    return acc;
-                },
-                []
-            );
-
-            setBasePaymentData(processedData);
-            setPaymentData(processedData);
-            setLedgerRowsData(processedLedgerRows);
-            setErrorCount(errCount);
-            setInsuranceApplied(false);
-            setBusinessIncomeApplied(false);
-            setUtilitiesApplied(false);
-
-        } catch (error) {
-            console.error("Error fetching payment data:", error);
-            setBasePaymentData([]);
-            setLedgerRowsData([]);
-            alert("데이터를 불러오는 중 오류가 발생했습니다.");
-        } finally {
-            setLoading(false);
-        }
-    }, [allSites, allTeams, allWorkers, buildMonthRange, compareYearMonth, deductionLabelMap, endMonth, normalizeTeamName, selectedTeamId, selectedWorkerId, startMonth, validateItem]);
-
-    useEffect(() => {
-        if (!filtersReady) return;
-        void fetchData();
-    }, [fetchData, filtersReady]);
 
     const toggleRow = (month: string, workerId: string, teamId: string) => {
         const key = `${month}__${workerId}__${teamId}`;
@@ -2543,373 +2938,409 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     };
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-4 md:p-6 max-w-[1700px] w-full mx-auto overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col p-2 md:p-3 max-w-[1700px] w-full mx-auto overflow-hidden">
             {!hideHeader && (
-                <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm px-6 py-4 mb-4">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-rose-100 text-rose-600 p-2 rounded-xl">
-                            <FontAwesomeIcon icon={faCalendarDays} className="text-xl" />
+                <div className="flex-shrink-0 bg-white border border-slate-200 rounded-lg shadow-sm px-3 py-2 mb-2">
+                    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex items-center gap-2">
+                            <div className="bg-rose-100 text-rose-600 p-1 rounded-md">
+                                <FontAwesomeIcon icon={faCalendarDays} className="text-sm" />
+                            </div>
+                            <div>
+                                <h1 className="text-lg font-bold text-slate-800 leading-tight">통합급여관리</h1>
+                            </div>
                         </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800">월급제</h1>
-                            <p className="text-sm text-slate-500 mt-1">월별 공수·단가·공제를 한 화면에서 검토하고 엑셀 출력까지 진행합니다.</p>
+
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                            <span className="font-semibold text-slate-700">정산기간</span>
+                            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1">
+                                <button
+                                    type="button"
+                                    onClick={() => startMonth && setStartMonth(shiftYearMonth(startMonth, -1))}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
+                                    aria-label="시작월 이전"
+                                >
+                                    <FontAwesomeIcon icon={faChevronLeft} className="text-[10px]" />
+                                </button>
+                                <div className="flex items-center gap-1">
+                                    <button type="button" className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700">
+                                        {formatYearMonthParts(startMonth).year}년
+                                    </button>
+                                    <button type="button" className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700">
+                                        {formatYearMonthParts(startMonth).month}월
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => startMonth && setStartMonth(shiftYearMonth(startMonth, 1))}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
+                                    aria-label="시작월 다음"
+                                >
+                                    <FontAwesomeIcon icon={faChevronRight} className="text-[10px]" />
+                                </button>
+                            </div>
+                            <span className="text-slate-400">~</span>
+                            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1">
+                                <button
+                                    type="button"
+                                    onClick={() => endMonth && setEndMonth(shiftYearMonth(endMonth, -1))}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
+                                    aria-label="종료월 이전"
+                                >
+                                    <FontAwesomeIcon icon={faChevronLeft} className="text-[10px]" />
+                                </button>
+                                <div className="flex items-center gap-1">
+                                    <button type="button" className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700">
+                                        {formatYearMonthParts(endMonth).year}년
+                                    </button>
+                                    <button type="button" className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700">
+                                        {formatYearMonthParts(endMonth).month}월
+                                    </button>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => endMonth && setEndMonth(shiftYearMonth(endMonth, 1))}
+                                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
+                                    aria-label="종료월 다음"
+                                >
+                                    <FontAwesomeIcon icon={faChevronRight} className="text-[10px]" />
+                                </button>
+                            </div>
+
+                            <span className="ml-1 font-semibold text-slate-700">팀선택</span>
+                            <select
+                                value={selectedTeamId}
+                                onChange={(e) => setSelectedTeamId(e.target.value)}
+                                className="h-9 min-w-[150px] rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700"
+                            >
+                                <option value="">팀전체</option>
+                                {teams
+                                    .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
+                                    .map((team) => (
+                                        <option key={team.id} value={team.id}>{team.name}</option>
+                                    ))}
+                            </select>
+
+                            <span className="ml-1 w-px h-5 bg-slate-200" />
+
+                            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+                                <button
+                                    type="button"
+                                    className={`px-3 h-7 rounded-md text-xs font-bold transition-colors ${filterMode === 'team' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                                    onClick={() => setFilterMode('team')}
+                                >
+                                    팀
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`px-3 h-7 rounded-md text-xs font-bold transition-colors ${filterMode === 'worker' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                                    onClick={() => setFilterMode('worker')}
+                                >
+                                    개인
+                                </button>
+                                <button
+                                    type="button"
+                                    className="px-3 h-7 rounded-md text-xs font-bold text-slate-600 hover:text-slate-900 transition-colors"
+                                    onClick={handleResetFilters}
+                                >
+                                    초기화
+                                </button>
+                            </div>
+
+                            {filterMode === 'worker' && (
+                                <>
+                                    <select
+                                        value={selectedWorkerId}
+                                        onChange={(e) => setSelectedWorkerId(e.target.value)}
+                                        className="h-9 min-w-[130px] rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700"
+                                    >
+                                        <option value="">개인전체</option>
+                                        {workerOptions.map((worker) => (
+                                            <option key={worker.id} value={worker.id}>{worker.name}</option>
+                                        ))}
+                                    </select>
+                                    <input
+                                        type="text"
+                                        value={workerSearchText}
+                                        onChange={(e) => setWorkerSearchText(e.target.value)}
+                                        placeholder="이름 검색"
+                                        className="h-9 w-28 rounded-lg border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700 placeholder-slate-400"
+                                    />
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
             )}
 
-            <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 mb-6">
-                <div className="flex flex-wrap gap-3 items-center justify-between">
-                    <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 w-full xl:w-auto">
-                        <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 border border-slate-200">
-                            <button
-                                type="button"
-                                onClick={() => setYearCursor(shiftYearMonth(yearCursor, -12))}
-                                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded-md transition shadow-sm"
-                                title="이전 연도"
-                            >
-                                <FontAwesomeIcon icon={faChevronLeft} />
-                            </button>
-                            <span className="font-bold text-slate-700 px-2 min-w-[80px] text-center">
-                                {parseInt(yearCursor.split('-')[0])}년
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() => setYearCursor(shiftYearMonth(yearCursor, 12))}
-                                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded-md transition shadow-sm"
-                                title="다음 연도"
-                            >
-                                <FontAwesomeIcon icon={faChevronRight} />
-                            </button>
-                        </div>
+            <ToolbarContainer>
+                <ToolbarLead>
+                    <ToolbarLeadMeta>
+                        <ToolbarBadge>{rangeLabel || '-'}</ToolbarBadge>
+                        <ToolbarBadge>대상 {filteredPaymentData.length + filteredLedgerRows.filter(r => r.salaryModel === '일급제').length}명</ToolbarBadge>
+                        <ActionButton type="button" $variant="secondary" onClick={fetchData}>
+                            <FontAwesomeIcon icon={faSearch} />
+                            조회
+                        </ActionButton>
+                        <ActionButton
+                            type="button"
+                            $variant="outline"
+                            onClick={() => setToolbarExpanded((prev) => !prev)}
+                        >
+                            <FontAwesomeIcon icon={toolbarExpanded ? faChevronUp : faChevronDown} />
+                            {toolbarExpanded ? '간편 보기' : '상세 설정'}
+                        </ActionButton>
+                    </ToolbarLeadMeta>
+                </ToolbarLead>
 
-                        <div className="flex flex-wrap items-center gap-1">
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-                                const year = yearCursor.split('-')[0];
-                                const ym = `${year}-${String(m).padStart(2, '0')}`;
-                                const isInRange = monthRangeSet.has(ym);
-                                const isStart = startMonth === ym;
-                                const isEnd = endMonth === ym;
-                                return (
-                                    <button
-                                        key={m}
+                {toolbarExpanded && (
+                    <ToolbarGrid>
+                    <ToolbarCard $span={7}>
+                        <ToolbarCardHeader>
+                            <div>
+                                <ToolbarCardTitle>정산 기간 선택</ToolbarCardTitle>
+                                <ToolbarCardDescription>연도 이동과 월 범위 선택을 한 카드 안에서 처리합니다.</ToolbarCardDescription>
+                            </div>
+                            <ToolbarBadge>{monthRange.length}개월</ToolbarBadge>
+                        </ToolbarCardHeader>
+                        <ToolbarCardBody>
+                            <ToolbarInline>
+                                <YearNavigator>
+                                    <YearButton
+                                        type="button"
+                                        onClick={() => setYearCursor(shiftYearMonth(yearCursor, -12))}
+                                        title="이전 연도"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronLeft} />
+                                    </YearButton>
+                                    <YearText>{parseInt(yearCursor.split('-')[0], 10)}년</YearText>
+                                    <YearButton
+                                        type="button"
+                                        onClick={() => setYearCursor(shiftYearMonth(yearCursor, 12))}
+                                        title="다음 연도"
+                                    >
+                                        <FontAwesomeIcon icon={faChevronRight} />
+                                    </YearButton>
+                                </YearNavigator>
+
+                                <ToolbarSectionDivider />
+
+                                <QuickRangeGroup>
+                                    <QuickRangeButton
                                         type="button"
                                         onClick={() => {
-                                            if (!startMonth || (startMonth && endMonth && compareYearMonth(startMonth, endMonth) !== 0 && monthRange.length > 1 && (ym === startMonth || ym === endMonth))) {
-                                                setStartMonth(ym);
-                                                setEndMonth(ym);
-                                                return;
-                                            }
-                                            if (!startMonth) {
-                                                setStartMonth(ym);
-                                                setEndMonth(ym);
-                                                return;
-                                            }
-                                            if (compareYearMonth(ym, startMonth) < 0) {
-                                                setStartMonth(ym);
-                                                return;
-                                            }
-                                            setEndMonth(ym);
+                                            setStartMonth(prevYearMonth);
+                                            setEndMonth(prevYearMonth);
+                                            setYearCursor(prevYearMonth);
                                         }}
-                                        className={`w-9 h-8 text-sm font-medium rounded-md transition ${isStart || isEnd
-                                            ? 'bg-slate-800 text-white shadow-md transform scale-105'
-                                            : isInRange
-                                                ? 'bg-slate-200 text-slate-800'
-                                                : 'text-slate-600 hover:bg-slate-100'
-                                            }`}
                                     >
-                                        {m}월
-                                    </button>
-                                );
-                            })}
-                        </div>
+                                        전달
+                                    </QuickRangeButton>
+                                    <QuickRangeButton
+                                        type="button"
+                                        onClick={() => {
+                                            setStartMonth(currentYearMonth);
+                                            setEndMonth(currentYearMonth);
+                                            setYearCursor(currentYearMonth);
+                                        }}
+                                    >
+                                        이달
+                                    </QuickRangeButton>
+                                </QuickRangeGroup>
+                            </ToolbarInline>
 
-                        <div className="h-6 w-px bg-slate-300 mx-1 hidden lg:block"></div>
+                            <MonthGrid>
+                                {Array.from({ length: 12 }, (_, i) => i + 1).map((monthNumber) => {
+                                    const year = yearCursor.split('-')[0];
+                                    const ym = `${year}-${String(monthNumber).padStart(2, '0')}`;
+                                    const isInRange = monthRangeSet.has(ym);
+                                    const isActive = startMonth === ym || endMonth === ym;
 
-                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setStartMonth(prevYearMonth);
-                                    setEndMonth(prevYearMonth);
-                                    setYearCursor(prevYearMonth);
-                                }}
-                                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white hover:text-slate-900 rounded-md transition hover:shadow-sm"
-                            >
-                                전달
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setStartMonth(currentYearMonth);
-                                    setEndMonth(currentYearMonth);
-                                    setYearCursor(currentYearMonth);
-                                }}
-                                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white hover:text-slate-900 rounded-md transition hover:shadow-sm"
-                            >
-                                이달
-                            </button>
-                        </div>
+                                    return (
+                                        <MonthButton
+                                            key={monthNumber}
+                                            type="button"
+                                            $active={isActive}
+                                            $inRange={isInRange}
+                                            onClick={() => {
+                                                if (!startMonth || (startMonth && endMonth && compareYearMonth(startMonth, endMonth) !== 0 && monthRange.length > 1 && (ym === startMonth || ym === endMonth))) {
+                                                    setStartMonth(ym);
+                                                    setEndMonth(ym);
+                                                    return;
+                                                }
+                                                if (!startMonth) {
+                                                    setStartMonth(ym);
+                                                    setEndMonth(ym);
+                                                    return;
+                                                }
+                                                if (compareYearMonth(ym, startMonth) < 0) {
+                                                    setStartMonth(ym);
+                                                    return;
+                                                }
+                                                setEndMonth(ym);
+                                            }}
+                                        >
+                                            {monthNumber}월
+                                        </MonthButton>
+                                    );
+                                })}
+                            </MonthGrid>
+                        </ToolbarCardBody>
+                    </ToolbarCard>
 
-                        <div className="text-xs text-slate-500">
-                            선택기간: <span className="font-semibold text-slate-700">{rangeLabel || '-'}</span>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-2 py-1.5 shadow-sm">
-                        <span className="text-xs text-slate-500 px-1">검색</span>
-                        <div className="flex bg-slate-100 rounded-md p-1">
-                            <button
-                                type="button"
-                                onClick={() => setFilterMode('team')}
-                                className={`px-3 py-1 text-sm font-semibold rounded-md transition ${filterMode === 'team'
-                                    ? 'bg-white shadow text-slate-900'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                            >
-                                팀
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setFilterMode('worker')}
-                                className={`px-3 py-1 text-sm font-semibold rounded-md transition ${filterMode === 'worker'
-                                    ? 'bg-white shadow text-slate-900'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                            >
-                                개인
-                            </button>
-                        </div>
-                    </div>
-
-                    {filterMode === 'team' ? (
-                        <select
-                            value={selectedTeamId}
-                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                            className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-                        >
-                            <option value="">팀전체</option>
-                            {teams
-                                .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
-                                .map(team => (
-                                    <option key={team.id} value={team.id}>{team.name}</option>
-                                ))}
-                        </select>
-                    ) : (
-                        <>
-                            <select
-                                value={selectedWorkerId}
-                                onChange={(e) => setSelectedWorkerId(e.target.value)}
-                                className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-                            >
-                                <option value="">개인전체</option>
-                                {workerOptions.map((w) => (
-                                    <option key={w.id} value={w.id}>{w.name}</option>
-                                ))}
-                            </select>
-
-                            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-2 shadow-sm">
-                                <span className="text-xs text-slate-500">작업자</span>
-                                <input
-                                    type="text"
-                                    value={workerSearchText}
-                                    onChange={(e) => setWorkerSearchText(e.target.value)}
-                                    className="text-sm outline-none w-28"
-                                    placeholder="작업자검색"
-                                />
+                    <ToolbarCard $span={5}>
+                        <ToolbarCardHeader>
+                            <div>
+                                <ToolbarCardTitle>표시 방식 제어</ToolbarCardTitle>
+                                <ToolbarCardDescription>기본 목록과 가불 대장 전환, 세부 섹션 노출을 한 카드로 묶었습니다.</ToolbarCardDescription>
                             </div>
-                        </>
-                    )}
+                            <ToolbarBadge>{pageViewMode === 'ledger' ? '가불대장' : '기본목록'}</ToolbarBadge>
+                        </ToolbarCardHeader>
+                        <ToolbarCardBody>
+                            <SegmentedGroup>
+                                <SegmentedButton type="button" $active={pageViewMode === 'standard'} onClick={() => setPageViewMode('standard')}>
+                                    기본 목록
+                                </SegmentedButton>
+                                <SegmentedButton type="button" $active={pageViewMode === 'ledger'} onClick={() => setPageViewMode('ledger')}>
+                                    가불 대장
+                                </SegmentedButton>
+                            </SegmentedGroup>
 
-                    <button
-                        type="button"
-                        onClick={handleResetFilters}
-                        className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-semibold transition"
-                    >
-                        필터 초기화
-                    </button>
+                            {pageViewMode === 'ledger' ? (
+                                <FieldCard>
+                                    <FieldLabel>가불대장 항목</FieldLabel>
+                                    <ToggleChipGroup>
+                                        <ToggleChipButton
+                                            type="button"
+                                            $active={ledgerVisibleSections.utilities}
+                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, utilities: !prev.utilities }))}
+                                        >
+                                            공과금
+                                        </ToggleChipButton>
+                                        <ToggleChipButton
+                                            type="button"
+                                            $active={ledgerVisibleSections.advances}
+                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, advances: !prev.advances }))}
+                                        >
+                                            가불
+                                        </ToggleChipButton>
+                                        <ToggleChipButton
+                                            type="button"
+                                            $active={ledgerVisibleSections.taxes}
+                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, taxes: !prev.taxes }))}
+                                        >
+                                            세금
+                                        </ToggleChipButton>
+                                    </ToggleChipGroup>
+                                </FieldCard>
+                            ) : (
+                                <FieldCard>
+                                    <FieldLabel>표시 옵션</FieldLabel>
+                                    <ActionCluster>
+                                        <ModernSwitch compact label="계좌 컬럼 표시" checked={showAccountColumns} onChange={setShowAccountColumns} />
+                                        <ModernSwitch compact label="계산노무 표시" checked={showCalculationLabor} onChange={setShowCalculationLabor} />
+                                    </ActionCluster>
+                                </FieldCard>
+                            )}
+                        </ToolbarCardBody>
+                    </ToolbarCard>
 
-
-
-                    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-2 shadow-sm">
-                        <span className="text-xs text-slate-500">보내는사람</span>
-                        <input
-                            type="text"
-                            value={bulkSender}
-                            onChange={(e) => setBulkSender(e.target.value)}
-                            className="text-sm outline-none w-24"
-                            placeholder="㈜다원"
-                        />
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={() => setShowAccountColumns(prev => !prev)}
-                        className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-semibold transition flex items-center gap-2"
-                    >
-                        <FontAwesomeIcon icon={showAccountColumns ? faEyeSlash : faEye} />
-                        {showAccountColumns ? '계좌 숨기기' : '계좌 보기'}
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => setShowCalculationLabor((prev) => !prev)}
-                        className={`px-3 py-2 border rounded-lg text-sm font-semibold transition flex items-center gap-2 ${showCalculationLabor
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={faTableColumns} />
-                        {showCalculationLabor ? '계산노무 숨기기' : '계산노무 보기'}
-                    </button>
-
-                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                        <button
-                            type="button"
-                            onClick={() => setPageViewMode('standard')}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pageViewMode === 'standard'
-                                ? 'bg-white text-slate-900 shadow-sm'
-                                : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                        >
-                            기본목록
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setPageViewMode('ledger')}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pageViewMode === 'ledger'
-                                ? 'bg-white text-slate-900 shadow-sm'
-                                : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                        >
-                            가불대장
-                        </button>
-                    </div>
-
-                    {pageViewMode === 'ledger' && (
-                        <div className="flex flex-wrap items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg shadow-sm">
-                            <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">표시</span>
-                            <label className="flex items-center gap-1 text-xs text-slate-700 cursor-pointer whitespace-nowrap">
-                                <input
-                                    type="checkbox"
-                                    checked={ledgerVisibleSections.utilities}
-                                    onChange={(e) => setLedgerVisibleSections((prev) => ({ ...prev, utilities: e.target.checked }))}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    <ToolbarCard $span={5}>
+                        <ToolbarCardHeader>
+                            <div>
+                                <ToolbarCardTitle>정산 규칙 토글</ToolbarCardTitle>
+                                <ToolbarCardDescription>보험, 사업소득, 공과금 적용 상태를 카드형 스위치로 즉시 제어합니다.</ToolbarCardDescription>
+                            </div>
+                        </ToolbarCardHeader>
+                        <ToolbarCardBody>
+                            <ActionCluster>
+                                <ModernSwitch
+                                    label="4대보험 적용"
+                                    checked={insuranceApplied}
+                                    compact
+                                    onChange={(value) => applyCalculatedDeductions({
+                                        applyInsurance: value,
+                                        applyBusinessIncome: businessIncomeApplied,
+                                        applyUtilities: utilitiesApplied,
+                                    })}
                                 />
-                                공과금
-                            </label>
-                            <label className="flex items-center gap-1 text-xs text-slate-700 cursor-pointer whitespace-nowrap">
-                                <input
-                                    type="checkbox"
-                                    checked={ledgerVisibleSections.advances}
-                                    onChange={(e) => setLedgerVisibleSections((prev) => ({ ...prev, advances: e.target.checked }))}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                <ModernSwitch
+                                    label="사업소득 적용"
+                                    checked={businessIncomeApplied}
+                                    compact
+                                    onChange={(value) => applyCalculatedDeductions({
+                                        applyInsurance: insuranceApplied,
+                                        applyBusinessIncome: value,
+                                        applyUtilities: utilitiesApplied,
+                                    })}
                                 />
-                                가불
-                            </label>
-                            <label className="flex items-center gap-1 text-xs text-slate-700 cursor-pointer whitespace-nowrap">
-                                <input
-                                    type="checkbox"
-                                    checked={ledgerVisibleSections.taxes}
-                                    onChange={(e) => setLedgerVisibleSections((prev) => ({ ...prev, taxes: e.target.checked }))}
-                                    className="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                <ModernSwitch
+                                    label="공과금 적용"
+                                    checked={utilitiesApplied}
+                                    compact
+                                    onChange={(value) => applyCalculatedDeductions({
+                                        applyInsurance: insuranceApplied,
+                                        applyBusinessIncome: businessIncomeApplied,
+                                        applyUtilities: value,
+                                    })}
                                 />
-                                세금
-                            </label>
-                        </div>
-                    )}
+                            </ActionCluster>
 
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={openInsuranceSettings}
-                            className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-bold transition"
-                        >
-                            4대보험 설정
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyCalculatedDeductions({
-                                applyInsurance: !insuranceApplied,
-                                applyBusinessIncome: businessIncomeApplied,
-                                applyUtilities: utilitiesApplied,
-                            })}
-                            disabled={paymentData.length === 0}
-                            className={`${insuranceApplied ? 'bg-indigo-200 text-indigo-900 hover:bg-indigo-300' : 'bg-indigo-600 text-white hover:bg-indigo-700'} px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50`}
-                        >
-                            {insuranceApplied ? '4대보험 해제' : '4대보험 적용'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyCalculatedDeductions({
-                                applyInsurance: insuranceApplied,
-                                applyBusinessIncome: !businessIncomeApplied,
-                                applyUtilities: utilitiesApplied,
-                            })}
-                            disabled={paymentData.length === 0}
-                            className={`${businessIncomeApplied ? 'bg-emerald-200 text-emerald-900 hover:bg-emerald-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'} px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50`}
-                        >
-                            {businessIncomeApplied ? '사업소득 해제' : '사업소득 적용'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyCalculatedDeductions({
-                                applyInsurance: insuranceApplied,
-                                applyBusinessIncome: businessIncomeApplied,
-                                applyUtilities: !utilitiesApplied,
-                            })}
-                            disabled={paymentData.length === 0}
-                            className={`${utilitiesApplied ? 'bg-amber-200 text-amber-900 hover:bg-amber-300' : 'bg-amber-600 text-white hover:bg-amber-700'} px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50`}
-                        >
-                            {utilitiesApplied ? '공과금 해제' : '공과금 적용'}
-                        </button>
-                        <button
-                            onClick={fetchData}
-                            className="bg-slate-100 text-slate-600 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2"
-                        >
-                            <FontAwesomeIcon icon={faSearch} />
-                            <span>조회</span>
-                        </button>
-                        <button
-                            onClick={() => setShowKBPreview(true)}
-                            disabled={paymentData.length === 0}
-                            className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            🏦 국민은행용
-                        </button>
-                        <button
-                            onClick={() => {
-                                if (filteredPaymentData.length === 0) return;
-                                setSelectedPayslipRowKey(`${filteredPaymentData[0].month}__${filteredPaymentData[0].workerId}__${filteredPaymentData[0].teamId}`);
-                                setShowPayslipModal(true);
-                            }}
-                            disabled={paymentData.length === 0}
-                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            📄 명세서
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setIsFixed((prev) => !prev)}
-                            className={`px-4 py-2 border rounded-lg text-sm font-bold transition flex items-center gap-2 ${isFixed
-                                ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={faThumbtack} className={isFixed ? 'rotate-45' : ''} />
-                            {isFixed ? '틀고정 해제' : '틀고정'}
-                        </button>
-                        <button
-                            onClick={handleBatchDownload}
-                            disabled={paymentData.length === 0 || batchDownloading}
-                            className="bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            {batchDownloading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faFileZipper} />}
-                            전체 다운로드
-                        </button>
-                    </div>
-                </div>
-            </div>
+                            <ActionCluster>
+                                <ActionButton type="button" $variant="outline" onClick={openInsuranceSettings}>
+                                    <FontAwesomeIcon icon={faSave} />
+                                    요율 설정
+                                </ActionButton>
+                            </ActionCluster>
+                        </ToolbarCardBody>
+                    </ToolbarCard>
+
+                    <ToolbarCard $span={7}>
+                        <ToolbarCardHeader>
+                            <div>
+                                <ToolbarCardTitle>조회 및 문서 액션</ToolbarCardTitle>
+                                <ToolbarCardDescription>조회, 은행용 미리보기, 명세서, 일괄 다운로드를 작업 흐름에 맞게 정렬했습니다.</ToolbarCardDescription>
+                            </div>
+                            <ToolbarBadge>{paymentData.length + ledgerRowsData.filter(r => r.salaryModel === '일급제').length}건 로드됨</ToolbarBadge>
+                        </ToolbarCardHeader>
+                        <ToolbarCardBody>
+                            <ActionCluster>
+                                <ActionButton type="button" $variant="secondary" onClick={fetchData}>
+                                    <FontAwesomeIcon icon={faSearch} />
+                                    조회
+                                </ActionButton>
+                                <ActionButton type="button" $variant="warning" onClick={() => setShowKBPreview(true)} disabled={paymentData.length === 0}>
+                                    <FontAwesomeIcon icon={faFileExcel} />
+                                    국민은행
+                                </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="accent"
+                                    onClick={openPayslipPreview}
+                                    disabled={paymentData.length === 0}
+                                >
+                                    <FontAwesomeIcon icon={faDownload} />
+                                    명세서
+                                </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="success"
+                                    onClick={handleBatchDownload}
+                                    disabled={paymentData.length === 0 || batchDownloading}
+                                >
+                                    {batchDownloading ? (
+                                        <FontAwesomeIcon icon={faSpinner} spin />
+                                    ) : (
+                                        <FontAwesomeIcon icon={faFileZipper} />
+                                    )}
+                                    {batchDownloading ? '처리 중...' : '일괄 다운로드'}
+                                </ActionButton>
+                            </ActionCluster>
+                        </ToolbarCardBody>
+                    </ToolbarCard>
+                    </ToolbarGrid>
+                )}
+            </ToolbarContainer>
 
             {/* Hidden Batch Rendering Container */}
             <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
@@ -2922,6 +3353,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         }}
                         data={item}
                         month={item.month}
+                        applyUtilities={utilitiesApplied}
                     />
                 ))}
             </div>
@@ -2986,10 +3418,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     <table className="w-full text-sm text-left border-separate border-spacing-0">
                         <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-40">
                             <tr className="border-b border-slate-200">
-                                <th className={`px-4 py-3 text-center w-12 border-b border-slate-200 ${isFixed ? 'sticky left-0 z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}></th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[48px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '70px' : 'auto', minWidth: isFixed ? '70px' : 'auto' }}>월</th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[118px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '100px' : 'auto', minWidth: isFixed ? '100px' : 'auto' }}>이름</th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[218px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '140px' : 'auto', minWidth: isFixed ? '140px' : 'auto' }}>팀명</th>
+                                <th className="px-4 py-3 text-center w-12 border-b border-slate-200"></th>
+                                <th className="px-4 py-3 border-b border-slate-200">월</th>
+                                <th className="px-4 py-3 border-b border-slate-200">이름</th>
+                                <th className="px-4 py-3 border-b border-slate-200">팀명</th>
                                 <th className="px-4 py-3 border-b border-slate-200">주민번호</th>
                                 <th className="px-4 py-3 border-b border-slate-200">시공사</th>
                                 <th className="px-4 py-3">총 공수</th>
@@ -3069,7 +3501,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     return (
                                         <React.Fragment key={rowKey}>
                                             <tr className={`hover:bg-slate-50 transition ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'bg-indigo-50/30' : ''}`}>
-                                                <td className={`px-4 py-3 text-center border-b border-slate-100 ${isFixed ? 'sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>
+                                                <td className="px-4 py-3 text-center border-b border-slate-100">
                                                     <button
                                                         onClick={() => toggleRow(item.month, item.workerId, item.teamId ?? '')}
                                                         className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${isExpanded ? 'bg-brand-100 text-brand-600' : 'text-slate-400 hover:bg-slate-100'}`}
@@ -3077,9 +3509,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                         <FontAwesomeIcon icon={isExpanded ? faChevronUp : faChevronDown} className="text-xs" />
                                                     </button>
                                                 </td>
-                                                <td className={`px-4 py-3 font-mono text-slate-600 text-xs border-b border-slate-100 ${isFixed ? 'sticky left-[48px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.month}</td>
-                                                <td className={`px-4 py-3 font-medium text-slate-800 border-b border-slate-100 ${isFixed ? 'sticky left-[118px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.workerName}</td>
-                                                <td className={`px-4 py-3 text-slate-600 border-b border-slate-100 ${isFixed ? 'sticky left-[218px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.teamName}</td>
+                                                <td className="px-4 py-3 font-mono text-slate-600 text-xs border-b border-slate-100">{item.month}</td>
+                                                <td className="px-4 py-3 font-medium text-slate-800 border-b border-slate-100">{item.workerName}</td>
+                                                <td className="px-4 py-3 text-slate-600 border-b border-slate-100">{item.teamName}</td>
                                                 <td className="px-4 py-3 text-slate-600 font-mono text-xs border-b border-slate-100">{item.idNumber || '-'}</td>
                                                 <td className="px-4 py-3 text-slate-600 border-b border-slate-100">{item.companyName || '-'}</td>
                                                 <td className="px-4 py-3 text-slate-600 border-b border-slate-100">{Number(item.totalManDay).toFixed(1)}</td>
@@ -3551,41 +3983,49 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             )}
 
             {showKBPreview && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
-                        <div className="p-4 border-b border-slate-200 flex flex-col gap-4 bg-amber-50">
-                            <div className="flex justify-between items-center">
-                                <h3 className="text-lg font-bold text-slate-800">🏦 국민은행용 엑셀 미리보기</h3>
-                                <button
-                                    onClick={() => setShowKBPreview(false)}
-                                    className="text-slate-400 hover:text-slate-600 text-2xl"
-                                >
+                <KBPreviewOverlay>
+                    <KBPreviewDialog>
+                        <KBPreviewHeader>
+                            <KBPreviewTitleRow>
+                                <KBPreviewTitleBlock>
+                                    <KBPreviewEyebrow>KB Transfer Preview</KBPreviewEyebrow>
+                                    <KBPreviewTitle>국민은행용 엑셀 미리보기</KBPreviewTitle>
+                                    <KBPreviewDescription>송금표시, 메모 규칙, 이체금액 기준을 같은 팔레트의 카드형 입력으로 정리했습니다.</KBPreviewDescription>
+                                </KBPreviewTitleBlock>
+                                <KBPreviewCloseButton onClick={() => setShowKBPreview(false)}>
                                     ×
-                                </button>
-                            </div>
-                            <div className="flex gap-4 items-center bg-white p-3 rounded-lg border border-amber-200 shadow-sm flex-nowrap overflow-x-auto">
-                                <div className="flex items-center gap-2 whitespace-nowrap">
-                                    <label className="text-sm font-bold text-slate-700 whitespace-nowrap">받는분통장표시:</label>
-                                    <input
+                                </KBPreviewCloseButton>
+                            </KBPreviewTitleRow>
+
+                            <KBPreviewControlsGrid>
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-receiver-display">받는분통장표시</KBPreviewFieldLabel>
+                                    <KBPreviewInput
+                                        id="kb-receiver-display"
                                         type="text"
                                         value={kbReceiverDisplay}
                                         onChange={(e) => setKbReceiverDisplay(e.target.value)}
-                                        className="border border-slate-300 rounded px-2 py-1 text-sm w-40 focus:ring-amber-500 focus:border-amber-500"
+                                        placeholder="㈜다원"
                                     />
-                                </div>
-                                <div className="flex items-center gap-2 whitespace-nowrap">
-                                    <label className="text-sm font-bold text-slate-700 whitespace-nowrap">내통장메모 (이름 뒤에 붙음):</label>
-                                    <input
+                                    <KBPreviewFieldHint>은행 업로드 파일의 D열에 동일하게 들어갑니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-memo-suffix">내통장메모 규칙</KBPreviewFieldLabel>
+                                    <KBPreviewInput
+                                        id="kb-memo-suffix"
                                         type="text"
                                         value={kbMemoSuffix}
                                         onChange={(e) => setKbMemoSuffix(e.target.value)}
-                                        className="border border-slate-300 rounded px-2 py-1 text-sm w-40 focus:ring-amber-500 focus:border-amber-500"
+                                        placeholder="{이름} 가불"
                                     />
-                                </div>
-                                <div className="flex items-center space-x-2 ml-auto min-w-[220px]">
-                                    <span className="text-sm font-semibold whitespace-nowrap">이체금액 적용:</span>
-                                    <select
-                                        className="border border-slate-300 rounded px-2 py-1 text-sm bg-white"
+                                    <KBPreviewFieldHint>{'{이름}'} 치환자를 쓰면 작업자 이름 뒤에 자동으로 붙습니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-amount-type">이체금액 적용 기준</KBPreviewFieldLabel>
+                                    <KBPreviewSelect
+                                        id="kb-amount-type"
                                         value={kbAmountType}
                                         onChange={(e) => setKbAmountType(e.target.value)}
                                     >
@@ -3594,56 +4034,59 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         <option value="laborNet">공제후 노무총액</option>
                                         <option value="invoiceAdvance">법인가불 총액</option>
                                         <option value="laborAdvance">노무가불 총액</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-auto p-4">
-                            <table className="w-full text-sm border-collapse">
-                                <thead className="bg-amber-100 sticky top-0">
+                                    </KBPreviewSelect>
+                                    <KBPreviewFieldHint>선택한 기준으로 C열 이체금액이 계산됩니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+                            </KBPreviewControlsGrid>
+                        </KBPreviewHeader>
+                        <KBPreviewTableArea>
+                            <KBPreviewTable>
+                                <thead className="bg-slate-800/95 sticky top-0">
                                     <tr>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">A. 은행코드</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">B. 계좌번호</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-right font-bold">C. 이체금액</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">D. 받는분통장표시</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">E. 내통장메모</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">A. 은행코드</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">B. 계좌번호</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-right font-bold text-slate-100">C. 이체금액</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">D. 받는분통장표시</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">E. 내통장메모</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {getKBPreviewData().map((row, idx) => (
-                                        <tr key={idx} className="hover:bg-amber-50">
-                                            <td className="border border-slate-300 px-3 py-2">{row.은행코드}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.계좌번호}</td>
-                                            <td className="border border-slate-300 px-3 py-2 text-right font-medium">{row.이체금액.toLocaleString()}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.받는분통장표시}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.내통장메모}</td>
+                                        <tr key={idx} className="hover:bg-slate-800/60">
+                                            <td className="border border-slate-700 px-3 py-2">{row.은행코드}</td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.계좌번호}</td>
+                                            <td className="border border-slate-700 px-3 py-2 text-right font-medium text-amber-300">{row.이체금액.toLocaleString()}</td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.받는분통장표시}</td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.내통장메모}</td>
                                         </tr>
                                     ))}
                                 </tbody>
-                            </table>
-                        </div>
-                        <div className="p-4 border-t border-slate-200 flex justify-between items-center bg-amber-50">
-                            <span className="text-sm text-slate-600">
+                            </KBPreviewTable>
+                        </KBPreviewTableArea>
+                        <KBPreviewFooter>
+                            <KBPreviewSummary>
                                 총 {getKBPreviewData().length}명 · 총 이체금액 {getKBPreviewData().reduce((sum, row) => sum + row.이체금액, 0).toLocaleString()}원
-                            </span>
-                            <div className="flex gap-2">
-                                <button
+                            </KBPreviewSummary>
+                            <ActionCluster>
+                                <ActionButton
+                                    type="button"
+                                    $variant="outline"
                                     onClick={() => setShowKBPreview(false)}
-                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
                                 >
                                     닫기
-                                </button>
-                                <button
+                                </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="warning"
                                     onClick={() => { handleDownloadKBExcel(); setShowKBPreview(false); }}
-                                    className="px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-bold flex items-center gap-2"
                                 >
                                     <FontAwesomeIcon icon={faFileExcel} />
                                     국민은행용 다운로드
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                                </ActionButton>
+                            </ActionCluster>
+                        </KBPreviewFooter>
+                    </KBPreviewDialog>
+                </KBPreviewOverlay>
             )}
 
             {showBankCodes && (
@@ -3735,11 +4178,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 </div>
                             </aside>
                             <div className="flex-1 overflow-auto p-6 bg-slate-50">
-                                {payslipTarget ? (
+                                {resolvedPayslipTarget ? (
                                     <PayslipTemplate
                                         ref={printRef}
-                                        data={payslipTarget}
-                                        month={payslipTarget.month}
+                                        data={resolvedPayslipTarget}
+                                        month={resolvedPayslipTarget.month}
+                                        applyUtilities={utilitiesApplied}
                                     />
                                 ) : (
                                     <div className="text-center py-12 text-slate-500">
@@ -3749,14 +4193,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                                 <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                                     <p className="text-sm text-slate-600">
-                                        <span className="font-semibold text-slate-800">{payslipTarget?.workerName ?? '-'}</span>
+                                        <span className="font-semibold text-slate-800">{resolvedPayslipTarget?.workerName ?? '-'}</span>
                                         {' · 실지급 '}
-                                        <span className="text-brand-600 font-bold">{payslipTarget ? payslipTarget.totalAmount.toLocaleString() : 0}원</span>
+                                        <span className="text-brand-600 font-bold">{resolvedPayslipTarget ? resolvedPayslipTarget.totalAmount.toLocaleString() : 0}원</span>
                                     </p>
                                     <div className="flex gap-2">
                                         <button
                                             onClick={handleCopyToClipboard}
-                                            disabled={!payslipTarget || copying}
+                                            disabled={!resolvedPayslipTarget || copying}
                                             className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {copying ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faCopy} />}
@@ -3764,7 +4208,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         </button>
                                         <button
                                             onClick={handleDownloadIndividualPayslip}
-                                            disabled={!payslipTarget}
+                                            disabled={!resolvedPayslipTarget}
                                             className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             <FontAwesomeIcon icon={faFileExcel} />

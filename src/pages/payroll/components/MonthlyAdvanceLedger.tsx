@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import {
+    MonthlyAdvanceLedgerRow,
+    LedgerManualInput,
+    LedgerSideInput,
+    MonthlyAdvanceLedgerWorkEntry,
+    MonthlyAdvanceLedgerTaxAmounts
+} from '../types/payroll';
+
 type LedgerSide = 'invoice' | 'labor';
 type LedgerSideNumberField =
     | 'carry'
@@ -14,29 +22,6 @@ type LedgerSideNumberField =
     | 'management'
     | 'fine'
     | 'other';
-
-export interface LedgerSideInput {
-    carry: number;
-    carrySecond: number;
-    currentAdvance: number;
-    currentAdvanceSecond: number;
-    lodging: number;
-    electricity: number;
-    gas: number;
-    water: number;
-    internet: number;
-    management: number;
-    fine: number;
-    other: number;
-}
-
-export interface LedgerManualInput {
-    invoice: LedgerSideInput;
-    labor: LedgerSideInput;
-    personalMemo: string;
-    assignmentType?: 'corporate' | 'labor'; // Legacy row-level field
-    itemAssignments?: Record<string, 'corporate' | 'labor'>; // 추가: 개별 항목 분류
-}
 
 interface PayrollConfigLike {
     insuranceConfig?: {
@@ -54,49 +39,6 @@ interface PayrollConfigLike {
     };
     incomeTaxRate?: number;
     residentTaxRate?: number;
-}
-
-interface MonthlyAdvanceLedgerWorkEntry {
-    date?: string;
-    siteId?: string;
-    siteName?: string;
-    clientCompanyId?: string;
-    isLaborSite?: boolean;
-    paymentMethod?: string;
-    manDay: number;
-    unitPrice: number;
-    amount?: number;
-}
-
-interface MonthlyAdvanceLedgerTaxAmounts {
-    pension: number;
-    health: number;
-    care: number;
-    employment: number;
-    incomeTax: number;
-    residentTax: number;
-    businessIncomeTax: number;
-    businessResidentTax: number;
-    isWithholdingTarget: boolean;
-}
-
-export interface MonthlyAdvanceLedgerRow {
-    rowKey: string;
-    month: string;
-    teamId: string;
-    teamName: string;
-    workerId: string;
-    workerName: string;
-    salaryModel?: string;
-    invoiceManDay: number;
-    laborManDay: number;
-    unitPrice: number;
-    invoiceGrossAmount: number;
-    laborGrossAmount: number;
-    workEntries?: MonthlyAdvanceLedgerWorkEntry[];
-    statementTaxAmounts?: MonthlyAdvanceLedgerTaxAmounts;
-    assignmentType?: 'corporate' | 'labor';
-    manual?: LedgerManualInput; // Added
 }
 
 interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {

@@ -126,9 +126,10 @@ export interface PaymentData {
 interface Props {
     data: PaymentData;
     month: string;
+    applyUtilities?: boolean;
 }
 
-export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month }, ref) => {
+export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month, applyUtilities = false }, ref) => {
     const workEntries = data.workEntries ?? [];
     const deductionBreakdown = data.deductionBreakdown ?? {
         standardLines: [],
@@ -182,6 +183,14 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month 
     const businessAfterTaxAmount = Math.max(0, Math.floor((data.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
     const showInsuranceSection = insuranceTaxLines.length > 0;
     const hasInsuranceTargetSummary = Boolean(data.insuranceAppliedSummary && data.insuranceAppliedSummary.appliedManDay > 0);
+    const utilityDeductionLabels = new Set(['숙소비', '전기세', '도시가스', '수도세', '과태료', '기타']);
+    const allDeductionLines = [...deductionBreakdown.standardLines, ...deductionBreakdown.additionalLines];
+    const utilityDeductionLines = allDeductionLines
+        .filter((line) => utilityDeductionLabels.has(String(line.label ?? '').trim()));
+    const nonUtilityDeductionLines = allDeductionLines
+        .filter((line) => !utilityDeductionLabels.has(String(line.label ?? '').trim()));
+    const utilitySectionTotal = utilityDeductionLines.reduce((sum, line) => sum + line.amount, 0);
+    const showUtilitySection = applyUtilities || utilitySectionTotal > 0;
 
     const totalWorkManDay = workEntries.reduce((sum: number, entry: WorkerWorkEntry) => sum + entry.manDay, 0);
 
@@ -339,7 +348,21 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month 
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {[...deductionBreakdown.standardLines, ...deductionBreakdown.additionalLines].map((line: DeductionLine, idx: number) => (
+                                        {showUtilitySection && (
+                                            <tr className="bg-rose-50">
+                                                <td className="px-3 py-2 border-b border-slate-100 font-bold text-rose-900">공과금 적용 내역</td>
+                                                <td className="px-3 py-2 border-b border-slate-100 text-right font-bold text-rose-700">-{utilitySectionTotal.toLocaleString()}원</td>
+                                            </tr>
+                                        )}
+
+                                        {utilityDeductionLines.map((line: DeductionLine, idx: number) => (
+                                            <tr key={`deduction-utility-${line.label}-${idx}`} className="odd:bg-white even:bg-rose-50/30">
+                                                <td className="px-3 py-2 border-b border-slate-100">{line.label}</td>
+                                                <td className="px-3 py-2 border-b border-slate-100 text-right text-red-600">-{line.amount.toLocaleString()}원</td>
+                                            </tr>
+                                        ))}
+
+                                        {nonUtilityDeductionLines.map((line: DeductionLine, idx: number) => (
                                             <tr key={`deduction-${line.label}-${idx}`} className="odd:bg-white even:bg-slate-50/60">
                                                 <td className="px-3 py-2 border-b border-slate-100">{line.label}</td>
                                                 <td className="px-3 py-2 border-b border-slate-100 text-right text-red-600">-{line.amount.toLocaleString()}원</td>
@@ -610,6 +633,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month 
                                 </div>
                             </div>
                         )}
+
                         {otherTaxLines.length > 0 ? (
                             <div className="border border-slate-200 rounded-lg bg-white">
                                 <table className="w-full text-xs">
