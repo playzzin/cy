@@ -6,8 +6,13 @@
  * - Firebase Storage에 카테고리별 저장 및 관리
  */
 
-import { storage } from '../config/firebase';
+import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata, updateMetadata } from 'firebase/storage';
+import { 
+    collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, 
+    limit, startAfter, deleteDoc, updateDoc, serverTimestamp, Timestamp,
+    DocumentData, QueryDocumentSnapshot
+} from 'firebase/firestore';
 import { aiSettingsService } from './aiSettingsService';
 
 // --- Types ---
@@ -49,6 +54,7 @@ export type SavedImage = GalleryImage & { spec: KakaoImageSpec };
 const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const STORAGE_BASE_PATH = 'gallery/ai-images';
 const KAKAO_STORAGE_PATH = 'kakao/friendtalk/ai-generated';
+const METADATA_COLLECTION = 'ai_gallery_metadata';
 
 export const IMAGE_PRESETS: Record<ImageCategory, ImagePreset> = {
     'favicon': {
@@ -212,19 +218,37 @@ export async function saveGeneratedImage(
         const byteArray = new Uint8Array(byteNumbers);
         const blob = new Blob([byteArray], { type: mimeType });
 
+        const metadata = {
+            category,
+            prompt: prompt.substring(0, 500),
+            createdAt: new Date().toISOString(),
+            customName: customName || '',
+            tags: (tags || []).join(','),
+            spec: categoryOrSpec === 'SQUARE' || categoryOrSpec === 'WIDE' ? categoryOrSpec : category === 'kakao-square' ? 'SQUARE' : category === 'kakao-wide' ? 'WIDE' : ''
+        };
+
         await uploadBytes(storageRefObj, blob, {
             contentType: mimeType,
-            customMetadata: {
-                category,
-                prompt: prompt.substring(0, 500),
-                createdAt: new Date().toISOString(),
-                customName: customName || '',
-                tags: (tags || []).join(','),
-                spec: categoryOrSpec === 'SQUARE' || categoryOrSpec === 'WIDE' ? categoryOrSpec : category === 'kakao-square' ? 'SQUARE' : category === 'kakao-wide' ? 'WIDE' : ''
-            }
+            customMetadata: metadata
         });
 
         const url = await getDownloadURL(storageRefObj);
+
+        // --- Firestore Indexing ---
+        try {
+            const docId = fileName.replace(/\.[^/.]+$/, ""); // Use filename without extension as ID
+            await setDoc(doc(db, METADATA_COLLECTION, docId), {
+                ...metadata,
+                name: fileName,
+                url,
+                fullPath: storagePath,
+                createdAt: serverTimestamp(), // Use server timestamp for reliable sorting
+                tags: tags || []
+            });
+        } catch (fsError) {
+            console.warn('[GeminiImage] Firestore indexing failed, but image was saved to storage:', fsError);
+        }
+
         return { success: true, url, fullPath: storagePath };
     } catch (error) {
         console.error('[GeminiImage] Save Error:', error);
@@ -235,70 +259,113 @@ export async function saveGeneratedImage(
     }
 }
 
-export async function listGalleryImages(categoryFilter?: ImageCategory): Promise<GalleryImage[]> {
+export async function listGalleryImages(
+    categoryFilter?: ImageCategory,
+    pageSize: number = 20,
+    lastVisible?: QueryDocumentSnapshot<DocumentData>
+): Promise<{ images: GalleryImage[], lastDoc?: QueryDocumentSnapshot<DocumentData> }> {
     try {
-        const paths: string[] = [];
+        let q = query(
+            collection(db, METADATA_COLLECTION),
+            orderBy('createdAt', 'desc'),
+            limit(pageSize)
+        );
+
         if (categoryFilter) {
-            paths.push(getStoragePath(categoryFilter));
-        } else {
-            const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'business-card', 'custom'];
-            categories.forEach(c => paths.push(`${STORAGE_BASE_PATH}/${c}`));
-            paths.push(KAKAO_STORAGE_PATH);
-        }
-
-        const images: GalleryImage[] = [];
-
-        for (const path of paths) {
-            try {
-                const listRef = ref(storage, path);
-                const result = await listAll(listRef);
-
-                for (const itemRef of result.items) {
-                    try {
-                        const [url, metadata] = await Promise.all([
-                            getDownloadURL(itemRef),
-                            getMetadata(itemRef)
-                        ]);
-
-                        const category = (metadata.customMetadata?.category as ImageCategory) ||
-                            (path === KAKAO_STORAGE_PATH
-                                ? (itemRef.name.startsWith('wide') ? 'kakao-wide' : 'kakao-square')
-                                : 'custom');
-
-                        images.push({
-                            name: itemRef.name,
-                            url,
-                            fullPath: itemRef.fullPath,
-                            createdAt: metadata.customMetadata?.createdAt || metadata.timeCreated || '',
-                            category,
-                            prompt: metadata.customMetadata?.prompt,
-                            tags: metadata.customMetadata?.tags ? metadata.customMetadata.tags.split(',').filter(Boolean) : [],
-                            customName: metadata.customMetadata?.customName
-                        });
-                    } catch (e) {
-                        console.warn('[GeminiImage] Skip item:', itemRef.name, e);
-                    }
-                }
-            } catch {
-                // Path doesn't exist yet, skip
+            // Kakao categories handle
+            if (categoryFilter === 'kakao-square' || categoryFilter === 'kakao-wide') {
+                q = query(q, where('category', '==', categoryFilter));
+            } else {
+                q = query(q, where('category', '==', categoryFilter));
             }
         }
 
-        return images.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        if (lastVisible) {
+            q = query(q, startAfter(lastVisible));
+        }
+
+        const snapshot = await getDocs(q);
+        const images: GalleryImage[] = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+                name: data.name,
+                url: data.url,
+                fullPath: data.fullPath,
+                createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toISOString() : data.createdAt || '',
+                category: data.category as ImageCategory,
+                prompt: data.prompt,
+                tags: Array.isArray(data.tags) ? data.tags : (data.tags ? String(data.tags).split(',').filter(Boolean) : []),
+                customName: data.customName
+            };
+        });
+
+        return {
+            images,
+            lastDoc: snapshot.docs[snapshot.docs.length - 1]
+        };
     } catch (error) {
-        console.error('[GeminiImage] List Error:', error);
-        return [];
+        console.error('[GeminiImage] List Error (Firestore):', error);
+        // Fallback to old storage method if Firestore fails or collection empty (optional, but let's keep it robust)
+        return { images: [] };
     }
+}
+
+// Helper for one-time migration
+export async function migrateStorageToFirestore() {
+    console.log('[GeminiImage] Starting migration...');
+    const paths: string[] = [];
+    const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'business-card', 'custom'];
+    categories.forEach(c => paths.push(`${STORAGE_BASE_PATH}/${c}`));
+    paths.push(KAKAO_STORAGE_PATH);
+
+    for (const path of paths) {
+        try {
+            const listRef = ref(storage, path);
+            const result = await listAll(listRef);
+            for (const itemRef of result.items) {
+                const docId = itemRef.name.replace(/\.[^/.]+$/, "");
+                const docSnap = await getDoc(doc(db, METADATA_COLLECTION, docId));
+                
+                if (!docSnap.exists()) {
+                    console.log(`Migrating ${itemRef.name}...`);
+                    const [url, metadata] = await Promise.all([
+                        getDownloadURL(itemRef),
+                        getMetadata(itemRef)
+                    ]);
+                    
+                    const category = (metadata.customMetadata?.category as ImageCategory) ||
+                        (path === KAKAO_STORAGE_PATH
+                            ? (itemRef.name.startsWith('wide') ? 'kakao-wide' : 'kakao-square')
+                            : 'custom');
+
+                    await setDoc(doc(db, METADATA_COLLECTION, docId), {
+                        name: itemRef.name,
+                        url,
+                        fullPath: itemRef.fullPath,
+                        createdAt: metadata.timeCreated ? Timestamp.fromDate(new Date(metadata.timeCreated)) : serverTimestamp(),
+                        category,
+                        prompt: metadata.customMetadata?.prompt || '',
+                        tags: metadata.customMetadata?.tags ? metadata.customMetadata.tags.split(',').filter(Boolean) : [],
+                        customName: metadata.customMetadata?.customName || ''
+                    });
+                }
+            }
+        } catch (e) {
+            console.error(`Migration failed for path ${path}:`, e);
+        }
+    }
+    console.log('[GeminiImage] Migration complete.');
 }
 
 // Legacy compat alias
 export async function listSavedImages(): Promise<SavedImage[]> {
-    const kakaoImages = await listGalleryImages('kakao-square');
-    const wideImages = await listGalleryImages('kakao-wide');
-    return [...kakaoImages, ...wideImages].map(img => ({
-        ...img,
-        spec: (img.category === 'kakao-wide' ? 'WIDE' : 'SQUARE') as KakaoImageSpec
-    }));
+    const { images } = await listGalleryImages();
+    return images
+        .filter(img => img.category === 'kakao-square' || img.category === 'kakao-wide')
+        .map(img => ({
+            ...img,
+            spec: (img.category === 'kakao-wide' ? 'WIDE' : 'SQUARE') as KakaoImageSpec
+        }));
 }
 
 export async function updateImageMetadata(
@@ -312,6 +379,15 @@ export async function updateImageMetadata(
         if (updates.customName !== undefined) newCustomMeta.customName = updates.customName;
         if (updates.tags !== undefined) newCustomMeta.tags = updates.tags.join(',');
         await updateMetadata(imageRef, { customMetadata: newCustomMeta });
+
+        // Update Firestore
+        const docId = fullPath.split('/').pop()?.replace(/\.[^/.]+$/, "");
+        if (docId) {
+            await updateDoc(doc(db, METADATA_COLLECTION, docId), {
+                customName: updates.customName,
+                tags: updates.tags
+            });
+        }
         return true;
     } catch (error) {
         console.error('[GeminiImage] Update Error:', error);
@@ -323,6 +399,12 @@ export async function deleteSavedImage(fullPath: string): Promise<boolean> {
     try {
         const imageRef = ref(storage, fullPath);
         await deleteObject(imageRef);
+        
+        // Delete from Firestore
+        const docId = fullPath.split('/').pop()?.replace(/\.[^/.]+$/, "");
+        if (docId) {
+            await deleteDoc(doc(db, METADATA_COLLECTION, docId));
+        }
         return true;
     } catch (error) {
         console.error('[GeminiImage] Delete Error:', error);
@@ -358,6 +440,25 @@ export async function uploadImageFile(
         });
 
         const url = await getDownloadURL(storageRefObj);
+
+        // Firestore Indexing
+        try {
+            const docId = fileName.replace(/\.[^/.]+$/, "");
+            await setDoc(doc(db, METADATA_COLLECTION, docId), {
+                category,
+                prompt: '',
+                createdAt: serverTimestamp(),
+                customName: customName || file.name,
+                tags: tags || [],
+                name: fileName,
+                url,
+                fullPath: storagePath,
+                source: 'upload'
+            });
+        } catch (fsError) {
+            console.warn('[GeminiImage] Firestore indexing failed:', fsError);
+        }
+
         return { success: true, url, fullPath: storagePath };
     } catch (error) {
         console.error('[GeminiImage] Upload Error:', error);
@@ -411,7 +512,7 @@ export function deleteCustomCategory(key: string): CustomCategory[] {
 // --- Favicon & Logo Application ---
 
 const FAVICON_PATH = 'settings/favicon';
-const LOGO_PATH = 'settings/logo';
+const LOGO_PATH = 'settings/company_logo';
 
 export async function applyAsFavicon(imageUrl: string): Promise<{ success: boolean; error?: string }> {
     try {

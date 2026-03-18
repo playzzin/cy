@@ -13,6 +13,7 @@ import {
     generateImage, saveGeneratedImage, listGalleryImages, deleteSavedImage, updateImageMetadata,
     uploadImageFile, applyAsFavicon, applyAsLogo, getCurrentFaviconUrl, getCurrentLogoUrl,
     getCustomCategories, addCustomCategory, deleteCustomCategory,
+    migrateStorageToFirestore,
     IMAGE_PRESETS, ImageCategory, GalleryImage, CustomCategory
 } from '../../services/geminiImageService';
 
@@ -215,6 +216,16 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
     );
 };
 
+const SkeletonCard = () => (
+    <div className="bg-slate-900 rounded-2xl border border-slate-800/50 overflow-hidden animate-pulse">
+        <div className="aspect-square bg-slate-800" />
+        <div className="p-4 space-y-2">
+            <div className="h-4 bg-slate-800 rounded w-3/4" />
+            <div className="h-3 bg-slate-800 rounded w-1/2" />
+        </div>
+    </div>
+);
+
 // --- Main Page ---
 export const AiImageGalleryPage = () => {
     // Generation state
@@ -234,6 +245,9 @@ export const AiImageGalleryPage = () => {
     // Gallery state
     const [images, setImages] = useState<GalleryImage[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchingMore, setFetchingMore] = useState(false);
+    const [lastDoc, setLastDoc] = useState<any>(null);
+    const [hasMore, setHasMore] = useState(true);
     const [filterCategory, setFilterCategory] = useState<ImageCategory | 'all'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
@@ -276,17 +290,61 @@ export const AiImageGalleryPage = () => {
         'from-sky-500 to-indigo-500', 'from-pink-500 to-rose-500', 'from-amber-500 to-yellow-500',
     ];
 
-    const loadImages = useCallback(async () => {
-        setLoading(true);
+    const loadImages = useCallback(async (isNext = false) => {
+        if (!isNext) {
+            setLoading(true);
+            setImages([]);
+            setLastDoc(null);
+        } else {
+            setFetchingMore(true);
+        }
+
         try {
-            const result = await listGalleryImages();
-            setImages(result);
+            const result = await listGalleryImages(
+                filterCategory === 'all' ? undefined : filterCategory,
+                24,
+                isNext ? lastDoc : undefined
+            );
+            
+            if (isNext) {
+                setImages(prev => [...prev, ...result.images]);
+            } else {
+                setImages(result.images);
+            }
+            
+            setLastDoc(result.lastDoc);
+            setHasMore(result.images.length === 24);
         } finally {
             setLoading(false);
+            setFetchingMore(false);
         }
-    }, []);
+    }, [filterCategory, lastDoc]);
 
-    useEffect(() => { loadImages(); }, [loadImages]);
+    useEffect(() => { loadImages(); }, [filterCategory]);
+
+    const handleMigrate = async () => {
+        const confirm = await Swal.fire({
+            title: '이미지 마이그레이션',
+            text: '기존 Storage 이미지를 Firestore로 인덱싱 하시겠습니까? (최초 1회 권장)',
+            icon: 'info', showCancelButton: true, confirmButtonText: '시작', cancelButtonText: '취소'
+        });
+        if (!confirm.isConfirmed) return;
+        
+        Swal.fire({
+            title: '마이그레이션 진행 중...',
+            text: '잠시만 기다려주세요.',
+            allowOutsideClick: false,
+            didOpen: () => { Swal.showLoading(); }
+        });
+
+        try {
+            await migrateStorageToFirestore();
+            Swal.fire('완료', '마이그레이션이 완료되었습니다.', 'success');
+            loadImages();
+        } catch (e) {
+            Swal.fire('오류', '마이그레이션 중 오류가 발생했습니다.', 'error');
+        }
+    };
 
     useEffect(() => {
         setCustomCategories(getCustomCategories());
@@ -377,14 +435,7 @@ export const AiImageGalleryPage = () => {
 
     const filteredImages = useMemo(() => {
         let result = images;
-        if (filterCategory !== 'all') {
-            const isKakao = (filterCategory as string) === 'kakao-square' || (filterCategory as string) === 'kakao-wide';
-            if (isKakao) {
-                result = result.filter(i => i.category === 'kakao-square' || i.category === 'kakao-wide');
-            } else {
-                result = result.filter(i => i.category === filterCategory);
-            }
-        }
+        // Filtering is now handled by Firestore, but we still do client-side search for now
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
             result = result.filter(i =>
@@ -394,7 +445,7 @@ export const AiImageGalleryPage = () => {
             );
         }
         return result;
-    }, [images, filterCategory, searchQuery]);
+    }, [images, searchQuery]);
 
     const handleGenerate = async () => {
         if (!prompt.trim()) { Swal.fire('알림', '이미지 설명을 입력해주세요.', 'warning'); return; }
@@ -528,6 +579,11 @@ export const AiImageGalleryPage = () => {
                                 value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                             />
                         </div>
+                        <button onClick={handleMigrate} 
+                            className="hidden md:flex items-center gap-2 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 rounded-xl text-xs font-bold transition-all"
+                            title="기존 이미지 인덱싱">
+                            <FontAwesomeIcon icon={faCog} /> 마이그레이션
+                        </button>
                         <button onClick={() => setShowGenPanel(!showGenPanel)}
                             className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 transition-all ${showGenPanel ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25' : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'}`}>
                             <FontAwesomeIcon icon={faMagic} /> {showGenPanel ? '생성 패널 닫기' : 'AI 생성'}
@@ -818,78 +874,62 @@ export const AiImageGalleryPage = () => {
                         </button>
                     </div>
 
-                    {/* Grid */}
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-32">
-                            <FontAwesomeIcon icon={faSpinner} spin className="text-4xl text-purple-500 mb-4" />
-                            <p className="text-slate-400">이미지 목록을 불러오는 중...</p>
+                    {/* Image Grid */}
+                    {loading && images.length === 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-6">
+                            {[...Array(12)].map((_, i) => <SkeletonCard key={i} />)}
                         </div>
-                    ) : filteredImages.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-32 text-center">
-                            <div className="w-24 h-24 rounded-full bg-slate-800/50 flex items-center justify-center mb-6 border border-slate-700">
-                                <FontAwesomeIcon icon={faImages} className="text-4xl text-slate-600" />
-                            </div>
-                            <h3 className="text-xl font-bold text-white mb-2">
-                                {searchQuery ? '검색 결과가 없습니다' : '아직 생성된 이미지가 없습니다'}
-                            </h3>
-                            <p className="text-slate-400 text-sm max-w-md">
-                                {searchQuery ? '다른 검색어를 시도해보세요.' : '왼쪽 패널에서 AI 이미지 생성을 시작해보세요. 파비콘, 로고, 아이콘 등 다양한 이미지를 만들 수 있습니다.'}
-                            </p>
-                            {!showGenPanel && !searchQuery && (
-                                <button onClick={() => setShowGenPanel(true)}
-                                    className="mt-6 px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl font-bold text-sm hover:from-purple-500 hover:to-indigo-500 transition-all shadow-lg shadow-purple-600/25">
-                                    <FontAwesomeIcon icon={faMagic} className="mr-2" /> AI 이미지 생성 시작
-                                </button>
-                            )}
-                        </div>
-                    ) : (
-                        <motion.div layout className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                            <AnimatePresence mode="popLayout">
-                                {filteredImages.map(img => (
-                                    <motion.div key={img.fullPath} layout
-                                        initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                                        transition={{ duration: 0.2 }}
-                                        className="group relative bg-slate-800/50 rounded-xl overflow-hidden border border-slate-700/50 hover:border-slate-600 hover:shadow-xl hover:shadow-purple-900/10 transition-all cursor-pointer"
+                    ) : filteredImages.length > 0 ? (
+                        <>
+                            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-6">
+                                {filteredImages.map((img, idx) => (
+                                    <motion.div
+                                        key={img.fullPath}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: (idx % 12) * 0.05 }}
+                                        layoutId={img.fullPath}
                                         onClick={() => setSelectedImage(img)}
+                                        className="group relative bg-slate-900 rounded-2xl border border-slate-800/50 overflow-hidden cursor-pointer hover:border-purple-500/50 hover:shadow-xl hover:shadow-purple-900/10 transition-all active:scale-[0.98]"
                                     >
-                                        {/* Image */}
-                                        <div className="aspect-square bg-slate-900 overflow-hidden">
-                                            <img src={img.url} alt={img.customName || img.name}
-                                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                                                <FontAwesomeIcon icon={faExpand} className="text-white opacity-0 group-hover:opacity-100 transform scale-50 group-hover:scale-100 transition-all text-lg" />
+                                        <div className="aspect-square bg-slate-950 overflow-hidden">
+                                            <img
+                                                src={img.url}
+                                                alt={img.name}
+                                                loading="lazy"
+                                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                                            />
+                                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+                                                <p className="text-white text-xs font-bold truncate">{img.customName || img.name}</p>
+                                                <p className="text-slate-400 text-[10px] mt-1">#{(IMAGE_PRESETS[img.category] || { label: img.category }).label}</p>
                                             </div>
-                                        </div>
-
-                                        {/* Category Badge */}
-                                        <div className="absolute top-2 left-2">
-                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold backdrop-blur-md ${BADGE_COLORS[img.category]}`}>
-                                                <FontAwesomeIcon icon={PRESET_ICONS[img.category]} />
-                                                {IMAGE_PRESETS[img.category]?.label || img.category}
-                                            </span>
-                                        </div>
-
-                                        {/* Info */}
-                                        <div className="p-3">
-                                            <h4 className="text-sm font-bold text-white truncate">{img.customName || img.name}</h4>
-                                            {img.prompt && <p className="text-[10px] text-slate-500 truncate mt-0.5">{img.prompt}</p>}
-                                        </div>
-
-                                        {/* Quick Actions */}
-                                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                                            <button onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(img.url).then(() => Swal.fire({ icon: 'success', title: 'URL 복사됨', timer: 800, showConfirmButton: false })); }}
-                                                className="w-7 h-7 rounded-lg bg-black/60 backdrop-blur-sm text-white/80 hover:text-white flex items-center justify-center text-xs">
-                                                <FontAwesomeIcon icon={faCopy} />
-                                            </button>
-                                            <button onClick={e => { e.stopPropagation(); handleDelete(img); }}
-                                                className="w-7 h-7 rounded-lg bg-black/60 backdrop-blur-sm text-red-400 hover:text-red-300 flex items-center justify-center text-xs">
-                                                <FontAwesomeIcon icon={faTrash} />
-                                            </button>
                                         </div>
                                     </motion.div>
                                 ))}
-                            </AnimatePresence>
-                        </motion.div>
+                            </div>
+
+                            {/* Load More */}
+                            {hasMore && (
+                                <div className="mt-12 flex justify-center">
+                                    <button
+                                        onClick={() => loadImages(true)}
+                                        disabled={fetchingMore}
+                                        className="px-8 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-sm font-bold border border-slate-700 transition-all hover:border-purple-500/50 flex items-center gap-2"
+                                    >
+                                        {fetchingMore ? (
+                                            <><FontAwesomeIcon icon={faSpinner} spin /> 가저오는 중...</>
+                                        ) : (
+                                            '더 보기'
+                                        )}
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+                            <FontAwesomeIcon icon={faImages} className="text-5xl mb-4 opacity-20" />
+                            <p>저장된 이미지가 없습니다.</p>
+                        </div>
                     )}
                 </main>
             </div>
