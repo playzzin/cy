@@ -27,11 +27,53 @@ export interface DailyWageStatementPeriodConfig {
     endDay: number;
 }
 
+export const ADVANCE_ITEM_LABEL_KEYS = [
+    'corporateAdvance1',
+    'corporateAdvance2',
+    'corporateAdvance3',
+    'corporateAdvance4',
+    'laborAdvance1',
+    'laborAdvance2',
+    'laborAdvance3',
+    'laborAdvance4'
+] as const;
+
+export type AdvanceItemLabelKey = (typeof ADVANCE_ITEM_LABEL_KEYS)[number];
+
+export type AdvanceItemLabelsConfig = Record<AdvanceItemLabelKey, string>;
+
+export const DEFAULT_ADVANCE_ITEM_LABELS: AdvanceItemLabelsConfig = {
+    corporateAdvance1: '법인가불1',
+    corporateAdvance2: '법인가불2',
+    corporateAdvance3: '법인가불3',
+    corporateAdvance4: '법인가불4',
+    laborAdvance1: '노무가불1',
+    laborAdvance2: '노무가불2',
+    laborAdvance3: '노무가불3',
+    laborAdvance4: '노무가불4'
+};
+
+const sanitizeAdvanceItemLabels = (raw: unknown): AdvanceItemLabelsConfig => {
+    const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const next = { ...DEFAULT_ADVANCE_ITEM_LABELS };
+
+    ADVANCE_ITEM_LABEL_KEYS.forEach((key) => {
+        const value = obj[key];
+        if (typeof value !== 'string') return;
+        const trimmed = value.trim();
+        if (!trimmed) return;
+        next[key] = trimmed;
+    });
+
+    return next;
+};
+
 export interface PayrollConfig {
     taxRate: number; // 0.033 = 3.3%
     incomeTaxRate: number; // 0.03 = 3%
     residentTaxRate: number; // 0.003 = 0.3%
     deductionItems: PayrollDeductionItem[];
+    advanceItemLabels: AdvanceItemLabelsConfig;
     insuranceConfig: PayrollInsuranceConfig;
     dailyWageStatementPeriod: DailyWageStatementPeriodConfig;
     updatedAt?: Date;
@@ -55,6 +97,7 @@ const DEFAULT_CONFIG: PayrollConfig = {
         { id: 'internet', label: '\uc778\ud130\ub137', order: 9, isActive: true },
         { id: 'water', label: '\uc218\ub3c4\uc138', order: 10, isActive: true }
     ],
+    advanceItemLabels: DEFAULT_ADVANCE_ITEM_LABELS,
     insuranceConfig: {
         thresholdDays: 8,
         pensionRate: 0.045,
@@ -109,6 +152,7 @@ const ensurePayrollSettingExists = async (): Promise<void> => {
             incomeTaxRate: DEFAULT_CONFIG.incomeTaxRate,
             residentTaxRate: DEFAULT_CONFIG.residentTaxRate,
             deductionItems: DEFAULT_CONFIG.deductionItems,
+            advanceItemLabels: DEFAULT_CONFIG.advanceItemLabels,
             insuranceConfig: DEFAULT_CONFIG.insuranceConfig,
             dailyWageStatementPeriod: DEFAULT_CONFIG.dailyWageStatementPeriod,
             updatedAt: nowIso()
@@ -174,6 +218,8 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
             })
             .filter((item): item is PayrollDeductionItem => item !== null)
         : DEFAULT_CONFIG.deductionItems;
+
+    const advanceItemLabels = sanitizeAdvanceItemLabels(obj.advanceItemLabels);
 
     const insuranceRaw = obj.insuranceConfig;
     const insuranceObj = insuranceRaw && typeof insuranceRaw === 'object' ? (insuranceRaw as Record<string, unknown>) : {};
@@ -275,6 +321,7 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
         incomeTaxRate,
         residentTaxRate,
         deductionItems,
+        advanceItemLabels,
         insuranceConfig: {
             thresholdDays,
             pensionRate,
@@ -309,13 +356,14 @@ export const payrollConfigService = {
 
             const data = parseSettingData((row as any)?.data) ?? {};
             const patch: Partial<
-                Pick<PayrollConfig, 'taxRate' | 'incomeTaxRate' | 'residentTaxRate' | 'deductionItems' | 'insuranceConfig' | 'dailyWageStatementPeriod'>
+                Pick<PayrollConfig, 'taxRate' | 'incomeTaxRate' | 'residentTaxRate' | 'deductionItems' | 'advanceItemLabels' | 'insuranceConfig' | 'dailyWageStatementPeriod'>
             > = {};
 
             if (data.taxRate === undefined) patch.taxRate = DEFAULT_CONFIG.taxRate;
             if ((data as any).incomeTaxRate === undefined) patch.incomeTaxRate = DEFAULT_CONFIG.incomeTaxRate;
             if ((data as any).residentTaxRate === undefined) patch.residentTaxRate = DEFAULT_CONFIG.residentTaxRate;
             if (data.deductionItems === undefined) patch.deductionItems = DEFAULT_CONFIG.deductionItems;
+            if ((data as any).advanceItemLabels === undefined) patch.advanceItemLabels = DEFAULT_CONFIG.advanceItemLabels;
             if (data.insuranceConfig === undefined) patch.insuranceConfig = DEFAULT_CONFIG.insuranceConfig;
             if ((data as any).dailyWageStatementPeriod === undefined) patch.dailyWageStatementPeriod = DEFAULT_CONFIG.dailyWageStatementPeriod;
 
@@ -372,6 +420,17 @@ export const payrollConfigService = {
         } as any);
     },
 
+    updateAdvanceItemLabels: async (advanceItemLabels: Partial<AdvanceItemLabelsConfig>): Promise<void> => {
+        const safe = sanitizeAdvanceItemLabels(advanceItemLabels);
+        await ensurePayrollSettingExists();
+        const row = await findPayrollSettingRow();
+        const existing = row ? (parseSettingData((row as any)?.data) ?? {}) : {};
+        await updateSetting( {
+            id: DOC_ID,
+            data: JSON.stringify({ ...existing, advanceItemLabels: safe, updatedAt: nowIso() })
+        } as any);
+    },
+
     updateInsuranceConfig: async (insuranceConfig: PayrollInsuranceConfig): Promise<void> => {
         const safe = sanitizeConfig({ insuranceConfig });
         await ensurePayrollSettingExists();
@@ -401,6 +460,7 @@ export const payrollConfigService = {
             incomeTaxRate: safeConfig.incomeTaxRate,
             residentTaxRate: safeConfig.residentTaxRate,
             deductionItems: safeConfig.deductionItems,
+            advanceItemLabels: safeConfig.advanceItemLabels,
             insuranceConfig: safeConfig.insuranceConfig,
             dailyWageStatementPeriod: safeConfig.dailyWageStatementPeriod,
             updatedAt: nowIso()

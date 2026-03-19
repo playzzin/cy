@@ -6,7 +6,13 @@ import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
 import { AdvancePayment } from '../../services/advancePaymentService';
-import { payrollConfigService, PayrollConfig, PayrollDeductionItem, PayrollInsuranceConfig } from '../../services/payrollConfigService';
+import {
+    payrollConfigService,
+    PayrollConfig,
+    PayrollDeductionItem,
+    PayrollInsuranceConfig,
+    DEFAULT_ADVANCE_ITEM_LABELS,
+} from '../../services/payrollConfigService';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -16,6 +22,7 @@ import JSZip from 'jszip';
 import { addMonths, subMonths, format } from 'date-fns';
 import { PayslipTemplate } from './components/PayslipTemplate';
 import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
+import type { MonthlyAdvanceLedgerHandle } from './components/MonthlyAdvanceLedger';
 import Swal from 'sweetalert2';
 
 import { usePayrollData } from './hooks/usePayrollData';
@@ -723,6 +730,40 @@ const buildDeductionLabelMapFromConfig = (items?: PayrollDeductionItem[]): Recor
         base[safeId] = safeLabel && safeLabel.length > 0 ? safeLabel : safeId;
     });
     return base;
+};
+
+const normalizeLineLabel = (value: string): string => String(value ?? '').replace(/\s+/g, '').trim();
+
+const buildAdvanceLabelSet = (config?: PayrollConfig | null): Set<string> => {
+    const labels = {
+        ...DEFAULT_ADVANCE_ITEM_LABELS,
+        ...(config?.advanceItemLabels ?? {}),
+    };
+
+    const set = new Set<string>([
+        normalizeLineLabel(labels.corporateAdvance1),
+        normalizeLineLabel(labels.corporateAdvance2),
+        normalizeLineLabel(labels.corporateAdvance3),
+        normalizeLineLabel(labels.corporateAdvance4),
+        normalizeLineLabel(labels.laborAdvance1),
+        normalizeLineLabel(labels.laborAdvance2),
+        normalizeLineLabel(labels.laborAdvance3),
+        normalizeLineLabel(labels.laborAdvance4),
+        'corporateAdvance1',
+        'corporateAdvance2',
+        'corporateAdvance3',
+        'corporateAdvance4',
+        'laborAdvance1',
+        'laborAdvance2',
+        'laborAdvance3',
+        'laborAdvance4',
+        'carrySecond',
+        'currentAdvance',
+        'currentAdvanceSecond',
+    ]);
+
+    set.delete('');
+    return set;
 };
 
 const createEmptyDeductionBreakdown = (): DeductionBreakdown => ({
@@ -1581,6 +1622,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [filtersReady, setFiltersReady] = useState<boolean>(false);
     const [deductionLabelMap, setDeductionLabelMap] = useState<Record<string, string>>(buildStandardDeductionLabelMap());
     const [payrollConfig, setPayrollConfig] = useState<PayrollConfig | null>(null);
+    const advanceLabelSet = useMemo(() => buildAdvanceLabelSet(payrollConfig), [payrollConfig]);
     const [showInsuranceSettings, setShowInsuranceSettings] = useState<boolean>(false);
     const [insuranceConfigSaving, setInsuranceConfigSaving] = useState<boolean>(false);
 
@@ -1605,6 +1647,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [copying, setCopying] = useState(false);
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
     const [ledgerInputs, setLedgerInputs] = useState<Record<string, LedgerManualInput>>({});
+    const advanceLedgerRef = useRef<MonthlyAdvanceLedgerHandle>(null);
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
     const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
     const [kbAmountType, setKbAmountType] = useState<string>('totalAmount');
@@ -3151,6 +3194,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             const toNum = (v: any) => typeof v === 'number' && !isNaN(v) ? v : 0;
             return toNum(side.carry) + toNum(side.carrySecond) + toNum(side.currentAdvance) + toNum(side.currentAdvanceSecond);
         };
+        const getAdvanceItem = (side: any, field: 'carry' | 'carrySecond' | 'currentAdvance' | 'currentAdvanceSecond'): number => {
+            if (!side) return 0;
+            const v = side[field];
+            return typeof v === 'number' && !isNaN(v) ? v : 0;
+        };
 
         return filteredPaymentData.map((item) => {
             let amount = item.totalAmount;
@@ -3164,6 +3212,30 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             } else if (kbAmountType === 'laborAdvance') {
                 const manual = ledgerInputs[item.id];
                 amount = manual ? sumSideAdvances(manual.labor) : 0;
+            } else if (kbAmountType === 'corporateAdvance1') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'carry') : 0;
+            } else if (kbAmountType === 'corporateAdvance2') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'carrySecond') : 0;
+            } else if (kbAmountType === 'corporateAdvance3') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'currentAdvance') : 0;
+            } else if (kbAmountType === 'corporateAdvance4') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'currentAdvanceSecond') : 0;
+            } else if (kbAmountType === 'laborAdvance1') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'carry') : 0;
+            } else if (kbAmountType === 'laborAdvance2') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'carrySecond') : 0;
+            } else if (kbAmountType === 'laborAdvance3') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'currentAdvance') : 0;
+            } else if (kbAmountType === 'laborAdvance4') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'currentAdvanceSecond') : 0;
             }
 
             let memo = kbMemoSuffix;
@@ -3182,7 +3254,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 받는분통장표시: kbReceiverDisplay,
                 내통장메모: memo
             };
-        });
+        }).filter((row) => Number.isFinite(row.이체금액) && row.이체금액 > 0);
     };
 
 
@@ -4051,6 +4123,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     )}
                                     {batchDownloading ? '처리 중...' : '일괄 다운로드'}
                                 </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="secondary"
+                                    onClick={() => advanceLedgerRef.current?.downloadExcel(rangeLabel || currentYearMonth)}
+                                    disabled={ledgerRowsData.length === 0}
+                                >
+                                    <FontAwesomeIcon icon={faFileExcel} />
+                                    가불대장 엑셀
+                                </ActionButton>
                             </ActionCluster>
                         </ToolbarCardBody>
                     </ToolbarCard>
@@ -4214,6 +4295,20 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     const deductionBreakdownForDisplay = (utilitiesApplied || dailyFeeApplied)
                                         ? mergeDeductionBreakdownWithLines(baseDeductionForDisplay, deductionAppliedLinesForDisplay)
                                         : sourceDeductionForDisplay;
+                                    const deductionLinesForDisplay = [
+                                        ...(deductionBreakdownForDisplay.standardLines ?? []),
+                                        ...(deductionBreakdownForDisplay.additionalLines ?? []),
+                                    ];
+                                    const advanceLinesForDisplay = deductionLinesForDisplay.filter((line) =>
+                                        advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+                                    );
+                                    const nonAdvanceDeductionLinesForDisplay = deductionLinesForDisplay.filter((line) =>
+                                        !advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+                                    );
+                                    const advanceTotalForDisplay = advanceLinesForDisplay.reduce((sum, line) => sum + toNumber(line.amount), 0);
+                                    const nonAdvanceDeductionTotalForDisplay = nonAdvanceDeductionLinesForDisplay.reduce((sum, line) => sum + toNumber(line.amount), 0);
+                                    const hasNonAdvanceDeductionLines = nonAdvanceDeductionLinesForDisplay.length > 0;
+                                    const hasAdvanceLines = advanceLinesForDisplay.length > 0;
                                     const taxLinesForItem = getTaxLinesForItem(item);
                                     const taxTotalForDisplay = taxLinesForItem.reduce((sum, line) => sum + toNumber(line.amount), 0);
                                     const totalDeductionForDisplay = deductionBreakdownForDisplay.total + taxTotalForDisplay;
@@ -4381,10 +4476,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                             공제내역
                                                                         </h4>
                                                                         <span className="text-xs text-slate-500 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
-                                                                            총 {(deductionBreakdownForDisplay.standardLines.length + deductionBreakdownForDisplay.additionalLines.length)}건
+                                                                            총 {nonAdvanceDeductionLinesForDisplay.length}건
                                                                         </span>
                                                                     </div>
-                                                                    {deductionBreakdownForDisplay.hasData ? (
+                                                                    {hasNonAdvanceDeductionLines ? (
                                                                         <div className="border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
                                                                             <table className="w-full text-xs">
                                                                                 <thead className="bg-slate-50 text-slate-500">
@@ -4394,7 +4489,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                     </tr>
                                                                                 </thead>
                                                                                 <tbody className="divide-y divide-slate-100">
-                                                                                    {[...deductionBreakdownForDisplay.standardLines, ...deductionBreakdownForDisplay.additionalLines].map((line, idx) => (
+                                                                                    {nonAdvanceDeductionLinesForDisplay.map((line, idx) => (
                                                                                         <tr key={`deduction-${line.label}-${idx}`} className="hover:bg-amber-50/30">
                                                                                             <td className="px-3 py-2 text-slate-700">{line.label}</td>
                                                                                             <td className="px-3 py-2 text-right text-red-600 font-medium">-{line.amount.toLocaleString()}</td>
@@ -4404,7 +4499,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                 <tfoot className="bg-amber-50 font-bold text-amber-800">
                                                                                     <tr>
                                                                                         <td className="px-3 py-2 text-right">공제 합계</td>
-                                                                                        <td className="px-3 py-2 text-right">-{deductionBreakdownForDisplay.total.toLocaleString()}</td>
+                                                                                        <td className="px-3 py-2 text-right">-{nonAdvanceDeductionTotalForDisplay.toLocaleString()}</td>
                                                                                     </tr>
                                                                                 </tfoot>
                                                                             </table>
@@ -4412,6 +4507,46 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                     ) : (
                                                                         <div className="p-4 border border-dashed border-slate-300 rounded-lg text-center text-xs text-slate-500 bg-white">
                                                                             공제 내역이 없습니다.
+                                                                        </div>
+                                                                    )}
+
+                                                                    <div className="flex items-center justify-between">
+                                                                        <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                                                                            <span className="w-1 h-4 bg-yellow-500 rounded-full"></span>
+                                                                            가불내역
+                                                                        </h4>
+                                                                        <span className="text-xs text-slate-500 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                                            총 {advanceLinesForDisplay.length}건
+                                                                        </span>
+                                                                    </div>
+                                                                    {hasAdvanceLines ? (
+                                                                        <div className="border border-yellow-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                                                                            <table className="w-full text-xs">
+                                                                                <thead className="bg-yellow-50 text-yellow-800">
+                                                                                    <tr>
+                                                                                        <th className="px-3 py-2 text-left font-medium border-b border-yellow-100">항목</th>
+                                                                                        <th className="px-3 py-2 text-right font-medium border-b border-yellow-100 w-32">금액</th>
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody className="divide-y divide-yellow-100">
+                                                                                    {advanceLinesForDisplay.map((line, idx) => (
+                                                                                        <tr key={`advance-${line.label}-${idx}`} className="hover:bg-yellow-50/40">
+                                                                                            <td className="px-3 py-2 text-slate-700">{line.label}</td>
+                                                                                            <td className="px-3 py-2 text-right text-red-600 font-medium">-{line.amount.toLocaleString()}</td>
+                                                                                        </tr>
+                                                                                    ))}
+                                                                                </tbody>
+                                                                                <tfoot className="bg-yellow-50 font-bold text-yellow-900">
+                                                                                    <tr>
+                                                                                        <td className="px-3 py-2 text-right">가불 합계</td>
+                                                                                        <td className="px-3 py-2 text-right">-{advanceTotalForDisplay.toLocaleString()}</td>
+                                                                                    </tr>
+                                                                                </tfoot>
+                                                                            </table>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="p-4 border border-dashed border-yellow-300 rounded-lg text-center text-xs text-slate-500 bg-white">
+                                                                            가불 내역이 없습니다.
                                                                         </div>
                                                                     )}
 
@@ -4720,8 +4855,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
             {pageViewMode === 'ledger' && (
                 <MonthlyAdvanceLedger
+                    ref={advanceLedgerRef}
                     rows={ledgerRows}
                     payrollConfig={payrollConfig}
+                    advanceItemLabels={payrollConfig?.advanceItemLabels}
                     withholdingThreshold={WITHHOLDING_MAX_MAN_DAY}
                     applyInsurance={insuranceApplied}
                     applyBusinessIncome={businessIncomeApplied}
@@ -4806,6 +4943,23 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         <option value="laborNet">공제후 노무총액</option>
                                         <option value="invoiceAdvance">법인가불 총액</option>
                                         <option value="laborAdvance">노무가불 총액</option>
+                                        {(() => {
+                                            const al = { ...DEFAULT_ADVANCE_ITEM_LABELS, ...(payrollConfig?.advanceItemLabels ?? {}) };
+                                            return (
+                                                <>
+                                                    <option disabled>── 법인가불 개별 ──</option>
+                                                    <option value="corporateAdvance1">{al.corporateAdvance1}</option>
+                                                    <option value="corporateAdvance2">{al.corporateAdvance2}</option>
+                                                    <option value="corporateAdvance3">{al.corporateAdvance3}</option>
+                                                    <option value="corporateAdvance4">{al.corporateAdvance4}</option>
+                                                    <option disabled>── 노무가불 개별 ──</option>
+                                                    <option value="laborAdvance1">{al.laborAdvance1}</option>
+                                                    <option value="laborAdvance2">{al.laborAdvance2}</option>
+                                                    <option value="laborAdvance3">{al.laborAdvance3}</option>
+                                                    <option value="laborAdvance4">{al.laborAdvance4}</option>
+                                                </>
+                                            );
+                                        })()}
                                     </KBPreviewSelect>
                                     <KBPreviewFieldHint>선택한 기준으로 C열 이체금액이 계산됩니다.</KBPreviewFieldHint>
                                 </KBPreviewFieldCard>

@@ -3,7 +3,11 @@ import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
 import { siteService, Site } from '../../../services/siteService';
 import { teamService, Team } from '../../../services/teamService';
-import { payrollConfigService } from '../../../services/payrollConfigService';
+import {
+  payrollConfigService,
+  DEFAULT_ADVANCE_ITEM_LABELS,
+  AdvanceItemLabelsConfig,
+} from '../../../services/payrollConfigService';
 import { advancePaymentService, AdvancePayment } from '../../../services/advancePaymentService';
 import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerManualInput } from '../types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
@@ -101,6 +105,55 @@ const createEmptyLedgerSideInput = (): LedgerManualInput['invoice'] => ({
   other: 0,
 });
 
+const ITEM_KEY_LABEL_FALLBACKS: Record<string, string> = {
+  management: '관리비',
+  maintenance: '관리비',
+  other: '기타',
+  carrySecond: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance2,
+  currentAdvance: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance3,
+  currentAdvanceSecond: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance4,
+  corporateAdvance1: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance1,
+  corporateAdvance2: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance2,
+  corporateAdvance3: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance3,
+  corporateAdvance4: DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance4,
+  laborAdvance1: DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance1,
+  laborAdvance2: DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance2,
+  laborAdvance3: DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance3,
+  laborAdvance4: DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance4,
+};
+
+const buildDeductionLabelMap = (
+  config: { deductionItems?: Array<{ id?: string; label?: string }>; advanceItemLabels?: Partial<AdvanceItemLabelsConfig> } | null | undefined
+): Record<string, string> => {
+  const base = STANDARD_DEDUCTION_FIELDS.reduce<Record<string, string>>((acc, { key, label }) => {
+    acc[key] = label;
+    return acc;
+  }, { ...ITEM_KEY_LABEL_FALLBACKS });
+
+  (config?.deductionItems ?? []).forEach((item) => {
+    const safeId = String(item?.id ?? '').trim();
+    if (!safeId) return;
+    const safeLabel = String(item?.label ?? '').trim();
+    base[safeId] = safeLabel || safeId;
+  });
+
+  const advanceLabels = {
+    ...DEFAULT_ADVANCE_ITEM_LABELS,
+    ...(config?.advanceItemLabels ?? {}),
+  };
+
+  base.corporateAdvance1 = String(advanceLabels.corporateAdvance1 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance1;
+  base.corporateAdvance2 = String(advanceLabels.corporateAdvance2 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance2;
+  base.corporateAdvance3 = String(advanceLabels.corporateAdvance3 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance3;
+  base.corporateAdvance4 = String(advanceLabels.corporateAdvance4 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.corporateAdvance4;
+  base.laborAdvance1 = String(advanceLabels.laborAdvance1 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance1;
+  base.laborAdvance2 = String(advanceLabels.laborAdvance2 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance2;
+  base.laborAdvance3 = String(advanceLabels.laborAdvance3 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance3;
+  base.laborAdvance4 = String(advanceLabels.laborAdvance4 ?? '').trim() || DEFAULT_ADVANCE_ITEM_LABELS.laborAdvance4;
+
+  return base;
+};
+
 const pickPreferredAdvanceRecord = (
   records: AdvancePayment[],
   yearMonth: string,
@@ -129,13 +182,22 @@ const pickPreferredAdvanceRecord = (
 const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManualInput | undefined => {
   if (!record) return undefined;
 
+  const corporateAdvance1 = record.items?.corporateAdvance1;
+  const corporateAdvance2 = record.items?.corporateAdvance2;
+  const corporateAdvance3 = record.items?.corporateAdvance3;
+  const corporateAdvance4 = record.items?.corporateAdvance4;
+  const laborAdvance1 = record.items?.laborAdvance1;
+  const laborAdvance2 = record.items?.laborAdvance2;
+  const laborAdvance3 = record.items?.laborAdvance3;
+  const laborAdvance4 = record.items?.laborAdvance4;
+
   return {
     invoice: {
       ...createEmptyLedgerSideInput(),
-      carry: toNumber(record.prevMonthCarryover),
-      carrySecond: toNumber(record.items?.carrySecond),
-      currentAdvance: toNumber(record.items?.currentAdvance),
-      currentAdvanceSecond: toNumber(record.items?.currentAdvanceSecond),
+      carry: toNumber(corporateAdvance1 ?? record.prevMonthCarryover),
+      carrySecond: toNumber(corporateAdvance2 ?? record.items?.carrySecond),
+      currentAdvance: toNumber(corporateAdvance3 ?? record.items?.currentAdvance),
+      currentAdvanceSecond: toNumber(corporateAdvance4 ?? record.items?.currentAdvanceSecond),
       lodging: toNumber(record.accommodation),
       electricity: toNumber(record.electricity),
       gas: toNumber(record.gas),
@@ -145,7 +207,13 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       fine: toNumber(record.fines),
       other: toNumber(record.items?.other),
     },
-    labor: createEmptyLedgerSideInput(),
+    labor: {
+      ...createEmptyLedgerSideInput(),
+      carry: toNumber(laborAdvance1),
+      carrySecond: toNumber(laborAdvance2),
+      currentAdvance: toNumber(laborAdvance3),
+      currentAdvanceSecond: toNumber(laborAdvance4),
+    },
     personalMemo: String(record.memo ?? ''),
     assignmentType: (record.assignmentType === 'labor' ? 'labor' : 'corporate'),
     itemAssignments: record.itemAssignments ?? {},
@@ -255,6 +323,7 @@ export const usePayrollData = (
         teamService.getTeams(),
         payrollConfigService.getConfig()
       ]);
+      const deductionLabelMap = buildDeductionLabelMap(config);
 
       const workerMap = new Map<string, Worker>();
       allWorkers.forEach(w => { if (w.id) workerMap.set(w.id, w); });
@@ -452,7 +521,8 @@ export const usePayrollData = (
           : (advanceListByWorkerId.get(agg.workerId) || []);
 
         const deductionBreakdown = buildDeductionBreakdownFromRecords(
-          advanceRecords.filter((record) => String(record.yearMonth ?? '') === agg.month)
+          advanceRecords.filter((record) => String(record.yearMonth ?? '') === agg.month),
+          deductionLabelMap
         );
         const totalDeduction = deductionBreakdown.total;
         const netAmount = grossAmount - totalDeduction;

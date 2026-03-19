@@ -8,7 +8,14 @@ import { accommodationService } from '../../services/accommodationService';
 import { Accommodation } from '../../types/accommodation';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { companyService } from '../../services/companyService';
-import { payrollConfigService, PayrollConfig, PayrollDeductionItem } from '../../services/payrollConfigService';
+import {
+    payrollConfigService,
+    PayrollConfig,
+    PayrollDeductionItem,
+    AdvanceItemLabelKey,
+    AdvanceItemLabelsConfig,
+    DEFAULT_ADVANCE_ITEM_LABELS
+} from '../../services/payrollConfigService';
 import { siteService, Site } from '../../services/siteService';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
@@ -87,6 +94,20 @@ const createWorkerPaymentSummary = (): WorkerPaymentSummary => ({
 });
 
 const EMPTY_WORKER_PAYMENT_SUMMARY: WorkerPaymentSummary = createWorkerPaymentSummary();
+
+const CORPORATE_ADVANCE_ITEM_KEYS = [
+    'corporateAdvance1',
+    'corporateAdvance2',
+    'corporateAdvance3',
+    'corporateAdvance4'
+] as const;
+
+const LABOR_ADVANCE_ITEM_KEYS = [
+    'laborAdvance1',
+    'laborAdvance2',
+    'laborAdvance3',
+    'laborAdvance4'
+] as const;
 
 const toFiniteNumberOrZero = (value: unknown): number => {
     if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -524,7 +545,9 @@ const AdvancePaymentPage: React.FC = () => {
 
     const [, setPayrollConfig] = useState<PayrollConfig | null>(null);
     const [deductionItems, setDeductionItems] = useState<PayrollDeductionItem[]>([]);
+    const [advanceItemLabels, setAdvanceItemLabels] = useState<AdvanceItemLabelsConfig>({ ...DEFAULT_ADVANCE_ITEM_LABELS });
     const [configSaving, setConfigSaving] = useState(false);
+    const [advanceLabelSaving, setAdvanceLabelSaving] = useState(false);
     const [newDeductionLabel, setNewDeductionLabel] = useState('');
 
     // UI State
@@ -696,6 +719,26 @@ const AdvancePaymentPage: React.FC = () => {
         return Math.max(topDeductionItems.length, bottomDeductionItems.length);
     }, [topDeductionItems.length, bottomDeductionItems.length]);
 
+    const tableColumnCount = useMemo(() => {
+        return 3 + maxDeductionColumns + CORPORATE_ADVANCE_ITEM_KEYS.length + 2;
+    }, [maxDeductionColumns]);
+
+    const getAdvanceItemLabel = useCallback((key: AdvanceItemLabelKey): string => {
+        const raw = advanceItemLabels[key];
+        if (typeof raw === 'string' && raw.trim()) return raw.trim();
+        return DEFAULT_ADVANCE_ITEM_LABELS[key];
+    }, [advanceItemLabels]);
+
+    const corporateAdvanceItems = useMemo(
+        () => CORPORATE_ADVANCE_ITEM_KEYS.map((key) => ({ key, label: getAdvanceItemLabel(key) })),
+        [getAdvanceItemLabel]
+    );
+
+    const laborAdvanceItems = useMemo(
+        () => LABOR_ADVANCE_ITEM_KEYS.map((key) => ({ key, label: getAdvanceItemLabel(key) })),
+        [getAdvanceItemLabel]
+    );
+
     const resolvedOtherDeductionId = useMemo(() => {
         const byId = deductionItems.find((item) => String(item.id ?? '').trim() === 'other');
         if (byId) return byId.id;
@@ -797,6 +840,10 @@ const AdvancePaymentPage: React.FC = () => {
                 );
                 setPayrollConfig({ ...config, deductionItems: normalizedDeductionItems });
                 setDeductionItems(normalizedDeductionItems);
+                setAdvanceItemLabels({
+                    ...DEFAULT_ADVANCE_ITEM_LABELS,
+                    ...(config.advanceItemLabels ?? {})
+                });
             } catch {
                 const config = await payrollConfigService.getConfig();
                 if (isCancelled) return;
@@ -805,6 +852,10 @@ const AdvancePaymentPage: React.FC = () => {
                 );
                 setPayrollConfig({ ...config, deductionItems: normalizedDeductionItems });
                 setDeductionItems(normalizedDeductionItems);
+                setAdvanceItemLabels({
+                    ...DEFAULT_ADVANCE_ITEM_LABELS,
+                    ...(config.advanceItemLabels ?? {})
+                });
             }
         };
 
@@ -1661,6 +1712,78 @@ const AdvancePaymentPage: React.FC = () => {
         }
     }, [deductionItems]);
 
+    const handleAdvanceLabelChange = useCallback((key: AdvanceItemLabelKey, value: string) => {
+        setAdvanceItemLabels((prev) => ({
+            ...prev,
+            [key]: value
+        }));
+    }, []);
+
+    const handleSaveAdvanceLabelConfig = useCallback(async () => {
+        setAdvanceLabelSaving(true);
+        try {
+            const trimmedLabels = Object.fromEntries(
+                (Object.keys(DEFAULT_ADVANCE_ITEM_LABELS) as AdvanceItemLabelKey[]).map((key) => [
+                    key,
+                    String(advanceItemLabels[key] ?? '').trim()
+                ])
+            ) as AdvanceItemLabelsConfig;
+
+            const hasEmpty = (Object.keys(trimmedLabels) as AdvanceItemLabelKey[])
+                .some((key) => !trimmedLabels[key]);
+            if (hasEmpty) {
+                await Swal.fire('알림', '가불항목 이름은 비어있을 수 없습니다.', 'warning');
+                return;
+            }
+
+            await payrollConfigService.updateAdvanceItemLabels(trimmedLabels);
+            const latest = await payrollConfigService.getConfigFromServer();
+            const latestDeductionItems = ensureAccommodationLinkedDeductionItems(
+                [...latest.deductionItems].sort((a, b) => a.order - b.order)
+            );
+
+            setPayrollConfig({ ...latest, deductionItems: latestDeductionItems });
+            setDeductionItems(latestDeductionItems);
+            setAdvanceItemLabels({
+                ...DEFAULT_ADVANCE_ITEM_LABELS,
+                ...(latest.advanceItemLabels ?? {})
+            });
+
+            await Swal.fire({
+                icon: 'success',
+                title: '저장 완료',
+                text: '가불항목 설정이 저장되었습니다.',
+                timer: 1200,
+                showConfirmButton: false
+            });
+        } catch (error) {
+            console.error('Failed to save advance label config:', error);
+            const code = typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : '';
+            const message = typeof (error as { message?: unknown }).message === 'string' ? (error as { message: string }).message : '';
+            const detail = code ? ` (${code})` : '';
+            const suffix = message ? `\n${message}` : '';
+            await Swal.fire('오류', `가불항목 설정 저장 중 오류가 발생했습니다.${detail}${suffix}`, 'error');
+        } finally {
+            setAdvanceLabelSaving(false);
+        }
+    }, [advanceItemLabels]);
+
+    const handleAdvanceItemChange = useCallback((workerId: string, itemKey: string, value: string) => {
+        const numVal = parseNumberFromInput(value);
+
+        setAdvances((prev) => {
+            const current = prev[workerId];
+            if (!current) return prev;
+
+            const nextItems = { ...(current.items ?? {}), [itemKey]: numVal };
+            const updated = { ...current, items: nextItems };
+            updated.totalDeduction = calculateTotalDeduction(updated);
+            return { ...prev, [workerId]: updated };
+        });
+
+        setHasChanges(true);
+    }, [calculateTotalDeduction, parseNumberFromInput]);
+
 
 
     const renderDeductionInput = (workerId: string, deductionId: string, rowNum: 0 | 1) => {
@@ -1677,6 +1800,19 @@ const AdvancePaymentPage: React.FC = () => {
                     ? 'bg-emerald-50 text-emerald-800 font-bold ring-1 ring-emerald-200 focus:bg-emerald-100 focus:ring-2 focus:ring-emerald-300'
                     : 'bg-transparent focus:bg-blue-50 focus:ring-2 focus:ring-blue-500'
                     }`}
+                onFocus={(e) => e.target.select()}
+            />
+        );
+    };
+
+    const renderAdvanceItemInput = (workerId: string, itemKey: string) => {
+        return (
+            <input
+                type="text"
+                inputMode="numeric"
+                value={formatNumberForInput(getDeductionValue(advances[workerId], itemKey) || 0)}
+                onChange={(e) => handleAdvanceItemChange(workerId, itemKey, e.target.value)}
+                className="w-full text-right outline-none rounded px-1 transition-colors bg-yellow-50/70 focus:bg-yellow-100 focus:ring-2 focus:ring-amber-400"
                 onFocus={(e) => e.target.select()}
             />
         );
@@ -1887,6 +2023,34 @@ const AdvancePaymentPage: React.FC = () => {
                             설정 저장
                         </button>
                     </div>
+
+                    <div className="mt-4 border-t border-slate-200 pt-4">
+                        <h4 className="text-sm font-bold text-slate-700 mb-2">가불항목 추가설정</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                            {([...corporateAdvanceItems, ...laborAdvanceItems]).map((item) => (
+                                <label key={item.key} className="flex items-center justify-between gap-2 bg-white border border-slate-300 rounded px-2 py-1.5 text-xs">
+                                    <span className="text-slate-600 min-w-[88px]">{DEFAULT_ADVANCE_ITEM_LABELS[item.key]}</span>
+                                    <input
+                                        type="text"
+                                        value={advanceItemLabels[item.key] ?? ''}
+                                        onChange={(e) => handleAdvanceLabelChange(item.key, e.target.value)}
+                                        className="border border-slate-300 rounded px-2 py-1 text-xs w-full"
+                                        placeholder={DEFAULT_ADVANCE_ITEM_LABELS[item.key]}
+                                    />
+                                </label>
+                            ))}
+                        </div>
+                        <div className="flex justify-end">
+                            <button
+                                onClick={handleSaveAdvanceLabelConfig}
+                                disabled={advanceLabelSaving}
+                                className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded text-sm flex items-center gap-2"
+                            >
+                                {advanceLabelSaving ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faSave} />}
+                                가불항목 설정 저장
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
@@ -1945,6 +2109,12 @@ const AdvancePaymentPage: React.FC = () => {
                                     </th>
                                 ))}
 
+                                {corporateAdvanceItems.map((item) => (
+                                    <th key={item.key} className="p-3 border-r border-slate-300 min-w-[112px] bg-yellow-100">
+                                        {item.label}
+                                    </th>
+                                ))}
+
                                 <th rowSpan={2} className="p-2 border-r border-slate-300 w-24 text-right bg-slate-100 text-slate-800">공제계</th>
                                 <th rowSpan={2} className="p-2 border-r border-slate-300 min-w-[200px] text-center w-64">메모</th>
                             </tr>
@@ -1959,20 +2129,26 @@ const AdvancePaymentPage: React.FC = () => {
                                 {Array.from({ length: Math.max(0, topDeductionItems.length - bottomDeductionItems.length) }).map((_, i) => (
                                     <th key={`empty-${i}`} className="p-3 border-r border-slate-300 bg-slate-50"></th>
                                 ))}
+
+                                {laborAdvanceItems.map((item) => (
+                                    <th key={item.key} className="p-3 border-r border-slate-300 min-w-[112px] bg-yellow-50">
+                                        {item.label}
+                                    </th>
+                                ))}
                             </tr>
                         </thead>
 
                         <tbody className="divide-y divide-slate-200">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={20} className="p-10 text-center text-slate-500">
+                                    <td colSpan={tableColumnCount} className="p-10 text-center text-slate-500">
                                         <FontAwesomeIcon icon={faSpinner} spin className="text-2xl mb-2" />
                                         <p>데이터를 불러오고 있습니다...</p>
                                     </td>
                                 </tr>
                             ) : visibleWorkers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={20} className="p-10 text-center text-slate-400">
+                                    <td colSpan={tableColumnCount} className="p-10 text-center text-slate-400">
                                         데이터가 없습니다.
                                     </td>
                                 </tr>
@@ -2017,6 +2193,12 @@ const AdvancePaymentPage: React.FC = () => {
                                                     <td key={`empty-top-${i}`} className="p-1 border-r border-slate-200 bg-slate-50/30"></td>
                                                 ))}
 
+                                                {corporateAdvanceItems.map((item) => (
+                                                    <td key={item.key} className="p-1 border-r border-slate-200 bg-yellow-50/40">
+                                                        {renderAdvanceItemInput(worker.id!, item.key)}
+                                                    </td>
+                                                ))}
+
                                                 <td rowSpan={2} className="p-2 text-right font-bold text-slate-700 bg-white">
                                                     {advance.totalDeduction.toLocaleString()}
                                                 </td>
@@ -2041,6 +2223,12 @@ const AdvancePaymentPage: React.FC = () => {
                                                 {/* Fill empty cells if bottom row has fewer items than top row (or max cols) */}
                                                 {Array.from({ length: Math.max(0, maxDeductionColumns - bottomDeductionItems.length) }).map((_, i) => (
                                                     <td key={`empty-bottom-${i}`} className="p-1 border-r border-slate-200 bg-slate-50/30"></td>
+                                                ))}
+
+                                                {laborAdvanceItems.map((item) => (
+                                                    <td key={item.key} className="p-1 border-r border-slate-200 bg-yellow-50/30">
+                                                        {renderAdvanceItemInput(worker.id!, item.key)}
+                                                    </td>
                                                 ))}
                                             </tr>
                                         </React.Fragment>
@@ -2067,6 +2255,15 @@ const AdvancePaymentPage: React.FC = () => {
                                         <td key={`empty-total-top-${i}`} className="p-3 bg-slate-800"></td>
                                     ))}
 
+                                    {corporateAdvanceItems.map((item) => (
+                                        <td key={item.key} className="p-3 text-right text-xs bg-yellow-900/40">
+                                            {visibleWorkers
+                                                .filter((w) => Boolean(w.id))
+                                                .reduce((sum, w) => sum + getDeductionValue(advances[w.id!], item.key), 0)
+                                                .toLocaleString()}
+                                        </td>
+                                    ))}
+
                                     <td rowSpan={2} className="p-3 text-right text-amber-400 bg-slate-800 border-l border-slate-700 text-sm">
                                         {visibleWorkers.reduce((sum, w) => sum + (advances[w.id!]?.totalDeduction || 0), 0).toLocaleString()}
                                     </td>
@@ -2085,6 +2282,15 @@ const AdvancePaymentPage: React.FC = () => {
                                     {/* Fill empty cells if bottom row has fewer items than top row (or max cols) */}
                                     {Array.from({ length: Math.max(0, maxDeductionColumns - bottomDeductionItems.length) }).map((_, i) => (
                                         <td key={`empty-total-bottom-${i}`} className="p-3 bg-slate-700/50"></td>
+                                    ))}
+
+                                    {laborAdvanceItems.map((item) => (
+                                        <td key={item.key} className="p-3 text-right text-xs bg-yellow-800/40">
+                                            {visibleWorkers
+                                                .filter((w) => Boolean(w.id))
+                                                .reduce((sum, w) => sum + getDeductionValue(advances[w.id!], item.key), 0)
+                                                .toLocaleString()}
+                                        </td>
                                     ))}
                                 </tr>
                             </tfoot>

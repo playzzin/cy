@@ -1,4 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import * as XLSX from 'xlsx-js-style';
+import {
+    AdvanceItemLabelsConfig,
+    DEFAULT_ADVANCE_ITEM_LABELS
+} from '../../../services/payrollConfigService';
+
+export interface MonthlyAdvanceLedgerHandle {
+    downloadExcel: (label?: string) => void;
+}
 
 type LedgerSide = 'invoice' | 'labor';
 type LedgerSideNumberField =
@@ -128,6 +137,7 @@ interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
 interface Props {
     rows: MonthlyAdvanceLedgerRow[];
     payrollConfig: any | null;
+    advanceItemLabels?: Partial<AdvanceItemLabelsConfig>;
     withholdingThreshold: number;
     applyInsurance?: boolean;
     applyBusinessIncome?: boolean;
@@ -308,10 +318,11 @@ const sumSideDeductions = (side: LedgerSideInput): number =>
 const sumSideAdvances = (side: LedgerSideInput): number =>
     side.carry + side.carrySecond + side.currentAdvance + side.currentAdvanceSecond;
 
-const MonthlyAdvanceLedger: React.FC<Props> = ({
+const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     rows,
     payrollConfig,
-    withholdingThreshold,
+    advanceItemLabels,
+    withholdingThreshold = 7,
     applyInsurance = false,
     applyBusinessIncome = false,
     applyDailyFee = false,
@@ -321,13 +332,23 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     onInputsChange,
     initialInputs,
     visibleSections,
-}) => {
-    const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>(initialInputs ?? {});
-    const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
+}: Props, ref: React.ForwardedRef<MonthlyAdvanceLedgerHandle>) {
+    const showUtilities = visibleSections?.utilities ?? true;
+    const showAdvances = visibleSections?.advances ?? true;
+    const showTaxes = visibleSections?.taxes ?? true;
+    const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>({});
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
-    const showUtilities = visibleSections?.utilities !== false;
-    const showAdvances = visibleSections?.advances !== false;
-    const showTaxes = visibleSections?.taxes !== false;
+    const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
+    const resolvedAdvanceItemLabels = useMemo<AdvanceItemLabelsConfig>(() => {
+        const next: AdvanceItemLabelsConfig = { ...DEFAULT_ADVANCE_ITEM_LABELS };
+        Object.entries(advanceItemLabels || {}).forEach(([key, val]) => {
+            const trimmed = String(val ?? '').trim();
+            if (trimmed) {
+                next[key as keyof AdvanceItemLabelsConfig] = trimmed;
+            }
+        });
+        return next;
+    }, [advanceItemLabels]);
     const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 7 : 0);
     const tableMinWidth = Math.floor((708 + (showUtilities ? 392 : 0) + (showAdvances ? 432 : 0) + (showTaxes ? 590 : 0)) * 1.38);
 
@@ -380,13 +401,12 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
 
                 const existingAssignments = existing.itemAssignments ?? {};
                 const normalizedAssignments = normalized.itemAssignments ?? {};
-                const assignmentKeys = new Set([
-                    ...Object.keys(existingAssignments),
-                    ...Object.keys(normalizedAssignments),
-                ]);
-                const isSameAssignments = Array.from(assignmentKeys).every(
-                    (key) => existingAssignments[key] === normalizedAssignments[key]
+                const assignmentKeys = Array.from(
+                    new Set([...Object.keys(existingAssignments), ...Object.keys(normalizedAssignments)])
                 );
+                const isSameAssignments = assignmentKeys.every((assignmentKey) => (
+                    (existingAssignments[assignmentKey] ?? 'corporate') === (normalizedAssignments[assignmentKey] ?? 'corporate')
+                ));
 
                 const isSame =
                     isSameInvoice
@@ -488,8 +508,6 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
         touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
-            // 전체 분류가 바뀌면 모든 개별 항목 분류도 초기화하거나 동기화할 수 있지만, 
-            // 여기서는 전체 분류 필드만 업데이트합니다.
             return {
                 ...prev,
                 [rowKey]: {
@@ -1098,6 +1116,519 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
         );
     }, [computedRows]);
 
+    useImperativeHandle(ref, () => ({
+        downloadExcel(label?: string) {
+            if (computedRows.length === 0) {
+                alert('다운로드할 데이터가 없습니다.');
+                return;
+            }
+            const al = resolvedAdvanceItemLabels;
+
+            type ColKind = 'text-left' | 'text-center' | 'amount' | 'manDay';
+            type ColSection = 'base' | 'utilities' | 'advances' | 'taxes' | 'final';
+            type RowKind = 'header' | 'team' | 'data' | 'teamSubtotal' | 'grandTotal';
+
+            const headers: string[] = [];
+            const colKinds: ColKind[] = [];
+            const colSections: ColSection[] = [];
+            const colWidths: Array<{ wch: number }> = [];
+            const addColumn = (labelText: string, kind: ColKind, width: number, section: ColSection) => {
+                headers.push(labelText);
+                colKinds.push(kind);
+                colSections.push(section);
+                colWidths.push({ wch: width });
+            };
+
+            addColumn('No', 'text-center', 6, 'base');
+            addColumn('팀', 'text-left', 14, 'base');
+            addColumn('이름', 'text-left', 10, 'base');
+            addColumn('구분', 'text-center', 9, 'base');
+            addColumn('법인공수', 'manDay', 10, 'base');
+            addColumn('노무공수', 'manDay', 10, 'base');
+            addColumn('단가', 'amount', 12, 'base');
+            addColumn('법인총액', 'amount', 12, 'base');
+            addColumn('노무총액', 'amount', 12, 'base');
+
+            if (showUtilities) {
+                addColumn('숙소비(법인)', 'amount', 12, 'utilities');
+                addColumn('전기(법인)', 'amount', 12, 'utilities');
+                addColumn('가스(법인)', 'amount', 12, 'utilities');
+                addColumn('수도(법인)', 'amount', 12, 'utilities');
+                addColumn('인터넷(노무)', 'amount', 12, 'utilities');
+                addColumn('관리비(노무)', 'amount', 12, 'utilities');
+                addColumn('과태료(노무)', 'amount', 12, 'utilities');
+                addColumn('기타(노무)', 'amount', 12, 'utilities');
+                addColumn('법인공제합계', 'amount', 13, 'utilities');
+                addColumn('노무공제합계', 'amount', 13, 'utilities');
+            }
+
+            if (showAdvances) {
+                addColumn(`${al.corporateAdvance1}(법인)`, 'amount', 12, 'advances');
+                addColumn(`${al.corporateAdvance2}(법인)`, 'amount', 12, 'advances');
+                addColumn(`${al.corporateAdvance3}(법인)`, 'amount', 12, 'advances');
+                addColumn(`${al.corporateAdvance4}(법인)`, 'amount', 12, 'advances');
+                addColumn('법인가불합계', 'amount', 13, 'advances');
+                addColumn(`${al.laborAdvance1}(노무)`, 'amount', 12, 'advances');
+                addColumn(`${al.laborAdvance2}(노무)`, 'amount', 12, 'advances');
+                addColumn(`${al.laborAdvance3}(노무)`, 'amount', 12, 'advances');
+                addColumn(`${al.laborAdvance4}(노무)`, 'amount', 12, 'advances');
+                addColumn('노무가불합계', 'amount', 13, 'advances');
+            }
+
+            if (showTaxes) {
+                addColumn('국민연금', 'amount', 11, 'taxes');
+                addColumn('건강보험', 'amount', 11, 'taxes');
+                addColumn('장기요양', 'amount', 11, 'taxes');
+                addColumn('고용보험', 'amount', 11, 'taxes');
+                addColumn('갑근세', 'amount', 11, 'taxes');
+                addColumn('지방세', 'amount', 11, 'taxes');
+                addColumn('사업소득세', 'amount', 11, 'taxes');
+                addColumn('지방소득세', 'amount', 11, 'taxes');
+                addColumn('일급제수수료', 'amount', 12, 'taxes');
+                addColumn('4대보험합계', 'amount', 12, 'taxes');
+                addColumn('3.3%합계', 'amount', 11, 'taxes');
+            }
+
+            addColumn('법인실수령', 'amount', 13, 'final');
+            addColumn('개인실수령', 'amount', 13, 'final');
+            addColumn('순지급합계', 'amount', 13, 'final');
+            addColumn('메모', 'text-left', 24, 'final');
+
+            type Aggregate = {
+                invoiceManDay: number;
+                laborManDay: number;
+                invoiceGrossAmount: number;
+                laborGrossAmount: number;
+                invoiceLodging: number;
+                invoiceElectricity: number;
+                invoiceGas: number;
+                invoiceWater: number;
+                laborInternet: number;
+                laborManagement: number;
+                laborFine: number;
+                laborOther: number;
+                invoiceDeductionTotal: number;
+                laborDeductionTotal: number;
+                invoiceAdvanceCarry: number;
+                invoiceAdvanceCarrySecond: number;
+                invoiceAdvanceCurrent: number;
+                invoiceAdvanceCurrentSecond: number;
+                invoiceAdvanceTotal: number;
+                laborAdvanceCarry: number;
+                laborAdvanceCarrySecond: number;
+                laborAdvanceCurrent: number;
+                laborAdvanceCurrentSecond: number;
+                laborAdvanceTotal: number;
+                pension: number;
+                health: number;
+                care: number;
+                employment: number;
+                incomeTax: number;
+                residentTax: number;
+                businessIncomeTax: number;
+                businessResidentTax: number;
+                dailyFee: number;
+                insuranceTotal: number;
+                businessTotal: number;
+                corporateNet: number;
+                personalNet: number;
+                netTotal: number;
+            };
+
+            const aggregateRows = (targetRows: ComputedLedgerRow[]): Aggregate => targetRows.reduce(
+                (acc, row) => {
+                    acc.invoiceManDay += row.invoiceManDay;
+                    acc.laborManDay += row.laborManDay;
+                    acc.invoiceGrossAmount += row.invoiceGrossAmount;
+                    acc.laborGrossAmount += row.laborGrossAmount;
+                    acc.invoiceLodging += row.manual.invoice.lodging;
+                    acc.invoiceElectricity += row.manual.invoice.electricity;
+                    acc.invoiceGas += row.manual.invoice.gas;
+                    acc.invoiceWater += row.manual.invoice.water;
+                    acc.laborInternet += row.manual.labor.internet;
+                    acc.laborManagement += row.manual.labor.management;
+                    acc.laborFine += row.manual.labor.fine;
+                    acc.laborOther += row.manual.labor.other;
+                    acc.invoiceDeductionTotal += row.invoiceDeductionTotal;
+                    acc.laborDeductionTotal += row.laborDeductionTotal;
+                    acc.invoiceAdvanceCarry += row.manual.invoice.carry;
+                    acc.invoiceAdvanceCarrySecond += row.manual.invoice.carrySecond;
+                    acc.invoiceAdvanceCurrent += row.manual.invoice.currentAdvance;
+                    acc.invoiceAdvanceCurrentSecond += row.manual.invoice.currentAdvanceSecond;
+                    acc.invoiceAdvanceTotal += row.invoiceAdvanceTotal;
+                    acc.laborAdvanceCarry += row.manual.labor.carry;
+                    acc.laborAdvanceCarrySecond += row.manual.labor.carrySecond;
+                    acc.laborAdvanceCurrent += row.manual.labor.currentAdvance;
+                    acc.laborAdvanceCurrentSecond += row.manual.labor.currentAdvanceSecond;
+                    acc.laborAdvanceTotal += row.laborAdvanceTotal;
+                    acc.pension += row.pension;
+                    acc.health += row.health;
+                    acc.care += row.care;
+                    acc.employment += row.employment;
+                    acc.incomeTax += row.incomeTax;
+                    acc.residentTax += row.residentTax;
+                    acc.businessIncomeTax += row.businessIncomeTax;
+                    acc.businessResidentTax += row.businessResidentTax;
+                    acc.dailyFee += row.dailyFee;
+                    acc.insuranceTotal += row.insuranceTotal;
+                    acc.businessTotal += row.businessTotal;
+                    acc.corporateNet += row.corporateNet;
+                    acc.personalNet += row.personalNet;
+                    acc.netTotal += (row.corporateNet + row.personalNet);
+                    return acc;
+                },
+                {
+                    invoiceManDay: 0,
+                    laborManDay: 0,
+                    invoiceGrossAmount: 0,
+                    laborGrossAmount: 0,
+                    invoiceLodging: 0,
+                    invoiceElectricity: 0,
+                    invoiceGas: 0,
+                    invoiceWater: 0,
+                    laborInternet: 0,
+                    laborManagement: 0,
+                    laborFine: 0,
+                    laborOther: 0,
+                    invoiceDeductionTotal: 0,
+                    laborDeductionTotal: 0,
+                    invoiceAdvanceCarry: 0,
+                    invoiceAdvanceCarrySecond: 0,
+                    invoiceAdvanceCurrent: 0,
+                    invoiceAdvanceCurrentSecond: 0,
+                    invoiceAdvanceTotal: 0,
+                    laborAdvanceCarry: 0,
+                    laborAdvanceCarrySecond: 0,
+                    laborAdvanceCurrent: 0,
+                    laborAdvanceCurrentSecond: 0,
+                    laborAdvanceTotal: 0,
+                    pension: 0,
+                    health: 0,
+                    care: 0,
+                    employment: 0,
+                    incomeTax: 0,
+                    residentTax: 0,
+                    businessIncomeTax: 0,
+                    businessResidentTax: 0,
+                    dailyFee: 0,
+                    insuranceTotal: 0,
+                    businessTotal: 0,
+                    corporateNet: 0,
+                    personalNet: 0,
+                    netTotal: 0,
+                }
+            );
+
+            const buildDataRow = (row: ComputedLedgerRow, no: number): Array<string | number | null> => {
+                const out: Array<string | number | null> = [
+                    no,
+                    row.teamName || '',
+                    row.workerName || '',
+                    row.salaryModel || '월급제',
+                    row.invoiceManDay,
+                    row.laborManDay,
+                    row.unitPrice,
+                    row.invoiceGrossAmount,
+                    row.laborGrossAmount,
+                ];
+
+                if (showUtilities) {
+                    out.push(
+                        row.manual.invoice.lodging,
+                        row.manual.invoice.electricity,
+                        row.manual.invoice.gas,
+                        row.manual.invoice.water,
+                        row.manual.labor.internet,
+                        row.manual.labor.management,
+                        row.manual.labor.fine,
+                        row.manual.labor.other,
+                        row.invoiceDeductionTotal,
+                        row.laborDeductionTotal,
+                    );
+                }
+
+                if (showAdvances) {
+                    out.push(
+                        row.manual.invoice.carry,
+                        row.manual.invoice.carrySecond,
+                        row.manual.invoice.currentAdvance,
+                        row.manual.invoice.currentAdvanceSecond,
+                        row.invoiceAdvanceTotal,
+                        row.manual.labor.carry,
+                        row.manual.labor.carrySecond,
+                        row.manual.labor.currentAdvance,
+                        row.manual.labor.currentAdvanceSecond,
+                        row.laborAdvanceTotal,
+                    );
+                }
+
+                if (showTaxes) {
+                    out.push(
+                        row.pension,
+                        row.health,
+                        row.care,
+                        row.employment,
+                        row.incomeTax,
+                        row.residentTax,
+                        row.businessIncomeTax,
+                        row.businessResidentTax,
+                        row.dailyFee,
+                        row.insuranceTotal,
+                        row.businessTotal,
+                    );
+                }
+
+                out.push(row.corporateNet, row.personalNet, row.corporateNet + row.personalNet, row.manual.personalMemo ?? '');
+                return out;
+            };
+
+            const buildSummaryRow = (
+                title: string,
+                teamName: string,
+                workerCount: number,
+                agg: Aggregate
+            ): Array<string | number | null> => {
+                const out: Array<string | number | null> = [
+                    title,
+                    teamName,
+                    `${workerCount}명`,
+                    '',
+                    agg.invoiceManDay,
+                    agg.laborManDay,
+                    '',
+                    agg.invoiceGrossAmount,
+                    agg.laborGrossAmount,
+                ];
+
+                if (showUtilities) {
+                    out.push(
+                        agg.invoiceLodging,
+                        agg.invoiceElectricity,
+                        agg.invoiceGas,
+                        agg.invoiceWater,
+                        agg.laborInternet,
+                        agg.laborManagement,
+                        agg.laborFine,
+                        agg.laborOther,
+                        agg.invoiceDeductionTotal,
+                        agg.laborDeductionTotal,
+                    );
+                }
+
+                if (showAdvances) {
+                    out.push(
+                        agg.invoiceAdvanceCarry,
+                        agg.invoiceAdvanceCarrySecond,
+                        agg.invoiceAdvanceCurrent,
+                        agg.invoiceAdvanceCurrentSecond,
+                        agg.invoiceAdvanceTotal,
+                        agg.laborAdvanceCarry,
+                        agg.laborAdvanceCarrySecond,
+                        agg.laborAdvanceCurrent,
+                        agg.laborAdvanceCurrentSecond,
+                        agg.laborAdvanceTotal,
+                    );
+                }
+
+                if (showTaxes) {
+                    out.push(
+                        agg.pension,
+                        agg.health,
+                        agg.care,
+                        agg.employment,
+                        agg.incomeTax,
+                        agg.residentTax,
+                        agg.businessIncomeTax,
+                        agg.businessResidentTax,
+                        agg.dailyFee,
+                        agg.insuranceTotal,
+                        agg.businessTotal,
+                    );
+                }
+
+                out.push(agg.corporateNet, agg.personalNet, agg.netTotal, '');
+                return out;
+            };
+
+            const aoa: Array<Array<string | number | null>> = [];
+            const rowKinds: RowKind[] = [];
+            const merges: XLSX.Range[] = [];
+            const pushRow = (row: Array<string | number | null>, kind: RowKind) => {
+                aoa.push(row);
+                rowKinds.push(kind);
+            };
+
+            pushRow(headers, 'header');
+
+            let no = 1;
+            groupedRows.forEach((group) => {
+                const teamRowIdx = aoa.length;
+                pushRow([
+                    `${group.teamName} (${group.rows.length}명)`,
+                    ...Array(headers.length - 1).fill(null),
+                ], 'team');
+                merges.push({ s: { r: teamRowIdx, c: 0 }, e: { r: teamRowIdx, c: headers.length - 1 } });
+
+                group.rows.forEach((row) => {
+                    pushRow(buildDataRow(row, no), 'data');
+                    no += 1;
+                });
+
+                pushRow(
+                    buildSummaryRow('소계', group.teamName, group.rows.length, aggregateRows(group.rows)),
+                    'teamSubtotal'
+                );
+            });
+
+            pushRow(
+                buildSummaryRow('합계', '전체', computedRows.length, aggregateRows(computedRows)),
+                'grandTotal'
+            );
+
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!merges'] = merges;
+            ws['!cols'] = colWidths;
+            ws['!autofilter'] = {
+                ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}1`
+            };
+
+            const border = {
+                top: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+                bottom: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+                left: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+                right: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+            };
+            const headerStyleBase = {
+                font: { name: '맑은 고딕', sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
+                alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+                border,
+            };
+            const teamStyle = {
+                fill: { fgColor: { rgb: '334155' }, patternType: 'solid' as const },
+                font: { name: '맑은 고딕', sz: 10, bold: true, color: { rgb: 'FFFFFF' } },
+                alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+                border,
+            };
+            const dataLeftStyle = {
+                font: { name: '맑은 고딕', sz: 9 },
+                alignment: { horizontal: 'left' as const, vertical: 'center' as const },
+                border,
+            };
+            const dataCenterStyle = {
+                font: { name: '맑은 고딕', sz: 9 },
+                alignment: { horizontal: 'center' as const, vertical: 'center' as const },
+                border,
+            };
+            const dataAmountStyle = {
+                font: { name: '맑은 고딕', sz: 9 },
+                alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+                numFmt: '#,##0',
+                border,
+            };
+            const dataManDayStyle = {
+                font: { name: '맑은 고딕', sz: 9 },
+                alignment: { horizontal: 'right' as const, vertical: 'center' as const },
+                numFmt: '#,##0.0#',
+                border,
+            };
+            const headerFillBySection = (section: ColSection) => {
+                if (section === 'utilities') return { fgColor: { rgb: '475569' }, patternType: 'solid' as const };
+                if (section === 'advances') return { fgColor: { rgb: 'A16207' }, patternType: 'solid' as const };
+                if (section === 'taxes') return { fgColor: { rgb: '92400E' }, patternType: 'solid' as const };
+                if (section === 'final') return { fgColor: { rgb: '166534' }, patternType: 'solid' as const };
+                return { fgColor: { rgb: '1E3A5F' }, patternType: 'solid' as const };
+            };
+            const dataFillBySection = (section: ColSection) => {
+                if (section === 'utilities') return { fgColor: { rgb: 'F1F5F9' }, patternType: 'solid' as const };
+                if (section === 'advances') return { fgColor: { rgb: 'FEF3C7' }, patternType: 'solid' as const };
+                if (section === 'taxes') return { fgColor: { rgb: 'FEF9C3' }, patternType: 'solid' as const };
+                if (section === 'final') return { fgColor: { rgb: 'ECFDF5' }, patternType: 'solid' as const };
+                return undefined;
+            };
+            const subtotalFill = { fgColor: { rgb: 'FEF3C7' }, patternType: 'solid' as const };
+            const grandFill = { fgColor: { rgb: 'DBEAFE' }, patternType: 'solid' as const };
+            const makeSummaryStyle = (colKind: ColKind, fill: { fgColor: { rgb: string }; patternType: 'solid' }) => {
+                if (colKind === 'text-left') {
+                    return {
+                        ...dataLeftStyle,
+                        fill,
+                        font: { name: '맑은 고딕', sz: 10, bold: true },
+                    };
+                }
+                if (colKind === 'text-center') {
+                    return {
+                        ...dataCenterStyle,
+                        fill,
+                        font: { name: '맑은 고딕', sz: 10, bold: true },
+                    };
+                }
+                if (colKind === 'manDay') {
+                    return {
+                        ...dataManDayStyle,
+                        fill,
+                        font: { name: '맑은 고딕', sz: 10, bold: true },
+                    };
+                }
+                return {
+                    ...dataAmountStyle,
+                    fill,
+                    font: { name: '맑은 고딕', sz: 10, bold: true },
+                };
+            };
+
+            const pickDataStyle = (colKind: ColKind, section: ColSection) => {
+                const fill = dataFillBySection(section);
+                if (colKind === 'text-left') return fill ? { ...dataLeftStyle, fill } : dataLeftStyle;
+                if (colKind === 'text-center') return fill ? { ...dataCenterStyle, fill } : dataCenterStyle;
+                if (colKind === 'manDay') return fill ? { ...dataManDayStyle, fill } : dataManDayStyle;
+                return fill ? { ...dataAmountStyle, fill } : dataAmountStyle;
+            };
+
+            const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+            for (let r = range.s.r; r <= range.e.r; r += 1) {
+                for (let c = range.s.c; c <= range.e.c; c += 1) {
+                    const addr = XLSX.utils.encode_cell({ r, c });
+                    if (!ws[addr]) ws[addr] = { t: 'z', v: null };
+                    const cell = ws[addr] as XLSX.CellObject & { s?: unknown };
+                    const rowKind = rowKinds[r];
+                    const colKind = colKinds[c] ?? 'text-left';
+                    const colSection = colSections[c] ?? 'base';
+
+                    if (rowKind === 'header') {
+                        cell.s = {
+                            ...headerStyleBase,
+                            fill: headerFillBySection(colSection),
+                        };
+                    } else if (rowKind === 'team') {
+                        cell.s = teamStyle;
+                    } else if (rowKind === 'teamSubtotal') {
+                        cell.s = makeSummaryStyle(colKind, subtotalFill);
+                    } else if (rowKind === 'grandTotal') {
+                        cell.s = makeSummaryStyle(colKind, grandFill);
+                    } else {
+                        cell.s = pickDataStyle(colKind, colSection);
+                    }
+
+                    if (typeof cell.v === 'number') {
+                        cell.t = 'n';
+                    }
+                }
+            }
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '팀별가불대장');
+
+            const safeLabel = String(label ?? '')
+                .trim()
+                .replace(/[\\/:*?"<>|]/g, '-')
+                .replace(/\s+/g, '_');
+            const fileName = safeLabel
+                ? `팀별가불대장_${safeLabel}.xlsx`
+                : '팀별가불대장.xlsx';
+            XLSX.writeFile(wb, fileName);
+        },
+    }), [computedRows, groupedRows, totals, resolvedAdvanceItemLabels, showUtilities, showAdvances, showTaxes]);
+
     const rateText = useMemo(() => {
         const pensionRate = ((payrollConfig?.insuranceConfig?.pensionRate ?? 0.045) * 100).toFixed(2);
         const healthRate = ((payrollConfig?.insuranceConfig?.healthRate ?? 0.03545) * 100).toFixed(3);
@@ -1197,20 +1728,20 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                             {showAdvances && (
                                 <>
                                     <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
-                                        <span className="block text-[13px]">법인가불1</span>
-                                        <span className="block text-[13px]">노무가불1</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance1}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance1}</span>
                                     </th>
                                     <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
-                                        <span className="block text-[13px]">법인가불2</span>
-                                        <span className="block text-[13px]">노무가불2</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance2}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance2}</span>
                                     </th>
                                     <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
-                                        <span className="block text-[13px]">법인가불3</span>
-                                        <span className="block text-[13px]">노무가불3</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance3}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance3}</span>
                                     </th>
                                     <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
-                                        <span className="block text-[13px]">법인가불4</span>
-                                        <span className="block text-[13px]">노무가불4</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance4}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance4}</span>
                                     </th>
                                     <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] bg-emerald-200">가불 합계</th>
                                 </>
@@ -1569,33 +2100,19 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             </div>
         </div>
     );
-};
+});
 
-export default React.memo(MonthlyAdvanceLedger, (prevProps, nextProps) => {
-    // rows 배열의 길이와 내용을 비교
-    if (prevProps.rows.length !== nextProps.rows.length) {
-        return false;
-    }
-    
+export default React.memo(MonthlyAdvanceLedger, (prevProps: Props, nextProps: Props) => {
+    if (prevProps.rows.length !== nextProps.rows.length) return false;
     for (let i = 0; i < prevProps.rows.length; i++) {
         const prevRow = prevProps.rows[i];
         const nextRow = nextProps.rows[i];
-        if (prevRow.rowKey !== nextRow.rowKey) {
-            return false;
-        }
-        // statementTaxAmounts 내 수수료 변경 감지 (토글 시 리렌더링 보장)
-        if ((prevRow.statementTaxAmounts?.dailyFee ?? 0) !== (nextRow.statementTaxAmounts?.dailyFee ?? 0)) {
-            return false;
-        }
+        if (prevRow.rowKey !== nextRow.rowKey) return false;
+        if ((prevRow.statementTaxAmounts?.dailyFee ?? 0) !== (nextRow.statementTaxAmounts?.dailyFee ?? 0)) return false;
     }
-    
-    // 다른 모든 props는 얕은 비교
     for (const key in prevProps) {
         if (key === 'rows') continue;
-        if (prevProps[key as keyof Props] !== nextProps[key as keyof Props]) {
-            return false;
-        }
+        if (prevProps[key as keyof Props] !== nextProps[key as keyof Props]) return false;
     }
-    
-    return true;  // props 같음 = 리렌더링 스킵
+    return true;
 });
