@@ -196,6 +196,23 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
         .filter((line) => !utilityDeductionLabels.has(String(line.label ?? '').trim()));
     const utilitySectionTotal = utilityDeductionLines.reduce((sum, line) => sum + line.amount, 0);
     const showUtilitySection = applyUtilities || utilitySectionTotal > 0;
+    const insuranceSummary = data.insuranceAppliedSummary;
+    const insuranceAppliedSites = insuranceSummary?.appliedSites ?? [];
+    const insuranceAppliedManDay = insuranceSummary?.appliedManDay ?? 0;
+    const insuranceThresholdManDay = insuranceSummary?.thresholdManDay ?? 0;
+    const insuranceAppliedAmount = insuranceSummary?.appliedAmount ?? 0;
+
+    const withholdingSummary = data.withholdingAppliedSummary;
+    const withholdingAppliedManDay = withholdingSummary?.appliedManDay ?? 0;
+    const withholdingThresholdManDay = withholdingSummary?.thresholdManDay ?? 0;
+    const withholdingAppliedAmount = withholdingSummary?.appliedAmount ?? 0;
+    const withholdingAppliedSites = withholdingSummary?.appliedSites ?? [];
+    const withholdingGrossAmountDisplay = Math.floor(withholdingSummary?.grossAmount ?? withholdingSummary?.appliedAmount ?? 0);
+
+    const businessSummary = data.businessIncomeAppliedSummary;
+    const businessAppliedManDay = businessSummary?.appliedManDay ?? 0;
+    const businessAppliedAmount = businessSummary?.appliedAmount ?? 0;
+    const businessAppliedSites = businessSummary?.appliedSites ?? [];
 
     const totalWorkManDay = workEntries.reduce((sum: number, entry: WorkerWorkEntry) => sum + entry.manDay, 0);
 
@@ -221,7 +238,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
         if (label.startsWith('[4대보험]')) {
             if (label.includes('국민연금')) return formatRatePercent(snapshot.pensionRate, 2);
             if (label.includes('건강보험')) return formatRatePercent(snapshot.healthRate, 3);
-            if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth, 2);
+            if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth ?? 0, 2);
             if (label.includes('고용보험')) return formatRatePercent(snapshot.employmentRate, 3);
         }
         if (label.startsWith('[원천세]') || label.startsWith('[세금]')) {
@@ -230,8 +247,8 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
             if (label.includes('근로소득세') || label.includes('갑근세')) return incomeRate;
             if (label.includes('지방소득세') || label.includes('지방세')) return residentRate;
         }
-        if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate, 1);
-        if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate, 1);
+        if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate ?? 0, 1);
+        if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate ?? 0, 1);
 
         return '-';
     };
@@ -423,13 +440,13 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                     <div className="text-emerald-800 font-bold">
                                         {hasInsuranceTargetSummary
-                                            ? `4대보험 적용 공수 ${data.insuranceAppliedSummary!.appliedManDay.toFixed(1)} (기준 ${data.insuranceAppliedSummary!.thresholdManDay})`
+                                            ? `4대보험 적용 공수 ${insuranceAppliedManDay.toFixed(1)} (기준 ${insuranceThresholdManDay})`
                                             : '4대보험 공제내역'}
                                     </div>
                                     <div className="text-right">
                                         <div className="text-emerald-700 font-mono">
                                             {hasInsuranceTargetSummary
-                                                ? `대상금액 ${data.insuranceAppliedSummary!.appliedAmount.toLocaleString()}원`
+                                                ? `대상금액 ${insuranceAppliedAmount.toLocaleString()}원`
                                                 : `공제금액 ${insuranceSectionTaxTotal.toLocaleString()}원`}
                                         </div>
                                         <div className="text-[11px] text-emerald-700/90 font-semibold">
@@ -449,7 +466,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {data.insuranceAppliedSummary!.appliedSites.map((s) => (
+                                                {insuranceAppliedSites.map((s) => (
                                                     <tr key={`ins-site-${s.siteId}`} className="odd:bg-white even:bg-slate-50/60">
                                                         <td className="px-2 py-1 border-b border-slate-100 text-slate-700">{s.siteName}</td>
                                                         <td className="px-2 py-1 border-b border-slate-100 text-center text-emerald-700 font-semibold">
@@ -495,7 +512,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                             <tbody>
                                                 <tr className="bg-emerald-50">
                                                     <td className="px-2 py-1.5 text-center text-emerald-900 font-bold w-1/4">세전 금액</td>
-                                                    <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{data.insuranceAppliedSummary!.appliedAmount.toLocaleString()}</td>
+                                                    <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{insuranceAppliedAmount.toLocaleString()}</td>
                                                     <td className="px-2 py-1.5 text-center text-emerald-900 font-bold w-1/4">세후 금액</td>
                                                     <td className="px-2 py-1.5 text-right font-mono text-emerald-700 font-bold w-1/4">{insuranceAfterTaxAmount.toLocaleString()}</td>
                                                 </tr>
@@ -506,17 +523,17 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                             </div>
                         )}
 
-                        {data.withholdingAppliedSummary && data.withholdingAppliedSummary.appliedManDay > 0 && (
+                        {withholdingSummary && withholdingAppliedManDay > 0 && (
                             <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-xs mt-2">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                     <div className="text-amber-900 font-bold">
-                                        갑근세·지방세 적용공수 {data.withholdingAppliedSummary.appliedManDay.toFixed(1)}공수
-                                        {data.withholdingAppliedSummary.thresholdManDay > 0
-                                            ? ` (기준 ${data.withholdingAppliedSummary.thresholdManDay}공수 이하)`
+                                        갑근세·지방세 적용공수 {withholdingAppliedManDay.toFixed(1)}공수
+                                        {withholdingThresholdManDay > 0
+                                            ? ` (기준 ${withholdingThresholdManDay}공수 이하)`
                                             : ' (노무 전체 공수 적용)'}
                                     </div>
                                     <div className="text-amber-800 font-mono">
-                                        과세대상금액 {data.withholdingAppliedSummary.appliedAmount.toLocaleString()}원
+                                        과세대상금액 {withholdingAppliedAmount.toLocaleString()}원
                                     </div>
                                 </div>
                                 <div className="mt-2 border border-amber-200 rounded bg-white overflow-hidden">
@@ -530,7 +547,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {data.withholdingAppliedSummary.appliedSites.map((s) => (
+                                            {withholdingAppliedSites.map((s) => (
                                                 <tr key={`withholding-site-${s.siteId}`} className="odd:bg-white even:bg-slate-50/60">
                                                     <td className="px-2 py-1 border-b border-slate-100 text-slate-700">{s.siteName}</td>
                                                     <td className="px-2 py-1 border-b border-slate-100 text-center text-amber-700 font-semibold">
@@ -577,7 +594,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                         <tbody>
                                             <tr className="bg-amber-50">
                                                 <td className="px-2 py-1.5 text-center text-amber-900 font-bold w-1/4">세전 금액</td>
-                                                <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{Math.floor(data.withholdingAppliedSummary.grossAmount ?? data.withholdingAppliedSummary.appliedAmount).toLocaleString()}원</td>
+                                                <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{withholdingGrossAmountDisplay.toLocaleString()}원</td>
                                                 <td className="px-2 py-1.5 text-center text-amber-900 font-bold w-1/4">세후 금액</td>
                                                 <td className="px-2 py-1.5 text-right font-mono text-amber-700 font-bold w-1/4">{withholdingAfterTaxAmount.toLocaleString()}원</td>
                                             </tr>
@@ -587,14 +604,14 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                             </div>
                         )}
 
-                        {data.businessIncomeAppliedSummary && data.businessIncomeAppliedSummary.appliedManDay > 0 && (
+                        {businessSummary && businessAppliedManDay > 0 && (
                             <div className="border border-sky-200 bg-sky-50 rounded-lg p-3 text-xs mt-2">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                     <div className="text-sky-900 font-bold">
-                                        사업소득 3.3% 적용 공수 {data.businessIncomeAppliedSummary.appliedManDay.toFixed(1)}
+                                        사업소득 3.3% 적용 공수 {businessAppliedManDay.toFixed(1)}
                                     </div>
                                     <div className="text-sky-800 font-mono">
-                                        대상금액 {data.businessIncomeAppliedSummary.appliedAmount.toLocaleString()}원
+                                        대상금액 {businessAppliedAmount.toLocaleString()}원
                                     </div>
                                 </div>
                                 <div className="mt-2 border border-sky-200 rounded bg-white overflow-hidden">
@@ -608,7 +625,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {data.businessIncomeAppliedSummary.appliedSites.map((s) => (
+                                            {businessAppliedSites.map((s) => (
                                                 <tr key={`biz-site-${s.siteId}`} className="odd:bg-white even:bg-slate-50/60">
                                                     <td className="px-2 py-1 border-b border-slate-100 text-slate-700">{s.siteName}</td>
                                                     <td className="px-2 py-1 border-b border-slate-100 text-center text-sky-700 font-semibold">4대보험·갑근세 제외</td>
@@ -650,7 +667,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                         <tbody>
                                             <tr className="bg-sky-50">
                                                 <td className="px-2 py-1.5 text-center text-sky-900 font-bold w-1/4">세전 금액</td>
-                                                <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{data.businessIncomeAppliedSummary.appliedAmount.toLocaleString()}</td>
+                                                <td className="px-2 py-1.5 text-right font-mono text-slate-800 w-1/4">{businessAppliedAmount.toLocaleString()}</td>
                                                 <td className="px-2 py-1.5 text-center text-sky-900 font-bold w-1/4">세후 금액</td>
                                                 <td className="px-2 py-1.5 text-right font-mono text-sky-700 font-bold w-1/4">{businessAfterTaxAmount.toLocaleString()}</td>
                                             </tr>
