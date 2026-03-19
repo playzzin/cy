@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef, useTransition } from 'react';
 import styled from 'styled-components';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -1639,6 +1639,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [withholdingApplyAllLaborInput, setWithholdingApplyAllLaborInput] = useState<boolean>(true);
     const [employmentApplyBelowThresholdInput, setEmploymentApplyBelowThresholdInput] = useState<boolean>(true);
 
+    const [isPending, startTransition] = useTransition();
+
     const [insuranceApplied, setInsuranceApplied] = useState<boolean>(false);
     const [insuranceTeamSiteOnly, setInsuranceTeamSiteOnly] = useState<boolean>(false);
     const [businessIncomeApplied, setBusinessIncomeApplied] = useState<boolean>(false);
@@ -2552,72 +2554,84 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             return;
         }
 
-        setPaymentData((prev) => {
-            const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : prev;
-            const ledgerInputsMap = ledgerInputsRef.current;
-            const ledgerRowsData = ledgerRowsDataRef.current;
-            const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(config?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
-            
-            return basePD.map((item) => {
-                const sourceDeductionBreakdown = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
-                const baseDeductionBreakdown = rebuildDeductionBreakdownRef.current({
-                    standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-                    additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-                });
-                const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
-
-                // utility input 직접 해결 (인라인)
-                const itemRowKey = item.id;
-                const direct = itemRowKey ? (ledgerInputsMap[itemRowKey] as any) : undefined;
-                const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
+        startTransition(() => {
+            setPaymentData((prev) => {
+                const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : prev;
+                const ledgerInputsMap = ledgerInputsRef.current;
+                const ledgerRowsData = ledgerRowsDataRef.current;
+                const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(config?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
                 
-                let utilityInput: any = undefined;
-                if (direct) {
-                    utilityInput = direct;
-                } else if (mapped) {
-                    utilityInput = mapped;
-                } else {
-                    const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
-                    const itemTeamNormalized = normalizeTeamNameRef.current(item.teamName);
-                    const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
-                    const singleFallback = utilityInputByWorkerMonthSingleRef.current.get(monthWorkerKey);
+                // O(1) 조회를 위한 그룹화 (매번 필터/find 도는 것을 방지)
+                const ledgerEntriesMergedByMonthWorker = new Map<string, { team: string | undefined, input: any }[]>();
+                Object.entries(ledgerInputsMap).forEach(([ledgerRowKey, manual]) => {
+                    const parts = ledgerRowKey.split('__');
+                    if (parts.length < 4) return;
+                    const [month, workerId, teamName, salaryModelStr] = parts;
                     
-                    const monthWorkerEntries = Object.entries(ledgerInputsMap)
-                        .filter(([ledgerRowKey]) => ledgerRowKey.endsWith(`__${itemSalaryModel}`))
-                        .filter(([ledgerRowKey]) => {
-                            const parts = ledgerRowKey.split('__');
-                            if (parts.length < 4) return false;
-                            const [month, workerId] = parts;
-                            return month === item.month && workerId === item.workerId;
-                        })
-                        .map(([ledgerRowKey, manual]) => {
-                            const ledgerRow = ledgerRowsData.find((row) => row.rowKey === ledgerRowKey);
-                            return {
-                                team: normalizeTeamNameRef.current(ledgerRow?.teamName),
-                                input: manual as any,
-                            };
-                        });
+                    // team 정규화: row 속성을 기반으로 하거나 ledgerRowKey 자체 값 이용
+                    // 성능 최적화: ledgerRowsData에서 매번 find하지 않고, ledgerRowKey의 team 명을 정규화한다.
+                    const team = normalizeTeamNameRef.current(teamName);
                     
-                    const teamMatchedInputs = monthWorkerEntries
-                        .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
-                        .map((entry) => entry.input);
+                    const groupKey = `${month}__${workerId}__${salaryModelStr}`;
+                    let group = ledgerEntriesMergedByMonthWorker.get(groupKey);
+                    if (!group) {
+                        group = [];
+                        ledgerEntriesMergedByMonthWorker.set(groupKey, group);
+                    }
+                    group.push({ team, input: manual });
+                });
+
+                const paymentRowsCountByMonthWorker = new Map<string, number>();
+                basePD.forEach(row => {
+                    const key = `${row.month}__${row.workerId}`;
+                    paymentRowsCountByMonthWorker.set(key, (paymentRowsCountByMonthWorker.get(key) || 0) + 1);
+                });
+
+                return basePD.map((item) => {
+                    const sourceDeductionBreakdown = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
+                    const baseDeductionBreakdown = rebuildDeductionBreakdownRef.current({
+                        standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                        additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                    });
+                    const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
+
+                    // utility input 직접 해결 (인라인)
+                    const itemRowKey = item.id;
+                    const direct = itemRowKey ? (ledgerInputsMap[itemRowKey] as any) : undefined;
+                    const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
                     
-                    if (teamMatchedInputs.length > 1) {
-                        utilityInput = teamMatchedInputs.reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
-                    } else if (teamMatchedInputs.length === 1) {
-                        utilityInput = teamMatchedInputs[0];
-                    } else if (singleFallback) {
-                        utilityInput = singleFallback;
+                    let utilityInput: any = undefined;
+                    if (direct) {
+                        utilityInput = direct;
+                    } else if (mapped) {
+                        utilityInput = mapped;
                     } else {
-                        const paymentRows = (basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : prev)
-                            .filter((row) => row.month === item.month && row.workerId === item.workerId);
-                        if (paymentRows.length === 1 && monthWorkerEntries.length > 0) {
-                            utilityInput = monthWorkerEntries
-                                .map((entry) => entry.input)
-                                .reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+                        const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+                        const itemTeamNormalized = normalizeTeamNameRef.current(item.teamName);
+                        const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
+                        const singleFallback = utilityInputByWorkerMonthSingleRef.current.get(monthWorkerKey);
+                        
+                        const monthWorkerEntries = ledgerEntriesMergedByMonthWorker.get(monthWorkerKey) || [];
+                        
+                        const teamMatchedInputs = monthWorkerEntries
+                            .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
+                            .map((entry) => entry.input);
+                        
+                        if (teamMatchedInputs.length > 1) {
+                            utilityInput = teamMatchedInputs.reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+                        } else if (teamMatchedInputs.length === 1) {
+                            utilityInput = teamMatchedInputs[0];
+                        } else if (singleFallback) {
+                            utilityInput = singleFallback;
+                        } else {
+                            const pRowsCount = paymentRowsCountByMonthWorker.get(`${item.month}__${item.workerId}`) || 0;
+                            if (pRowsCount === 1 && monthWorkerEntries.length > 0) {
+                                utilityInput = monthWorkerEntries
+                                    .map((entry) => entry.input)
+                                    .reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+                            }
                         }
                     }
-                }
 
                 const utilityLines = params.applyUtilities && utilityInput
                     ? buildUtilityDeductionLinesRef.current(utilityInput)
@@ -2682,11 +2696,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             });
         });
 
-        setInsuranceApplied(params.applyInsurance);
-        setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
-        setBusinessIncomeApplied(params.applyBusinessIncome);
-        setUtilitiesApplied(params.applyUtilities);
-        setDailyFeeApplied(params.applyDailyFee);
+            setInsuranceApplied(params.applyInsurance);
+            setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
+            setBusinessIncomeApplied(params.applyBusinessIncome);
+            setUtilitiesApplied(params.applyUtilities);
+            setDailyFeeApplied(params.applyDailyFee);
+        });
     }, [isEntryInWorkerTeamSite]);
 
     useEffect(() => {
@@ -3586,7 +3601,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const dailyWorkerFeePerManDayView = Math.max(0, Math.floor(toNumber(insuranceConfigView?.dailyWorkerFeePerManDay ?? 0)));
 
     return (
-        <div className="h-full flex flex-col p-2 w-full overflow-hidden">
+        <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
+            {isPending && (
+                <div className="absolute inset-0 z-[100] bg-white/50 backdrop-blur-sm flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-4xl text-blue-600" />
+                        <span className="text-slate-600 font-semibold text-lg">급여 계산을 적용하고 있습니다...</span>
+                    </div>
+                </div>
+            )}
             {!hideHeader && (
                 <div className="flex-shrink-0 bg-white border border-slate-200 rounded-lg shadow-sm px-2 py-1.5 mb-1.5">
                     <div className="flex flex-col gap-2">
