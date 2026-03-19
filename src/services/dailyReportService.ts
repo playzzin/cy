@@ -267,8 +267,52 @@ export const dailyReportService = {
     },
 
     getReportsBySite: async (siteId: string): Promise<DailyReport[]> => {
+        const normalizedTargetSiteId = String(siteId ?? '').trim();
+        if (!normalizedTargetSiteId) return [];
+
         const reports = await dailyReportService.getAllReports();
-        return reports.filter(report => report.siteId === siteId);
+
+        // 현장 ID 체계가 바뀐 경우(legacyId <-> id)에도 과거 일보를 함께 조회한다.
+        const { siteService } = await import('./siteService');
+        const allSites = await siteService.getSites();
+
+        const candidateSiteIds = new Set<string>();
+        const candidateSiteNames = new Set<string>();
+        candidateSiteIds.add(normalizedTargetSiteId);
+
+        let expanded = true;
+        while (expanded) {
+            expanded = false;
+            allSites.forEach((site) => {
+                const id = String(site.id ?? '').trim();
+                const legacyId = String(site.legacyId ?? '').trim();
+                if (!id && !legacyId) return;
+
+                const isLinked = (id && candidateSiteIds.has(id)) || (legacyId && candidateSiteIds.has(legacyId));
+                if (!isLinked) return;
+
+                if (id && !candidateSiteIds.has(id)) {
+                    candidateSiteIds.add(id);
+                    expanded = true;
+                }
+                if (legacyId && !candidateSiteIds.has(legacyId)) {
+                    candidateSiteIds.add(legacyId);
+                    expanded = true;
+                }
+
+                const name = String(site.name ?? '').trim();
+                if (name) candidateSiteNames.add(name);
+            });
+        }
+
+        return reports.filter((report) => {
+            const reportSiteId = String(report.siteId ?? '').trim();
+            if (reportSiteId && candidateSiteIds.has(reportSiteId)) return true;
+
+            // 일부 구 데이터가 siteId가 비정상인 경우를 대비해 siteName도 보조 매칭한다.
+            const reportSiteName = String(report.siteName ?? '').trim();
+            return !!reportSiteName && candidateSiteNames.has(reportSiteName);
+        });
     },
 
     syncReportsSalaryModel: async (): Promise<{ updated: number; errors: string[] }> => {
