@@ -14,6 +14,7 @@ import {
     faPenNib,
     faFlask,
     faChevronRight,
+    faChevronLeft,
     faUserGear,
     faHardDrive,
     faUserTie,
@@ -64,6 +65,7 @@ interface SidebarProps {
     isSidebarCollapsed: boolean;
     isMobile: boolean;
     openMobileSidebar: () => void;
+    toggleSidebar?: () => void;
     logoUrl?: string;
 }
 
@@ -98,6 +100,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     isSidebarCollapsed,
     isMobile,
     openMobileSidebar,
+    toggleSidebar,
     logoUrl
 }) => {
     const location = useLocation();
@@ -309,7 +312,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <>
             <nav id="sidebar" onMouseLeave={handleMouseLeaveNav} style={sidebarStyle} className={isCheongyeon ? 'cheongyeon-sidebar' : ''}>
                 <div className="sidebar-header">
-                    <div className="logo-group" onClick={handleLogoClick} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', width: '100%', overflow: 'hidden' }}>
+                    <div className="logo-group" onClick={(!isMobile && isSidebarCollapsed && toggleSidebar) ? toggleSidebar : handleLogoClick} title={(!isMobile && isSidebarCollapsed) ? '메뉴 펼치기' : undefined} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', flex: isSidebarCollapsed ? '0 0 100%' : '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
                         {logoUrl ? (
                             logoType === 'video' ? (
                                 <video 
@@ -318,26 +321,36 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     loop 
                                     muted 
                                     playsInline
-                                    style={{ height: '32px', width: 'auto', marginRight: '10px', borderRadius: '4px' }}
+                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', borderRadius: '4px' }}
                                 />
                             ) : (
                                 <img 
                                     src={logoUrl} 
                                     alt="Logo" 
-                                    style={{ height: '32px', width: 'auto', marginRight: '10px', objectFit: 'contain' }}
+                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', objectFit: 'contain' }}
                                 />
                             )
                         ) : (
                             <FontAwesomeIcon
                                 icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
                                 id="sidebar-logo-icon"
-                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: '10px' }}
+                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: isSidebarCollapsed ? '0' : '10px' }}
                             />
                         )}
                         <span id="sidebar-logo-text" className="logo-text" style={{ ...logoStyle, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
                             {currentSiteData.name}
                         </span>
                     </div>
+                    {/* PC 전용: 접기 버튼 (펼쳐진 상태일 때만 표시) */}
+                    {!isMobile && !isSidebarCollapsed && toggleSidebar && (
+                        <button
+                            className="sidebar-pc-toggle-btn"
+                            onClick={toggleSidebar}
+                            title="메뉴 접기"
+                        >
+                            <FontAwesomeIcon icon={faChevronLeft} />
+                        </button>
+                    )}
                     <button id="mobile-close-btn" onClick={closeAll} style={isCheongyeon ? { color: 'white' } : {}}>
                         <FontAwesomeIcon icon={faXmark} />
                     </button>

@@ -3032,6 +3032,61 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return rows;
     }, [allWorkers, allowedTeamIdsForWorkerFilter, pageViewMode, workerSearchText]);
 
+    const normalizeBankKey = useCallback((value: unknown): string => {
+        const collapsed = String(value ?? '')
+            .trim()
+            .replace(/\s+/g, '')
+            .replace(/[()\[\]{}]/g, '')
+            .toUpperCase();
+
+        return collapsed
+            .replace(/^\d{3}[-_]?/, '')
+            .replace(/[-_]?\d{3}$/, '');
+    }, []);
+
+    const bankCodeByName = useMemo(() => {
+        const map = new Map<string, string>();
+
+        Object.entries(BANK_CODES).forEach(([k, v]) => {
+            const key = String(k ?? '').trim();
+            const value = String(v ?? '').trim();
+
+            if (/^\d{3}$/.test(key)) {
+                // code -> name 형태
+                const normalizedName = normalizeBankKey(value);
+                if (normalizedName) map.set(normalizedName, key);
+                return;
+            }
+
+            if (/^\d{3}$/.test(value)) {
+                // name -> code 형태
+                const normalizedName = normalizeBankKey(key);
+                if (normalizedName) map.set(normalizedName, value);
+            }
+        });
+
+        // 자주 입력되는 별칭 보정
+        map.set('국민', '004');
+        map.set('국민은행', '004');
+        map.set('KB국민', '004');
+        map.set('KB국민은행', '004');
+
+        return map;
+    }, [normalizeBankKey]);
+
+    const resolveBankCode = useCallback((bankName?: string, bankCode?: string): string => {
+        const explicitCode = String(bankCode ?? '').trim();
+        if (/^\d{3}$/.test(explicitCode)) return explicitCode;
+
+        const rawBankName = String(bankName ?? '').trim();
+        if (/^\d{3}$/.test(rawBankName)) return rawBankName;
+
+        const normalizedName = normalizeBankKey(bankName);
+        if (!normalizedName) return '';
+
+        return bankCodeByName.get(normalizedName) ?? '';
+    }, [bankCodeByName, normalizeBankKey]);
+
 
 
 
@@ -3044,8 +3099,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             errors.bankName = true;
             isValid = false;
         }
-        if (!item.bankCode && item.bankName) {
-            if (!BANK_CODES[item.bankName]) {
+        if (!resolveBankCode(item.bankName, item.bankCode)) {
+            if (item.bankName) {
                 errors.bankCode = true;
                 isValid = false;
             }
@@ -3060,7 +3115,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         return { isValid, errors };
-    }, []);
+    }, [resolveBankCode]);
 
     const toggleRow = (itemId: string) => {
         const key = itemId;
@@ -3132,7 +3187,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         ];
 
         const rowData: (string | number)[][] = filteredPaymentData.map(item => [
-            item.bankCode,
+            resolveBankCode(item.bankName, item.bankCode),
             item.accountNumber,
             item.totalAmount,
             kbReceiverDisplay,
@@ -3248,7 +3303,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
 
             return {
-                은행코드: item.bankCode,
+                은행코드: resolveBankCode(item.bankName, item.bankCode),
                 계좌번호: item.accountNumber,
                 이체금액: amount,
                 받는분통장표시: kbReceiverDisplay,
@@ -3689,13 +3744,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 >
                                     개인
                                 </button>
-                                <button
-                                    type="button"
-                                    className="px-3 h-8 rounded-md text-[14px] font-bold text-slate-600 hover:text-slate-900 transition-colors"
-                                    onClick={handleResetFilters}
-                                >
-                                    초기화
-                                </button>
                             </div>
 
                             {filterMode === 'worker' && (
@@ -3921,7 +3969,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     })}
                                 />
                                 <ModernSwitch
-                                    label="해당팀 현장만 4대보험 공제"
+                                    label="해당팀 4대보험"
                                     checked={insuranceTeamSiteOnly}
                                     compact
                                     onChange={(value) => applyCalculatedDeductions({
@@ -3957,7 +4005,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     })}
                                 />
                                 <ModernSwitch
-                                    label="수수료 적용(일급제)"
+                                    label="수수료 적용"
                                     checked={dailyFeeApplied}
                                     compact
                                     onChange={(value) => applyCalculatedDeductions({

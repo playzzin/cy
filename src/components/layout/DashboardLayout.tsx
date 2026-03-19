@@ -494,6 +494,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             isSidebarCollapsed={isSidebarCollapsed}
                             isMobile={isMobile}
                             openMobileSidebar={() => setIsMobileOpen(true)}
+                            toggleSidebar={toggleSidebar}
                             logoUrl={systemConfig.logoUrl}
                         />
                     </ErrorBoundary>
@@ -567,6 +568,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         isSidebarCollapsed={isSidebarCollapsed}
                         isMobile={isMobile}
                         openMobileSidebar={() => setIsMobileOpen(true)}
+                        toggleSidebar={toggleSidebar}
                         logoUrl={systemConfig.logoUrl}
                     />
                 </ErrorBoundary>

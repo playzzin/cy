@@ -231,6 +231,25 @@ a {
     font-size: 18px;
 }
 
+/* PC 전용 사이드바 접기 버튼 */
+.sidebar-pc-toggle-btn {
+    display: none; /* 모바일에서는 숨김 */
+    align-items: center;
+    justify-content: center;
+    padding: 7px 9px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+    margin-left: 4px;
+}
+
+.sidebar-pc-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
 .menu-list-wrapper {
     flex: 1;
     overflow-y: auto;
@@ -653,6 +672,16 @@ a {
 
 /* Collapsed Sidebar (PC) */
 @media (min-width: 769px) {
+    /* 데스크퇱: 메인 헤더 햄버거 숨김 (사이드바 헤더의 버튼이 대신 담당) */
+    #sidebar-toggle {
+        display: none;
+    }
+
+    /* 사이드바 PC 접기 버튼 표시 */
+    .sidebar-pc-toggle-btn {
+        display: flex;
+    }
+
     .app.sidebar-collapsed #sidebar {
         width: var(--sidebar-collapsed-width);
     }
@@ -682,11 +711,18 @@ a {
     .app.sidebar-collapsed .menu-item>button {
         justify-content: center;
         padding: 15px 0;
+        border-left: none !important; /* 접힌 상태에서는 보더 제거하여 중앙 유지 */
+    }
+
+    .app.sidebar-collapsed .menu-item.active > a,
+    .app.sidebar-collapsed .menu-item.active > button {
+        background: rgba(26, 188, 156, 0.15); /* 보더 대신 배경으로 강조 */
+        padding-left: 0;
     }
 
     .app.sidebar-collapsed .menu-icon {
         margin-right: 0;
-        font-size: 1.2rem;
+        font-size: 1.25rem;
     }
 
     .app.sidebar-collapsed .sidebar-header {
@@ -694,13 +730,28 @@ a {
         padding: 0;
     }
 
+    .app.sidebar-collapsed .sidebar-pc-toggle-btn {
+        display: none;
+    }
+
     .app.sidebar-collapsed .logo-group {
-        justify-content: center;
         width: 100%;
+        justify-content: center;
     }
 
     .app.sidebar-collapsed #sidebar-logo-icon {
         margin-right: 0 !important;
+    }
+
+    /* 커스텀 이미지/비디오 로고 margin 제거 */
+    .app.sidebar-collapsed .logo-group img,
+    .app.sidebar-collapsed .logo-group video {
+        margin-right: 0 !important;
+    }
+
+    /* 접힌 비열 시 로고 호버 효과 (expand 힌트) */
+    .app.sidebar-collapsed .logo-group:hover {
+        opacity: 0.8;
     }
 
     /* Tooltips for Collapsed Sidebar */

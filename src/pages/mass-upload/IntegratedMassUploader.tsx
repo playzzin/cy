@@ -152,9 +152,9 @@ const TEMPLATE_FIELDS: Record<TemplateSheetType, { sheetName: string; fields: Te
             { label: '주소', aliases: [], example: '서울시 강남구 역삼동 123', description: '주소(선택)' },
             { label: '단가', aliases: ['일당', '임금', '급여'], example: '180000', description: '단가/일당/임금/급여 중 하나로 입력 가능. 숫자만 입력 권장' },
             { label: '급여방식', aliases: ['구분', '급여구분', '급여형태', '급여모델'], example: '일급제', description: '급여 방식', allowedValues: ['일급제', '주급제', '월급제', '지원팀', '용역팀', '가지급'] },
-            { label: '은행명', aliases: [], example: '국민은행', description: '은행명(선택)' },
-            { label: '계좌번호', aliases: [], example: '123-456-789012', description: '계좌번호(선택)' },
-            { label: '예금주', aliases: [], example: '홍길동', description: '예금주(선택)' },
+            { label: '은행명', aliases: ['은행', 'bankName', 'bank'], example: '국민은행', description: '은행명(선택)' },
+            { label: '계좌번호', aliases: ['계좌', '계좌번호(숫자)', 'accountNumber', 'account', 'accountNo', 'account_number'], example: '123-456-789012', description: '계좌번호(선택)' },
+            { label: '예금주', aliases: ['예금주명', '계좌주', 'accountHolder', 'holder'], example: '홍길동', description: '예금주(선택)' },
             { label: '팀구분', aliases: [], example: '일용직', description: '팀 구분(선택). 작업자 생성 시 teamType으로 저장' }
         ]
     },
@@ -558,6 +558,55 @@ const getCellByHeaderIncludes = (row: any, includes: string[]): unknown => {
         }
     }
     return undefined;
+};
+
+const getWorkerBankNameFromRow = (row: any): string => {
+    const direct = getCellString(
+        row?.['은행명']
+        ?? row?.['은행']
+        ?? row?.['bankName']
+        ?? row?.['bank']
+    );
+    if (direct) return direct;
+
+    return getCellString(getCellByHeaderIncludes(row, ['은행명', '은행', 'bankName', 'bank']));
+};
+
+const getWorkerAccountNumberFromRow = (row: any): string => {
+    const direct = getCellString(
+        row?.['계좌번호']
+        ?? row?.['계좌']
+        ?? row?.['계좌번호(숫자)']
+        ?? row?.['accountNumber']
+        ?? row?.['account']
+        ?? row?.['accountNo']
+        ?? row?.['account_number']
+    );
+    if (direct) return direct.replace(/\s+/g, '');
+
+    const guessed = getCellByHeaderIncludes(row, [
+        '계좌번호',
+        '계좌',
+        '계좌번호(숫자)',
+        'accountNumber',
+        'account',
+        'accountNo',
+        'account_number'
+    ]);
+    return getCellString(guessed).replace(/\s+/g, '');
+};
+
+const getWorkerAccountHolderFromRow = (row: any): string => {
+    const direct = getCellString(
+        row?.['예금주']
+        ?? row?.['예금주명']
+        ?? row?.['계좌주']
+        ?? row?.['accountHolder']
+        ?? row?.['holder']
+    );
+    if (direct) return direct;
+
+    return getCellString(getCellByHeaderIncludes(row, ['예금주', '예금주명', '계좌주', 'accountHolder', 'holder']));
 };
 
 const getSiteTypeRawFromSiteRow = (row: any): unknown => (
@@ -1259,15 +1308,15 @@ const analyzeWorkerMapping = async (fileRows: any[]): Promise<MappedRow[]> => {
             changes.push('주소 변경');
         }
 
-        const rowBankName = getCellString(row['은행명'] ?? row['은행']);
+        const rowBankName = getWorkerBankNameFromRow(row);
         if (rowBankName && rowBankName !== (existing.bankName ?? '')) {
             changes.push(`은행명: ${existing.bankName || '-'} → ${rowBankName}`);
         }
-        const rowAccountNumber = getCellString(row['계좌번호'] ?? row['계좌'] ?? row['계좌번호(숫자)']);
+        const rowAccountNumber = getWorkerAccountNumberFromRow(row);
         if (rowAccountNumber && rowAccountNumber !== (existing.accountNumber ?? '')) {
             changes.push('계좌번호 변경');
         }
-        const rowAccountHolder = getCellString(row['예금주'] ?? row['예금주명']);
+        const rowAccountHolder = getWorkerAccountHolderFromRow(row);
         if (rowAccountHolder && rowAccountHolder !== (existing.accountHolder ?? '')) {
             changes.push(`예금주: ${existing.accountHolder || '-'} → ${rowAccountHolder}`);
         }
@@ -1602,7 +1651,8 @@ const IntegratedMassUploader: React.FC = () => {
                     });
                     if (sheetName) {
                         const ws = wb.Sheets[sheetName];
-                        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '' });
+                        // raw:false로 읽어 긴 숫자/선행 0이 포함된 계좌번호를 표시 문자열 기준으로 보존한다.
+                        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
                         const normalizedData = rawData.map((row: any) => normalizeExcelRowKeys(row));
                         const headerMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
                         const headers = (headerMatrix?.[0] ?? [])
@@ -2156,9 +2206,9 @@ const IntegratedMassUploader: React.FC = () => {
 
                 const unitPrice = getUnitPriceFromRow(row);
 
-                const bankName = getCellString(row?.['은행명'] ?? row?.['은행']);
-                const accountNumber = getCellString(row?.['계좌번호'] ?? row?.['계좌'] ?? row?.['계좌번호(숫자)']);
-                const accountHolder = getCellString(row?.['예금주'] ?? row?.['예금주명']);
+                const bankName = getWorkerBankNameFromRow(row);
+                const accountNumber = getWorkerAccountNumberFromRow(row);
+                const accountHolder = getWorkerAccountHolderFromRow(row);
 
                 const existing = workersByName.get(name);
                 if (item.action === 'CREATE') {
