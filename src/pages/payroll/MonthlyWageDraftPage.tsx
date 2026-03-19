@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef, useTransition } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import styled from 'styled-components';
 import { dailyReportService } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -24,6 +24,7 @@ import { PayslipTemplate } from './components/PayslipTemplate';
 import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
 import type { MonthlyAdvanceLedgerHandle } from './components/MonthlyAdvanceLedger';
 import Swal from 'sweetalert2';
+import { PayrollToolbar } from './components/PayrollToolbar';
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
@@ -431,80 +432,6 @@ const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' | 'dange
     }
 `;
 
-// --- Modern Switch Component ---
-const SwitchWrapper = styled.label<{ $checked: boolean }>`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-width: 132px;
-    padding: 8px 10px;
-    border-radius: 12px;
-    border: 1px solid ${props => (props.$checked ? 'rgba(37, 99, 235, 0.24)' : 'rgba(226, 232, 240, 0.95)')};
-    background: ${props => (props.$checked
-        ? 'linear-gradient(135deg, rgba(219, 234, 254, 0.96) 0%, rgba(239, 246, 255, 0.94) 100%)'
-        : 'rgba(255, 255, 255, 0.96)')};
-    box-shadow: ${props => (props.$checked ? '0 18px 34px -28px rgba(37, 99, 235, 0.32)' : 'none')};
-    cursor: pointer;
-    user-select: none;
-    transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
-
-    &:hover {
-        transform: translateY(-1px);
-    }
-`;
-
-const SwitchTextGroup = styled.span`
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-`;
-
-const SwitchInput = styled.input`
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-`;
-
-const SwitchLabel = styled.span`
-    font-size: 15px;
-    font-weight: 800;
-    color: #0f172a;
-`;
-
-const SwitchState = styled.span<{ $checked: boolean }>`
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: ${props => (props.$checked ? '#2563eb' : '#94a3b8')};
-`;
-
-const Slider = styled.span<{ $checked: boolean }>`
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    width: 38px;
-    height: 22px;
-    flex-shrink: 0;
-    border-radius: 999px;
-    background: ${props => (props.$checked ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : '#cbd5e1')};
-    transition: background 0.2s ease;
-
-    &::before {
-        content: '';
-        position: absolute;
-        top: 3px;
-        left: ${props => (props.$checked ? '19px' : '3px')};
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: white;
-        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
-        transition: left 0.2s ease;
-    }
-`;
-
 const KBPreviewOverlay = styled.div`
     position: fixed;
     inset: 0;
@@ -690,30 +617,6 @@ const KBPreviewSummary = styled.span`
     font-size: 14px;
     color: #cbd5e1;
 `;
-
-interface ModernSwitchProps {
-    label: string;
-    checked: boolean;
-    onChange: (checked: boolean) => void;
-    compact?: boolean;
-}
-
-const ModernSwitch: React.FC<ModernSwitchProps> = ({ label, checked, onChange, compact = false }) => (
-    <div style={compact ? { transform: 'scale(1)', transformOrigin: 'left center' } : undefined}>
-        <SwitchWrapper $checked={checked}>
-            <SwitchTextGroup>
-                <SwitchLabel>{label}</SwitchLabel>
-                <SwitchState $checked={checked}>{checked ? '적용' : '해제'}</SwitchState>
-            </SwitchTextGroup>
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <SwitchInput type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-                <Slider $checked={checked} />
-            </div>
-        </SwitchWrapper>
-    </div>
-);
-
-
 
 const buildStandardDeductionLabelMap = (): Record<string, string> =>
     STANDARD_DEDUCTION_FIELDS.reduce<Record<string, string>>((acc, { key, label }) => {
@@ -1639,7 +1542,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [withholdingApplyAllLaborInput, setWithholdingApplyAllLaborInput] = useState<boolean>(true);
     const [employmentApplyBelowThresholdInput, setEmploymentApplyBelowThresholdInput] = useState<boolean>(true);
 
-    const [isPending, startTransition] = useTransition();
+    const [deductionApplyInProgress, setDeductionApplyInProgress] = useState(false);
 
     const [insuranceApplied, setInsuranceApplied] = useState<boolean>(false);
     const [insuranceTeamSiteOnly, setInsuranceTeamSiteOnly] = useState<boolean>(false);
@@ -1653,6 +1556,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
     const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
     const [kbAmountType, setKbAmountType] = useState<string>('totalAmount');
+    const applyRunSeqRef = React.useRef(0);
+    const applyWatchdogRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const companyNameById = useMemo<Record<string, string>>(() => {
         const map: Record<string, string> = {};
@@ -1955,7 +1860,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
 
             if (!rangeAnchorMonth) {
-                setRangeAnchorMonth(safe);
+                setRangeAnchorMonth('');
                 setStartMonth(safe);
                 setEndMonth(safe);
                 return;
@@ -2508,6 +2413,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     // useRef로 최신 상태 액세스 - 의존성 없이 항상 최신값 사용
     const basePaymentDataRef = React.useRef(basePaymentData);
     const paymentDataRef = React.useRef(paymentData);
+    // 세금 계산 결과 영속 캐시 - basePaymentData 교체 시 초기화
+    const persistentTaxCacheRef = React.useRef<Map<string, any>>(new Map());
+    // 연속 토글 디바운스 타이머
+    const applyDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const payrollConfigRef = React.useRef(payrollConfig);
     const normalizeTeamNameRef = React.useRef(normalizeTeamName);
     const buildUtilityDeductionLinesRef = React.useRef(buildUtilityDeductionLines);
@@ -2522,7 +2431,36 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const utilityInputByWorkerMonthSingleRef = React.useRef(utilityInputByWorkerMonthSingle);
     const mergeUtilityInputRef = React.useRef(mergeUtilityInput);
 
+    const clearApplyWatchdog = useCallback(() => {
+        if (applyWatchdogRef.current !== null) {
+            clearTimeout(applyWatchdogRef.current);
+            applyWatchdogRef.current = null;
+        }
+    }, []);
+
+    const markApplyStarted = useCallback((seq: number) => {
+        setDeductionApplyInProgress(true);
+        clearApplyWatchdog();
+        // 비정상 루프가 생겨도 오버레이가 영구 고정되지 않도록 최대 표시시간을 둔다.
+        applyWatchdogRef.current = setTimeout(() => {
+            if (applyRunSeqRef.current === seq) {
+                setDeductionApplyInProgress(false);
+            }
+            applyWatchdogRef.current = null;
+        }, 15000);
+    }, [clearApplyWatchdog]);
+
+    const markApplyFinished = useCallback((seq: number) => {
+        if (applyRunSeqRef.current !== seq) return;
+        clearApplyWatchdog();
+        setDeductionApplyInProgress(false);
+    }, [clearApplyWatchdog]);
+
     React.useEffect(() => {
+        // basePaymentData 참조가 달라지면(새 조회) 세금 캐시를 초기화한다
+        if (basePaymentDataRef.current !== basePaymentData) {
+            persistentTaxCacheRef.current.clear();
+        }
         basePaymentDataRef.current = basePaymentData;
         paymentDataRef.current = paymentData;
         payrollConfigRef.current = payrollConfig;
@@ -2540,38 +2478,56 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         mergeUtilityInputRef.current = mergeUtilityInput;
     }, [basePaymentData, paymentData, payrollConfig, normalizeTeamName, buildUtilityDeductionLines, mergeDeductionBreakdownWithLines, calculateWorkEntryTaxBreakdown, rebuildDeductionBreakdown, stripTemporaryDeductionLines, stripTemporaryTaxLines, ledgerInputs, ledgerRowsData, utilityInputByPaymentRowKey, utilityInputByWorkerMonthSingle, mergeUtilityInput]);
 
+    React.useEffect(() => {
+        return () => {
+            if (applyDebounceRef.current !== null) {
+                clearTimeout(applyDebounceRef.current);
+                applyDebounceRef.current = null;
+            }
+            clearApplyWatchdog();
+        };
+    }, [clearApplyWatchdog]);
+
     const applyCalculatedDeductions = useCallback((params: {
         applyInsurance: boolean;
         applyBusinessIncome: boolean;
         applyUtilities: boolean;
         applyDailyFee: boolean;
         applyInsuranceTeamSiteOnly: boolean;
+        immediate?: boolean;
     }) => {
-        // useRef에서 최신값 액세스 - 자체 의존성 없음
         const config = payrollConfigRef.current;
         if ((params.applyInsurance || params.applyBusinessIncome || params.applyDailyFee) && !config) {
             alert('설정(4대보험/세율)을 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
             return;
         }
 
-        startTransition(() => {
-            setPaymentData((prev) => {
-                const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : prev;
+        const runSeq = applyRunSeqRef.current + 1;
+        applyRunSeqRef.current = runSeq;
+        markApplyStarted(runSeq);
+
+        if (applyDebounceRef.current !== null) {
+            clearTimeout(applyDebounceRef.current);
+            applyDebounceRef.current = null;
+        }
+
+        const delay = params.immediate ? 0 : 150;
+        applyDebounceRef.current = setTimeout(() => {
+            if (runSeq !== applyRunSeqRef.current) return;
+            applyDebounceRef.current = null;
+
+            try {
+                const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : paymentDataRef.current;
                 const ledgerInputsMap = ledgerInputsRef.current;
-                const ledgerRowsData = ledgerRowsDataRef.current;
                 const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(config?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
-                
-                // O(1) 조회를 위한 그룹화 (매번 필터/find 도는 것을 방지)
+
                 const ledgerEntriesMergedByMonthWorker = new Map<string, { team: string | undefined, input: any }[]>();
                 Object.entries(ledgerInputsMap).forEach(([ledgerRowKey, manual]) => {
                     const parts = ledgerRowKey.split('__');
                     if (parts.length < 4) return;
                     const [month, workerId, teamName, salaryModelStr] = parts;
-                    
-                    // team 정규화: row 속성을 기반으로 하거나 ledgerRowKey 자체 값 이용
-                    // 성능 최적화: ledgerRowsData에서 매번 find하지 않고, ledgerRowKey의 team 명을 정규화한다.
                     const team = normalizeTeamNameRef.current(teamName);
-                    
+
                     const groupKey = `${month}__${workerId}__${salaryModelStr}`;
                     let group = ledgerEntriesMergedByMonthWorker.get(groupKey);
                     if (!group) {
@@ -2582,12 +2538,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 });
 
                 const paymentRowsCountByMonthWorker = new Map<string, number>();
-                basePD.forEach(row => {
+                basePD.forEach((row) => {
                     const key = `${row.month}__${row.workerId}`;
                     paymentRowsCountByMonthWorker.set(key, (paymentRowsCountByMonthWorker.get(key) || 0) + 1);
                 });
 
-                return basePD.map((item) => {
+                const taxCache = persistentTaxCacheRef.current;
+
+                const newPaymentData = basePD.map((item) => {
                     const sourceDeductionBreakdown = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
                     const baseDeductionBreakdown = rebuildDeductionBreakdownRef.current({
                         standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
@@ -2595,11 +2553,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     });
                     const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
 
-                    // utility input 직접 해결 (인라인)
                     const itemRowKey = item.id;
                     const direct = itemRowKey ? (ledgerInputsMap[itemRowKey] as any) : undefined;
                     const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
-                    
+
                     let utilityInput: any = undefined;
                     if (direct) {
                         utilityInput = direct;
@@ -2610,13 +2567,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         const itemTeamNormalized = normalizeTeamNameRef.current(item.teamName);
                         const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
                         const singleFallback = utilityInputByWorkerMonthSingleRef.current.get(monthWorkerKey);
-                        
+
                         const monthWorkerEntries = ledgerEntriesMergedByMonthWorker.get(monthWorkerKey) || [];
-                        
+
                         const teamMatchedInputs = monthWorkerEntries
                             .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
                             .map((entry) => entry.input);
-                        
+
                         if (teamMatchedInputs.length > 1) {
                             utilityInput = teamMatchedInputs.reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
                         } else if (teamMatchedInputs.length === 1) {
@@ -2633,98 +2590,117 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         }
                     }
 
-                const utilityLines = params.applyUtilities && utilityInput
-                    ? buildUtilityDeductionLinesRef.current(utilityInput)
-                    : [];
-                const dailyFeeLines = buildDailyFeeDeductionLines({
-                    item,
-                    applyDailyFee: params.applyDailyFee,
-                    dailyFeePerManDay,
-                });
-                const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
-
-                const nextDeductionBreakdown = (params.applyUtilities || params.applyDailyFee)
-                    ? mergeDeductionBreakdownWithLinesRef.current(baseDeductionBreakdown, deductionAppliedLines)
-                    : sourceDeductionBreakdown;
-
-                let nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
-                    standardLines: [],
-                    additionalLines: [...(baseTaxBreakdown.additionalLines ?? [])],
-                });
-                let taxRateSnapshot: any = undefined;
-                let insuranceAppliedSummary: any = undefined;
-                let withholdingAppliedSummary: any = undefined;
-                let businessIncomeAppliedSummary: any = undefined;
-
-                if (config && (params.applyInsurance || params.applyBusinessIncome)) {
-                    const calculatedTax = calculateWorkEntryTaxBreakdownRef.current({
-                        workEntries: item.workEntries ?? [],
-                        payrollConfig: config,
-                        applyInsurance: params.applyInsurance,
-                        applyBusinessIncome: params.applyBusinessIncome,
-                        normalizeSiteName: normalizeTeamNameRef.current,
-                        withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
-                        isInsuranceEligibleEntry: params.applyInsuranceTeamSiteOnly
-                            ? (entry) => isEntryInWorkerTeamSite(entry, item.teamId, item.teamName)
-                            : undefined,
+                    const utilityLines = params.applyUtilities && utilityInput
+                        ? buildUtilityDeductionLinesRef.current(utilityInput)
+                        : [];
+                    const dailyFeeLines = buildDailyFeeDeductionLines({
+                        item,
+                        applyDailyFee: params.applyDailyFee,
+                        dailyFeePerManDay,
                     });
+                    const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
 
-                    nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
+                    const nextDeductionBreakdown = (params.applyUtilities || params.applyDailyFee)
+                        ? mergeDeductionBreakdownWithLinesRef.current(baseDeductionBreakdown, deductionAppliedLines)
+                        : sourceDeductionBreakdown;
+
+                    let nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
                         standardLines: [],
-                        additionalLines: [...(baseTaxBreakdown.additionalLines ?? []), ...calculatedTax.taxAdditionalLines],
+                        additionalLines: [...(baseTaxBreakdown.additionalLines ?? [])],
                     });
-                    taxRateSnapshot = calculatedTax.taxRateSnapshot;
-                    insuranceAppliedSummary = calculatedTax.insuranceAppliedSummary;
-                    withholdingAppliedSummary = calculatedTax.withholdingAppliedSummary;
-                    businessIncomeAppliedSummary = calculatedTax.businessIncomeAppliedSummary;
-                }
+                    let taxRateSnapshot: any = undefined;
+                    let insuranceAppliedSummary: any = undefined;
+                    let withholdingAppliedSummary: any = undefined;
+                    let businessIncomeAppliedSummary: any = undefined;
 
-                const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
-                const nextTotalAmount = item.grossAmount - nextTotalDeduction;
+                    if (config && (params.applyInsurance || params.applyBusinessIncome)) {
+                        const entriesLen = item.workEntries?.length ?? 0;
+                        const cacheKey = `${item.workerId}__${item.month}__${entriesLen}__${params.applyInsurance}__${params.applyBusinessIncome}__${params.applyInsuranceTeamSiteOnly}__${params.applyInsuranceTeamSiteOnly ? (item.teamId ?? '') : ''}`;
 
-                return {
-                    ...item,
-                    deductionBreakdown: nextDeductionBreakdown,
-                    taxBreakdown: nextTaxBreakdown,
-                    taxRateSnapshot: taxRateSnapshot,
-                    insuranceAppliedSummary,
-                    withholdingAppliedSummary,
-                    businessIncomeAppliedSummary,
-                    totalDeduction: nextTotalDeduction,
-                    totalAmount: nextTotalAmount,
-                };
-            });
-        });
+                        let calculatedTax = taxCache.get(cacheKey);
+                        if (!calculatedTax) {
+                            calculatedTax = calculateWorkEntryTaxBreakdownRef.current({
+                                workEntries: item.workEntries ?? [],
+                                payrollConfig: config,
+                                applyInsurance: params.applyInsurance,
+                                applyBusinessIncome: params.applyBusinessIncome,
+                                normalizeSiteName: normalizeTeamNameRef.current,
+                                withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
+                                isInsuranceEligibleEntry: params.applyInsuranceTeamSiteOnly
+                                    ? (entry) => isEntryInWorkerTeamSite(entry, item.teamId, item.teamName)
+                                    : undefined,
+                            });
+                            taxCache.set(cacheKey, calculatedTax);
+                        }
 
-            setInsuranceApplied(params.applyInsurance);
-            setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
-            setBusinessIncomeApplied(params.applyBusinessIncome);
-            setUtilitiesApplied(params.applyUtilities);
-            setDailyFeeApplied(params.applyDailyFee);
-        });
-    }, [isEntryInWorkerTeamSite]);
+                        nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
+                            standardLines: [],
+                            additionalLines: [...(baseTaxBreakdown.additionalLines ?? []), ...calculatedTax.taxAdditionalLines],
+                        });
+                        taxRateSnapshot = calculatedTax.taxRateSnapshot;
+                        insuranceAppliedSummary = calculatedTax.insuranceAppliedSummary;
+                        withholdingAppliedSummary = calculatedTax.withholdingAppliedSummary;
+                        businessIncomeAppliedSummary = calculatedTax.businessIncomeAppliedSummary;
+                    }
 
-    useEffect(() => {
-        // 스위치 상태가 바뀌었을 때만 명세서 금액을 재계산한다.
-        const isApplyingAny = insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied;
-        if (!isApplyingAny) return;
-        applyCalculatedDeductions({
-            applyInsurance: insuranceApplied,
-            applyBusinessIncome: businessIncomeApplied,
-            applyUtilities: utilitiesApplied,
-            applyDailyFee: dailyFeeApplied,
-            applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-        });
+                    const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
+                    const nextTotalAmount = item.grossAmount - nextTotalDeduction;
+
+                    if (
+                        item.totalDeduction === nextTotalDeduction &&
+                        item.totalAmount === nextTotalAmount &&
+                        item.deductionBreakdown === nextDeductionBreakdown &&
+                        item.taxBreakdown === nextTaxBreakdown &&
+                        item.taxRateSnapshot === taxRateSnapshot &&
+                        item.insuranceAppliedSummary === insuranceAppliedSummary &&
+                        item.withholdingAppliedSummary === withholdingAppliedSummary &&
+                        item.businessIncomeAppliedSummary === businessIncomeAppliedSummary
+                    ) {
+                        return item;
+                    }
+
+                    return {
+                        ...item,
+                        deductionBreakdown: nextDeductionBreakdown,
+                        taxBreakdown: nextTaxBreakdown,
+                        taxRateSnapshot,
+                        insuranceAppliedSummary,
+                        withholdingAppliedSummary,
+                        businessIncomeAppliedSummary,
+                        totalDeduction: nextTotalDeduction,
+                        totalAmount: nextTotalAmount,
+                    };
+                });
+
+                if (runSeq !== applyRunSeqRef.current) return;
+
+                setPaymentData(newPaymentData);
+                setInsuranceApplied(params.applyInsurance);
+                setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
+                setBusinessIncomeApplied(params.applyBusinessIncome);
+                setUtilitiesApplied(params.applyUtilities);
+                setDailyFeeApplied(params.applyDailyFee);
+
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        markApplyFinished(runSeq);
+                    }, 0);
+                });
+            } catch (error) {
+                console.error('Failed to apply calculated deductions:', error);
+                markApplyFinished(runSeq);
+            }
+        }, delay);
     }, [
-        applyCalculatedDeductions,
-        businessIncomeApplied,
-        dailyFeeApplied,
-        insuranceApplied,
-        insuranceTeamSiteOnly,
-        utilitiesApplied,
+        isEntryInWorkerTeamSite,
+        markApplyFinished,
+        markApplyStarted,
     ]);
 
     const openPayslipPreview = useCallback(() => {
+        if (filteredPaymentData.length === 0) return;
+
+        // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
         if (filteredPaymentData.length === 0) return;
 
         // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
@@ -2735,6 +2711,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 applyUtilities: utilitiesApplied,
                 applyDailyFee: dailyFeeApplied,
                 applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
+                immediate: true, // 모달 오픈 전 즉시 반영
             });
         }
 
@@ -2889,6 +2866,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     applyUtilities: utilitiesApplied,
                     applyDailyFee: dailyFeeApplied,
                     applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
+                    immediate: true, // 설정 저장 후 즉시 반영
                 });
             }
         } catch (error) {
@@ -3046,6 +3024,176 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         return rows;
     }, [allWorkers, allowedTeamIdsForWorkerFilter, pageViewMode, workerSearchText]);
+
+    // ★ 행별 표시 데이터 캐시 - 렌더 루프 안에서 매번 재계산하던 수십 개의 계산값을
+    //    여기서 한 번만 처리한다. expandedRows 토글 같은 무관한 상태 변경 시 완전히 건너뜀.
+    const rowDisplayCache = useMemo(() => {
+        const cache = new Map<string, {
+            deductionBreakdownForDisplay: DeductionBreakdown;
+            advanceLinesForDisplay: DeductionLine[];
+            nonAdvanceDeductionLinesForDisplay: DeductionLine[];
+            advanceTotalForDisplay: number;
+            nonAdvanceDeductionTotalForDisplay: number;
+            hasNonAdvanceDeductionLines: boolean;
+            hasAdvanceLines: boolean;
+            taxLinesForItem: DeductionLine[];
+            taxTotalForDisplay: number;
+            totalDeductionForDisplay: number;
+            totalAmountForDisplay: number;
+            insuranceTaxLines: DeductionLine[];
+            withholdingTaxLines: DeductionLine[];
+            businessTaxLines: DeductionLine[];
+            otherTaxLines: DeductionLine[];
+            insuranceSectionTaxTotal: number;
+            withholdingSectionTaxTotal: number;
+            businessSectionTaxTotal: number;
+            otherTaxTotal: number;
+            insuranceAfterTaxAmount: number;
+            withholdingGrossAmount: number;
+            withholdingAfterTaxAmount: number;
+            businessAfterTaxAmount: number;
+            showInsuranceSection: boolean;
+            hasInsuranceTargetSummary: boolean;
+            withholdingDetailText: string;
+        }>();
+
+        const baseRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+        const baseRowsById = new Map<string, PaymentData>();
+        baseRows.forEach((row) => {
+            baseRowsById.set(row.id, row);
+        });
+
+        const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
+
+        filteredPaymentData.forEach((item) => {
+            const baseItemForDisplay = baseRowsById.get(item.id) ?? item;
+
+            // utility input 해결 (state 값 직접 사용)
+            const directUtility = ledgerInputs[item.id] as LedgerUtilityInputLike | undefined;
+            const mappedUtility = utilityInputByPaymentRowKey.get(item.id);
+            let utilityInputForDisplay: LedgerUtilityInputLike | undefined = directUtility ?? mappedUtility;
+            if (!utilityInputForDisplay) {
+                const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+                const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
+                utilityInputForDisplay = utilityInputByWorkerMonthSingle.get(monthWorkerKey);
+            }
+
+            const utilityLinesForDisplay = utilitiesApplied ? buildUtilityDeductionLines(utilityInputForDisplay) : [];
+            const dailyFeeLinesForDisplay = buildDailyFeeDeductionLines({
+                item,
+                applyDailyFee: dailyFeeApplied,
+                dailyFeePerManDay,
+            });
+            const deductionAppliedLines = [...utilityLinesForDisplay, ...dailyFeeLinesForDisplay];
+
+            const sourceDeduction = stripTemporaryDeductionLines(baseItemForDisplay.deductionBreakdown);
+            const baseDeduction = rebuildDeductionBreakdown({
+                standardLines: (sourceDeduction.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                additionalLines: (sourceDeduction.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+            });
+            const deductionBreakdownForDisplay = (utilitiesApplied || dailyFeeApplied)
+                ? mergeDeductionBreakdownWithLines(baseDeduction, deductionAppliedLines)
+                : sourceDeduction;
+
+            const deductionLines = [
+                ...(deductionBreakdownForDisplay.standardLines ?? []),
+                ...(deductionBreakdownForDisplay.additionalLines ?? []),
+            ];
+            const advanceLinesForDisplay = deductionLines.filter((line) =>
+                advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+            );
+            const nonAdvanceDeductionLinesForDisplay = deductionLines.filter((line) =>
+                !advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+            );
+            const advanceTotalForDisplay = advanceLinesForDisplay.reduce((sum, l) => sum + toNumber(l.amount), 0);
+            const nonAdvanceDeductionTotalForDisplay = nonAdvanceDeductionLinesForDisplay.reduce((sum, l) => sum + toNumber(l.amount), 0);
+
+            const taxLinesForItem = getTaxLinesForItem(item);
+            const taxTotalForDisplay = taxLinesForItem.reduce((sum, l) => sum + toNumber(l.amount), 0);
+            const totalDeductionForDisplay = deductionBreakdownForDisplay.total + taxTotalForDisplay;
+            const totalAmountForDisplay = item.grossAmount - totalDeductionForDisplay;
+
+            const insuranceTaxLines: DeductionLine[] = [];
+            const withholdingTaxLines: DeductionLine[] = [];
+            const businessTaxLines: DeductionLine[] = [];
+            const otherTaxLines: DeductionLine[] = [];
+
+            let insuranceSectionTaxTotal = 0;
+            let withholdingSectionTaxTotal = 0;
+            let businessSectionTaxTotal = 0;
+            let otherTaxTotal = 0;
+
+            taxLinesForItem.forEach((line) => {
+                const amount = toNumber(line.amount);
+                if (isInsuranceSectionTaxLabel(line.label)) {
+                    insuranceTaxLines.push(line);
+                    insuranceSectionTaxTotal += amount;
+                    return;
+                }
+                if (isWithholdingSectionTaxLabel(line.label)) {
+                    withholdingTaxLines.push(line);
+                    withholdingSectionTaxTotal += amount;
+                    return;
+                }
+                if (isBusinessSectionTaxLabel(line.label)) {
+                    businessTaxLines.push(line);
+                    businessSectionTaxTotal += amount;
+                    return;
+                }
+                otherTaxLines.push(line);
+                otherTaxTotal += amount;
+            });
+
+            const insuranceAfterTaxAmount = Math.max(0, Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal));
+            const withholdingGrossAmount = item.withholdingAppliedSummary
+                ? toNumber(item.withholdingAppliedSummary.grossAmount ?? item.withholdingAppliedSummary.appliedAmount)
+                : 0;
+            const withholdingAfterTaxAmount = Math.max(0, Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal));
+            const businessAfterTaxAmount = Math.max(0, Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
+
+            cache.set(item.id, {
+                deductionBreakdownForDisplay,
+                advanceLinesForDisplay,
+                nonAdvanceDeductionLinesForDisplay,
+                advanceTotalForDisplay,
+                nonAdvanceDeductionTotalForDisplay,
+                hasNonAdvanceDeductionLines: nonAdvanceDeductionLinesForDisplay.length > 0,
+                hasAdvanceLines: advanceLinesForDisplay.length > 0,
+                taxLinesForItem,
+                taxTotalForDisplay,
+                totalDeductionForDisplay,
+                totalAmountForDisplay,
+                insuranceTaxLines,
+                withholdingTaxLines,
+                businessTaxLines,
+                otherTaxLines,
+                insuranceSectionTaxTotal,
+                withholdingSectionTaxTotal,
+                businessSectionTaxTotal,
+                otherTaxTotal,
+                insuranceAfterTaxAmount,
+                withholdingGrossAmount,
+                withholdingAfterTaxAmount,
+                businessAfterTaxAmount,
+                showInsuranceSection: insuranceTaxLines.length > 0,
+                hasInsuranceTargetSummary: Boolean(item.insuranceAppliedSummary && item.insuranceAppliedSummary.appliedManDay > 0),
+                withholdingDetailText: resolveWithholdingDetailText(item.taxRateSnapshot),
+            });
+        });
+
+        return cache;
+    }, [
+        advanceLabelSet,
+        basePaymentData,
+        dailyFeeApplied,
+        filteredPaymentData,
+        ledgerInputs,
+        paymentData,
+        payrollConfig,
+        utilityInputByPaymentRowKey,
+        utilityInputByWorkerMonthSingle,
+        utilitiesApplied,
+    ]);
 
     const normalizeBankKey = useCallback((value: unknown): string => {
         const collapsed = String(value ?? '')
@@ -3539,6 +3687,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         setBatchDownloading(true);
+
+        // batchDownloading=true 설정 후 React가 PayslipTemplate들을 마운트할 때까지 대기
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
         const zip = new JSZip();
         const folder = zip.folder(`노임명세서_${rangeLabel || currentYearMonth}_${selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name : '전체'}`);
 
@@ -3600,9 +3752,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     ) / 100;
     const dailyWorkerFeePerManDayView = Math.max(0, Math.floor(toNumber(insuranceConfigView?.dailyWorkerFeePerManDay ?? 0)));
 
+
     return (
         <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
-            {isPending && (
+            {deductionApplyInProgress && (
                 <div className="absolute inset-0 z-[100] bg-white/50 backdrop-blur-sm flex items-center justify-center">
                     <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
                         <FontAwesomeIcon icon={faSpinner} className="animate-spin text-4xl text-blue-600" />
@@ -3610,623 +3763,99 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     </div>
                 </div>
             )}
+
+
             {!hideHeader && (
-                <div className="flex-shrink-0 bg-white border border-slate-200 rounded-lg shadow-sm px-2 py-1.5 mb-1.5">
-                    <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-1.5">
-                            <div className="bg-rose-100 text-rose-600 p-1 rounded-md">
-                                <FontAwesomeIcon icon={faCalendarDays} className="text-sm" />
-                            </div>
-                            <div>
-                                <h1 className="text-xl font-bold text-slate-800 leading-tight">통합급여관리</h1>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-1.5 text-base min-w-0 overflow-visible">
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-1.5 py-1">
-                                <div className="flex flex-wrap items-center gap-1">
-                                    <span className="font-semibold text-slate-700 mr-1">정산기간</span>
-
-                                    <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMonthModeChange('single')}
-                                            className={`px-3 h-8 rounded-md text-[14px] font-bold transition-colors ${monthSelectionMode === 'single' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                        >
-                                            해당달
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleMonthModeChange('range')}
-                                            className={`px-3 h-8 rounded-md text-[14px] font-bold transition-colors ${monthSelectionMode === 'range' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                        >
-                                            기간
-                                        </button>
-                                    </div>
-
-                                    <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1">
-                                        <button
-                                            type="button"
-                                            onClick={() => setYearCursor(shiftYearMonth(yearCursor, -12))}
-                                            className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
-                                            aria-label="이전 연도"
-                                        >
-                                            <FontAwesomeIcon icon={faChevronLeft} className="text-[12px]" />
-                                        </button>
-                                        <span className="min-w-[66px] text-center text-[14px] font-bold text-slate-700">{formatYearMonthParts(yearCursor).year}년</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => setYearCursor(shiftYearMonth(yearCursor, 12))}
-                                            className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-800"
-                                            aria-label="다음 연도"
-                                        >
-                                            <FontAwesomeIcon icon={faChevronRight} className="text-[12px]" />
-                                        </button>
-                                    </div>
-
-                                    <button
-                                        type="button"
-                                        onClick={handleSelectPrevMonth}
-                                        className={`h-8 rounded-md border px-3 text-[14px] font-bold transition-colors ${startMonth === prevYearMonth && endMonth === prevYearMonth ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
-                                    >
-                                        전달
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleSelectCurrentMonth}
-                                        className={`h-8 rounded-md border px-3 text-[14px] font-bold transition-colors ${startMonth === currentYearMonth && endMonth === currentYearMonth ? 'border-blue-500 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
-                                    >
-                                        이달
-                                    </button>
-
-                                    <div className="flex flex-wrap items-center gap-1 px-1 border-l border-slate-200">
-                                    {Array.from({ length: 12 }, (_, i) => i + 1).map((monthNumber) => {
-                                        const year = formatYearMonthParts(yearCursor).year;
-                                        const ym = `${year}-${String(monthNumber).padStart(2, '0')}`;
-                                        const isInRange = monthRangeSet.has(ym);
-                                        const isActive = startMonth === ym || endMonth === ym;
-                                        const isAnchor = monthSelectionMode === 'range' && rangeAnchorMonth === ym;
-
-                                        return (
-                                            <button
-                                                key={`top-month-${monthNumber}`}
-                                                type="button"
-                                                onClick={() => handleMonthButtonSelect(ym)}
-                                                className={`h-7 min-w-[32px] rounded-md border px-2 text-[13px] font-bold transition-colors ${isActive || isAnchor ? 'border-blue-500 bg-blue-600 text-white' : isInRange ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
-                                            >
-                                                {monthNumber}
-                                            </button>
-                                        );
-                                    })}
-                                    </div>
-
-                                    <span className="ml-1 rounded-md border border-slate-200 bg-white px-3 py-1 text-[14px] font-semibold text-slate-700">
-                                        {rangeLabel || '-'}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <span className="ml-1 font-semibold text-slate-700">팀선택</span>
-                            <div className="relative shrink-0" ref={teamDropdownRef}>
-                                <button
-                                    type="button"
-                                    onClick={() => setTeamDropdownOpen((prev) => !prev)}
-                                    className="h-10 min-w-[152px] rounded-lg border border-slate-300 bg-white px-3 text-base font-semibold text-slate-700 inline-flex items-center justify-between gap-2"
-                                    aria-haspopup="listbox"
-                                    aria-expanded={teamDropdownOpen}
-                                >
-                                    <span className="truncate">{selectedTeamLabel}</span>
-                                    <FontAwesomeIcon icon={faChevronDown} className={`text-[12px] text-slate-500 transition-transform ${teamDropdownOpen ? 'rotate-180' : ''}`} />
-                                </button>
-
-                                {teamDropdownOpen && (
-                                    <div className="absolute z-[80] mt-1 w-52 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg p-1" role="listbox">
-                                        <button
-                                            type="button"
-                                            className={`w-full text-left px-3 py-2.5 rounded text-base font-semibold transition-colors ${selectedTeamId === '' ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
-                                            onClick={() => {
-                                                setSelectedTeamId('');
-                                                setTeamDropdownOpen(false);
-                                            }}
-                                        >
-                                            팀전체
-                                        </button>
-                                        {teams
-                                            .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
-                                            .map((team) => (
-                                                <button
-                                                    key={team.id}
-                                                    type="button"
-                                                    className={`w-full text-left px-3 py-2.5 rounded text-base font-semibold transition-colors ${selectedTeamId === team.id ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
-                                                    onClick={() => {
-                                                        setSelectedTeamId(team.id);
-                                                        setTeamDropdownOpen(false);
-                                                    }}
-                                                >
-                                                    {team.name}
-                                                </button>
-                                            ))}
-                                    </div>
-                                )}
-                            </div>
-
-                            <span className="ml-1 w-px h-5 bg-slate-200" />
-
-                            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                                <button
-                                    type="button"
-                                    className={`px-3 h-8 rounded-md text-[14px] font-bold transition-colors ${filterMode === 'team' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                    onClick={() => setFilterMode('team')}
-                                >
-                                    팀
-                                </button>
-                                <button
-                                    type="button"
-                                    className={`px-3 h-8 rounded-md text-[14px] font-bold transition-colors ${filterMode === 'worker' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                    onClick={() => setFilterMode('worker')}
-                                >
-                                    개인
-                                </button>
-                            </div>
-
-                            {filterMode === 'worker' && (
-                                <>
-                                    <select
-                                        value={selectedWorkerId}
-                                        onChange={(e) => setSelectedWorkerId(e.target.value)}
-                                        className="h-10 min-w-[132px] rounded-lg border border-slate-300 bg-white px-3 text-base font-semibold text-slate-700"
-                                    >
-                                        <option value="">개인전체</option>
-                                        {workerOptions.map((worker) => (
-                                            <option key={worker.id} value={worker.id}>{worker.name}</option>
-                                        ))}
-                                    </select>
-                                    <input
-                                        type="text"
-                                        value={workerSearchText}
-                                        onChange={(e) => setWorkerSearchText(e.target.value)}
-                                        placeholder="이름 검색"
-                                        className="h-10 w-32 rounded-lg border border-slate-300 bg-white px-3 text-base font-semibold text-slate-700 placeholder-slate-400"
-                                    />
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <PayrollToolbar
+                    hideHeader={!!hideHeader}
+                    rangeLabel={rangeLabel}
+                    targetCount={paymentData.length + ledgerRowsData.filter(r => r.salaryModel === '일급제').length}
+                    monthRangeLength={monthRange.length}
+                    totalLoadCount={paymentData.length}
+                    monthSelectionMode={monthSelectionMode}
+                    handleMonthModeChange={handleMonthModeChange}
+                    yearCursor={yearCursor}
+                    setYearCursor={setYearCursor}
+                    shiftYearMonth={shiftYearMonth}
+                    formatYearMonthParts={formatYearMonthParts}
+                    handleSelectPrevMonth={handleSelectPrevMonth}
+                    handleSelectCurrentMonth={handleSelectCurrentMonth}
+                    monthRangeSet={monthRangeSet}
+                    startMonth={startMonth}
+                    endMonth={endMonth}
+                    rangeAnchorMonth={rangeAnchorMonth}
+                    handleMonthButtonSelect={handleMonthButtonSelect}
+                    teamDropdownRef={teamDropdownRef}
+                    teamDropdownOpen={teamDropdownOpen}
+                    setTeamDropdownOpen={setTeamDropdownOpen}
+                    selectedTeamLabel={selectedTeamLabel}
+                    selectedTeamId={selectedTeamId}
+                    setSelectedTeamId={setSelectedTeamId}
+                    teams={teams}
+                    filterMode={filterMode}
+                    setFilterMode={setFilterMode}
+                    selectedWorkerId={selectedWorkerId}
+                    setSelectedWorkerId={setSelectedWorkerId}
+                    workerOptions={workerOptions}
+                    workerSearchText={workerSearchText}
+                    setWorkerSearchText={setWorkerSearchText}
+                    pageViewMode={pageViewMode}
+                    setPageViewMode={setPageViewMode}
+                    ledgerVisibleSections={ledgerVisibleSections}
+                    setLedgerVisibleSections={setLedgerVisibleSections}
+                    showAccountColumns={showAccountColumns}
+                    setShowAccountColumns={setShowAccountColumns}
+                    showCalculationLabor={showCalculationLabor}
+                    setShowCalculationLabor={setShowCalculationLabor}
+                    insuranceApplied={insuranceApplied}
+                    insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                    businessIncomeApplied={businessIncomeApplied}
+                    utilitiesApplied={utilitiesApplied}
+                    dailyFeeApplied={dailyFeeApplied}
+                    applyCalculatedDeductions={applyCalculatedDeductions}
+                    insuranceThresholdDays={insuranceThresholdDays}
+                    withholdingApplyAllLaborView={withholdingApplyAllLaborView}
+                    WITHHOLDING_MAX_MAN_DAY={WITHHOLDING_MAX_MAN_DAY}
+                    withholdingBaseDeductionWonView={withholdingBaseDeductionWonView}
+                    withholdingIncomeRatePercentView={withholdingIncomeRatePercentView}
+                    withholdingTaxCreditPercentView={withholdingTaxCreditPercentView}
+                    withholdingResidentRatePercentView={withholdingResidentRatePercentView}
+                    employmentApplyBelowThresholdView={employmentApplyBelowThresholdView}
+                    dailyWorkerFeePerManDayView={dailyWorkerFeePerManDayView}
+                    fetchData={fetchData}
+                    toolbarExpanded={toolbarExpanded}
+                    setToolbarExpanded={setToolbarExpanded}
+                    openInsuranceSettings={openInsuranceSettings}
+                    setShowKBPreview={setShowKBPreview}
+                    isPaymentDataEmpty={paymentData.length === 0}
+                    openPayslipPreview={openPayslipPreview}
+                    handleBatchDownload={handleBatchDownload}
+                    batchDownloading={batchDownloading}
+                    advanceLedgerRef={advanceLedgerRef}
+                    isLedgerRowsDataEmpty={ledgerRowsData.length === 0}
+                    currentYearMonth={currentYearMonth}
+                />
             )}
 
-            <ToolbarContainer>
-                <ToolbarLead>
-                    <ToolbarLeadMeta>
-                        <ToolbarBadge>{rangeLabel || '-'}</ToolbarBadge>
-                        <ToolbarBadge>대상 {filteredPaymentData.length + filteredLedgerRows.filter(r => r.salaryModel === '일급제').length}명</ToolbarBadge>
-                        <ActionButton type="button" $variant="secondary" onClick={fetchData}>
-                            <FontAwesomeIcon icon={faSearch} />
-                            조회
-                        </ActionButton>
-                        <ActionButton
-                            type="button"
-                            $variant="outline"
-                            onClick={() => setToolbarExpanded((prev) => !prev)}
-                        >
-                            <FontAwesomeIcon icon={toolbarExpanded ? faChevronUp : faChevronDown} />
-                            {toolbarExpanded ? '간편 보기' : '상세 설정'}
-                        </ActionButton>
-                    </ToolbarLeadMeta>
-                </ToolbarLead>
-
-                {toolbarExpanded && (
-                    <ToolbarGrid>
-                    <ToolbarCard $span={7}>
-                        <ToolbarCardHeader>
-                            <div>
-                                <ToolbarCardTitle>정산 기간 선택</ToolbarCardTitle>
-                                <ToolbarCardDescription>연도 이동과 월 범위 선택을 한 카드 안에서 처리합니다.</ToolbarCardDescription>
-                            </div>
-                            <ToolbarBadge>{monthRange.length}개월</ToolbarBadge>
-                        </ToolbarCardHeader>
-                        <ToolbarCardBody>
-                            <ToolbarInline>
-                                <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
-                                    <button
-                                        type="button"
-                                        onClick={() => handleMonthModeChange('single')}
-                                        className={`px-2.5 h-7 rounded-md text-xs font-bold transition-colors ${monthSelectionMode === 'single' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                    >
-                                        해당달
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleMonthModeChange('range')}
-                                        className={`px-2.5 h-7 rounded-md text-xs font-bold transition-colors ${monthSelectionMode === 'range' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-                                    >
-                                        기간
-                                    </button>
-                                </div>
-
-                                <ToolbarSectionDivider />
-
-                                <YearNavigator>
-                                    <YearButton
-                                        type="button"
-                                        onClick={() => setYearCursor(shiftYearMonth(yearCursor, -12))}
-                                        title="이전 연도"
-                                    >
-                                        <FontAwesomeIcon icon={faChevronLeft} />
-                                    </YearButton>
-                                    <YearText>{parseInt(yearCursor.split('-')[0], 10)}년</YearText>
-                                    <YearButton
-                                        type="button"
-                                        onClick={() => setYearCursor(shiftYearMonth(yearCursor, 12))}
-                                        title="다음 연도"
-                                    >
-                                        <FontAwesomeIcon icon={faChevronRight} />
-                                    </YearButton>
-                                </YearNavigator>
-
-                                <ToolbarSectionDivider />
-
-                                <QuickRangeGroup>
-                                    <QuickRangeButton
-                                        type="button"
-                                        onClick={handleSelectPrevMonth}
-                                    >
-                                        전달
-                                    </QuickRangeButton>
-                                    <QuickRangeButton
-                                        type="button"
-                                        onClick={handleSelectCurrentMonth}
-                                    >
-                                        이달
-                                    </QuickRangeButton>
-                                </QuickRangeGroup>
-                            </ToolbarInline>
-
-                            <MonthGrid>
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map((monthNumber) => {
-                                    const year = formatYearMonthParts(yearCursor).year;
-                                    const ym = `${year}-${String(monthNumber).padStart(2, '0')}`;
-                                    const isInRange = monthRangeSet.has(ym);
-                                    const isActive = startMonth === ym || endMonth === ym || (monthSelectionMode === 'range' && rangeAnchorMonth === ym);
-
-                                    return (
-                                        <MonthButton
-                                            key={monthNumber}
-                                            type="button"
-                                            $active={isActive}
-                                            $inRange={isInRange}
-                                            onClick={() => handleMonthButtonSelect(ym)}
-                                        >
-                                            {monthNumber}월
-                                        </MonthButton>
-                                    );
-                                })}
-                            </MonthGrid>
-
-                            <div className="text-[11px] text-slate-500">
-                                {monthSelectionMode === 'single'
-                                    ? '해당달 모드: 월 버튼을 누르면 시작월/종료월이 같은 달로 설정됩니다.'
-                                    : rangeAnchorMonth
-                                        ? `기간 모드: 종료월을 선택하세요. (시작월 ${rangeAnchorMonth})`
-                                        : '기간 모드: 시작월을 선택한 뒤 종료월을 선택하세요.'}
-                            </div>
-                        </ToolbarCardBody>
-                    </ToolbarCard>
-
-                    <ToolbarCard $span={5}>
-                        <ToolbarCardHeader>
-                            <div>
-                                <ToolbarCardTitle>표시 방식 제어</ToolbarCardTitle>
-                                <ToolbarCardDescription>기본 목록과 가불 대장 전환, 세부 섹션 노출을 한 카드로 묶었습니다.</ToolbarCardDescription>
-                            </div>
-                            <ToolbarBadge>{pageViewMode === 'ledger' ? '가불대장' : '기본목록'}</ToolbarBadge>
-                        </ToolbarCardHeader>
-                        <ToolbarCardBody>
-                            <SegmentedGroup>
-                                <SegmentedButton type="button" $active={pageViewMode === 'standard'} onClick={() => setPageViewMode('standard')}>
-                                    기본 목록
-                                </SegmentedButton>
-                                <SegmentedButton type="button" $active={pageViewMode === 'ledger'} onClick={() => setPageViewMode('ledger')}>
-                                    가불 대장
-                                </SegmentedButton>
-                            </SegmentedGroup>
-
-                            {pageViewMode === 'ledger' ? (
-                                <FieldCard>
-                                    <FieldLabel>가불대장 항목</FieldLabel>
-                                    <ToggleChipGroup>
-                                        <ToggleChipButton
-                                            type="button"
-                                            $active={ledgerVisibleSections.utilities}
-                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, utilities: !prev.utilities }))}
-                                        >
-                                            공과금
-                                        </ToggleChipButton>
-                                        <ToggleChipButton
-                                            type="button"
-                                            $active={ledgerVisibleSections.advances}
-                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, advances: !prev.advances }))}
-                                        >
-                                            가불
-                                        </ToggleChipButton>
-                                        <ToggleChipButton
-                                            type="button"
-                                            $active={ledgerVisibleSections.taxes}
-                                            onClick={() => setLedgerVisibleSections((prev) => ({ ...prev, taxes: !prev.taxes }))}
-                                        >
-                                            세금
-                                        </ToggleChipButton>
-                                    </ToggleChipGroup>
-                                </FieldCard>
-                            ) : (
-                                <FieldCard>
-                                    <FieldLabel>표시 옵션</FieldLabel>
-                                    <ActionCluster>
-                                        <ModernSwitch compact label="계좌 컬럼 표시" checked={showAccountColumns} onChange={setShowAccountColumns} />
-                                        <ModernSwitch compact label="계산노무 표시" checked={showCalculationLabor} onChange={setShowCalculationLabor} />
-                                    </ActionCluster>
-                                </FieldCard>
-                            )}
-                        </ToolbarCardBody>
-                    </ToolbarCard>
-
-                    <ToolbarCard $span={5}>
-                        <ToolbarCardHeader>
-                            <div>
-                                <ToolbarCardTitle>정산 규칙 토글</ToolbarCardTitle>
-                                <ToolbarCardDescription>보험, 사업소득, 공과금, 일급제 수수료 적용 상태를 카드형 스위치로 즉시 제어합니다.</ToolbarCardDescription>
-                            </div>
-                        </ToolbarCardHeader>
-                        <ToolbarCardBody>
-                            <ActionCluster>
-                                <ModernSwitch
-                                    label="4대보험 적용"
-                                    checked={insuranceApplied}
-                                    compact
-                                    onChange={(value) => applyCalculatedDeductions({
-                                        applyInsurance: value,
-                                        applyBusinessIncome: businessIncomeApplied,
-                                        applyUtilities: utilitiesApplied,
-                                        applyDailyFee: dailyFeeApplied,
-                                        applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-                                    })}
-                                />
-                                <ModernSwitch
-                                    label="해당팀 4대보험"
-                                    checked={insuranceTeamSiteOnly}
-                                    compact
-                                    onChange={(value) => applyCalculatedDeductions({
-                                        applyInsurance: insuranceApplied,
-                                        applyBusinessIncome: businessIncomeApplied,
-                                        applyUtilities: utilitiesApplied,
-                                        applyDailyFee: dailyFeeApplied,
-                                        applyInsuranceTeamSiteOnly: value,
-                                    })}
-                                />
-                                <ModernSwitch
-                                    label="사업소득 적용"
-                                    checked={businessIncomeApplied}
-                                    compact
-                                    onChange={(value) => applyCalculatedDeductions({
-                                        applyInsurance: insuranceApplied,
-                                        applyBusinessIncome: value,
-                                        applyUtilities: utilitiesApplied,
-                                        applyDailyFee: dailyFeeApplied,
-                                        applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-                                    })}
-                                />
-                                <ModernSwitch
-                                    label="공과금 적용"
-                                    checked={utilitiesApplied}
-                                    compact
-                                    onChange={(value) => applyCalculatedDeductions({
-                                        applyInsurance: insuranceApplied,
-                                        applyBusinessIncome: businessIncomeApplied,
-                                        applyUtilities: value,
-                                        applyDailyFee: dailyFeeApplied,
-                                        applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-                                    })}
-                                />
-                                <ModernSwitch
-                                    label="수수료 적용"
-                                    checked={dailyFeeApplied}
-                                    compact
-                                    onChange={(value) => applyCalculatedDeductions({
-                                        applyInsurance: insuranceApplied,
-                                        applyBusinessIncome: businessIncomeApplied,
-                                        applyUtilities: utilitiesApplied,
-                                        applyDailyFee: value,
-                                        applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-                                    })}
-                                />
-                            </ActionCluster>
-
-                            {(insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) && (
-                                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-700 space-y-1.5">
-                                    <div className="font-bold text-slate-800">현재 적용되는 로직</div>
-
-                                    {insuranceApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">4대보험</span>
-                                            {' '}
-                                            노무 공수를 현장+발주사 그룹으로 합산해
-                                            {' '}
-                                            <span className="font-semibold">{insuranceThresholdDays}공수 이상</span>
-                                            {' '}
-                                            그룹에 국민연금/건강보험/장기요양을 적용합니다.
-                                        </div>
-                                    )}
-
-                                    {insuranceApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">갑근세/지방세</span>
-                                            {' '}
-                                            {withholdingApplyAllLaborView
-                                                ? '노무 전체 공수 대상'
-                                                : `노무 ${WITHHOLDING_MAX_MAN_DAY}공수 이하 대상`}
-                                            {' '}
-                                            · 계산식: ((단가 - {withholdingBaseDeductionWonView.toLocaleString()}원) x 노무공수 x {withholdingIncomeRatePercentView}%) x (1 - {withholdingTaxCreditPercentView}%)
-                                            {' '}
-                                            / 지방세 {withholdingResidentRatePercentView}%
-                                        </div>
-                                    )}
-
-                                    {insuranceApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">고용보험</span>
-                                            {' '}
-                                            기준 충족 그룹 + 갑근세 대상 그룹에 적용되며,
-                                            {' '}
-                                            공수미달 자동적용 설정은
-                                            {' '}
-                                            <span className="font-semibold">{employmentApplyBelowThresholdView ? 'ON' : 'OFF'}</span>
-                                            입니다.
-                                        </div>
-                                    )}
-
-                                    {insuranceApplied && insuranceTeamSiteOnly && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">팀 매칭 제한</span>
-                                            {' '}
-                                            작업자 팀과 현장 담당팀이 매칭되는 근무내역만 4대보험 판정에 포함합니다.
-                                            {' '}
-                                            해당 현장에서 4대보험 기준 미달이거나 팀 매칭에서 제외된 나머지 노무현장은
-                                            {' '}
-                                            {withholdingApplyAllLaborView
-                                                ? '갑근세/지방세 노무 전체 공수 대상으로 분류됩니다.'
-                                                : `갑근세/지방세 노무 ${WITHHOLDING_MAX_MAN_DAY}공수 이하 대상으로 분류됩니다.`}
-                                        </div>
-                                    )}
-
-                                    {businessIncomeApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">사업소득</span>
-                                            {' '}
-                                            4대보험/갑근세 대상에서 제외된 금액에 3.0% + 0.3%를 적용합니다.
-                                        </div>
-                                    )}
-
-                                    {utilitiesApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">공과금</span>
-                                            {' '}
-                                            가불대장 공과금 입력(숙소비/전기료/가스비/수도세/인터넷/관리비/과태료/기타)을 공제내역에 반영합니다.
-                                        </div>
-                                    )}
-
-                                    {dailyFeeApplied && (
-                                        <div>
-                                            <span className="font-semibold text-slate-800">일급제 수수료</span>
-                                            {' '}
-                                            일급제 작업자에게 공수 x {dailyWorkerFeePerManDayView.toLocaleString()}원(공수당) 수수료를 공제합니다.
-                                        </div>
-                                    )}
-
-                                    {(insuranceApplied && businessIncomeApplied) || (insuranceApplied && utilitiesApplied) || (insuranceApplied && dailyFeeApplied) || (businessIncomeApplied && utilitiesApplied) || (businessIncomeApplied && dailyFeeApplied) || (utilitiesApplied && dailyFeeApplied) ? (
-                                        <div className="rounded-md border border-slate-200 bg-white px-2 py-1.5 space-y-1">
-                                            <div className="font-semibold text-slate-800">겹침 적용 로직</div>
-                                            {insuranceApplied && businessIncomeApplied && (
-                                                <div>4대보험/갑근세가 먼저 대상을 확정하고, 사업소득은 그 제외 금액에만 계산됩니다.</div>
-                                            )}
-                                            {insuranceApplied && utilitiesApplied && (
-                                                <div>세금 계산 결과(4대보험/갑근세/지방세)에 공과금 공제가 추가 합산됩니다.</div>
-                                            )}
-                                            {businessIncomeApplied && utilitiesApplied && (
-                                                <div>사업소득 3.3% 세금과 공과금 공제가 함께 총 공제액에 합산됩니다.</div>
-                                            )}
-                                            {dailyFeeApplied && (
-                                                <div>일급제 수수료는 공과금/세금과 함께 총 공제액에 합산됩니다.</div>
-                                            )}
-                                            {(insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) && (
-                                                <div className="font-medium text-slate-800">최종 실지급 = 세전금액 - (보험/세금 + 사업소득세 + 공과금 + 일급제 수수료)</div>
-                                            )}
-                                        </div>
-                                    ) : null}
-                                </div>
-                            )}
-
-                            <ActionCluster>
-                                <ActionButton type="button" $variant="outline" onClick={openInsuranceSettings}>
-                                    <FontAwesomeIcon icon={faSave} />
-                                    요율 설정
-                                </ActionButton>
-                            </ActionCluster>
-                        </ToolbarCardBody>
-                    </ToolbarCard>
-
-                    <ToolbarCard $span={7}>
-                        <ToolbarCardHeader>
-                            <div>
-                                <ToolbarCardTitle>조회 및 문서 액션</ToolbarCardTitle>
-                                <ToolbarCardDescription>조회, 은행용 미리보기, 명세서, 일괄 다운로드를 작업 흐름에 맞게 정렬했습니다.</ToolbarCardDescription>
-                            </div>
-                            <ToolbarBadge>{paymentData.length + ledgerRowsData.filter(r => r.salaryModel === '일급제').length}건 로드됨</ToolbarBadge>
-                        </ToolbarCardHeader>
-                        <ToolbarCardBody>
-                            <ActionCluster>
-                                <ActionButton type="button" $variant="secondary" onClick={fetchData}>
-                                    <FontAwesomeIcon icon={faSearch} />
-                                    조회
-                                </ActionButton>
-                                <ActionButton type="button" $variant="warning" onClick={() => setShowKBPreview(true)} disabled={paymentData.length === 0}>
-                                    <FontAwesomeIcon icon={faFileExcel} />
-                                    국민은행
-                                </ActionButton>
-                                <ActionButton
-                                    type="button"
-                                    $variant="accent"
-                                    onClick={openPayslipPreview}
-                                    disabled={paymentData.length === 0}
-                                >
-                                    <FontAwesomeIcon icon={faDownload} />
-                                    명세서
-                                </ActionButton>
-                                <ActionButton
-                                    type="button"
-                                    $variant="success"
-                                    onClick={handleBatchDownload}
-                                    disabled={paymentData.length === 0 || batchDownloading}
-                                >
-                                    {batchDownloading ? (
-                                        <FontAwesomeIcon icon={faSpinner} spin />
-                                    ) : (
-                                        <FontAwesomeIcon icon={faFileZipper} />
-                                    )}
-                                    {batchDownloading ? '처리 중...' : '일괄 다운로드'}
-                                </ActionButton>
-                                <ActionButton
-                                    type="button"
-                                    $variant="secondary"
-                                    onClick={() => advanceLedgerRef.current?.downloadExcel(rangeLabel || currentYearMonth)}
-                                    disabled={ledgerRowsData.length === 0}
-                                >
-                                    <FontAwesomeIcon icon={faFileExcel} />
-                                    가불대장 엑셀
-                                </ActionButton>
-                            </ActionCluster>
-                        </ToolbarCardBody>
-                    </ToolbarCard>
-                    </ToolbarGrid>
-                )}
-            </ToolbarContainer>
-
-            {/* Hidden Batch Rendering Container */}
-            <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
-                {filteredPaymentData.map(item => (
-                    <PayslipTemplate
-                        key={`batch-${item.id}`}
-                        ref={el => {
-                            const elementKey = item.id;
-                            batchRefs.current[elementKey] = el;
-                        }}
-                        data={item}
-                        month={item.month}
-                        applyUtilities={utilitiesApplied}
-                        insuranceTeamSiteOnly={insuranceTeamSiteOnly}
-                        isTeamResponsibleSiteEntry={isEntryInWorkerTeamSite}
-                    />
-                ))}
-            </div>
+            {/* Hidden Batch Rendering Container - 다운로드 시에만 렌더링 (평소 불필요한 재렌더링 방지) */}
+            {batchDownloading && (
+                <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
+                    {filteredPaymentData.map(item => (
+                        <PayslipTemplate
+                            key={`batch-${item.id}`}
+                            ref={el => {
+                                const elementKey = item.id;
+                                batchRefs.current[elementKey] = el;
+                            }}
+                            data={item}
+                            month={item.month}
+                            applyUtilities={utilitiesApplied}
+                            insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                            isTeamResponsibleSiteEntry={isEntryInWorkerTeamSite}
+                        />
+                    ))}
+                </div>
+            )}
 
             {errorCount > 0 && (
                 <div className="flex-shrink-0 mb-2 bg-red-50 border border-red-200 text-red-700 px-2.5 py-2 rounded-lg flex items-center gap-1.5 text-base">
@@ -4347,64 +3976,37 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 filteredPaymentData.map(item => {
                                     const rowKey = item.id;
                                     const isExpanded = expandedRows.has(rowKey);
-                                    const baseRowsForDisplay = basePaymentData.length > 0 ? basePaymentData : paymentData;
-                                    const baseItemForDisplay = baseRowsForDisplay.find((row) => row.id === item.id) ?? item;
-                                    const utilityInputForDisplay = utilitiesApplied ? resolveUtilityInputForPaymentItem(item) : undefined;
-                                    const utilityLinesForDisplay = utilitiesApplied ? buildUtilityDeductionLines(utilityInputForDisplay) : [];
-                                    const dailyFeePerManDayForDisplay = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
-                                    const dailyFeeLinesForDisplay = buildDailyFeeDeductionLines({
-                                        item,
-                                        applyDailyFee: dailyFeeApplied,
-                                        dailyFeePerManDay: dailyFeePerManDayForDisplay,
-                                    });
-                                    const deductionAppliedLinesForDisplay = [...utilityLinesForDisplay, ...dailyFeeLinesForDisplay];
-                                    const sourceDeductionForDisplay = stripTemporaryDeductionLines(baseItemForDisplay.deductionBreakdown);
-                                    const baseDeductionForDisplay = rebuildDeductionBreakdown({
-                                        standardLines: (sourceDeductionForDisplay.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-                                        additionalLines: (sourceDeductionForDisplay.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-                                    });
-                                    const deductionBreakdownForDisplay = (utilitiesApplied || dailyFeeApplied)
-                                        ? mergeDeductionBreakdownWithLines(baseDeductionForDisplay, deductionAppliedLinesForDisplay)
-                                        : sourceDeductionForDisplay;
-                                    const deductionLinesForDisplay = [
-                                        ...(deductionBreakdownForDisplay.standardLines ?? []),
-                                        ...(deductionBreakdownForDisplay.additionalLines ?? []),
-                                    ];
-                                    const advanceLinesForDisplay = deductionLinesForDisplay.filter((line) =>
-                                        advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
-                                    );
-                                    const nonAdvanceDeductionLinesForDisplay = deductionLinesForDisplay.filter((line) =>
-                                        !advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
-                                    );
-                                    const advanceTotalForDisplay = advanceLinesForDisplay.reduce((sum, line) => sum + toNumber(line.amount), 0);
-                                    const nonAdvanceDeductionTotalForDisplay = nonAdvanceDeductionLinesForDisplay.reduce((sum, line) => sum + toNumber(line.amount), 0);
-                                    const hasNonAdvanceDeductionLines = nonAdvanceDeductionLinesForDisplay.length > 0;
-                                    const hasAdvanceLines = advanceLinesForDisplay.length > 0;
-                                    const taxLinesForItem = getTaxLinesForItem(item);
-                                    const taxTotalForDisplay = taxLinesForItem.reduce((sum, line) => sum + toNumber(line.amount), 0);
-                                    const totalDeductionForDisplay = deductionBreakdownForDisplay.total + taxTotalForDisplay;
-                                    const totalAmountForDisplay = item.grossAmount - totalDeductionForDisplay;
-                                    const insuranceTaxLines = taxLinesForItem.filter((line) => isInsuranceSectionTaxLabel(line.label));
-                                    const withholdingTaxLines = taxLinesForItem.filter((line) => isWithholdingSectionTaxLabel(line.label));
-                                    const businessTaxLines = taxLinesForItem.filter((line) => isBusinessSectionTaxLabel(line.label));
-                                    const otherTaxLines = taxLinesForItem.filter((line) => (
-                                        !isInsuranceSectionTaxLabel(line.label)
-                                        && !isWithholdingSectionTaxLabel(line.label)
-                                        && !isBusinessSectionTaxLabel(line.label)
-                                    ));
-                                    const insuranceSectionTaxTotal = sumInsuranceSectionTax(item);
-                                    const withholdingSectionTaxTotal = sumWithholdingSectionTax(item);
-                                    const businessSectionTaxTotal = sumBusinessSectionTax(item);
-                                    const otherTaxTotal = otherTaxLines.reduce((sum, line) => sum + toNumber(line.amount), 0);
-                                    const insuranceAfterTaxAmount = Math.max(0, Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal));
-                                    const withholdingGrossAmount = item.withholdingAppliedSummary
-                                        ? toNumber(item.withholdingAppliedSummary.grossAmount ?? item.withholdingAppliedSummary.appliedAmount)
-                                        : 0;
-                                    const withholdingAfterTaxAmount = Math.max(0, Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal));
-                                    const businessAfterTaxAmount = Math.max(0, Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
-                                    const showInsuranceSection = insuranceTaxLines.length > 0;
-                                    const hasInsuranceTargetSummary = Boolean(item.insuranceAppliedSummary && item.insuranceAppliedSummary.appliedManDay > 0);
-                                    const withholdingDetailText = resolveWithholdingDetailText(item.taxRateSnapshot);
+                                    // ★ 캐시에서 표시 데이터 조회 - O(1), 재계산 없음
+                                    const rowDisplay = rowDisplayCache.get(item.id);
+                                    if (!rowDisplay) return null;
+                                    const {
+                                        deductionBreakdownForDisplay,
+                                        advanceLinesForDisplay,
+                                        nonAdvanceDeductionLinesForDisplay,
+                                        advanceTotalForDisplay,
+                                        nonAdvanceDeductionTotalForDisplay,
+                                        hasNonAdvanceDeductionLines,
+                                        hasAdvanceLines,
+                                        taxLinesForItem,
+                                        taxTotalForDisplay,
+                                        totalDeductionForDisplay,
+                                        totalAmountForDisplay,
+                                        insuranceTaxLines,
+                                        withholdingTaxLines,
+                                        businessTaxLines,
+                                        otherTaxLines,
+                                        insuranceSectionTaxTotal,
+                                        withholdingSectionTaxTotal,
+                                        businessSectionTaxTotal,
+                                        otherTaxTotal,
+                                        insuranceAfterTaxAmount,
+                                        withholdingGrossAmount,
+                                        withholdingAfterTaxAmount,
+                                        businessAfterTaxAmount,
+                                        showInsuranceSection,
+                                        hasInsuranceTargetSummary,
+                                        withholdingDetailText,
+                                    } = rowDisplay;
 
                                     return (
                                         <React.Fragment key={rowKey}>

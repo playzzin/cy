@@ -562,7 +562,7 @@ export const usePayrollData = (
           displayContent: '월급',
           workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
           deductionBreakdown,
-          taxBreakdown: { standardLines: [], additionalLines: [] },
+          taxBreakdown: createEmptyDeductionBreakdown(),
           taxRateSnapshot: {
             pensionRate: config?.insuranceConfig.pensionRate || 0,
             healthRate: config?.insuranceConfig.healthRate || 0,

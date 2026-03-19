@@ -13,7 +13,8 @@ import {
     WithholdingAppliedSiteSummary,
     BusinessIncomeAppliedSiteSummary,
     LedgerUtilityInputLike,
-    LedgerUtilitySideInputLike
+    LedgerUtilitySideInputLike,
+    TaxRateSnapshot as GlobalTaxRateSnapshot
 } from '../types/payroll';
 import { 
     TEMP_INSURANCE_PREFIX, 
@@ -22,7 +23,7 @@ import {
     LEGACY_TAX_PREFIX,
     WITHHOLDING_MAX_MAN_DAY,
     APPLIED_UTILITY_FIELDS
-} from '../constants/payroll';
+} from '../constants/payroll.constants';
 
 /**
  * 기초적인 숫자 변환 및 반올림 유틸리티
@@ -36,17 +37,16 @@ export const floorWon = (value: number): number =>
 /**
  * 세금 및 보험료 계산 스냅샷 타입
  */
-export interface TaxRateSnapshot {
+/**
+ * 세금 및 보험료 계산 스냅샷 타입 (GlobalTaxRateSnapshot과 호환되도록 수정)
+ */
+export interface TaxRateSnapshot extends GlobalTaxRateSnapshot {
     pensionRate: number;
     healthRate: number;
-    careRateOfHealth: number;
+    longtermRate: number;
     employmentRate: number;
     incomeTaxRate: number;
     residentTaxRate: number;
-    withholdingBaseDeduction: number;
-    withholdingIncomeBaseMultiplier: number;
-    businessIncomeTaxRate: number;
-    businessResidentTaxRate: number;
 }
 
 /**
@@ -114,28 +114,28 @@ export const PayrollUtils = {
      */
     calculateWorkEntryTaxBreakdown: (params: {
         workEntries?: WorkerWorkEntry[];
-        payrollConfig: Pick<PayrollConfig, 'insuranceConfig' | 'incomeTaxRate' | 'residentTaxRate'>;
+        payrollConfig: PayrollConfig;
         applyInsurance: boolean;
         applyBusinessIncome: boolean;
         normalizeSiteName: (value: string | undefined) => string;
         withholdingThreshold: number;
     }): WorkEntryTaxCalculationResult => {
-        const insuranceConfig = params.payrollConfig.insuranceConfig;
-        const threshold = Math.max(0, Math.floor(toNumber(insuranceConfig?.thresholdDays)));
-        const withholdingBaseDeduction = Math.max(0, Math.floor(toNumber(insuranceConfig?.withholdingBaseDeduction ?? 150000)));
-        const withholdingTaxCreditRate = Math.min(1, Math.max(0, toNumber(insuranceConfig?.withholdingIncomeBaseMultiplier ?? 0.55)));
+        const config = params.payrollConfig;
+        const threshold = Math.max(0, Math.floor(toNumber(config?.thresholdDays)));
+        const withholdingBaseDeduction = Math.max(0, Math.floor(toNumber(config?.withholdingBaseDeduction ?? 150000)));
+        const withholdingTaxCreditRate = Math.min(1, Math.max(0, toNumber(config?.withholdingIncomeBaseMultiplier ?? 0.55)));
         const withholdingIncomeTaxRate = Math.max(
             0,
-            toNumber(insuranceConfig?.withholdingIncomeTaxRate ?? params.payrollConfig.incomeTaxRate ?? 0.06)
+            toNumber(config?.withholdingIncomeTaxRate ?? config.incomeTaxRate ?? 0.06)
         );
         const withholdingResidentTaxRate = Math.max(
             0,
-            toNumber(insuranceConfig?.withholdingResidentTaxRate ?? params.payrollConfig.residentTaxRate ?? 0.1)
+            toNumber(config?.withholdingResidentTaxRate ?? config.residentTaxRate ?? 0.1)
         );
         const withholdingApplyAllLabor =
-            typeof insuranceConfig?.withholdingApplyAllLabor === 'boolean' ? insuranceConfig.withholdingApplyAllLabor : true;
+            typeof config?.withholdingApplyAllLabor === 'boolean' ? config.withholdingApplyAllLabor : true;
         const employmentApplyBelowThreshold =
-            typeof insuranceConfig?.employmentApplyBelowThreshold === 'boolean' ? insuranceConfig.employmentApplyBelowThreshold : true;
+            typeof config?.employmentApplyBelowThreshold === 'boolean' ? config.employmentApplyBelowThreshold : true;
 
         const allEntries = (params.workEntries ?? []).filter((entry) => {
             if (!entry) return false;
@@ -284,10 +284,10 @@ export const PayrollUtils = {
 
         const taxAdditionalLines: DeductionLine[] = [];
 
-        const pension = params.applyInsurance ? floorWon(insuranceBaseAmount * toNumber(insuranceConfig?.pensionRate)) : 0;
-        const health = params.applyInsurance ? floorWon(insuranceBaseAmount * toNumber(insuranceConfig?.healthRate)) : 0;
-        const care = params.applyInsurance ? floorWon(health * toNumber(insuranceConfig?.careRateOfHealth)) : 0;
-        const employment = params.applyInsurance ? floorWon(employmentBaseAmount * toNumber(insuranceConfig?.employmentRate)) : 0;
+        const pension = params.applyInsurance ? floorWon(insuranceBaseAmount * toNumber(config?.pensionRate)) : 0;
+        const health = params.applyInsurance ? floorWon(insuranceBaseAmount * toNumber(config?.healthRate)) : 0;
+        const care = params.applyInsurance ? floorWon(health * toNumber(config?.longtermRate)) : 0;
+        const employment = params.applyInsurance ? floorWon(employmentBaseAmount * toNumber(config?.employmentRate)) : 0;
 
         if (pension > 0) taxAdditionalLines.push({ label: `${TEMP_INSURANCE_PREFIX} 국민연금`, amount: pension });
         if (health > 0) taxAdditionalLines.push({ label: `${TEMP_INSURANCE_PREFIX} 건강보험`, amount: health });
@@ -337,7 +337,7 @@ export const PayrollUtils = {
 
         if (params.applyInsurance && withholdingBaseAmount > 0) {
             const appliedSites: WithholdingAppliedSiteSummary[] = Array.from(withholdingGroupKeys)
-                .map((groupKey) => {
+                .map((groupKey): WithholdingAppliedSiteSummary => {
                     const agg = laborGroupAgg.get(groupKey);
                     const siteId = agg?.siteId ?? groupKey.split('::')[0];
                     return {
@@ -346,11 +346,12 @@ export const PayrollUtils = {
                         manDay: toNumber(agg?.manDay),
                         amount: toNumber(agg?.amount),
                         reason: withholdingApplyAllLabor ? '노무전체' : '노무7이하',
-                    } as WithholdingAppliedSiteSummary;
+                    };
                 })
                 .sort((a, b) => b.manDay - a.manDay);
 
             withholdingAppliedSummary = {
+                thresholdDays: config.thresholdDays,
                 thresholdManDay: withholdingApplyAllLabor ? 0 : params.withholdingThreshold,
                 appliedManDay: appliedSites.reduce((sum, s) => sum + toNumber(s.manDay), 0),
                 appliedAmount: withholdingBaseAmount,
@@ -361,18 +362,19 @@ export const PayrollUtils = {
 
         if (params.applyBusinessIncome && businessBaseAmount > 0) {
             const appliedSites: BusinessIncomeAppliedSiteSummary[] = Array.from(businessSiteAgg.entries())
-                .map(([siteId, agg]) => ({
+                .map(([siteId, agg]): BusinessIncomeAppliedSiteSummary => ({
                     siteId,
                     siteName: siteNameById.get(siteId) ?? '-',
                     manDay: toNumber(agg?.manDay),
                     amount: toNumber(agg?.amount),
-                    reason: '4대보험_제외' as const,
+                    reason: '4대보험_제외',
                 }))
                 .sort((a, b) => b.manDay - a.manDay);
 
             businessIncomeAppliedSummary = {
                 appliedManDay: appliedSites.reduce((sum, s) => sum + toNumber(s.manDay), 0),
                 appliedAmount: businessBaseAmount,
+                rate: 0.03,
                 appliedSites,
             };
         }
@@ -391,10 +393,11 @@ export const PayrollUtils = {
             },
             taxAdditionalLines,
             taxRateSnapshot: {
-                pensionRate: toNumber(insuranceConfig?.pensionRate),
-                healthRate: toNumber(insuranceConfig?.healthRate),
-                careRateOfHealth: toNumber(insuranceConfig?.careRateOfHealth),
-                employmentRate: toNumber(insuranceConfig?.employmentRate),
+                pensionRate: toNumber(config?.pensionRate),
+                healthRate: toNumber(config?.healthRate),
+                longtermRate: toNumber(config?.longtermRate),
+                careRateOfHealth: toNumber(config?.longtermRate), // 하위 호환성 유지
+                employmentRate: toNumber(config?.employmentRate),
                 incomeTaxRate: withholdingIncomeTaxRate,
                 residentTaxRate: withholdingResidentTaxRate,
                 withholdingBaseDeduction,

@@ -710,18 +710,18 @@ a {
     .app.sidebar-collapsed .menu-item>a,
     .app.sidebar-collapsed .menu-item>button {
         justify-content: center;
-        padding: 15px 0;
-        border-left: none !important; /* 접힌 상태에서는 보더 제거하여 중앙 유지 */
+        padding: 15px 0 !important; /* 하단의 !important 패딩을 덮어씌우기 위해 사용 */
+        border-left: none !important;
     }
 
     .app.sidebar-collapsed .menu-item.active > a,
     .app.sidebar-collapsed .menu-item.active > button {
-        background: rgba(26, 188, 156, 0.15); /* 보더 대신 배경으로 강조 */
-        padding-left: 0;
+        background: rgba(26, 188, 156, 0.15);
+        padding-left: 0 !important;
     }
 
     .app.sidebar-collapsed .menu-icon {
-        margin-right: 0;
+        margin-right: 0 !important;
         font-size: 1.25rem;
     }
 
@@ -737,6 +737,7 @@ a {
     .app.sidebar-collapsed .logo-group {
         width: 100%;
         justify-content: center;
+        padding: 0 !important;
     }
 
     .app.sidebar-collapsed #sidebar-logo-icon {

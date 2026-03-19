@@ -600,6 +600,8 @@ export const Slider = styled.span<{ $checked: boolean }>`
     }
 `;
 
+
+
 export const KBPreviewOverlay = styled.div`
     position: fixed;
     inset: 0;
@@ -686,3 +688,22 @@ export const KBPreviewCloseButton = styled.button`
         color: #ffffff;
     }
 `;
+
+// --- PayrollToolbar 전용 Styled Components ---
+
+export const ToolbarCardDescription = styled.p`
+    margin: 0;
+    font-size: 11px;
+    color: #94a3b8;
+    line-height: 1.4;
+`;
+
+export const ToolbarSectionDivider = styled.div`
+    width: 1px;
+    align-self: stretch;
+    background: #e2e8f0;
+    margin: 0 4px;
+`;
+
+
+
