@@ -516,14 +516,25 @@ const LOGO_PATH = 'settings/company_logo';
 
 export async function applyAsFavicon(imageUrl: string): Promise<{ success: boolean; error?: string }> {
     try {
+        const { db } = await import('../config/firebase');
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+
         // Download the image and re-upload to settings/favicon
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, FAVICON_PATH);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
 
-        // Update browser favicon immediately
+        // Get the official Download URL
         const faviconUrl = await getDownloadURL(storageRefObj);
+
+        // SYNC: Update Firestore for real-time reactivity
+        await setDoc(doc(db, 'settings', 'system_config'), {
+            faviconUrl,
+            faviconUpdatedAt: serverTimestamp()
+        }, { merge: true });
+
+        // Update browser favicon immediately (as a fallback/immediate effect)
         const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
         if (link) {
             link.href = faviconUrl;
@@ -543,11 +554,21 @@ export async function applyAsFavicon(imageUrl: string): Promise<{ success: boole
 
 export async function applyAsLogo(imageUrl: string): Promise<{ success: boolean; url?: string; error?: string }> {
     try {
+        const { db } = await import('../config/firebase');
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         const storageRefObj = ref(storage, LOGO_PATH);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
         const url = await getDownloadURL(storageRefObj);
+
+        // SYNC: Update Firestore for real-time reactivity
+        await setDoc(doc(db, 'settings', 'system_config'), {
+            logoUrl: url,
+            logoUpdatedAt: serverTimestamp()
+        }, { merge: true });
+
         return { success: true, url };
     } catch (error) {
         console.error('[GeminiImage] Apply Logo Error:', error);

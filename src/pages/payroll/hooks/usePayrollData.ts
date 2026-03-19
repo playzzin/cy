@@ -5,7 +5,7 @@ import { siteService, Site } from '../../../services/siteService';
 import { teamService, Team } from '../../../services/teamService';
 import { payrollConfigService } from '../../../services/payrollConfigService';
 import { advancePaymentService, AdvancePayment } from '../../../services/advancePaymentService';
-import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine } from '../types/payroll';
+import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEntry, DeductionLine, LedgerManualInput } from '../types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
 
 // Helper: Convert any value to number safely
@@ -85,6 +85,72 @@ const createEmptyDeductionBreakdown = (): DeductionBreakdown => ({
   total: 0,
   hasData: false,
 });
+
+const createEmptyLedgerSideInput = (): LedgerManualInput['invoice'] => ({
+  carry: 0,
+  carrySecond: 0,
+  currentAdvance: 0,
+  currentAdvanceSecond: 0,
+  lodging: 0,
+  electricity: 0,
+  gas: 0,
+  water: 0,
+  internet: 0,
+  management: 0,
+  fine: 0,
+  other: 0,
+});
+
+const pickPreferredAdvanceRecord = (
+  records: AdvancePayment[],
+  yearMonth: string,
+  preferredTeamId?: string
+): AdvancePayment | undefined => {
+  const monthMatched = records.filter((record) => String(record.yearMonth ?? '') === yearMonth);
+  if (monthMatched.length === 0) return undefined;
+
+  const scoped = preferredTeamId
+    ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === String(preferredTeamId).trim())
+    : monthMatched;
+
+  const candidates = scoped.length > 0 ? scoped : monthMatched;
+  return candidates.reduce<AdvancePayment | undefined>((best, current) => {
+    if (!best) return current;
+    const bestTs = best.updatedAt instanceof Date ? best.updatedAt.getTime() : 0;
+    const currentTs = current.updatedAt instanceof Date ? current.updatedAt.getTime() : 0;
+    if (currentTs !== bestTs) return currentTs > bestTs ? current : best;
+
+    const bestScore = toNumber(best.totalDeduction);
+    const currentScore = toNumber(current.totalDeduction);
+    return currentScore >= bestScore ? current : best;
+  }, undefined);
+};
+
+const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManualInput | undefined => {
+  if (!record) return undefined;
+
+  return {
+    invoice: {
+      ...createEmptyLedgerSideInput(),
+      carry: toNumber(record.prevMonthCarryover),
+      carrySecond: toNumber(record.items?.carrySecond),
+      currentAdvance: toNumber(record.items?.currentAdvance),
+      currentAdvanceSecond: toNumber(record.items?.currentAdvanceSecond),
+      lodging: toNumber(record.accommodation),
+      electricity: toNumber(record.electricity),
+      gas: toNumber(record.gas),
+      water: toNumber(record.water),
+      internet: toNumber(record.internet),
+      management: toNumber(record.items?.management),
+      fine: toNumber(record.fines),
+      other: toNumber(record.items?.other),
+    },
+    labor: createEmptyLedgerSideInput(),
+    personalMemo: String(record.memo ?? ''),
+    assignmentType: (record.assignmentType === 'labor' ? 'labor' : 'corporate'),
+    itemAssignments: record.itemAssignments ?? {},
+  };
+};
 
 const buildDeductionBreakdownFromRecords = (
   records: AdvancePayment[],
@@ -357,10 +423,8 @@ export const usePayrollData = (
             paymentMethod: reportSite?.paymentMethod || '-'
           };
 
-          if (isMonthly) {
-            const key = `${reportYM}__${rw.workerId}__${safeTeamKey}__월급제`;
-            mergeAggregate(workerAggregates, key, { ...baseParams, salaryModel: '월급제' });
-          }
+          const paymentKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
+          mergeAggregate(workerAggregates, paymentKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
           const ledgerKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
           mergeAggregate(ledgerWorkerAggregates, ledgerKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
         });
@@ -387,7 +451,9 @@ export const usePayrollData = (
           ? (advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) || advanceListByWorkerId.get(agg.workerId) || [])
           : (advanceListByWorkerId.get(agg.workerId) || []);
 
-        const deductionBreakdown = buildDeductionBreakdownFromRecords(advanceRecords);
+        const deductionBreakdown = buildDeductionBreakdownFromRecords(
+          advanceRecords.filter((record) => String(record.yearMonth ?? '') === agg.month)
+        );
         const totalDeduction = deductionBreakdown.total;
         const netAmount = grossAmount - totalDeduction;
 
@@ -445,6 +511,18 @@ export const usePayrollData = (
         const grossAmount = agg.totalAmount;
         const unitPrice = agg.unitPrices.length === 1 ? agg.unitPrices[0] : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (w?.unitPrice || 0));
 
+        const canonicalTeamId = (agg.teamId.startsWith('unresolved:') || agg.teamId === 'no-team') ? (w?.teamId ?? '').trim() : agg.teamId;
+        const primaryAdvanceRecords = canonicalTeamId
+          ? (advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) ?? [])
+          : [];
+        const fallbackAdvanceRecords = advanceListByWorkerId.get(agg.workerId) ?? [];
+        const selectedAdvanceRecord = pickPreferredAdvanceRecord(
+          primaryAdvanceRecords.length > 0 ? primaryAdvanceRecords : fallbackAdvanceRecords,
+          agg.month,
+          canonicalTeamId
+        );
+        const manual = buildManualInputFromAdvanceRecord(selectedAdvanceRecord);
+
         const rowKey = `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`;
         return {
           id: rowKey,
@@ -460,9 +538,11 @@ export const usePayrollData = (
           unitPrice,
           invoiceGrossAmount: agg.invoiceGrossAmount,
           laborGrossAmount: agg.laborGrossAmount,
+          workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
           amount: agg.totalAmount,
           date: agg.month,
           type: '월급',
+          manual,
         };
       });
 

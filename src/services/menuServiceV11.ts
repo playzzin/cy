@@ -366,30 +366,20 @@ export const menuServiceV11 = {
             for (const candidate of candidatesToTry) {
                 const menuRef = getMenuDocRef(candidate);
                 try {
-                    await setDoc(menuRef, sanitizedData, { merge: true });
+                    // Removing { merge: true } ensures that deleted keys are actually removed from Firestore
+                    await setDoc(menuRef, sanitizedData);
                     activeDocId = candidate;
                     return true;
                 } catch (err: any) {
-                    try {
-                        // Fallback: some rulesets allow update but restrict set/replace semantics.
-                        await updateDoc(menuRef, sanitizedData as any);
-                        activeDocId = candidate;
-                        return true;
-                    } catch (err2: any) {
-                        lastError = err2;
-                        if (isPermissionDenied(err2)) {
-                            continue;
-                        }
-                    }
-
                     lastError = err;
                     if (isPermissionDenied(err)) {
                         continue;
                     }
+                    throw err;
                 }
             }
 
-            throw lastError;
+            throw lastError || new Error('All save attempts failed');
         } catch (error) {
             console.error('Failed to save menu configuration:', error);
             throw error;

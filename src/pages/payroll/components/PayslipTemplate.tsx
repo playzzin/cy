@@ -2,12 +2,13 @@ import React, { forwardRef } from 'react';
 
 interface WorkerWorkEntry {
     date: string;
+    siteId?: string;
     siteName: string;
     manDay: number;
     unitPrice: number;
     description?: string;
     paymentMethod?: string;
-    amount?: number;
+    amount: number;
 }
 
 interface DeductionLine {
@@ -18,30 +19,30 @@ interface DeductionLine {
 interface DeductionBreakdown {
     standardLines: DeductionLine[];
     additionalLines: DeductionLine[];
-    totalStandard: number;
-    totalAdditional: number;
+    totalStandard?: number;
+    totalAdditional?: number;
     total: number;
     hasData: boolean;
 }
 
 const TEMP_WITHHOLDING_PREFIX = '[원천세]';
 
-type InsuranceAppliedReason = 'site' | 'client';
+type InsuranceAppliedReason = 'site' | 'client' | 'threshold' | 'manual' | 'all-labor';
 
 interface InsuranceAppliedSiteSummary {
     siteId: string;
     siteName: string;
-    clientCompanyId: string;
+    clientCompanyId?: string;
     manDay: number;
     amount: number;
-    reason: InsuranceAppliedReason;
+    reason?: InsuranceAppliedReason;
 }
 
 interface InsuranceAppliedSummary {
-    thresholdManDay: number;
+    thresholdManDay?: number;
     appliedManDay: number;
     appliedAmount: number;
-    appliedSites: InsuranceAppliedSiteSummary[];
+    appliedSites?: InsuranceAppliedSiteSummary[];
 }
 
 interface BusinessIncomeAppliedSiteSummary {
@@ -49,13 +50,13 @@ interface BusinessIncomeAppliedSiteSummary {
     siteName: string;
     manDay: number;
     amount: number;
-    reason: '4대보험_제외';
+    reason?: '4대보험_제외';
 }
 
 interface BusinessIncomeAppliedSummary {
-    appliedManDay: number;
+    appliedManDay?: number;
     appliedAmount: number;
-    appliedSites: BusinessIncomeAppliedSiteSummary[];
+    appliedSites?: BusinessIncomeAppliedSiteSummary[];
 }
 
 interface WithholdingAppliedSiteSummary {
@@ -63,49 +64,50 @@ interface WithholdingAppliedSiteSummary {
     siteName: string;
     manDay: number;
     amount: number;
-    reason: '노무7이하' | '노무전체';
+    reason?: '노무7이하' | '노무전체';
 }
 
 interface WithholdingAppliedSummary {
-    thresholdManDay: number;
-    appliedManDay: number;
+    thresholdManDay?: number;
+    thresholdDays?: number;
+    appliedManDay?: number;
     appliedAmount: number;
     grossAmount?: number;
-    appliedSites: WithholdingAppliedSiteSummary[];
+    appliedSites?: WithholdingAppliedSiteSummary[];
 }
 
 interface TaxRateSnapshot {
     pensionRate: number;
     healthRate: number;
-    careRateOfHealth: number;
+    careRateOfHealth?: number;
     employmentRate: number;
     incomeTaxRate: number;
     residentTaxRate: number;
     withholdingBaseDeduction?: number;
     withholdingIncomeBaseMultiplier?: number;
-    businessIncomeTaxRate: number;
-    businessResidentTaxRate: number;
+    businessIncomeTaxRate?: number;
+    businessResidentTaxRate?: number;
 }
 
 export interface PaymentData {
     personalMemo?: string;
     workerId: string;
     workerName: string;
-    idNumber: string;
-    companyId: string;
-    companyName: string;
-    teamId: string;
-    teamName: string;
+    idNumber?: string;
+    companyId?: string;
+    companyName?: string;
+    teamId?: string;
+    teamName?: string;
     month: string;
     totalManDay: number;
     unitPrice: number;
     grossAmount: number;
     totalDeduction: number;
     totalAmount: number;
-    bankName: string;
-    bankCode: string;
-    accountNumber: string;
-    accountHolder: string;
+    bankName?: string;
+    bankCode?: string;
+    accountNumber?: string;
+    accountHolder?: string;
     displayContent: string;
     workEntries: WorkerWorkEntry[];
     deductionBreakdown: DeductionBreakdown;
@@ -127,9 +129,11 @@ interface Props {
     data: PaymentData;
     month: string;
     applyUtilities?: boolean;
+    insuranceTeamSiteOnly?: boolean;
+    isTeamResponsibleSiteEntry?: (entry: WorkerWorkEntry, teamId?: string, teamName?: string) => boolean;
 }
 
-export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month, applyUtilities = false }, ref) => {
+export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month, applyUtilities = false, insuranceTeamSiteOnly = false, isTeamResponsibleSiteEntry }, ref) => {
     const workEntries = data.workEntries ?? [];
     const deductionBreakdown = data.deductionBreakdown ?? {
         standardLines: [],
@@ -183,7 +187,8 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
     const businessAfterTaxAmount = Math.max(0, Math.floor((data.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
     const showInsuranceSection = insuranceTaxLines.length > 0;
     const hasInsuranceTargetSummary = Boolean(data.insuranceAppliedSummary && data.insuranceAppliedSummary.appliedManDay > 0);
-    const utilityDeductionLabels = new Set(['숙소비', '전기세', '도시가스', '수도세', '과태료', '기타']);
+    const insuranceScopeLabel = insuranceTeamSiteOnly ? '적용범위: 팀 매칭 현장' : '적용범위: 전체 기준';
+    const utilityDeductionLabels = new Set(['숙소비', '전기세', '도시가스', '수도세', '인터넷', '관리비', '과태료', '기타']);
     const allDeductionLines = [...deductionBreakdown.standardLines, ...deductionBreakdown.additionalLines];
     const utilityDeductionLines = allDeductionLines
         .filter((line) => utilityDeductionLabels.has(String(line.label ?? '').trim()));
@@ -246,6 +251,11 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
             <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white text-center py-4 rounded-t-xl print:bg-purple-700 print:text-white">
                 <h2 className="text-xl font-bold">{month} 노임명세서</h2>
                 <p className="text-xs mt-1 font-medium text-white/80">근무내역 · 가불항목 · 총공제까지 한 번에 확인</p>
+                {insuranceTeamSiteOnly && (
+                    <div className="mt-2 inline-flex items-center rounded-full border border-white/40 bg-white/20 px-3 py-1 text-[11px] font-semibold text-white">
+                        4대보험 기준: 팀 매칭 현장만 공제
+                    </div>
+                )}
             </div>
 
             {/* Employee Info */}
@@ -304,16 +314,27 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {workEntries.map((entry: WorkerWorkEntry, index: number) => (
-                                            <tr key={`${entry.date}-${index}`} className="odd:bg-white even:bg-slate-50/60">
+                                        {workEntries.map((entry: WorkerWorkEntry, index: number) => {
+                                            const isTeamResponsibleSite = Boolean(
+                                                isTeamResponsibleSiteEntry?.(entry, data.teamId, data.teamName)
+                                            );
+
+                                            return (
+                                            <tr
+                                                key={`${entry.date}-${index}`}
+                                                className={isTeamResponsibleSite ? 'bg-sky-50/80' : 'odd:bg-white even:bg-slate-50/60'}
+                                            >
                                                 <td className="px-3 py-2 border-b border-slate-100 font-mono">{entry.date}</td>
-                                                <td className="px-3 py-2 border-b border-slate-100">{entry.siteName}</td>
-                                                <td className="px-3 py-2 border-b border-slate-100 text-center text-slate-500 text-xs">{entry.paymentMethod || '-'}</td>
+                                                <td className={`px-3 py-2 border-b border-slate-100 ${isTeamResponsibleSite ? 'font-semibold text-sky-800' : ''}`}>{entry.siteName}</td>
+                                                <td className={`px-3 py-2 border-b border-slate-100 text-center text-xs ${isTeamResponsibleSite ? 'text-sky-700 font-semibold' : 'text-slate-500'}`}>
+                                                    {entry.paymentMethod || '-'}
+                                                </td>
                                                 <td className="px-3 py-2 border-b border-slate-100 text-right">{entry.manDay.toFixed(1)}</td>
                                                 <td className="px-3 py-2 border-b border-slate-100 text-right">{entry.unitPrice.toLocaleString()}</td>
                                                 <td className="px-3 py-2 border-b border-slate-100 text-right font-medium text-slate-700">{(entry.amount || 0).toLocaleString()}</td>
                                             </tr>
-                                        ))}
+                                            );
+                                        })}
                                     </tbody>
                                     <tfoot>
                                         <tr className="bg-purple-50 font-semibold text-purple-700">
@@ -405,10 +426,15 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                                             ? `4대보험 적용 공수 ${data.insuranceAppliedSummary!.appliedManDay.toFixed(1)} (기준 ${data.insuranceAppliedSummary!.thresholdManDay})`
                                             : '4대보험 공제내역'}
                                     </div>
-                                    <div className="text-emerald-700 font-mono">
-                                        {hasInsuranceTargetSummary
-                                            ? `대상금액 ${data.insuranceAppliedSummary!.appliedAmount.toLocaleString()}원`
-                                            : `공제금액 ${insuranceSectionTaxTotal.toLocaleString()}원`}
+                                    <div className="text-right">
+                                        <div className="text-emerald-700 font-mono">
+                                            {hasInsuranceTargetSummary
+                                                ? `대상금액 ${data.insuranceAppliedSummary!.appliedAmount.toLocaleString()}원`
+                                                : `공제금액 ${insuranceSectionTaxTotal.toLocaleString()}원`}
+                                        </div>
+                                        <div className="text-[11px] text-emerald-700/90 font-semibold">
+                                            {insuranceScopeLabel}
+                                        </div>
                                     </div>
                                 </div>
                                 {hasInsuranceTargetSummary && (

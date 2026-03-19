@@ -1,13 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
-import {
-    MonthlyAdvanceLedgerRow,
-    LedgerManualInput,
-    LedgerSideInput,
-    MonthlyAdvanceLedgerWorkEntry,
-    MonthlyAdvanceLedgerTaxAmounts
-} from '../types/payroll';
-
 type LedgerSide = 'invoice' | 'labor';
 type LedgerSideNumberField =
     | 'carry'
@@ -23,6 +15,29 @@ type LedgerSideNumberField =
     | 'fine'
     | 'other';
 
+interface LedgerSideInput {
+    carry: number;
+    carrySecond: number;
+    currentAdvance: number;
+    currentAdvanceSecond: number;
+    lodging: number;
+    electricity: number;
+    gas: number;
+    water: number;
+    internet: number;
+    management: number;
+    fine: number;
+    other: number;
+}
+
+interface LedgerManualInput {
+    invoice: LedgerSideInput;
+    labor: LedgerSideInput;
+    personalMemo: string;
+    assignmentType?: 'corporate' | 'labor'; // Legacy row-level field
+    itemAssignments?: Record<string, 'corporate' | 'labor'>; // 추가: 개별 항목 분류
+}
+
 interface PayrollConfigLike {
     insuranceConfig?: {
         thresholdDays?: number;
@@ -30,6 +45,7 @@ interface PayrollConfigLike {
         healthRate?: number;
         careRateOfHealth?: number;
         employmentRate?: number;
+        dailyWorkerFeePerManDay?: number;
         withholdingBaseDeduction?: number;
         withholdingIncomeBaseMultiplier?: number;
         withholdingIncomeTaxRate?: number;
@@ -39,6 +55,49 @@ interface PayrollConfigLike {
     };
     incomeTaxRate?: number;
     residentTaxRate?: number;
+}
+
+interface MonthlyAdvanceLedgerWorkEntry {
+    date?: string;
+    siteId?: string;
+    siteName?: string;
+    clientCompanyId?: string;
+    isLaborSite?: boolean;
+    paymentMethod?: string;
+    manDay: number;
+    unitPrice: number;
+    amount?: number;
+}
+
+interface MonthlyAdvanceLedgerTaxAmounts {
+    pension: number;
+    health: number;
+    care: number;
+    employment: number;
+    incomeTax: number;
+    residentTax: number;
+    businessIncomeTax: number;
+    businessResidentTax: number;
+    dailyFee?: number;
+    isWithholdingTarget: boolean;
+}
+
+export interface MonthlyAdvanceLedgerRow {
+    rowKey: string;
+    month: string;
+    teamId: string;
+    teamName: string;
+    workerId: string;
+    workerName: string;
+    salaryModel?: string;
+    invoiceManDay: number;
+    laborManDay: number;
+    unitPrice: number;
+    invoiceGrossAmount: number;
+    laborGrossAmount: number;
+    workEntries?: MonthlyAdvanceLedgerWorkEntry[];
+    statementTaxAmounts?: MonthlyAdvanceLedgerTaxAmounts;
+    assignmentType?: 'corporate' | 'labor'; // 추가
 }
 
 interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
@@ -58,6 +117,7 @@ interface ComputedLedgerRow extends MonthlyAdvanceLedgerRow {
     residentTax: number;
     businessIncomeTax: number;
     businessResidentTax: number;
+    dailyFee: number;
     insuranceTotal: number;
     businessTotal: number;
     corporateNet: number;
@@ -71,8 +131,12 @@ interface Props {
     withholdingThreshold: number;
     applyInsurance?: boolean;
     applyBusinessIncome?: boolean;
+    applyDailyFee?: boolean;
+    insuranceTeamSiteOnly?: boolean;
+    isInsuranceEligibleEntry?: (entry: MonthlyAdvanceLedgerWorkEntry, row: MonthlyAdvanceLedgerRow) => boolean;
     clientCompanyNameById?: Record<string, string>;
     onInputsChange?: (inputs: Record<string, LedgerManualInput>) => void;
+    initialInputs?: Record<string, LedgerManualInput>;
     visibleSections?: {
         utilities?: boolean;
         advances?: boolean;
@@ -114,6 +178,71 @@ const createEmptyManualInput = (defaultAssignment?: 'corporate' | 'labor'): Ledg
     itemAssignments: {},
 });
 
+const resolveAssignmentType = (
+    assignmentType: LedgerManualInput['assignmentType'] | undefined,
+    fallback: 'corporate' | 'labor' = 'corporate'
+): 'corporate' | 'labor' => {
+    if (assignmentType === 'labor') return 'labor';
+    if (assignmentType === 'corporate') return 'corporate';
+    return fallback;
+};
+
+const SIDE_NUMBER_FIELDS: LedgerSideNumberField[] = [
+    'carry',
+    'carrySecond',
+    'currentAdvance',
+    'currentAdvanceSecond',
+    'lodging',
+    'electricity',
+    'gas',
+    'water',
+    'internet',
+    'management',
+    'fine',
+    'other',
+];
+
+const normalizeManualInput = (
+    input: LedgerManualInput | undefined,
+    defaultAssignment?: 'corporate' | 'labor'
+): LedgerManualInput => ({
+    invoice: { ...createEmptySideInput(), ...(input?.invoice ?? {}) },
+    labor: { ...createEmptySideInput(), ...(input?.labor ?? {}) },
+    personalMemo: input?.personalMemo ?? '',
+    assignmentType: input?.assignmentType ?? defaultAssignment ?? 'corporate',
+    itemAssignments: input?.itemAssignments ?? {},
+});
+
+const isSideInputEmpty = (side: LedgerSideInput | undefined): boolean => {
+    const safeSide = { ...createEmptySideInput(), ...(side ?? {}) };
+    return SIDE_NUMBER_FIELDS.every((field) => Number(safeSide[field] ?? 0) === 0);
+};
+
+const isManualInputEffectivelyEmpty = (
+    input: LedgerManualInput | undefined,
+    defaultAssignment?: 'corporate' | 'labor'
+): boolean => {
+    if (!input) return true;
+    const memo = String(input.personalMemo ?? '').trim();
+    const assignments = input.itemAssignments ?? {};
+    const hasAssignment = Object.keys(assignments).some((key) => {
+        const value = assignments[key];
+        return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
+    });
+
+    const baselineAssignment = resolveAssignmentType(defaultAssignment, 'corporate');
+    const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
+    const hasCustomAssignment = currentAssignment !== baselineAssignment;
+
+    return (
+        isSideInputEmpty(input.invoice)
+        && isSideInputEmpty(input.labor)
+        && memo.length === 0
+        && !hasAssignment
+        && !hasCustomAssignment
+    );
+};
+
 const toSafeAmount = (value: string): number => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -152,14 +281,14 @@ const LedgerInputCell: React.FC<{
                 step={1000}
                 value={value === 0 ? '' : String(value)}
                 onChange={(e) => onChange(toSafeAmount(e.target.value))}
-                className={`w-full bg-white/50 border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1 text-right text-[11px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
+                className={`w-full bg-white/50 border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
                 placeholder={placeholder}
             />
             {onAssignmentChange && (
                 <button
                     type="button"
                     onClick={() => onAssignmentChange(assignment === 'corporate' ? 'labor' : 'corporate')}
-                    className={`shrink-0 w-3.5 h-3.5 flex items-center justify-center rounded-[2px] text-[8px] font-bold transition-colors ${
+                    className={`shrink-0 w-4 h-4 flex items-center justify-center rounded-[2px] text-[9px] font-bold transition-colors ${
                         assignment === 'corporate'
                             ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                             : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
@@ -185,53 +314,145 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     withholdingThreshold,
     applyInsurance = false,
     applyBusinessIncome = false,
+    applyDailyFee = false,
+    insuranceTeamSiteOnly = false,
+    isInsuranceEligibleEntry,
     clientCompanyNameById = {},
     onInputsChange,
+    initialInputs,
     visibleSections,
 }) => {
-    const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>({});
+    const [inputsByRowKey, setInputsByRowKey] = useState<Record<string, LedgerManualInput>>(initialInputs ?? {});
+    const touchedRowKeysRef = React.useRef<Set<string>>(new Set());
     const [showLaborGroupBasis, setShowLaborGroupBasis] = useState<boolean>(false);
     const showUtilities = visibleSections?.utilities !== false;
     const showAdvances = visibleSections?.advances !== false;
     const showTaxes = visibleSections?.taxes !== false;
-    const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 6 : 0);
-    const tableMinWidth = 788 + (showUtilities ? 344 : 0) + (showAdvances ? 372 : 0) + (showTaxes ? 434 : 0);
+    const totalColumnCount = 10 + (showUtilities ? 5 : 0) + (showAdvances ? 5 : 0) + (showTaxes ? 7 : 0);
+    const tableMinWidth = Math.floor((708 + (showUtilities ? 392 : 0) + (showAdvances ? 432 : 0) + (showTaxes ? 590 : 0)) * 1.38);
 
     useEffect(() => {
         setInputsByRowKey((prev) => {
             const next: Record<string, LedgerManualInput> = {};
+            let changed = false;
+
             rows.forEach((row) => {
-                const existing = prev[row.rowKey];
+                const prevInput = prev[row.rowKey];
+                const initialInput = initialInputs?.[row.rowKey];
+                const isTouchedRow = touchedRowKeysRef.current.has(row.rowKey);
+                const shouldAdoptInitial = Boolean(initialInput) && !isTouchedRow && isManualInputEffectivelyEmpty(prevInput, row.assignmentType);
+                const existing = shouldAdoptInitial ? initialInput : (prevInput ?? initialInput);
                 if (!existing) {
-                    // Use row.manual if it exists (freshly fetched from DB), otherwise create empty
-                    next[row.rowKey] = row.manual ? {
-                        ...createEmptyManualInput(row.assignmentType),
-                        ...row.manual,
-                        invoice: { ...createEmptySideInput(), ...row.manual.invoice },
-                        labor: { ...createEmptySideInput(), ...row.manual.labor },
-                        itemAssignments: row.manual.itemAssignments ?? {},
-                    } : createEmptyManualInput(row.assignmentType);
+                    changed = true;
+                    next[row.rowKey] = createEmptyManualInput(row.assignmentType);
                     return;
                 }
-                // If it already exists in state, we keep it but ensure fields are complete
-                next[row.rowKey] = {
-                    invoice: { ...createEmptySideInput(), ...existing.invoice },
-                    labor: { ...createEmptySideInput(), ...existing.labor },
-                    personalMemo: existing.personalMemo ?? '',
-                    assignmentType: existing.assignmentType ?? row.assignmentType ?? 'labor',
-                    itemAssignments: existing.itemAssignments ?? {},
-                };
-            });
-            return next;
-        });
-    }, [rows]);
 
+                const normalized = normalizeManualInput(existing, row.assignmentType);
+
+                const isSameInvoice =
+                    existing.invoice?.carry === normalized.invoice.carry
+                    && existing.invoice?.carrySecond === normalized.invoice.carrySecond
+                    && existing.invoice?.currentAdvance === normalized.invoice.currentAdvance
+                    && existing.invoice?.currentAdvanceSecond === normalized.invoice.currentAdvanceSecond
+                    && existing.invoice?.lodging === normalized.invoice.lodging
+                    && existing.invoice?.electricity === normalized.invoice.electricity
+                    && existing.invoice?.gas === normalized.invoice.gas
+                    && existing.invoice?.water === normalized.invoice.water
+                    && existing.invoice?.internet === normalized.invoice.internet
+                    && existing.invoice?.management === normalized.invoice.management
+                    && existing.invoice?.fine === normalized.invoice.fine
+                    && existing.invoice?.other === normalized.invoice.other;
+
+                const isSameLabor =
+                    existing.labor?.carry === normalized.labor.carry
+                    && existing.labor?.carrySecond === normalized.labor.carrySecond
+                    && existing.labor?.currentAdvance === normalized.labor.currentAdvance
+                    && existing.labor?.currentAdvanceSecond === normalized.labor.currentAdvanceSecond
+                    && existing.labor?.lodging === normalized.labor.lodging
+                    && existing.labor?.electricity === normalized.labor.electricity
+                    && existing.labor?.gas === normalized.labor.gas
+                    && existing.labor?.water === normalized.labor.water
+                    && existing.labor?.internet === normalized.labor.internet
+                    && existing.labor?.management === normalized.labor.management
+                    && existing.labor?.fine === normalized.labor.fine
+                    && existing.labor?.other === normalized.labor.other;
+
+                const existingAssignments = existing.itemAssignments ?? {};
+                const normalizedAssignments = normalized.itemAssignments ?? {};
+                const assignmentKeys = new Set([
+                    ...Object.keys(existingAssignments),
+                    ...Object.keys(normalizedAssignments),
+                ]);
+                const isSameAssignments = Array.from(assignmentKeys).every(
+                    (key) => existingAssignments[key] === normalizedAssignments[key]
+                );
+
+                const isSame =
+                    isSameInvoice
+                    && isSameLabor
+                    && (existing.personalMemo ?? '') === normalized.personalMemo
+                    && (existing.assignmentType ?? row.assignmentType ?? 'corporate') === normalized.assignmentType
+                    && isSameAssignments;
+
+                if (!isSame || shouldAdoptInitial) {
+                    changed = true;
+                    next[row.rowKey] = normalized;
+                    return;
+                }
+
+                next[row.rowKey] = existing;
+            });
+
+            if (Object.keys(prev).length !== rows.length) {
+                changed = true;
+            }
+
+            return changed ? next : prev;
+        });
+    }, [initialInputs, rows]);
+
+    // useRef를 사용해 이전 inputsByRowKey를 추적하여 실제 변경 시에만 콜백 호출
+    const prevInputsByRowKeyRef = React.useRef<Record<string, LedgerManualInput>>(inputsByRowKey);
+    
     useEffect(() => {
-        onInputsChange?.(inputsByRowKey);
+        const prev = prevInputsByRowKeyRef.current;
+        const curr = inputsByRowKey;
+        
+        // 객체 참조가 같으면 콜백 호출 안 함
+        if (prev === curr) {
+            return;
+        }
+        
+        // 키 개수가 다르면 변경됨
+        const prevKeys = Object.keys(prev);
+        const currKeys = Object.keys(curr);
+        if (prevKeys.length !== currKeys.length) {
+            prevInputsByRowKeyRef.current = curr;
+            onInputsChange?.(curr);
+            return;
+        }
+        
+        // 각 키의 값 비교
+        let hasActualChange = false;
+        for (const key of currKeys) {
+            const prevValue = prev[key];
+            const currValue = curr[key];
+            if (prevValue !== currValue) {
+                hasActualChange = true;
+                break;
+            }
+        }
+        
+        if (hasActualChange) {
+            prevInputsByRowKeyRef.current = curr;
+            onInputsChange?.(curr);
+        }
     }, [inputsByRowKey, onInputsChange]);
 
     const updateSideField = useCallback(
         (rowKey: string, side: LedgerSide, field: LedgerSideNumberField, value: number) => {
+            touchedRowKeysRef.current.add(rowKey);
             setInputsByRowKey((prev) => {
                 const base = prev[rowKey] ?? createEmptyManualInput();
                 return {
@@ -250,6 +471,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     );
 
     const updatePersonalMemo = useCallback((rowKey: string, value: string) => {
+        touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
             return {
@@ -263,6 +485,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     }, []);
 
     const updateAssignmentType = useCallback((rowKey: string, value: 'corporate' | 'labor') => {
+        touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
             // 전체 분류가 바뀌면 모든 개별 항목 분류도 초기화하거나 동기화할 수 있지만, 
@@ -278,6 +501,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     }, []);
 
     const updateItemAssignment = useCallback((rowKey: string, itemKey: string, value: 'corporate' | 'labor') => {
+        touchedRowKeysRef.current.add(rowKey);
         setInputsByRowKey((prev) => {
             const base = prev[rowKey] ?? createEmptyManualInput();
             return {
@@ -292,6 +516,21 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             };
         });
     }, []);
+
+    const isInsuranceEligibleForRowEntry = useCallback(
+        (entry: MonthlyAdvanceLedgerWorkEntry, row: MonthlyAdvanceLedgerRow): boolean => {
+            if (!insuranceTeamSiteOnly) return true;
+            if (!isInsuranceEligibleEntry) return true;
+
+            const rawAmount = Number(entry.amount ?? 0);
+            const amount = Number.isFinite(rawAmount) && rawAmount > 0
+                ? rawAmount
+                : floorWon(Number(entry.manDay ?? 0) * Number(entry.unitPrice ?? 0));
+
+            return isInsuranceEligibleEntry({ ...entry, amount }, row);
+        },
+        [insuranceTeamSiteOnly, isInsuranceEligibleEntry]
+    );
 
     const getLaborGroupSummaries = useCallback(
         (row: MonthlyAdvanceLedgerRow): LaborGroupSummary[] => {
@@ -358,6 +597,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     hasUnknownClient: boolean;
                 }
             >();
+            const insuranceEligibleGroupAgg = new Map<string, { manDay: number; amount: number }>();
 
             sourceEntries.forEach((entry) => {
                 if (!isLaborEntry(entry)) return;
@@ -381,11 +621,19 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     amount: prev.amount + amount,
                     hasUnknownClient: prev.hasUnknownClient || !clientCompanyId,
                 });
+
+                if (!isInsuranceEligibleForRowEntry(entry, row)) return;
+
+                const insurancePrev = insuranceEligibleGroupAgg.get(groupKey) ?? { manDay: 0, amount: 0 };
+                insuranceEligibleGroupAgg.set(groupKey, {
+                    manDay: insurancePrev.manDay + manDay,
+                    amount: insurancePrev.amount + amount,
+                });
             });
 
             const insuranceGroupKeys = new Set<string>();
             if (applyInsurance && insuranceThreshold > 0) {
-                laborGroupAgg.forEach((agg, groupKey) => {
+                insuranceEligibleGroupAgg.forEach((agg, groupKey) => {
                     if (agg.manDay >= insuranceThreshold) {
                         insuranceGroupKeys.add(groupKey);
                     }
@@ -437,6 +685,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             applyBusinessIncome,
             applyInsurance,
             clientCompanyNameById,
+            isInsuranceEligibleForRowEntry,
             payrollConfig?.insuranceConfig?.thresholdDays,
             payrollConfig?.insuranceConfig?.withholdingApplyAllLabor,
             withholdingThreshold,
@@ -472,6 +721,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             typeof (payrollConfig as any)?.insuranceConfig?.employmentApplyBelowThreshold === 'boolean'
                 ? (payrollConfig as any).insuranceConfig.employmentApplyBelowThreshold
                 : true;
+        const dailyWorkerFeePerManDay = Math.max(0, Math.floor(toNumber((payrollConfig as any)?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
         const businessIncomeRate = 0.03;
         const businessResidentRate = 0.003;
 
@@ -495,7 +745,9 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                 let residentTax = 0;
                 let businessIncomeTax = 0;
                 let businessResidentTax = 0;
+                let dailyFee = 0;
                 let isWithholdingTarget = false;
+                const isDailyWageWorker = (row.salaryModel ?? '').trim() === '일급제';
 
                 if (row.statementTaxAmounts) {
                     pension = floorWon(row.statementTaxAmounts.pension);
@@ -507,6 +759,13 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     businessIncomeTax = floorWon(row.statementTaxAmounts.businessIncomeTax);
                     businessResidentTax = floorWon(row.statementTaxAmounts.businessResidentTax);
                     isWithholdingTarget = Boolean(row.statementTaxAmounts.isWithholdingTarget);
+                    const stmtDailyFee = applyDailyFee ? floorWon(row.statementTaxAmounts.dailyFee ?? 0) : 0;
+                    if (stmtDailyFee > 0) {
+                        dailyFee = stmtDailyFee;
+                    } else if (applyDailyFee && isDailyWageWorker && dailyWorkerFeePerManDay > 0) {
+                        const totalManDay = toNumber(row.invoiceManDay) + toNumber(row.laborManDay);
+                        dailyFee = floorWon(totalManDay * dailyWorkerFeePerManDay);
+                    }
                 } else {
                     const getSiteKey = (entry: MonthlyAdvanceLedgerWorkEntry): string => {
                         const siteId = (entry.siteId ?? '').trim();
@@ -556,6 +815,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     };
 
                     const laborGroupAgg = new Map<string, { manDay: number; amount: number }>();
+                    const insuranceEligibleGroupAgg = new Map<string, { manDay: number; amount: number }>();
 
                     allEntries.forEach((entry) => {
                         const amount = toNumber(entry.amount) > 0 ? toNumber(entry.amount) : toNumber(entry.manDay) * toNumber(entry.unitPrice);
@@ -568,11 +828,19 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                             manDay: prevLaborGroup.manDay + manDay,
                             amount: prevLaborGroup.amount + amount,
                         });
+
+                        if (!isInsuranceEligibleForRowEntry(entry, row)) return;
+
+                        const prevInsuranceGroup = insuranceEligibleGroupAgg.get(groupKey) ?? { manDay: 0, amount: 0 };
+                        insuranceEligibleGroupAgg.set(groupKey, {
+                            manDay: prevInsuranceGroup.manDay + manDay,
+                            amount: prevInsuranceGroup.amount + amount,
+                        });
                     });
 
                     const insuranceGroupKeys = new Set<string>();
                     if (applyInsurance && insuranceThreshold > 0) {
-                        laborGroupAgg.forEach((agg, groupKey) => {
+                        insuranceEligibleGroupAgg.forEach((agg, groupKey) => {
                             if (agg.manDay >= insuranceThreshold) {
                                 insuranceGroupKeys.add(groupKey);
                             }
@@ -580,7 +848,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     }
 
                     const insuranceBaseAmount = applyInsurance
-                        ? Array.from(laborGroupAgg.entries()).reduce(
+                        ? Array.from(insuranceEligibleGroupAgg.entries()).reduce(
                             (sum, [groupKey, agg]) => sum + (insuranceGroupKeys.has(groupKey) ? toNumber(agg.amount) : 0),
                             0
                         )
@@ -656,13 +924,21 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
 
                     businessIncomeTax = applyBusinessIncome ? floorWon(businessBaseAmount * businessIncomeRate) : 0;
                     businessResidentTax = applyBusinessIncome ? floorWon(businessBaseAmount * businessResidentRate) : 0;
+
+                    const totalManDayForDailyFee = allEntries.reduce((sum, entry) => sum + toNumber(entry.manDay), 0);
+                    dailyFee = applyDailyFee && isDailyWageWorker && dailyWorkerFeePerManDay > 0
+                        ? floorWon(totalManDayForDailyFee * dailyWorkerFeePerManDay)
+                        : 0;
                 }
                 const insuranceTotal = pension + health + care + employment;
                 const businessTotal = businessIncomeTax + businessResidentTax;
-                const corporateBaseBeforeUtility = floorWon(invoiceGrossAmount - invoiceAdvanceTotal - businessTotal);
-                const personalBaseBeforeUtility = floorWon(laborGrossAmount - laborAdvanceTotal - insuranceTotal - incomeTax - residentTax);
+                const dailyFeeAssignment: 'corporate' | 'labor' = (manual.itemAssignments?.['dailyFee'] ?? 'labor') as 'corporate' | 'labor';
+                const dailyFeeForCorporate = dailyFeeAssignment === 'corporate' ? dailyFee : 0;
+                const dailyFeeForPersonal = dailyFeeAssignment === 'labor' ? dailyFee : 0;
+                const corporateBaseBeforeUtility = floorWon(invoiceGrossAmount - invoiceAdvanceTotal - businessTotal - dailyFeeForCorporate);
+                const personalBaseBeforeUtility = floorWon(laborGrossAmount - laborAdvanceTotal - insuranceTotal - incomeTax - residentTax - dailyFeeForPersonal);
 
-                const assignmentType = manual.assignmentType ?? row.assignmentType ?? 'labor';
+                const assignmentType = manual.assignmentType ?? row.assignmentType ?? 'corporate';
                 
                 const utilityFields: Array<{ key: LedgerSideNumberField }> = [
                     { key: 'lodging' },
@@ -713,6 +989,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                     residentTax,
                     businessIncomeTax,
                     businessResidentTax,
+                    dailyFee,
                     insuranceTotal,
                     businessTotal,
                     corporateNet,
@@ -727,7 +1004,16 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                 if (salaryModelCompare !== 0) return salaryModelCompare;
                 return (a.workerName || '').localeCompare(b.workerName || '', 'ko');
             });
-    }, [applyBusinessIncome, applyInsurance, inputsByRowKey, payrollConfig, rows, withholdingThreshold]);
+    }, [
+        applyBusinessIncome,
+        applyDailyFee,
+        applyInsurance,
+        inputsByRowKey,
+        isInsuranceEligibleForRowEntry,
+        payrollConfig,
+        rows,
+        withholdingThreshold,
+    ]);
 
     const groupedRows = useMemo(() => {
         const map = new Map<string, ComputedLedgerRow[]>();
@@ -770,6 +1056,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                 acc.residentTax += row.residentTax;
                 acc.businessIncomeTax += row.businessIncomeTax;
                 acc.businessResidentTax += row.businessResidentTax;
+                acc.dailyFee += row.dailyFee;
                 acc.insuranceTotal += row.insuranceTotal;
                 acc.businessTotal += row.businessTotal;
                 acc.corporateNet += row.corporateNet;
@@ -802,6 +1089,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                 residentTax: 0,
                 businessIncomeTax: 0,
                 businessResidentTax: 0,
+                dailyFee: 0,
                 insuranceTotal: 0,
                 businessTotal: 0,
                 corporateNet: 0,
@@ -827,31 +1115,42 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
         const withholdingTaxCreditRate = (
             Number(payrollConfig?.insuranceConfig?.withholdingIncomeBaseMultiplier ?? 0.55) * 100
         ).toFixed(2);
-        return { pensionRate, healthRate, careRate, employmentRate, incomeRate, residentRate, withholdingBaseDeduction, withholdingTaxCreditRate };
+        const dailyWorkerFeePerManDay = Math.max(0, Math.floor(Number(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0))).toLocaleString('ko-KR');
+        return {
+            pensionRate,
+            healthRate,
+            careRate,
+            employmentRate,
+            incomeRate,
+            residentRate,
+            withholdingBaseDeduction,
+            withholdingTaxCreditRate,
+            dailyWorkerFeePerManDay,
+        };
     }, [payrollConfig]);
 
     return (
         <div className="flex-1 min-h-0 bg-white rounded-2xl border border-slate-300 shadow-sm flex flex-col overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-100 to-blue-50">
+            <div className="px-3 py-2 border-b border-slate-200 bg-gradient-to-r from-slate-100 to-blue-50">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
                     <div>
-                        <h3 className="text-base font-bold text-slate-800">팀별 가불대장</h3>
-                        <p className="text-xs text-slate-600 mt-0.5">
+                        <h3 className="text-lg font-bold text-slate-800">팀별 가불대장</h3>
+                        <p className="text-[14px] text-slate-600 mt-0.5">
                             팀 소속 작업자의 계산서/노무 공수 분리, 공제 직접 입력, 법인/개인 가불 공제, 세금 계산을 한 화면에서 처리합니다.
                         </p>
-                        <p className="text-[11px] text-slate-500 mt-1">
-                            적용 상태: 4대보험 {applyInsurance ? '적용' : '미적용'} / 사업소득 {applyBusinessIncome ? '적용' : '미적용'}
+                        <p className="text-[14px] text-slate-500 mt-1">
+                            적용 상태: 4대보험 {applyInsurance ? '적용' : '미적용'} / 사업소득 {applyBusinessIncome ? '적용' : '미적용'} / 일급제 수수료 {applyDailyFee ? '적용' : '미적용'}
                         </p>
                     </div>
                     <div className="flex flex-col items-start lg:items-end gap-2">
-                        <div className="text-[11px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium">
+                        <div className="text-[13px] text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium">
                             4대보험: 국민연금 {rateText.pensionRate}% / 건강보험 {rateText.healthRate}% / 장기요양(건강보험) {rateText.careRate}% / 고용보험 {rateText.employmentRate}%<br />
-                            원천세: ((단가 - {rateText.withholdingBaseDeduction}원) × 노무공수 × 갑근세 {rateText.incomeRate}%) × (1 - 세액공제율 {rateText.withholdingTaxCreditRate}%) / 지방세(소득세의 {rateText.residentRate}%) | 사업소득: 3.0% + 0.3%
+                            원천세: ((단가 - {rateText.withholdingBaseDeduction}원) × 노무공수 × 갑근세 {rateText.incomeRate}%) × (1 - 세액공제율 {rateText.withholdingTaxCreditRate}%) / 지방세(소득세의 {rateText.residentRate}%) | 사업소득: 3.0% + 0.3% | 일급제 수수료: 공수 × {rateText.dailyWorkerFeePerManDay}원
                         </div>
                         <button
                             type="button"
                             onClick={() => setShowLaborGroupBasis((prev) => !prev)}
-                            className={`text-[11px] px-3 py-1.5 rounded-md border font-semibold transition-colors ${
+                            className={`text-[13px] px-3 py-1.5 rounded-md border font-semibold transition-colors ${
                                 showLaborGroupBasis
                                     ? 'bg-slate-700 text-white border-slate-700'
                                     : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
@@ -864,59 +1163,72 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
             </div>
 
             <div className="flex-1 min-h-0 overflow-auto bg-white">
-                <table className="w-full border-collapse text-[11px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
+                <table className="w-full border-collapse text-[13px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
                     <thead className="sticky top-0 z-20">
                         <tr className="bg-slate-200 text-slate-800">
-                            <th className="border border-slate-400 px-2 py-1.5 w-10">No</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-20">이름</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-14">구분</th>
-                            <th className="border border-slate-400 px-1.5 py-1.5 w-[76px]">공제 분류</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-16 bg-sky-100">공수</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[72px]">단가</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[84px] bg-yellow-100">세전 금액</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-10">No</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-20">이름</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-14">구분</th>
+                            <th className="border border-slate-400 px-1.5 py-1.5 whitespace-nowrap w-[88px]">공제 분류</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-16 bg-sky-100">공수</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-[80px]">단가</th>
+                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-[92px] bg-yellow-100">세전 금액</th>
                             {showUtilities && (
                                 <>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">숙소비<br />인터넷</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">전기세<br />관리비</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">도시가스<br />과태료</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[68px]">수도세<br />기타</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-slate-300">합계</th>
+                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                        <span className="block text-[13px]">숙소비</span>
+                                            <span className="block text-[13px]">인터넷</span>
+                                        </th>
+                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                        <span className="block text-[13px]">전기료</span>
+                                            <span className="block text-[13px]">관리비</span>
+                                        </th>
+                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                        <span className="block text-[13px]">가스비</span>
+                                            <span className="block text-[13px]">과태료</span>
+                                        </th>
+                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                            <span className="block text-[13px]">수도세</span>
+                                            <span className="block text-[13px]">기타</span>
+                                        </th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-slate-300">합계</th>
                                 </>
                             )}
                             {showAdvances && (
                                 <>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
-                                        <span className="block whitespace-nowrap text-[10px]">전달 법인가불</span>
-                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">전달 노무가불</span>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">법인가불1</span>
+                                        <span className="block text-[13px]">노무가불1</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
-                                        <span className="block whitespace-nowrap text-[10px]">전달 법인가불</span>
-                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">전달 노무가불</span>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">법인가불2</span>
+                                        <span className="block text-[13px]">노무가불2</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
-                                        <span className="block whitespace-nowrap text-[10px]">당월 법인가불</span>
-                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">당월 노무가불</span>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">법인가불3</span>
+                                        <span className="block text-[13px]">노무가불3</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[82px] bg-yellow-200">
-                                        <span className="block whitespace-nowrap text-[10px]">당월 법인가불</span>
-                                        <span className="block whitespace-nowrap text-[10px] text-slate-700">당월 노무가불</span>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">법인가불4</span>
+                                        <span className="block text-[13px]">노무가불4</span>
                                     </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[76px] bg-emerald-200">가불 합계</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] bg-emerald-200">가불 합계</th>
                                 </>
                             )}
                             {showTaxes && (
                                 <>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">국민연금<br />장기요양</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-yellow-100">건강보험<br />+고용보험</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-amber-100">갑근세<br />지방세</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-100">사업소득세<br />지방소득세</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[74px] bg-yellow-200">4대 보험 합계</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 w-[72px] bg-green-200">3.3% 합계</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">국민연금/장기요양</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">건강보험/+고용보험</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] bg-amber-100">갑근세/지방세</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] bg-green-100">사업소득세/지방소득세</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[94px] bg-fuchsia-100">일급제 수수료</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[106px] bg-yellow-200">4대 보험 합계</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-green-200">3.3% 합계</th>
                                 </>
                             )}
-                            <th className="border border-slate-400 px-2 py-1.5 w-[86px] bg-emerald-200">법 인</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[86px] bg-lime-200">개 인</th>
-                            <th className="border border-slate-400 px-2 py-1.5 w-[120px] bg-lime-100">메모</th>
+                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-emerald-200">법 인</th>
+                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-lime-200">개 인</th>
+                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[140px] bg-lime-100">메모</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -955,11 +1267,11 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                         <input 
                                                             type="radio" 
                                                             name={`assign-${row.rowKey}`}
-                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'labor') === 'corporate'}
+                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'corporate'}
                                                             onChange={() => updateAssignmentType(row.rowKey, 'corporate')}
-                                                            className="w-3 h-3 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                            className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                                         />
-                                                        <span className="text-[11px] font-bold text-blue-800 tracking-wide">법인</span>
+                                                        <span className="text-[14px] font-bold text-blue-800 tracking-wide">법인</span>
                                                     </label>
                                                 </td>
                                                 <td className="border border-slate-300 px-2 text-right bg-lime-300 font-bold">{formatManDay(row.invoiceManDay)}</td>
@@ -971,7 +1283,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.lodging}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)}
-                                                                assignment={row.manual.itemAssignments?.lodging ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.lodging ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'lodging', v)}
                                                                 placeholder="숙소"
                                                             />
@@ -980,7 +1292,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.electricity}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)}
-                                                                assignment={row.manual.itemAssignments?.electricity ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.electricity ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'electricity', v)}
                                                                 placeholder="전기"
                                                             />
@@ -989,7 +1301,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.gas}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)}
-                                                                assignment={row.manual.itemAssignments?.gas ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.gas ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'gas', v)}
                                                                 placeholder="가스"
                                                             />
@@ -998,7 +1310,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.water}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)}
-                                                                assignment={row.manual.itemAssignments?.water ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.water ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'water', v)}
                                                                 placeholder="수도"
                                                             />
@@ -1029,6 +1341,25 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                         <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.health)}</td>
                                                         <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.incomeTax)}</td>
                                                         <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessIncomeTax)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-1 text-right bg-fuchsia-100 font-bold">
+                                                            <div className="flex flex-col items-end gap-0.5">
+                                                                <span>{formatAmount(row.dailyFee)}</span>
+                                                                {row.dailyFee > 0 && (
+                                                                    <button
+                                                                        onClick={() => updateItemAssignment(row.rowKey, 'dailyFee',
+                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? 'labor' : 'corporate'
+                                                                        )}
+                                                                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                                                                            (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate'
+                                                                                ? 'bg-blue-200 text-blue-800'
+                                                                                : 'bg-emerald-200 text-emerald-800'
+                                                                        }`}
+                                                                    >
+                                                                        {(row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? '법인' : '노무'}
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
                                                         <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.insuranceTotal)}</td>
                                                         <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-bold">{formatAmount(row.businessTotal)}</td>
                                                     </>
@@ -1041,7 +1372,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                         value={row.manual.personalMemo}
                                                         onChange={(e) => updatePersonalMemo(row.rowKey, e.target.value)}
                                                         placeholder="메모"
-                                                        className="w-full border border-lime-300 rounded px-1.5 py-1 text-[10px] bg-white/90 text-slate-700 outline-none focus:border-lime-500"
+                                                        className="w-full border border-lime-300 rounded px-2 py-1.5 text-[13px] bg-white/90 text-slate-700 outline-none focus:border-lime-500"
                                                         maxLength={120}
                                                     />
                                                 </td>
@@ -1052,11 +1383,11 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                         <input 
                                                             type="radio" 
                                                             name={`assign-${row.rowKey}`}
-                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'labor') === 'labor'}
+                                                            checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'labor'}
                                                             onChange={() => updateAssignmentType(row.rowKey, 'labor')}
-                                                            className="w-3 h-3 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                                                         />
-                                                        <span className="text-[11px] font-bold text-emerald-800 tracking-wide">노무</span>
+                                                        <span className="text-[14px] font-bold text-emerald-800 tracking-wide">노무</span>
                                                     </label>
                                                 </td>
                                                 <td className="border border-slate-300 px-2 text-right bg-yellow-300 font-bold">{formatManDay(row.laborManDay)}</td>
@@ -1067,7 +1398,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.internet}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'internet', v)}
-                                                                assignment={row.manual.itemAssignments?.internet ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.internet ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'internet', v)}
                                                                 placeholder="인터넷"
                                                             />
@@ -1076,7 +1407,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.management}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'management', v)}
-                                                                assignment={row.manual.itemAssignments?.management ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.management ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'management', v)}
                                                                 placeholder="관리비"
                                                             />
@@ -1085,7 +1416,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.fine}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'fine', v)}
-                                                                assignment={row.manual.itemAssignments?.fine ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.fine ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'fine', v)}
                                                                 placeholder="과태료"
                                                             />
@@ -1094,7 +1425,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.other}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'other', v)}
-                                                                assignment={row.manual.itemAssignments?.other ?? row.manual.assignmentType ?? row.assignmentType ?? 'labor'}
+                                                                assignment={row.manual.itemAssignments?.other ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'other', v)}
                                                                 placeholder="기타"
                                                             />
@@ -1128,10 +1459,9 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                                     </>
                                                 )}
                                             </tr>
-                                            {/* 법인 잔액 부족 안내 메시지 제거 */}
                                             {showLaborGroupBasis && (
                                                 <tr className="bg-slate-50">
-                                                    <td colSpan={totalColumnCount} className="border border-slate-300 px-2 py-1 text-[10px] text-slate-700">
+                                                    <td colSpan={totalColumnCount} className="border border-slate-300 px-2 py-1.5 text-[13px] text-slate-700">
                                                         {laborGroupSummaries.length > 0
                                                             ? `기준그룹(노무현장+발주사): ${laborGroupSummaries
                                                                 .map((summary) => `${summary.siteName}/${summary.clientLabel} · ${formatManDay(summary.manDay)}공수 · ${resolveCategoryLabel(summary.category)}`)
@@ -1225,6 +1555,7 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
                                         <div>{formatAmount(totals.businessIncomeTax)}</div>
                                         <div className="text-slate-500">{formatAmount(totals.businessResidentTax)}</div>
                                     </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-fuchsia-50">{formatAmount(totals.dailyFee)}</td>
                                     <td className="border border-slate-400 px-2 py-2 text-right">{formatAmount(totals.insuranceTotal)}</td>
                                     <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.businessTotal)}</td>
                                 </>
@@ -1240,4 +1571,31 @@ const MonthlyAdvanceLedger: React.FC<Props> = ({
     );
 };
 
-export default MonthlyAdvanceLedger;
+export default React.memo(MonthlyAdvanceLedger, (prevProps, nextProps) => {
+    // rows 배열의 길이와 내용을 비교
+    if (prevProps.rows.length !== nextProps.rows.length) {
+        return false;
+    }
+    
+    for (let i = 0; i < prevProps.rows.length; i++) {
+        const prevRow = prevProps.rows[i];
+        const nextRow = nextProps.rows[i];
+        if (prevRow.rowKey !== nextRow.rowKey) {
+            return false;
+        }
+        // statementTaxAmounts 내 수수료 변경 감지 (토글 시 리렌더링 보장)
+        if ((prevRow.statementTaxAmounts?.dailyFee ?? 0) !== (nextRow.statementTaxAmounts?.dailyFee ?? 0)) {
+            return false;
+        }
+    }
+    
+    // 다른 모든 props는 얕은 비교
+    for (const key in prevProps) {
+        if (key === 'rows') continue;
+        if (prevProps[key as keyof Props] !== nextProps[key as keyof Props]) {
+            return false;
+        }
+    }
+    
+    return true;  // props 같음 = 리렌더링 스킵
+});

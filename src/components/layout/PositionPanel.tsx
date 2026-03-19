@@ -30,12 +30,10 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
     // Filter sites for display
     const filteredSites = React.useMemo(() => {
         if (!siteData) return [];
-        return Object.keys(siteData)
-            .filter(key =>
-                !key.startsWith('pos_') &&
-                !['safety', 'learning', 'equipment', 'foreman', 'skilled', 'general', 'newcomer'].includes(key)
-            )
-            .map(key => ({ key, ...siteData[key] }));
+        return Object.entries(siteData)
+            .filter(([key]) => !key.startsWith('pos_'))
+            .map(([key, site]) => ({ key, ...site }))
+            .sort((a, b) => (a.order || 0) - (b.order || 0));
     }, [siteData]);
 
     return (
@@ -79,7 +77,7 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                             : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
                             }`}
                     >
-                        현장 모드
+                        사이트 모드
                     </button>
                     <button
                         onClick={() => setActiveTab('position')}
@@ -159,11 +157,11 @@ const PositionPanel: React.FC<PositionPanelProps> = ({
                     <div className="mt-6 p-3 bg-slate-700/30 rounded-lg border border-slate-600">
                         <p className="text-slate-400 text-xs leading-relaxed">
                             💡 <strong className="text-slate-300">
-                                {activeTab === 'site' ? '현장 모드' : '직책 모드'}
-                            </strong>
-                            {activeTab === 'site'
-                                ? '는 각 현장별 데이터를 독립적으로 관리할 수 있는 공간입니다.'
-                                : '는 권한과 관계없이 해당 직책의 메뉴 구성을 미리보기 할 수 있는 기능입니다.'}
+                            {activeTab === 'site' ? '사이트 모드' : '직책 모드'}
+                        </strong>
+                        {activeTab === 'site'
+                            ? '는 선택한 사이트의 메뉴와 데이터를 기반으로 화면을 구성합니다.'
+                            : '는 권한과 관계없이 해당 직책의 메뉴 구성을 미리보기 할 수 있는 기능입니다.'}
                         </p>
                     </div>
                 </div>

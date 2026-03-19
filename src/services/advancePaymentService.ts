@@ -223,17 +223,29 @@ export const advancePaymentService = {
     getAdvancePayments: async (year: number, month: number, teamId: string): Promise<AdvancePayment[]> => {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-            const teamUuid = await resolveTeamUuid(teamId);
+            const safeTeamId = String(teamId ?? '').trim();
+            const teamUuid = await resolveTeamUuid(safeTeamId);
             const res = await listAllAdvancePayments();
             const rows = (res as any)?.data?.advancePayments ?? [];
 
             return rows
                 .filter((row: any) => {
                     if (String(row?.yearMonth ?? '') !== String(yearMonth)) return false;
-                    const dcTeamId = row?.team?.id ? String(row.team.id) : '';
-                    const dcTeamLegacyId = row?.team?.legacyId ? String(row.team.legacyId) : '';
-                    if (teamId && (dcTeamId === teamId || dcTeamLegacyId === teamId)) return true;
-                    return teamUuid ? dcTeamId === teamUuid : false;
+
+                    const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
+                    const dcTeamId = row?.team?.id ? String(row.team.id).trim() : '';
+                    const dcTeamLegacyId = row?.team?.legacyId ? String(row.team.legacyId).trim() : '';
+                    const flatTeamId = row?.teamId ? String(row.teamId).trim() : '';
+                    const parsedTeamId = parsed?.teamId ? String(parsed.teamId).trim() : '';
+
+                    const candidateTeamIds = new Set<string>(
+                        [dcTeamId, dcTeamLegacyId, flatTeamId, parsedTeamId].filter((v) => Boolean(v))
+                    );
+
+                    if (!safeTeamId && !teamUuid) return true;
+                    if (safeTeamId && candidateTeamIds.has(safeTeamId)) return true;
+                    if (teamUuid && candidateTeamIds.has(teamUuid)) return true;
+                    return false;
                 })
                 .map((row: any) => {
                     const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
@@ -325,21 +337,44 @@ export const advancePaymentService = {
 
     saveAdvancePayment: async (data: AdvancePayment) => {
         try {
-            const docId = `${data.teamId}_${data.workerId}_${data.yearMonth}`;
+            const safeTeamId = String(data.teamId ?? '').trim();
+            const safeWorkerId = String(data.workerId ?? '').trim();
+            const safeYearMonth = String(data.yearMonth ?? '').trim();
+            const docId = `${safeTeamId}_${safeWorkerId}_${safeYearMonth}`;
             const [teamUuid, workerUuid] = await Promise.all([
-                resolveTeamUuid(data.teamId),
-                resolveWorkerUuid(data.workerId)
+                resolveTeamUuid(safeTeamId),
+                resolveWorkerUuid(safeWorkerId)
             ]);
-            if (!teamUuid) throw new Error('팀을 찾을 수 없습니다.');
+
+            const resolvedTeamId = teamUuid ?? safeTeamId;
+            const resolvedWorkerId = workerUuid ?? safeWorkerId;
+
+            if (!resolvedTeamId) {
+                throw new Error('팀 ID가 비어 있어 저장할 수 없습니다.');
+            }
+
+            if (!teamUuid) {
+                console.warn('[advancePaymentService.saveAdvancePayment] Team UUID resolve failed. Fallback to raw teamId.', {
+                    teamId: safeTeamId,
+                    yearMonth: safeYearMonth,
+                });
+            }
+
+            if (!workerUuid) {
+                console.warn('[advancePaymentService.saveAdvancePayment] Worker UUID resolve failed. Fallback to raw workerId.', {
+                    workerId: safeWorkerId,
+                    yearMonth: safeYearMonth,
+                });
+            }
             
             const normalizedItems = normalizeItems(data.items);
 
             const payload: any = {
                 id: docId,
-                yearMonth: data.yearMonth,
-                workerId: workerUuid ?? null,
+                yearMonth: safeYearMonth,
+                workerId: resolvedWorkerId || null,
                 workerName: data.workerName ?? null,
-                teamId: teamUuid,
+                teamId: resolvedTeamId,
                 teamName: data.teamName ?? null,
                 items: JSON.stringify(normalizedItems),
                 prevMonthCarryover: data.prevMonthCarryover ?? 0,

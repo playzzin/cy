@@ -988,6 +988,17 @@ const AdvancePaymentPage: React.FC = () => {
             const importedCellMap: Record<string, true> = {};
             let hasAutoImportUpdates = false;
 
+            // worker.id/worker.legacyId 혼용으로 인한 재조회 누락을 막기 위해 canonical worker key를 먼저 만든다.
+            const canonicalWorkerKeyByAnyId = new Map<string, string>();
+            teamWorkers.forEach((worker) => {
+                const workerId = String(worker.id ?? '').trim();
+                const legacyId = String(worker.legacyId ?? '').trim();
+                const canonicalKey = workerId || legacyId;
+                if (!canonicalKey) return;
+                if (workerId) canonicalWorkerKeyByAnyId.set(workerId, canonicalKey);
+                if (legacyId) canonicalWorkerKeyByAnyId.set(legacyId, canonicalKey);
+            });
+
             // 1. 기존 가불 내역 먼저 맵에 담기
             existingAdvances
                 .filter((record) => {
@@ -995,13 +1006,18 @@ const AdvancePaymentPage: React.FC = () => {
                     return allowedTeamIdSet.has(String(record.teamId ?? ''));
                 })
                 .forEach(record => {
+                    const rawWorkerId = String(record.workerId ?? '').trim();
+                    const workerKey = canonicalWorkerKeyByAnyId.get(rawWorkerId) ?? rawWorkerId;
+                    if (!workerKey) return;
+
                     const normalizedRecord: AdvancePayment = {
                         ...record,
+                        workerId: workerKey,
                         privateRoom: record.privateRoom ?? 0,
                         items: record.items ?? {}
                     };
 
-                    advancesMap[record.workerId] = {
+                    advancesMap[workerKey] = {
                         ...normalizedRecord,
                         totalDeduction: calculateTotalDeduction(normalizedRecord)
                     };
@@ -1139,6 +1155,12 @@ const AdvancePaymentPage: React.FC = () => {
                     // 기존 값이 청구값과 다른 경우에만 업데이트 (청구 데이터를 소스 트루스로 간주)
                     const normalizedAmount = toFiniteNumberOrZero(amount);
                     const currentAmount = getAdvanceFieldValue(target, field);
+
+                    // 자동연동 0값으로 수동 입력 금액을 지우지 않도록 보호한다.
+                    if (normalizedAmount <= 0 && currentAmount > 0) {
+                        return;
+                    }
+
                     if (currentAmount !== normalizedAmount) {
                         setAdvanceFieldValue(target, field, normalizedAmount);
                         hasUpdate = true;
@@ -1182,6 +1204,12 @@ const AdvancePaymentPage: React.FC = () => {
 
                     const nextAmount = toFiniteNumberOrZero(amounts[field]);
                     const currentAmount = getAdvanceFieldValue(target, deductionFieldId);
+
+                    // 개인배정 자동연동 0값이 수동 공과금을 덮어쓰지 않도록 보호한다.
+                    if (nextAmount <= 0 && currentAmount > 0) {
+                        return;
+                    }
+
                     if (currentAmount !== nextAmount) {
                         setAdvanceFieldValue(target, deductionFieldId, nextAmount);
                         hasUpdate = true;
@@ -1438,35 +1466,67 @@ const AdvancePaymentPage: React.FC = () => {
     const handleSave = async () => {
         setSaving(true);
         try {
-            // Save all records in the map
-            const promises = Object.values(advances).map(record => {
-                const cleanedItems = record.items
-                    ? Object.fromEntries(
-                        Object.entries(record.items).filter(([key]) => !isLegacyDeductionFieldId(key))
-                    )
-                    : {};
+            const normalizedRecords = Object.values(advances)
+                .map((record) => {
+                    const cleanedItems = record.items
+                        ? Object.fromEntries(
+                            Object.entries(record.items).filter(([key]) => !isLegacyDeductionFieldId(key))
+                        )
+                        : {};
 
-                const normalized: AdvancePayment = {
-                    ...record,
-                    items: cleanedItems
-                };
+                    const normalized: AdvancePayment = {
+                        ...record,
+                        workerId: String(record.workerId ?? '').trim(),
+                        teamId: String(record.teamId ?? '').trim(),
+                        yearMonth: String(record.yearMonth ?? '').trim(),
+                        items: cleanedItems
+                    };
 
-                normalized.totalDeduction = calculateTotalDeduction(normalized);
-                return advancePaymentService.saveAdvancePayment(normalized);
-            });
+                    normalized.totalDeduction = calculateTotalDeduction(normalized);
+                    return normalized;
+                })
+                .filter((record) => record.workerId && record.teamId && record.yearMonth);
 
-            await Promise.all(promises);
+            if (normalizedRecords.length === 0) {
+                Swal.fire('알림', '저장할 데이터가 없습니다.', 'info');
+                return;
+            }
 
-            Swal.fire({
-                icon: 'success',
-                title: '저장 완료',
-                text: '가불 내역이 저장되었습니다.',
-                timer: 1500,
-                showConfirmButton: false
-            });
-            setHasChanges(false);
-            // 저장 성공 시 임시저장 데이터 삭제
-            clearTempData();
+            const results = await Promise.allSettled(
+                normalizedRecords.map((record) => advancePaymentService.saveAdvancePayment(record))
+            );
+
+            const successCount = results.filter((result) => result.status === 'fulfilled').length;
+            const failCount = results.length - successCount;
+
+            if (failCount === 0) {
+                Swal.fire({
+                    icon: 'success',
+                    title: '저장 완료',
+                    text: `가불 내역 ${successCount}건이 저장되었습니다.`,
+                    timer: 1500,
+                    showConfirmButton: false
+                });
+
+                setHasChanges(false);
+                // 저장 성공 시 임시저장 데이터 삭제
+                clearTempData();
+                return;
+            }
+
+            const firstError = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+            const firstMessage = firstError
+                ? (firstError.reason instanceof Error
+                    ? firstError.reason.message
+                    : String(firstError.reason ?? '알 수 없는 오류'))
+                : '알 수 없는 오류';
+
+            if (successCount > 0) {
+                Swal.fire('일부 저장됨', `${successCount}건 저장, ${failCount}건 실패\n${firstMessage}`, 'warning');
+                return;
+            }
+
+            Swal.fire('오류', `저장 중 오류가 발생했습니다.\n${firstMessage}`, 'error');
         } catch (error) {
             console.error("Save failed:", error);
             const code = typeof (error as { code?: unknown })?.code === 'string' ? String((error as { code: string }).code) : '';

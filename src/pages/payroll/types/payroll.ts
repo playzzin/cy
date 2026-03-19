@@ -11,21 +11,23 @@ export interface DeductionLine {
 export interface DeductionBreakdown {
     standardLines: DeductionLine[];
     additionalLines: DeductionLine[];
-    pension: number;
-    health: number;
-    longterm: number;
-    employment: number;
-    incomeTax: number;
-    residentTax: number;
-    businessIncomeTax: number;
-    businessResidentTax: number;
+    pension?: number;
+    health?: number;
+    longterm?: number;
+    employment?: number;
+    incomeTax?: number;
+    residentTax?: number;
+    businessIncomeTax?: number;
+    businessResidentTax?: number;
+    totalStandard?: number;
+    totalAdditional?: number;
     total: number;
     hasData: boolean;
 }
 
 export interface WorkerWorkEntry {
     date: string;
-    siteId: string;
+    siteId?: string;
     siteName: string;
     clientCompanyId?: string;
     isLaborSite?: boolean;
@@ -36,33 +38,39 @@ export interface WorkerWorkEntry {
     amount: number;
 }
 
-export interface InsuranceAppliedReason {
-    type: 'threshold' | 'manual' | 'all-labor';
-    description: string;
-}
+export type InsuranceAppliedReason = 'site' | 'client' | 'threshold' | 'manual' | 'all-labor';
 
 export interface InsuranceAppliedSummary {
+    thresholdManDay?: number;
     appliedManDay: number;
     appliedAmount: number;
-    reasons: InsuranceAppliedReason[];
+    reasons?: InsuranceAppliedReason[];
+    appliedSites?: InsuranceAppliedSiteSummary[];
 }
 
 export interface WithholdingAppliedSummary {
     grossAmount: number;
+    appliedManDay?: number;
     appliedAmount: number;
     thresholdDays: number;
+    thresholdManDay?: number;
+    appliedSites?: WithholdingAppliedSiteSummary[];
 }
 
 export interface BusinessIncomeAppliedSummary {
+    appliedManDay?: number;
     appliedAmount: number;
     rate: number;
+    appliedSites?: BusinessIncomeAppliedSiteSummary[];
 }
 
 export interface InsuranceAppliedSiteSummary {
     siteId: string;
     siteName: string;
+    clientCompanyId?: string;
     manDay: number;
     amount: number;
+    reason?: InsuranceAppliedReason;
 }
 
 export interface WithholdingAppliedSiteSummary {
@@ -70,6 +78,7 @@ export interface WithholdingAppliedSiteSummary {
     siteName: string;
     manDay: number;
     amount: number;
+    reason?: '노무7이하' | '노무전체';
 }
 
 export interface BusinessIncomeAppliedSiteSummary {
@@ -77,15 +86,19 @@ export interface BusinessIncomeAppliedSiteSummary {
     siteName: string;
     manDay: number;
     amount: number;
+    reason?: '4대보험_제외';
 }
 
 export interface TaxRateSnapshot {
     pensionRate: number;
     healthRate: number;
     longtermRate: number;
+    careRateOfHealth?: number;
     employmentRate: number;
     incomeTaxRate: number;
     residentTaxRate: number;
+    businessIncomeTaxRate?: number;
+    businessResidentTaxRate?: number;
     thresholdDays?: number;
     withholdingBaseDeduction?: number;
     withholdingIncomeBaseMultiplier?: number;
@@ -99,11 +112,11 @@ export interface PaymentData {
     id: string;
     workerId: string;
     workerName: string;
-    idNumber?: string;
-    teamId?: string;
-    teamName?: string;
-    companyId?: string;
-    companyName?: string;
+    idNumber: string;
+    teamId: string;
+    teamName: string;
+    companyId: string;
+    companyName: string;
     month: string;
     unitPrice: number;
     totalManDay: number;
@@ -122,10 +135,7 @@ export interface PaymentData {
     // 상세 내역
     workEntries: WorkerWorkEntry[];
     deductionBreakdown: DeductionBreakdown;
-    taxBreakdown: {
-        standardLines: DeductionLine[];
-        additionalLines: DeductionLine[];
-    };
+    taxBreakdown: DeductionBreakdown;
     
     // 보험/세금 적용 요약
     insuranceAppliedSummary?: InsuranceAppliedSummary;
@@ -140,10 +150,10 @@ export interface PaymentData {
     // 기타
     taxRateSnapshot: TaxRateSnapshot;
     displayContent: string;
-    bankCode?: string;
-    bankName?: string;
-    accountNumber?: string;
-    accountHolder?: string;
+    bankCode: string;
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
     isValid: boolean;
     errors: Record<string, boolean>;
 }
@@ -192,6 +202,7 @@ export interface MonthlyAdvanceLedgerTaxAmounts {
     residentTax: number;
     businessIncomeTax: number;
     businessResidentTax: number;
+    dailyFee?: number;
     isWithholdingTarget: boolean;
 }
 

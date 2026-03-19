@@ -13,6 +13,7 @@ export interface PayrollInsuranceConfig {
     healthRate: number;
     careRateOfHealth: number;
     employmentRate: number;
+    dailyWorkerFeePerManDay?: number;
     withholdingBaseDeduction?: number;
     withholdingIncomeBaseMultiplier?: number;
     withholdingIncomeTaxRate?: number;
@@ -60,6 +61,7 @@ const DEFAULT_CONFIG: PayrollConfig = {
         healthRate: 0.03545,
         careRateOfHealth: 0.1295,
         employmentRate: 0.009,
+        dailyWorkerFeePerManDay: 0,
         withholdingBaseDeduction: 150000,
         withholdingIncomeBaseMultiplier: 0.55,
         withholdingIncomeTaxRate: 0.06,
@@ -206,6 +208,12 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
             ? employmentRateRaw
             : DEFAULT_CONFIG.insuranceConfig.employmentRate;
 
+    const dailyWorkerFeePerManDayRaw = insuranceObj.dailyWorkerFeePerManDay;
+    const dailyWorkerFeePerManDay =
+        typeof dailyWorkerFeePerManDayRaw === 'number' && Number.isFinite(dailyWorkerFeePerManDayRaw) && dailyWorkerFeePerManDayRaw >= 0
+            ? Math.floor(dailyWorkerFeePerManDayRaw)
+            : Math.floor(DEFAULT_CONFIG.insuranceConfig.dailyWorkerFeePerManDay ?? 0);
+
     const withholdingBaseDeductionRaw = insuranceObj.withholdingBaseDeduction;
     const withholdingBaseDeduction =
         typeof withholdingBaseDeductionRaw === 'number' && Number.isFinite(withholdingBaseDeductionRaw) && withholdingBaseDeductionRaw >= 0
@@ -273,6 +281,7 @@ const sanitizeConfig = (raw: unknown): PayrollConfig => {
             healthRate,
             careRateOfHealth,
             employmentRate,
+            dailyWorkerFeePerManDay,
             withholdingBaseDeduction,
             withholdingIncomeBaseMultiplier,
             withholdingIncomeTaxRate,

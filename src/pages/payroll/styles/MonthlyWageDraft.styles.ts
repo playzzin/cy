@@ -64,25 +64,26 @@ export const ToolbarGrid = styled.div`
     z-index: 1;
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 5px;
+    gap: 10px;
+    width: 100%;
 
     @media (max-width: 1280px) {
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(12, minmax(0, 1fr));
     }
 
     @media (max-width: 768px) {
-        grid-template-columns: repeat(1, minmax(0, 1fr));
+        grid-template-columns: 1fr;
     }
 `;
 
 export const ToolbarCard = styled.section<{ $span?: number }>`
     position: relative;
-    grid-column: span ${props => props.$span ?? 4};
+    grid-column: span ${props => props.$span ?? 6};
     display: flex;
     flex-direction: column;
     gap: 5px;
     min-height: 100%;
-    padding: 7px;
+    padding: 10px;
     border-radius: 9px;
     border: 1px solid #e2e8f0;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
@@ -90,7 +91,7 @@ export const ToolbarCard = styled.section<{ $span?: number }>`
     backdrop-filter: blur(14px);
 
     @media (max-width: 1280px) {
-        grid-column: span 3;
+        grid-column: span 12;
     }
 
     @media (max-width: 768px) {
@@ -387,6 +388,8 @@ export const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' |
         box-shadow: none;
     }
 `;
+
+
 
 export const KBPreviewControlsGrid = styled.div`
     display: grid;

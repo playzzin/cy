@@ -7,7 +7,7 @@ import './DashboardLayout.css';
 
 import Header from './Header';
 import Sidebar from './Sidebar';
-import RightPanel from './RightPanel';
+// import RightPanel from './RightPanel';
 
 import BottomPanel from './BottomPanel';
 import AdminPanel from './AdminPanel';
@@ -53,7 +53,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [isMobile, setIsMobile] = useState(false);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-    const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
     const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
     const [isPositionPanelOpen, setIsPositionPanelOpen] = useState(false);
     // 사이트 모드를 localStorage에서 복원하여 수동 변경 시 유지되도록 함
@@ -205,32 +204,48 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         };
     }, [currentUser, siteData]); // Re-run when siteData is loaded
 
-    // Dynamic Favicon Loader
+    // Real-time System Config Listener (Logo, Favicon)
+    const [systemConfig, setSystemConfig] = useState<{ logoUrl?: string, faviconUrl?: string }>({});
+
     useEffect(() => {
-        const loadFavicon = async () => {
-            try {
-                // Determine if we are in environment that supports dynamic favicon loading
-                // We'll just try to fetch 'settings/favicon'
-                const { storage } = await import('../../config/firebase');
-                const { ref, getDownloadURL } = await import('firebase/storage');
+        const setupConfigListener = async () => {
+            const { db } = await import('../../config/firebase');
+            const { doc, onSnapshot } = await import('firebase/firestore');
 
-                const faviconUrl = await getDownloadURL(ref(storage, 'settings/favicon'));
+            const unsubscribe = onSnapshot(doc(db, 'settings', 'system_config'), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    setSystemConfig({
+                        logoUrl: data.logoUrl,
+                        faviconUrl: data.faviconUrl
+                    });
 
-                const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-                if (link) {
-                    link.href = faviconUrl;
-                } else {
-                    const newLink = document.createElement('link');
-                    newLink.rel = 'icon';
-                    newLink.href = faviconUrl;
-                    document.head.appendChild(newLink);
+                    // Update browser favicon
+                    if (data.faviconUrl) {
+                        const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+                        if (link) {
+                            link.href = data.faviconUrl;
+                        } else {
+                            const newLink = document.createElement('link');
+                            newLink.rel = 'icon';
+                            newLink.href = data.faviconUrl;
+                            document.head.appendChild(newLink);
+                        }
+                    }
                 }
-            } catch (error) {
-                // No custom favicon found, stick to default
-                // console.log("Using default favicon");
-            }
+            });
+
+            return unsubscribe;
         };
-        // loadFavicon(); // Disabled to prevent 403 errors until configured
+
+        let unsubscribe: (() => void) | undefined;
+        setupConfigListener().then(unsub => {
+            unsubscribe = unsub;
+        });
+
+        return () => {
+            if (unsubscribe) unsubscribe();
+        };
     }, []);
 
     const toggleSidebar = () => {
@@ -242,25 +257,17 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         }
     };
 
-    const togglePanel = (type: 'right' | 'bottom' | 'admin' | 'position') => {
-        if (type === 'right') {
-            setIsRightPanelOpen(!isRightPanelOpen);
-            setIsBottomPanelOpen(false);
-            setIsAdminPanelOpen(false);
-            setIsPositionPanelOpen(false);
-        } else if (type === 'bottom') {
+    const togglePanel = (type: 'bottom' | 'admin' | 'position') => {
+        if (type === 'bottom') {
             setIsBottomPanelOpen(!isBottomPanelOpen);
-            setIsRightPanelOpen(false);
             setIsAdminPanelOpen(false);
             setIsPositionPanelOpen(false);
         } else if (type === 'admin') {
             setIsAdminPanelOpen(!isAdminPanelOpen);
-            setIsRightPanelOpen(false);
             setIsBottomPanelOpen(false);
             setIsPositionPanelOpen(false);
         } else if (type === 'position') {
             setIsPositionPanelOpen(!isPositionPanelOpen);
-            setIsRightPanelOpen(false);
             setIsBottomPanelOpen(false);
             setIsAdminPanelOpen(false);
         }
@@ -367,7 +374,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     };
 
     const closePanels = () => {
-        setIsRightPanelOpen(false);
         setIsBottomPanelOpen(false);
         setIsAdminPanelOpen(false);
         setIsPositionPanelOpen(false);
@@ -466,6 +472,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         currentPosition={currentPosition}
                         changePosition={changePosition}
                         positions={positions}
+                        siteData={siteData}
+                        currentSite={currentSite}
+                        changeSite={changeSite}
                     />
 
                     {/* Same Sidebar as Admin ERP (Left Side) */}
@@ -485,18 +494,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             isSidebarCollapsed={isSidebarCollapsed}
                             isMobile={isMobile}
                             openMobileSidebar={() => setIsMobileOpen(true)}
+                            logoUrl={systemConfig.logoUrl}
                         />
                     </ErrorBoundary>
 
-                    {/* Right Panel - Site Mode Switcher */}
-                    <RightPanel
-                        isOpen={isRightPanelOpen}
-                        togglePanel={togglePanel}
-                        siteData={siteData}
-                        currentSite={currentSite}
-                        changeSite={changeSite}
-                        menuPaths={menuPaths}
-                    />
 
                     {/* Bottom Panel */}
                     <BottomPanel
@@ -518,7 +519,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
                     {/* Main Content with Video Background for Dashboard2 */}
                     <main id="main-content" className={location.pathname === '/dashboard2' ? 'cheongyeon-main' : ''} onClick={() => {
-                        if (isRightPanelOpen || isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
+                        if (isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
                             closeAll();
                         }
                     }}>
@@ -545,6 +546,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     currentPosition={currentPosition}
                     changePosition={changePosition}
                     positions={positions}
+                    siteData={siteData}
+                    currentSite={currentSite}
+                    changeSite={changeSite}
                 />
 
                 <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
@@ -563,17 +567,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         isSidebarCollapsed={isSidebarCollapsed}
                         isMobile={isMobile}
                         openMobileSidebar={() => setIsMobileOpen(true)}
+                        logoUrl={systemConfig.logoUrl}
                     />
                 </ErrorBoundary>
 
-                <RightPanel
-                    isOpen={isRightPanelOpen}
-                    togglePanel={togglePanel}
-                    siteData={siteData}
-                    currentSite={currentSite}
-                    changeSite={changeSite}
-                    menuPaths={menuPaths}
-                />
 
                 <BottomPanel
                     isOpen={isBottomPanelOpen}
@@ -592,7 +589,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
 
                 <main id="main-content" onClick={() => {
-                    if (isRightPanelOpen || isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
+                    if (isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
                         closeAll();
                     }
                 }}>

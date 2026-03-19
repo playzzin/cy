@@ -15,17 +15,21 @@ import { useNavigate } from 'react-router-dom';
 import { resolveIcon } from '../../constants/iconMap';
 import { userService } from '../../services/userService';
 import PositionPanel from './PositionPanel';
-import { PositionItem } from '../../types/menu';
+import { PositionItem, SiteDataType } from '../../types/menu';
 
 interface HeaderProps {
     toggleSidebar: () => void;
-    togglePanel: (type: 'right' | 'bottom' | 'admin' | 'position') => void;
+    togglePanel: (type: 'bottom' | 'admin' | 'position') => void;
     currentSiteData: any;
     isAdmin: boolean;
     isPositionPanelOpen: boolean;
     currentPosition: string;
     changePosition: (positionId: string) => void;
     positions: PositionItem[];
+    siteData: SiteDataType | null;
+    currentSite: string;
+    changeSite: (siteKey: string) => void;
+    logoUrl?: string;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -36,7 +40,11 @@ const Header: React.FC<HeaderProps> = ({
     isPositionPanelOpen,
     currentPosition,
     changePosition,
-    positions
+    positions,
+    siteData,
+    currentSite,
+    changeSite,
+    logoUrl
 }) => {
     const { currentUser, logout } = useAuth();
     const navigate = useNavigate();
@@ -92,7 +100,15 @@ const Header: React.FC<HeaderProps> = ({
                 </button>
 
                 <div className="mobile-logo-area">
-                    <FontAwesomeIcon icon={resolveIcon(currentSiteData.icon, faShieldHalved)} style={{ marginRight: '8px', color: '#3498db' }} />
+                    {logoUrl ? (
+                        <img 
+                            src={logoUrl} 
+                            alt="Logo" 
+                            style={{ height: '24px', width: 'auto', marginRight: '8px', objectFit: 'contain' }}
+                        />
+                    ) : (
+                        <FontAwesomeIcon icon={resolveIcon(currentSiteData.icon, faShieldHalved)} style={{ marginRight: '8px', color: '#3498db' }} />
+                    )}
                     <span>{currentSiteData.name}</span>
                 </div>
             </div>
@@ -100,15 +116,10 @@ const Header: React.FC<HeaderProps> = ({
                 <button className="header-btn" onClick={() => togglePanel('bottom')} title="빠른 실행">
                     <FontAwesomeIcon icon={faUserGear} />
                 </button>
-                {isAdmin && (
-                    <button className="header-btn" onClick={() => togglePanel('right')} title="사이트 모드">
-                        <FontAwesomeIcon icon={faGear} />
-                    </button>
-                )}
 
                 {isAdmin && (
                     <div className="relative" ref={positionPanelRef}>
-                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="직책 모드">
+                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="모드 선택">
                             <FontAwesomeIcon icon={faIdBadge} />
                         </button>
                         {isPositionPanelOpen && (
@@ -118,6 +129,9 @@ const Header: React.FC<HeaderProps> = ({
                                 currentPosition={currentPosition}
                                 changePosition={changePosition}
                                 positions={positions}
+                                siteData={siteData}
+                                currentSite={currentSite}
+                                changeSite={changeSite}
                             />
                         )}
                     </div>

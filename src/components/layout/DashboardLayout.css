@@ -1,4 +1,4 @@
-﻿/* =========================================
+/* =========================================
    1. Variables & Reset
    ========================================= */
 :root {
@@ -94,6 +94,11 @@ a {
     transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     z-index: var(--z-main);
+}
+
+/* Full-bleed pages: remove padding to maximize content area */
+#main-content.page-full-bleed {
+    padding: 0;
 }
 
 /* =========================================
@@ -267,7 +272,10 @@ a {
 }
 
 .menu-open-new-btn {
-    margin-left: auto;
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
     width: 22px;
     height: 22px;
     border-radius: 6px;
@@ -276,6 +284,12 @@ a {
     justify-content: center;
     color: rgba(189, 195, 199, 0.85);
     transition: all 0.2s ease;
+    opacity: 0;
+    z-index: 2;
+}
+
+.menu-item:hover .menu-open-new-btn {
+    opacity: 1;
 }
 
 .menu-open-new-btn:hover {
@@ -381,6 +395,12 @@ a {
     justify-content: center;
     cursor: pointer;
     transition: all 0.2s ease;
+    opacity: 0;
+}
+
+.submenu-leaf-item:hover .submenu-open-new-btn,
+.nested-leaf-item:hover .submenu-open-new-btn {
+    opacity: 1;
 }
 
 .submenu-open-new-btn:hover {
@@ -542,6 +562,11 @@ a {
     justify-content: center;
     color: rgba(148, 163, 184, 0.9);
     transition: all 0.2s ease;
+    opacity: 0;
+}
+
+.submenu-item:hover .submenu-open-new-inline {
+    opacity: 1;
 }
 
 .submenu-open-new-inline:hover {
@@ -854,4 +879,43 @@ a {
         left: auto !important;
         width: 100vw !important;
     }
+}
+
+/* =========================================
+   Sidebar Alignment Fix (New Window Button)
+   ========================================= */
+.menu-item>a,
+.menu-item>button,
+.submenu-list a,
+.submenu-header-btn,
+.nested-submenu-list a {
+    padding-right: 46px !important;
+    position: relative !important;
+}
+
+
+.menu-open-new-btn,
+.submenu-open-new-btn,
+.arrow-icon {
+    position: absolute !important;
+    right: 14px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    margin: 0 !important;
+}
+
+.menu-open-new-btn,
+.submenu-open-new-btn {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.arrow-icon.rotated {
+    transform: translateY(-50%) rotate(90deg) !important;
+}
+
+.menu-item:hover .menu-open-new-btn,
+.submenu-leaf-item:hover .submenu-open-new-btn,
+.nested-leaf-item:hover .submenu-open-new-btn {
+    opacity: 1 !important;
 }
