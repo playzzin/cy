@@ -3756,7 +3756,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     return (
         <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
             {deductionApplyInProgress && (
-                <div className="absolute inset-0 z-[100] bg-white/50 backdrop-blur-sm flex items-center justify-center">
+                <div className="absolute inset-0 z-[100] pointer-events-none bg-white/50 backdrop-blur-sm flex items-center justify-center">
                     <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
                         <FontAwesomeIcon icon={faSpinner} className="animate-spin text-4xl text-blue-600" />
                         <span className="text-slate-600 font-semibold text-lg">급여 계산을 적용하고 있습니다...</span>
