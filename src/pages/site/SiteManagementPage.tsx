@@ -95,7 +95,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                     ).trim();
                     const resolvedCompanyName = String(
                         workerMaster?.companyName
-                        || '청연/직영'
+                        || '소속미지정'
                     ).trim();
 
                     // Worker Summary
@@ -119,7 +119,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                     }
 
                     // Company ManDay Summary (worker master 기반)
-                    const companyKey = resolvedCompanyName || '청연/직영';
+                    const companyKey = resolvedCompanyName || '소속미지정';
                     cMap.set(companyKey, (cMap.get(companyKey) || 0) + manDay);
                 });
             });
