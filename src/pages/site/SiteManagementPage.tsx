@@ -13,6 +13,7 @@ import {
 import { format, parseISO, isValid } from 'date-fns';
 
 import { siteService, Site } from '../../services/siteService';
+import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
 
 // ----------------------------------------------------------------------
@@ -63,10 +64,21 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
         if (!site.id) return;
         setLoading(true);
         try {
-            // 출력일보 탭 핵심 데이터만 먼저 로드한다.
-            const fetchedReports = await dailyReportService.getReportsBySite(site.id);
+            // 출력일보 + 작업자 마스터를 함께 읽어 작업자 소속을 정확히 매핑한다.
+            const [fetchedReports, workers] = await Promise.all([
+                dailyReportService.getReportsBySite(site.id),
+                manpowerService.getWorkers(),
+            ]);
             const sortedReports = [...fetchedReports].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
             setReports(sortedReports);
+
+            const workerById = new Map<string, (typeof workers)[number]>();
+            workers.forEach((worker) => {
+                const id = String(worker.id ?? '').trim();
+                const legacyId = String(worker.legacyId ?? '').trim();
+                if (id) workerById.set(id, worker);
+                if (legacyId && !workerById.has(legacyId)) workerById.set(legacyId, worker);
+            });
 
             // 작업자/업체 누적 공수 집계
             const wMap = new Map<string, WorkerSummary>();
@@ -74,6 +86,18 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 
             sortedReports.forEach((report: DailyReport) => {
                 report.workers.forEach((w: DailyReportWorker) => {
+                    const workerMaster = workerById.get(String(w.workerId ?? '').trim());
+                    const resolvedTeamName = String(
+                        w.workerTeamName
+                        || workerMaster?.teamName
+                        || report.teamName
+                        || ''
+                    ).trim();
+                    const resolvedCompanyName = String(
+                        workerMaster?.companyName
+                        || '청연/직영'
+                    ).trim();
+
                     // Worker Summary
                     const key = w.workerId;
                     const existing = wMap.get(key);
@@ -87,15 +111,15 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                             workerId: key,
                             name: w.name,
                             role: w.role || '',
-                            teamName: report.teamName || '', // Assume worker belongs to reporting team roughly
+                            teamName: resolvedTeamName,
                             totalManDay: manDay,
                             lastWorkDate: report.date || '',
-                            companyName: report.companyName || report.partnerName || '자체/직영'
+                            companyName: resolvedCompanyName,
                         });
                     }
 
-                    // Company/Team ManDay Summary
-                    const companyKey = report.partnerName || report.companyName || '본사/직영';
+                    // Company ManDay Summary (worker master 기반)
+                    const companyKey = resolvedCompanyName || '청연/직영';
                     cMap.set(companyKey, (cMap.get(companyKey) || 0) + manDay);
                 });
             });
