@@ -2,9 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    faBuilding, faMapMarkerAlt, faCalendarAlt, faHardHat, faTruck,
-    faFileInvoice, faSearch, faTimes, faChartPie, faList,
-    faLayerGroup, faSignInAlt, faSignOutAlt, faPercentage
+    faBuilding, faMapMarkerAlt, faCalendarAlt, faHardHat,
+    faSearch, faTimes, faChartPie, faList
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -14,9 +13,7 @@ import {
 import { format, parseISO, isValid } from 'date-fns';
 
 import { siteService, Site } from '../../services/siteService';
-import materialService from '../../services/materialService'; // Default import
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
-import { Inventory, InboundTransaction, OutboundTransaction } from '../../types/materials';
 
 // ----------------------------------------------------------------------
 // Types & Interfaces
@@ -49,13 +46,10 @@ interface CompanyManDaySummary {
 // ----------------------------------------------------------------------
 
 const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'materials' | 'reports'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'reports'>('overview');
     const [loading, setLoading] = useState(false);
 
     // Data States
-    const [inventory, setInventory] = useState<Inventory[]>([]);
-    const [inbound, setInbound] = useState<InboundTransaction[]>([]);
-    const [outbound, setOutbound] = useState<OutboundTransaction[]>([]);
     const [workerSummaries, setWorkerSummaries] = useState<WorkerSummary[]>([]);
     const [companySummaries, setCompanySummaries] = useState<CompanyManDaySummary[]>([]);
     const [reports, setReports] = useState<DailyReport[]>([]);
@@ -69,25 +63,16 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
         if (!site.id) return;
         setLoading(true);
         try {
-            // 1. Materials Data
-            const [fetchedInventory, fetchedInbound, fetchedOutbound] = await Promise.all([
-                materialService.getInventoryBySite(site.id),
-                materialService.getInboundTransactions({ siteId: site.id }),
-                materialService.getOutboundTransactions({ siteId: site.id })
-            ]);
-            setInventory(fetchedInventory);
-            setInbound(fetchedInbound);
-            setOutbound(fetchedOutbound);
-
-            // 2. Daily Reports Data
+            // 출력일보 탭 핵심 데이터만 먼저 로드한다.
             const fetchedReports = await dailyReportService.getReportsBySite(site.id);
-            setReports(fetchedReports);
+            const sortedReports = [...fetchedReports].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
+            setReports(sortedReports);
 
-            // 3. Process Worker Summaries
+            // 작업자/업체 누적 공수 집계
             const wMap = new Map<string, WorkerSummary>();
             const cMap = new Map<string, number>();
 
-            fetchedReports.forEach((report: DailyReport) => {
+            sortedReports.forEach((report: DailyReport) => {
                 report.workers.forEach((w: DailyReportWorker) => {
                     // Worker Summary
                     const key = w.workerId;
@@ -133,81 +118,6 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
     };
 
     // --- Render Helpers ---
-
-    const renderMaterialsTab = () => {
-        return (
-            <div className="space-y-6 h-full flex flex-col">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm">
-                        <h4 className="text-sm font-bold text-slate-400 mb-2">총 입고 건수</h4>
-                        <div className="text-2xl font-bold text-blue-400">{inbound.length.toLocaleString()}건</div>
-                    </div>
-                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm">
-                        <h4 className="text-sm font-bold text-slate-400 mb-2">총 출고 건수</h4>
-                        <div className="text-2xl font-bold text-red-400">{outbound.length.toLocaleString()}건</div>
-                    </div>
-                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm">
-                        <h4 className="text-sm font-bold text-slate-400 mb-2">관리 품목 수</h4>
-                        <div className="text-2xl font-bold text-slate-200">{inventory.length.toLocaleString()}개</div>
-                    </div>
-                </div>
-
-                <div className="flex-1 bg-slate-800 rounded-xl border border-slate-700 shadow-sm flex flex-col overflow-hidden">
-                    <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
-                        <h3 className="font-bold text-slate-200 flex items-center gap-2">
-                            <FontAwesomeIcon icon={faList} className="text-blue-500" /> 자재 입출고 및 재고 현황
-                        </h3>
-                        <span className="text-xs text-slate-500">* 소진율 = 출고 / 입고</span>
-                    </div>
-                    <div className="flex-1 overflow-auto w-full custom-scrollbar">
-                        <table className="w-full text-sm text-left text-slate-400">
-                            <thead className="text-xs text-slate-300 uppercase bg-slate-700/50 sticky top-0 z-10 font-bold tracking-wider">
-                                <tr>
-                                    <th className="px-6 py-3 whitespace-nowrap">분류</th>
-                                    <th className="px-6 py-3 whitespace-nowrap">품명</th>
-                                    <th className="px-6 py-3 whitespace-nowrap">규격</th>
-                                    <th className="px-6 py-3 whitespace-nowrap text-center">단위</th>
-                                    <th className="px-6 py-3 whitespace-nowrap text-right">총입고</th>
-                                    <th className="px-6 py-3 whitespace-nowrap text-right">총출고</th>
-                                    <th className="px-6 py-3 whitespace-nowrap text-right">현재고</th>
-                                    <th className="px-6 py-3 whitespace-nowrap text-right">소진율(%)</th>
-                                </tr>
-                            </thead>
-                            <tbody className="bg-slate-800 divide-y divide-slate-700/50">
-                                {inventory.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={8} className="px-6 py-10 text-center text-slate-500">
-                                            데이터가 없습니다.
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    inventory.map((item, idx) => {
-                                        const inQ = item.totalInbound || 0;
-                                        const outQ = item.totalOutbound || 0;
-                                        const rate = inQ === 0 ? '0%' : `${((outQ / inQ) * 100).toFixed(1)}%`;
-
-                                        return (
-                                            <tr key={idx} className="hover:bg-slate-700/30 transition-colors border-b border-slate-700/50 last:border-0">
-                                                <td className="px-6 py-3.5 whitespace-nowrap font-medium text-slate-300">{item.category}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-white font-medium">{item.itemName}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap">{item.spec}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-center text-slate-500">{item.unit}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-right text-blue-400">{inQ.toLocaleString()}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-right text-red-400">{outQ.toLocaleString()}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-right text-slate-100 font-bold bg-slate-700/20">{item.currentStock.toLocaleString()}</td>
-                                                <td className="px-6 py-3.5 whitespace-nowrap text-right text-slate-400">{rate}</td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        );
-    };
-
     const renderReportsTab = () => {
         return (
             <div className="space-y-6 h-full flex flex-col">
@@ -348,7 +258,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 
                 {/* Tabs */}
                 <div className="flex border-b border-slate-700 bg-slate-800 px-6">
-                    {(['overview', 'materials', 'reports'] as const).map(tab => (
+                    {(['overview', 'reports'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -358,7 +268,6 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                 }`}
                         >
                             {tab === 'overview' && '개요'}
-                            {tab === 'materials' && '자재 관리'}
                             {tab === 'reports' && '출력 일보'}
                         </button>
                     ))}
@@ -397,7 +306,6 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                     </div>
                                 </div>
                             )}
-                            {activeTab === 'materials' && renderMaterialsTab()}
                             {activeTab === 'reports' && renderReportsTab()}
                         </div>
                     )}
