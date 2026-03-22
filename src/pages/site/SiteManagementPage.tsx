@@ -15,6 +15,8 @@ import { format, parseISO, isValid } from 'date-fns';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
+import materialService from '../../services/materialService';
+import { InboundTransaction, OutboundTransaction } from '../../types/materials';
 
 // ----------------------------------------------------------------------
 // Types & Interfaces
@@ -48,6 +50,16 @@ interface SiteReportSummary {
     totalManDay: number;
 }
 
+interface MaterialTransactionSummary {
+    id: string;
+    type: 'inbound' | 'outbound';
+    transactionDate: string;
+    itemName: string;
+    spec: string;
+    quantity: number;
+    unit: string;
+}
+
 const getContractorDisplayName = (site: Site): string => {
     const candidates = [site.companyName, site.constructorCompanyName, site.partnerName]
         .map((value) => String(value || '').trim())
@@ -68,17 +80,55 @@ const getReportSiteKey = (siteId?: string | null, siteName?: string | null): str
 // ----------------------------------------------------------------------
 
 const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'workcontent'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'materials' | 'reports' | 'workcontent'>('overview');
     const [loading, setLoading] = useState(false);
 
     // Data States
     const [workerSummaries, setWorkerSummaries] = useState<WorkerSummary[]>([]);
     const [companySummaries, setCompanySummaries] = useState<CompanyManDaySummary[]>([]);
     const [reports, setReports] = useState<DailyReport[]>([]);
+    const [inboundTransactions, setInboundTransactions] = useState<InboundTransaction[]>([]);
+    const [outboundTransactions, setOutboundTransactions] = useState<OutboundTransaction[]>([]);
     const totalOutputManDay = useMemo(() => reports.reduce((acc, report) => {
         const reportManDay = (report.workers || []).reduce((sum, worker) => sum + (typeof worker.manDay === 'number' ? worker.manDay : 0), 0);
         return acc + reportManDay;
     }, 0), [reports]);
+
+    const totalInboundQuantity = useMemo(
+        () => inboundTransactions.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0),
+        [inboundTransactions]
+    );
+
+    const totalOutboundQuantity = useMemo(
+        () => outboundTransactions.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0),
+        [outboundTransactions]
+    );
+
+    const recentMaterialTransactions = useMemo<MaterialTransactionSummary[]>(() => {
+        const inbound = inboundTransactions.map((row) => ({
+            id: row.id,
+            type: 'inbound' as const,
+            transactionDate: row.transactionDate || '',
+            itemName: row.itemName || '-',
+            spec: row.spec || '-',
+            quantity: Number(row.quantity) || 0,
+            unit: row.unit || '',
+        }));
+
+        const outbound = outboundTransactions.map((row) => ({
+            id: row.id,
+            type: 'outbound' as const,
+            transactionDate: row.transactionDate || '',
+            itemName: row.itemName || '-',
+            spec: row.spec || '-',
+            quantity: Number(row.quantity) || 0,
+            unit: row.unit || '',
+        }));
+
+        return [...inbound, ...outbound]
+            .sort((a, b) => String(b.transactionDate).localeCompare(String(a.transactionDate)))
+            .slice(0, 8);
+    }, [inboundTransactions, outboundTransactions]);
 
     useEffect(() => {
         if (!site.id) return;
@@ -96,6 +146,28 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
             ]);
             const sortedReports = [...fetchedReports].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
             setReports(sortedReports);
+
+            // 자재 조회 실패가 출력일보/작업자 데이터 로딩을 막지 않도록 분리 처리한다.
+            const [inboundResult, outboundResult] = await Promise.allSettled([
+                materialService.getInboundTransactions({ siteId: site.id }),
+                materialService.getOutboundTransactions({ siteId: site.id }),
+            ]);
+
+            if (inboundResult.status === 'fulfilled') {
+                const sortedInbound = [...inboundResult.value].sort((a, b) => String(b.transactionDate || '').localeCompare(String(a.transactionDate || '')));
+                setInboundTransactions(sortedInbound);
+            } else {
+                console.error('Failed to load inbound transactions:', inboundResult.reason);
+                setInboundTransactions([]);
+            }
+
+            if (outboundResult.status === 'fulfilled') {
+                const sortedOutbound = [...outboundResult.value].sort((a, b) => String(b.transactionDate || '').localeCompare(String(a.transactionDate || '')));
+                setOutboundTransactions(sortedOutbound);
+            } else {
+                console.error('Failed to load outbound transactions:', outboundResult.reason);
+                setOutboundTransactions([]);
+            }
 
             const workerById = new Map<string, (typeof workers)[number]>();
             workers.forEach((worker) => {
@@ -329,6 +401,72 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
         );
     };
 
+    const renderMaterialsTab = () => {
+        return (
+            <div className="space-y-4 h-full flex flex-col">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-slate-300">총 입고수량</h4>
+                        <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-sm font-bold">
+                            {totalInboundQuantity.toLocaleString()}
+                        </span>
+                    </div>
+                    <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between">
+                        <h4 className="text-sm font-bold text-slate-300">총 출고수량</h4>
+                        <span className="px-3 py-1 rounded-full bg-amber-500/20 text-amber-300 text-sm font-bold">
+                            {totalOutboundQuantity.toLocaleString()}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="flex-1 bg-slate-800 rounded-xl border border-slate-700 shadow-sm flex flex-col overflow-hidden">
+                    <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                        <h3 className="font-bold text-slate-200 flex items-center gap-2">
+                            <FontAwesomeIcon icon={faList} className="text-blue-400" /> 자재 입출고 내역
+                        </h3>
+                        <span className="text-xs text-slate-500">최근 {recentMaterialTransactions.length}건</span>
+                    </div>
+                    <div className="flex-1 overflow-auto custom-scrollbar">
+                        <table className="w-full text-sm text-left text-slate-400">
+                            <thead className="text-xs text-slate-300 uppercase bg-slate-700/50 sticky top-0 z-10 font-bold tracking-wider">
+                                <tr>
+                                    <th className="px-6 py-3 whitespace-nowrap">일자</th>
+                                    <th className="px-6 py-3 whitespace-nowrap">구분</th>
+                                    <th className="px-6 py-3 whitespace-nowrap">품명</th>
+                                    <th className="px-6 py-3 whitespace-nowrap">규격</th>
+                                    <th className="px-6 py-3 whitespace-nowrap text-right">수량</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-slate-800 divide-y divide-slate-700/50">
+                                {recentMaterialTransactions.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-6 py-10 text-center text-slate-500">
+                                            자재 입출고 내역이 없습니다.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    recentMaterialTransactions.map((row) => (
+                                        <tr key={`${row.type}-${row.id}`} className="hover:bg-slate-700/30 transition-colors border-b border-slate-700/50 last:border-0">
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-slate-300">{row.transactionDate || '-'}</td>
+                                            <td className="px-6 py-3.5 whitespace-nowrap">
+                                                <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold ${row.type === 'inbound' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                                                    {row.type === 'inbound' ? '입고' : '출고'}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-slate-200">{row.itemName}</td>
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-slate-400">{row.spec}</td>
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-right text-slate-200 font-semibold">{row.quantity.toLocaleString()} {row.unit}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
             <motion.div
@@ -364,7 +502,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 
                 {/* Tabs */}
                 <div className="flex border-b border-slate-700 bg-slate-800 px-6">
-                    {(['overview', 'reports', 'workcontent'] as const).map(tab => (
+                    {(['overview', 'materials', 'reports', 'workcontent'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -374,6 +512,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                 }`}
                         >
                             {tab === 'overview' && '개요'}
+                            {tab === 'materials' && '자재 입출고'}
                             {tab === 'reports' && '출력 일보'}
                             {tab === 'workcontent' && '작업내용'}
                         </button>
@@ -406,6 +545,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                             <dd className="text-sm font-medium text-slate-300">{site.clientCompanyName || '-'}</dd>
                                         </dl>
                                     </div>
+
                                     <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-sm flex flex-col justify-center items-center text-center">
                                         <div className="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center text-2xl mb-4">
                                             <FontAwesomeIcon icon={faHardHat} />
@@ -415,6 +555,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                     </div>
                                 </div>
                             )}
+                            {activeTab === 'materials' && renderMaterialsTab()}
                             {activeTab === 'reports' && renderReportsTab()}
                             {activeTab === 'workcontent' && renderWorkContentTab()}
                         </div>
