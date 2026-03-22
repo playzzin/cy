@@ -92,8 +92,11 @@ const Header: React.FC<HeaderProps> = ({
         }
     };
 
+    const isCheongyeon = currentSite === 'test';
+    const headerStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' } : {};
+
     return (
-        <header id="main-header">
+        <header id="main-header" style={headerStyle} className={isCheongyeon ? 'cheongyeon-header' : ''}>
             <div className="header-left-group">
                 <button className="header-btn" id="sidebar-toggle" onClick={toggleSidebar} aria-label="메뉴 토글">
                     <FontAwesomeIcon icon={faBars} />

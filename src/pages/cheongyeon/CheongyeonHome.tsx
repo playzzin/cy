@@ -1,15 +1,304 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRight, faPlay, faHelmetSafety, faChartLine, faNetworkWired, faHandshake } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRight, faPlay, faHelmetSafety, faChartLine, faNetworkWired, faUsers, faCalendarDays, faBuilding, faHandshake } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router-dom';
+import { motion, Variants } from 'framer-motion';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { storage } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+
+type SiteWorkerHighlight = {
+    id: string;
+    name: string;
+    role: string;
+    shifts: number;
+};
+
+type SiteHighlight = {
+    key: string;
+    siteId: string;
+    siteName: string;
+    latestDate: string;
+    reportCount: number;
+    totalWorkers: number;
+    teamNames: string[];
+    workers: SiteWorkerHighlight[];
+};
+
+const toDateNumber = (date: string): number => Number(String(date || '').replace(/-/g, '')) || 0;
+const toDateString = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+const toKoreanDate = (date: string): string => {
+    const [y, m, d] = String(date || '').split('-');
+    if (!y || !m || !d) return '-';
+    return `${y}.${m}.${d}`;
+};
+
+type DailyStatRow = { totalWorkers: number; totalManDay: number; siteCount: number; teamCount: number };
+type DashboardStats = {
+    yesterday: DailyStatRow;
+    yearToDate: DailyStatRow;
+    yesterdayLabel: string;
+    yearToDateLabel: string;
+};
+
+type MonthlyTrendRow = {
+    monthKey: string;
+    monthLabel: string;
+    manDay: number;
+    siteCount: number;
+};
+
+type DailyTrendRow = {
+    dateKey: string;
+    dateLabel: string;
+    totalWorkers: number;
+    totalManDay: number;
+    siteCount: number;
+    teamCount: number;
+};
+
+type StatMetric = {
+    key: keyof DailyStatRow;
+    label: string;
+    unit: string;
+    color: string;
+    fill: string;
+    icon: any;
+    decimals?: number;
+};
+
+const getCurrentYearRange = (): { start: string; end: string; label: string } => {
+    // 올해 누적 기준 (1월 1일 ~ 오늘)
+    const year = new Date().getFullYear();
+    const today = toDateString(new Date());
+    return { start: `${year}-01-01`, end: today, label: `${year}년` };
+};
+
+const getRecent30DayWindow = (): { start: string; end: string; dateKeys: string[] } => {
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() - 1);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 29);
+    const dateKeys = Array.from({ length: 30 }).map((_, idx) => {
+        const current = new Date(startDate);
+        current.setDate(startDate.getDate() + idx);
+        return toDateString(current);
+    });
+
+    return {
+        start: toDateString(startDate),
+        end: toDateString(endDate),
+        dateKeys,
+    };
+};
+
+const toMonthKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const getRecent12MonthWindow = (): { start: string; end: string; monthKeys: string[] } => {
+    const now = new Date();
+    const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+    const monthKeys = Array.from({ length: 12 }).map((_, idx) => {
+        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + idx, 1);
+        return toMonthKey(monthDate);
+    });
+    return {
+        start: toDateString(startDate),
+        end: toDateString(now),
+        monthKeys,
+    };
+};
+
+const buildMonthlyTrend = (reports: DailyReport[], monthKeys: string[]): MonthlyTrendRow[] => {
+    const monthMap = new Map<string, { manDay: number; siteSet: Set<string> }>();
+    monthKeys.forEach((key) => monthMap.set(key, { manDay: 0, siteSet: new Set<string>() }));
+
+    reports.forEach((report) => {
+        const reportDate = String(report.date || '').trim();
+        const monthKey = reportDate.slice(0, 7);
+        const bucket = monthMap.get(monthKey);
+        if (!bucket) return;
+
+        const reportManDay = (report.workers || []).reduce((acc, worker) => {
+            const manDay = typeof worker.manDay === 'number' ? worker.manDay : 0;
+            return acc + manDay;
+        }, 0);
+
+        bucket.manDay += reportManDay;
+
+        const siteKey = String(report.siteId || report.siteName || '').trim();
+        if (siteKey) bucket.siteSet.add(siteKey);
+    });
+
+    return monthKeys.map((monthKey) => {
+        const month = monthMap.get(monthKey);
+        const monthLabel = `${monthKey.slice(0, 4)}.${monthKey.slice(5, 7)}`;
+        return {
+            monthKey,
+            monthLabel,
+            manDay: Math.round((month?.manDay || 0) * 10) / 10,
+            siteCount: month?.siteSet.size || 0,
+        };
+    });
+};
+
+const buildDailyTrend = (reports: DailyReport[], dateKeys: string[]): DailyTrendRow[] => {
+    const dateMap = new Map<string, {
+        workerSet: Set<string>;
+        siteSet: Set<string>;
+        teamSet: Set<string>;
+        totalManDay: number;
+    }>();
+
+    dateKeys.forEach((key) => {
+        dateMap.set(key, {
+            workerSet: new Set<string>(),
+            siteSet: new Set<string>(),
+            teamSet: new Set<string>(),
+            totalManDay: 0,
+        });
+    });
+
+    reports.forEach((report) => {
+        const dateKey = String(report.date || '').trim();
+        const bucket = dateMap.get(dateKey);
+        if (!bucket) return;
+
+        const siteKey = String(report.siteId || report.siteName || '').trim();
+        if (siteKey) bucket.siteSet.add(siteKey);
+
+        const teamKey = String((report as any).teamId || report.teamName || '').trim();
+        if (teamKey) bucket.teamSet.add(teamKey);
+
+        (report.workers || []).forEach((worker) => {
+            const workerKey = String(worker.workerId || worker.name || '').trim();
+            if (workerKey) bucket.workerSet.add(workerKey);
+            bucket.totalManDay += typeof worker.manDay === 'number' ? worker.manDay : 0;
+        });
+    });
+
+    return dateKeys.map((dateKey) => {
+        const bucket = dateMap.get(dateKey);
+        return {
+            dateKey,
+            dateLabel: dateKey.replace(/-/g, '.'),
+            totalWorkers: bucket?.workerSet.size || 0,
+            totalManDay: Math.round(((bucket?.totalManDay || 0) * 10)) / 10,
+            siteCount: bucket?.siteSet.size || 0,
+            teamCount: bucket?.teamSet.size || 0,
+        };
+    });
+};
+
+const extractWorkerNames = (reports: DailyReport[]): string[] => {
+    const set = new Set<string>();
+    reports.forEach((report) => {
+        (report.workers || []).forEach((worker) => {
+            const name = String(worker.name || '').trim();
+            if (name) set.add(name);
+        });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'));
+};
+
+const computeStatRow = (reports: DailyReport[]): DailyStatRow => {
+    const workers = new Set<string>();
+    const sites = new Set<string>();
+    const teams = new Set<string>();
+    let totalManDay = 0;
+    reports.forEach(r => {
+        const siteKey = String(r.siteId || r.siteName || '').trim();
+        if (siteKey) sites.add(siteKey);
+        const teamKey = String((r as any).teamId || r.teamName || '').trim();
+        if (teamKey) teams.add(teamKey);
+        (r.workers || []).forEach(w => {
+            const wKey = String(w.workerId || w.name || '').trim();
+            if (wKey) workers.add(wKey);
+            totalManDay += typeof w.manDay === 'number' ? w.manDay : 0;
+        });
+    });
+    return { totalWorkers: workers.size, totalManDay: Math.round(totalManDay * 10) / 10, siteCount: sites.size, teamCount: teams.size };
+};
+
+const STAT_METRICS: StatMetric[] = [
+    { key: 'totalWorkers', label: '총 출역 인원', unit: '명', icon: faUsers, color: 'from-amber-400 to-orange-500', fill: '#f59e0b' },
+    { key: 'totalManDay', label: '총 투입 공수', unit: '', icon: faChartLine, color: 'from-blue-400 to-cyan-500', fill: '#06b6d4', decimals: 1 },
+    { key: 'siteCount', label: '출력 현장 수', unit: '개', icon: faBuilding, color: 'from-emerald-400 to-green-500', fill: '#22c55e' },
+];
+
+const statSectionVariant: Variants = {
+    hidden: { opacity: 0, y: 40 },
+    visible: {
+        opacity: 1,
+        y: 0,
+        transition: { duration: 0.8, ease: 'easeOut' },
+    },
+};
+
+type AnimatedBarShapeProps = {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    fill?: string;
+    index?: number;
+};
+
+const AnimatedBarShape: React.FC<AnimatedBarShapeProps> = ({
+    x = 0,
+    y = 0,
+    width = 0,
+    height = 0,
+    fill = '#06b6d4',
+    index = 0,
+}) => {
+    const safeHeight = Math.max(0, height);
+    const startY = y + safeHeight;
+
+    return (
+        <motion.rect
+            x={x}
+            width={width}
+            rx={6}
+            ry={6}
+            fill={fill}
+            initial={{ y: startY, height: 0, opacity: 0.9 }}
+            animate={{ y, height: safeHeight, opacity: 1 }}
+            transition={{ duration: 0.55, delay: index * 0.07, ease: 'easeOut' }}
+        />
+    );
+};
 
 const CheongyeonHome: React.FC = () => {
     const [playCount, setPlayCount] = useState(0);
     const [isIntro, setIsIntro] = useState(false); // 처음부터 컨텐츠 표시 (어두운 배경)
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
     const [videoLoaded, setVideoLoaded] = useState(false);
+    const [siteHighlights, setSiteHighlights] = useState<SiteHighlight[]>([]);
+    const [loadingHighlights, setLoadingHighlights] = useState(true);
+    const [highlightError, setHighlightError] = useState<string | null>(null);
+    const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+    const [loadingStats, setLoadingStats] = useState(true);
+    const [monthlyTrend, setMonthlyTrend] = useState<MonthlyTrendRow[]>([]);
+    const [dailyTrend, setDailyTrend] = useState<DailyTrendRow[]>([]);
+    const [activeYesterdayMetric, setActiveYesterdayMetric] = useState<keyof DailyStatRow>('totalManDay');
+    const [activeYearMetric, setActiveYearMetric] = useState<keyof DailyStatRow>('totalManDay');
+    const [manDayViewMode, setManDayViewMode] = useState<'daily' | 'monthly'>('daily');
+    const [siteViewMode, setSiteViewMode] = useState<'daily' | 'monthly'>('daily');
+    const [workerListScope, setWorkerListScope] = useState<'yesterday' | 'yearToDate' | null>(null);
+    const [workerNamesByScope, setWorkerNamesByScope] = useState<{ yesterday: string[]; yearToDate: string[] }>({
+        yesterday: [],
+        yearToDate: [],
+    });
+    const [animatedStats, setAnimatedStats] = useState<{ yesterday: DailyStatRow; yearToDate: DailyStatRow }>({
+        yesterday: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
+        yearToDate: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
+    });
     const videoRef = useRef<HTMLVideoElement>(null);
     const navigate = useNavigate();
 
@@ -26,6 +315,189 @@ const CheongyeonHome: React.FC = () => {
         };
         loadVideo();
     }, []);
+
+    useEffect(() => {
+        const loadRecentSiteHighlights = async () => {
+            setLoadingHighlights(true);
+            setHighlightError(null);
+
+            try {
+                const end = new Date();
+                const start = new Date();
+                start.setDate(end.getDate() - 20);
+
+                const reports = await dailyReportService.getReports({
+                    startDate: toDateString(start),
+                    endDate: toDateString(end),
+                });
+
+                const sortedReports = [...reports].sort((a: DailyReport, b: DailyReport) => toDateNumber(b.date) - toDateNumber(a.date));
+
+                const grouped = new Map<string, {
+                    key: string;
+                    siteId: string;
+                    siteName: string;
+                    latestDate: string;
+                    reportCount: number;
+                    teamNames: Set<string>;
+                    workerMap: Map<string, SiteWorkerHighlight>;
+                }>();
+
+                sortedReports.forEach((report) => {
+                    const siteId = String(report.siteId || '').trim();
+                    const siteName = String(report.siteName || '').trim() || '현장명 미기록';
+                    const key = siteId || `name:${siteName}`;
+
+                    if (!grouped.has(key)) {
+                        grouped.set(key, {
+                            key,
+                            siteId,
+                            siteName,
+                            latestDate: String(report.date || ''),
+                            reportCount: 0,
+                            teamNames: new Set<string>(),
+                            workerMap: new Map<string, SiteWorkerHighlight>(),
+                        });
+                    }
+
+                    const bucket = grouped.get(key)!;
+                    bucket.reportCount += 1;
+
+                    if (toDateNumber(report.date) > toDateNumber(bucket.latestDate)) {
+                        bucket.latestDate = String(report.date || '');
+                    }
+
+                    const teamName = String(report.teamName || '').trim();
+                    if (teamName) bucket.teamNames.add(teamName);
+
+                    (report.workers || []).forEach((worker, index) => {
+                        const workerName = String(worker.name || '').trim() || `미기록 작업자 ${index + 1}`;
+                        const workerId = String(worker.workerId || '').trim();
+                        const workerKey = workerId || `name:${workerName}`;
+                        const role = String(worker.role || '').trim() || '팀원';
+                        const shiftValue = (Number(worker.manDay) > 0 ? Number(worker.manDay) : 1);
+
+                        const existing = bucket.workerMap.get(workerKey);
+                        if (existing) {
+                            existing.shifts += shiftValue;
+                            if (existing.role === '팀원' && role !== '팀원') {
+                                existing.role = role;
+                            }
+                            return;
+                        }
+
+                        bucket.workerMap.set(workerKey, {
+                            id: workerKey,
+                            name: workerName,
+                            role,
+                            shifts: shiftValue,
+                        });
+                    });
+                });
+
+                const highlights: SiteHighlight[] = Array.from(grouped.values())
+                    .map((bucket) => ({
+                        key: bucket.key,
+                        siteId: bucket.siteId,
+                        siteName: bucket.siteName,
+                        latestDate: bucket.latestDate,
+                        reportCount: bucket.reportCount,
+                        totalWorkers: bucket.workerMap.size,
+                        teamNames: Array.from(bucket.teamNames).slice(0, 3),
+                        workers: Array.from(bucket.workerMap.values())
+                            .sort((a, b) => b.shifts - a.shifts)
+                            .slice(0, 12),
+                    }))
+                    .sort((a, b) => toDateNumber(b.latestDate) - toDateNumber(a.latestDate))
+                    .slice(0, 14);
+
+                setSiteHighlights(highlights);
+            } catch (error) {
+                console.error('Failed to load dashboard2 highlights:', error);
+                setHighlightError('최근 출력일보 데이터를 불러오지 못했습니다.');
+            } finally {
+                setLoadingHighlights(false);
+            }
+        };
+
+        loadRecentSiteHighlights();
+    }, []);
+
+    useEffect(() => {
+        const loadStats = async () => {
+            setLoadingStats(true);
+            try {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = toDateString(yesterday);
+                const { start: ytdStart, end: ytdEnd, label: ytdLabel } = getCurrentYearRange();
+                const { start: trendStart, end: trendEnd, monthKeys } = getRecent12MonthWindow();
+                const { start: dailyStart, end: dailyEnd, dateKeys } = getRecent30DayWindow();
+
+                const [yReports, ytdReports, trendReports, dailyReports] = await Promise.all([
+                    dailyReportService.getReports({ startDate: yesterdayStr, endDate: yesterdayStr }),
+                    dailyReportService.getReports({ startDate: ytdStart, endDate: ytdEnd }),
+                    dailyReportService.getReports({ startDate: trendStart, endDate: trendEnd }),
+                    dailyReportService.getReports({ startDate: dailyStart, endDate: dailyEnd }),
+                ]);
+
+                setDashboardStats({
+                    yesterday: computeStatRow(yReports),
+                    yearToDate: computeStatRow(ytdReports),
+                    yesterdayLabel: yesterdayStr,
+                    yearToDateLabel: ytdLabel,
+                });
+                setMonthlyTrend(buildMonthlyTrend(trendReports, monthKeys));
+                setDailyTrend(buildDailyTrend(dailyReports, dateKeys));
+                setWorkerNamesByScope({
+                    yesterday: extractWorkerNames(yReports),
+                    yearToDate: extractWorkerNames(ytdReports),
+                });
+            } catch (err) {
+                console.error('Failed to load dashboard stats:', err);
+            } finally {
+                setLoadingStats(false);
+            }
+        };
+        loadStats();
+    }, []);
+
+    useEffect(() => {
+        if (!dashboardStats || loadingStats) return;
+
+        const duration = 2400;
+        const startedAt = performance.now();
+        let rafId = 0;
+
+        const animate = (now: number) => {
+            const progress = Math.min((now - startedAt) / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            const lerp = (target: number) => target * eased;
+
+            setAnimatedStats({
+                yesterday: {
+                    totalWorkers: Math.round(lerp(dashboardStats.yesterday.totalWorkers)),
+                    totalManDay: Math.round(lerp(dashboardStats.yesterday.totalManDay) * 10) / 10,
+                    siteCount: Math.round(lerp(dashboardStats.yesterday.siteCount)),
+                    teamCount: Math.round(lerp(dashboardStats.yesterday.teamCount)),
+                },
+                yearToDate: {
+                    totalWorkers: Math.round(lerp(dashboardStats.yearToDate.totalWorkers)),
+                    totalManDay: Math.round(lerp(dashboardStats.yearToDate.totalManDay) * 10) / 10,
+                    siteCount: Math.round(lerp(dashboardStats.yearToDate.siteCount)),
+                    teamCount: Math.round(lerp(dashboardStats.yearToDate.teamCount)),
+                },
+            });
+
+            if (progress < 1) {
+                rafId = requestAnimationFrame(animate);
+            }
+        };
+
+        rafId = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(rafId);
+    }, [dashboardStats, loadingStats]);
 
     const handleVideoEnded = () => {
         const nextCount = playCount + 1;
@@ -54,6 +526,43 @@ const CheongyeonHome: React.FC = () => {
         }
     };
 
+    const formatStatValue = (value: number, decimals = 0): string => {
+        if (decimals > 0) return value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        return Math.round(value).toLocaleString();
+    };
+
+    const activeYesterdayMetricConfig = STAT_METRICS.find((metric) => metric.key === activeYesterdayMetric) || STAT_METRICS[1];
+
+    const handleYesterdayMetricClick = (metricKey: keyof DailyStatRow) => {
+        setActiveYesterdayMetric(metricKey);
+        if (metricKey === 'totalManDay') setManDayViewMode('daily');
+        if (metricKey === 'siteCount') setSiteViewMode('daily');
+        if (metricKey === 'totalWorkers') {
+            setWorkerListScope('yesterday');
+            return;
+        }
+        setWorkerListScope(null);
+    };
+
+    const handleYearMetricClick = (metricKey: keyof DailyStatRow) => {
+        setActiveYearMetric(metricKey);
+        if (metricKey === 'totalManDay') setManDayViewMode('monthly');
+        if (metricKey === 'siteCount') setSiteViewMode('monthly');
+        if (metricKey === 'totalWorkers') {
+            setWorkerListScope('yearToDate');
+            return;
+        }
+        setWorkerListScope(null);
+    };
+
+    const manDayGraphData = manDayViewMode === 'daily'
+        ? dailyTrend.map((row) => ({ label: row.dateLabel, value: row.totalManDay }))
+        : monthlyTrend.map((row) => ({ label: row.monthLabel, value: row.manDay }));
+
+    const siteGraphData = siteViewMode === 'daily'
+        ? dailyTrend.map((row) => ({ label: row.dateLabel, value: row.siteCount }))
+        : monthlyTrend.map((row) => ({ label: row.monthLabel, value: row.siteCount }));
+
     return (
         <div className="relative min-h-screen bg-slate-900 overflow-x-hidden">
             {/* Video Background (Absolute within main content) */}
@@ -76,57 +585,341 @@ const CheongyeonHome: React.FC = () => {
                 <div className={`absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-slate-900/80 transition-opacity duration-1000 ${isIntro ? 'opacity-0' : 'opacity-100'}`} />
             </div>
 
-            {/* 1. Hero Section */}
-            <div className={`relative z-10 flex flex-col justify-start pt-32 min-h-screen px-8 max-w-[1800px] mx-auto pb-20 transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
-                <div className="max-w-4xl space-y-8 animate-slideUp">
+            {/* 1. Recent Daily Report Highlights */}
+            <section className={`relative z-10 px-8 pt-28 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                <div className="mb-10 max-w-5xl animate-slideUp">
                     <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 backdrop-blur-md border border-white/10 w-fit">
                         <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                        <span className="text-amber-400 text-sm font-medium tracking-wide uppercase">Total Construction ERP</span>
+                        <span className="text-amber-400 text-sm font-medium tracking-wide uppercase">CHEONGYEON ENG SIGNATURE</span>
                     </div>
 
-                    <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight font-display tracking-tight drop-shadow-2xl">
-                        신뢰를 짓는 기술,<br />
-                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-600">
-                            청연ENG
+                    <h1 className="mt-6 text-4xl md:text-6xl font-bold text-white leading-tight font-display tracking-tight drop-shadow-2xl">
+                        청연ENG 시스템 동바리·비계 시공
+                        <span className="block text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-600 mt-2">
+                            자재임대와 건설인력 네트워크의 중심
                         </span>
                     </h1>
 
-                    <p className="text-xl text-slate-300 max-w-3xl leading-relaxed font-light break-keep">
-                        동바리·비계 시공 전문업체로서 체계적인 ERP 시스템을 구축하여<br className="hidden md:block" />
-                        건설사에는 <strong>실시간 공사 현황</strong>을, 근로자에게는 <strong>정직과 투명</strong>을 약속합니다.
+                    <p className="mt-5 text-lg text-slate-300 max-w-4xl leading-relaxed font-light break-keep">
+                        청연ENG는 시스템 동바리·비계 시공 전문성과 자재임대 운영 역량,
+                        그리고 전국 단위 건설인력 네트워크를 결합해 대형 현장부터 긴급 공정까지 안정적으로 수행합니다.
+                        정밀한 현장 운영과 신뢰 기반 협업으로, 공사의 시작부터 완성까지 압도적인 실행력을 제공합니다.
                     </p>
 
-                    <div className="flex flex-wrap items-center gap-6 pt-4">
-                        <button className="px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white rounded-full font-bold text-lg transition-all shadow-lg shadow-amber-500/30 flex items-center gap-3 group">
-                            Get Started
+                    <div className="flex flex-wrap items-center gap-4 mt-7">
+                        <button
+                            className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-full font-bold text-base transition-all shadow-lg shadow-amber-500/30 flex items-center gap-2 group"
+                            onClick={() => navigate('/cheongyeon/greeting')}
+                        >
+                            대표 인사말
                             <FontAwesomeIcon icon={faArrowRight} className="transition-transform group-hover:translate-x-1" />
                         </button>
-
                         <button
-                            className="px-8 py-4 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white rounded-full font-medium text-lg transition-all flex items-center gap-3 group"
+                            className="px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white rounded-full font-medium text-base transition-all flex items-center gap-2 group"
+                            onClick={() => navigate('/site/management')}
+                        >
+                            현장 관리 열기
+                            <FontAwesomeIcon icon={faArrowRight} className="transition-transform group-hover:translate-x-1" />
+                        </button>
+                        <button
+                            className="px-6 py-3 bg-transparent border border-amber-400/60 text-amber-200 rounded-full font-medium text-base transition-all flex items-center gap-2 group hover:bg-amber-500/10 hover:text-amber-300"
                             onClick={handleReplayIntro}
                         >
-                            <span className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center group-hover:bg-white group-hover:text-slate-900 transition-colors">
-                                <FontAwesomeIcon icon={faPlay} className="text-sm pl-0.5" />
-                            </span>
-                            Watch Brand Video
-                        </button>
-                        <button
-                            className="px-8 py-4 bg-transparent border border-amber-400/60 text-amber-200 rounded-full font-medium text-lg transition-all flex items-center gap-3 group hover:bg-amber-500/10 hover:text-amber-300"
-                            onClick={() => navigate('/cheongyeon/organization')}
-                        >
-                            조직도 보기
-                            <FontAwesomeIcon icon={faArrowRight} className="transition-transform group-hover:translate-x-1" />
+                            <FontAwesomeIcon icon={faPlay} className="text-sm" /> 브랜드 영상 다시보기
                         </button>
                     </div>
                 </div>
 
-                {/* Scroll Indicator */}
-                <div className="absolute bottom-12 left-1/2 -translate-x-1/2 hidden md:flex flex-col items-center gap-2 animate-bounce">
-                    <span className="text-xs text-white/50 tracking-widest uppercase">Scroll Down</span>
-                    <div className="w-[1px] h-12 bg-gradient-to-b from-amber-500 to-transparent" />
+                {loadingHighlights ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-pulse">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                            <div key={index} className="h-72 rounded-3xl bg-white/5 border border-white/10" />
+                        ))}
+                    </div>
+                ) : highlightError ? (
+                    <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-6 py-5 text-red-100">
+                        {highlightError}
+                    </div>
+                ) : siteHighlights.length === 0 ? null : (
+                    <div className="overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        <div className="flex gap-5 w-max pr-8">
+                            {siteHighlights.map((site) => (
+                                <article
+                                    key={site.key}
+                                    className="w-[340px] md:w-[380px] rounded-3xl p-6 bg-white/5 backdrop-blur-md border border-white/10 hover:border-amber-500/50 transition-all duration-300 hover:-translate-y-1"
+                                >
+                                    <header className="flex items-start justify-between gap-3 mb-4">
+                                        <div>
+                                            <div className="text-xs text-amber-300/90 tracking-wide uppercase mb-1">최근 일보 {toKoreanDate(site.latestDate)}</div>
+                                            <h3 className="text-xl font-bold text-white leading-tight break-keep">{site.siteName}</h3>
+                                        </div>
+                                        <button
+                                            onClick={() => site.siteId ? navigate(`/site/management?siteId=${site.siteId}`) : navigate('/site/management')}
+                                            className="text-[11px] px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-200 hover:bg-amber-500/25 transition-colors"
+                                        >
+                                            현장 보기
+                                        </button>
+                                    </header>
+
+                                    <div className="grid grid-cols-3 gap-2 mb-4">
+                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
+                                            <div className="text-lg font-bold text-white">{site.reportCount}</div>
+                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">일보 건수</div>
+                                        </div>
+                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
+                                            <div className="text-lg font-bold text-white">{site.totalWorkers}</div>
+                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">작업자</div>
+                                        </div>
+                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
+                                            <div className="text-lg font-bold text-white">{site.teamNames.length}</div>
+                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">팀</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-2 mb-4">
+                                        {site.teamNames.length > 0 ? site.teamNames.map((team) => (
+                                            <span key={team} className="text-[11px] px-2.5 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-100">
+                                                {team}
+                                            </span>
+                                        )) : (
+                                            <span className="text-[11px] px-2.5 py-1 rounded-full bg-slate-500/20 border border-slate-400/30 text-slate-200">
+                                                팀 정보 미기록
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="rounded-2xl bg-black/25 border border-white/10 p-4">
+                                        <div className="flex items-center gap-2 text-xs text-slate-300 mb-3 uppercase tracking-wider">
+                                            <FontAwesomeIcon icon={faUsers} className="text-amber-300" /> 투입 작업자
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto pr-1">
+                                            {site.workers.map((worker) => (
+                                                <div key={worker.id} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/10 border border-white/10 text-sm text-white">
+                                                    <span className="w-5 h-5 rounded-full bg-amber-500/25 text-amber-100 text-[11px] flex items-center justify-center font-bold">
+                                                        {worker.name.slice(0, 1)}
+                                                    </span>
+                                                    <span className="font-medium">{worker.name}</span>
+                                                    <span className="text-[10px] text-slate-300">{worker.role}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <footer className="mt-4 flex items-center justify-between text-[11px] text-slate-400">
+                                        <span className="inline-flex items-center gap-1"><FontAwesomeIcon icon={faCalendarDays} /> 최근 업데이트 {toKoreanDate(site.latestDate)}</span>
+                                        <span className="inline-flex items-center gap-1"><FontAwesomeIcon icon={faBuilding} /> 청연ENG 출력일보</span>
+                                    </footer>
+                                </article>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </section>
+
+            {/* Stats Cards Section */}
+            <section className={`relative z-10 px-8 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                <motion.div
+                    variants={statSectionVariant}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: true, amount: 0.2 }}
+                    className="flex items-center gap-3 mb-4"
+                >
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="text-amber-300 text-sm font-semibold tracking-widest uppercase">
+                        어제 출력 실적 {dashboardStats ? `(${dashboardStats.yesterdayLabel})` : ''}
+                    </span>
+                </motion.div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    {loadingStats
+                        ? Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
+                        ))
+                        : STAT_METRICS.map((metric, idx) => (
+                            <motion.button
+                                key={`y-${metric.key}`}
+                                type="button"
+                                onClick={() => handleYesterdayMetricClick(metric.key)}
+                                variants={statSectionVariant}
+                                initial="hidden"
+                                whileInView="visible"
+                                viewport={{ once: true, amount: 0.2 }}
+                                className={`rounded-2xl bg-white/5 backdrop-blur-md border transition-all p-5 flex items-center gap-4 text-left ${activeYesterdayMetric === metric.key ? 'border-white/40 shadow-lg shadow-white/10' : 'border-white/10 hover:border-amber-500/40'}`}
+                            >
+                                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${metric.color} flex items-center justify-center text-white text-xl flex-shrink-0 shadow-lg`}>
+                                    <FontAwesomeIcon icon={metric.icon} />
+                                </div>
+                                <div>
+                                    <div className="text-2xl font-bold text-white">
+                                        {formatStatValue(animatedStats.yesterday[metric.key], metric.decimals || 0)}{metric.unit}
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
+                                </div>
+                            </motion.button>
+                        ))}
                 </div>
-            </div>
+
+                <motion.div
+                    variants={statSectionVariant}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: true, amount: 0.2 }}
+                    className="flex items-center gap-3 mb-4"
+                >
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-cyan-300 text-sm font-semibold tracking-widest uppercase">
+                        올해 출력 실적 {dashboardStats ? `(${dashboardStats.yearToDateLabel} 누적)` : ''}
+                    </span>
+                </motion.div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    {loadingStats
+                        ? Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
+                        ))
+                        : STAT_METRICS.map((metric, idx) => (
+                            <motion.button
+                                key={`ytd-${metric.key}`}
+                                type="button"
+                                onClick={() => handleYearMetricClick(metric.key)}
+                                variants={statSectionVariant}
+                                initial="hidden"
+                                whileInView="visible"
+                                viewport={{ once: true, amount: 0.2 }}
+                                className={`rounded-2xl bg-white/5 backdrop-blur-md border transition-all p-5 flex items-center gap-4 text-left ${activeYearMetric === metric.key ? 'border-white/40 shadow-lg shadow-white/10' : 'border-white/10 hover:border-cyan-500/40'}`}
+                            >
+                                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${metric.color} flex items-center justify-center text-white text-xl flex-shrink-0 shadow-lg`}>
+                                    <FontAwesomeIcon icon={metric.icon} />
+                                </div>
+                                <div>
+                                    <div className="text-2xl font-bold text-white">
+                                        {formatStatValue(animatedStats.yearToDate[metric.key], metric.decimals || 0)}{metric.unit}
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
+                                </div>
+                            </motion.button>
+                        ))}
+                </div>
+
+                {workerListScope ? (
+                    <motion.div
+                        variants={statSectionVariant}
+                        initial="hidden"
+                        whileInView="visible"
+                        viewport={{ once: true, amount: 0.2 }}
+                        className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
+                    >
+                        <h4 className="text-sm text-amber-200 font-semibold mb-3">
+                            {workerListScope === 'yesterday' ? '어제 출력 인원 명단' : '올해 출력 인원 명단'}
+                        </h4>
+                        <div className="text-xs text-slate-400 mb-4">
+                            총 {workerNamesByScope[workerListScope].length.toLocaleString()}명
+                        </div>
+                        <div className="max-h-72 overflow-y-auto pr-1 flex flex-wrap gap-2">
+                            {workerNamesByScope[workerListScope].length > 0 ? (
+                                workerNamesByScope[workerListScope].map((name) => (
+                                    <span key={`${workerListScope}-${name}`} className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600 text-slate-100 text-sm">
+                                        {name}
+                                    </span>
+                                ))
+                            ) : (
+                                <div className="text-sm text-slate-500">출력 인원 기록이 없습니다.</div>
+                            )}
+                        </div>
+                    </motion.div>
+                ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <motion.div
+                        variants={statSectionVariant}
+                        initial="hidden"
+                        whileInView="visible"
+                        viewport={{ once: true, amount: 0.2 }}
+                        transition={{ duration: 0.7, delay: 0 }}
+                        className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
+                    >
+                        <h4 className="text-sm text-amber-200 font-semibold mb-3">
+                            {manDayViewMode === 'daily' ? '최근 한달 일자별 투입 공수' : '최근 1년 월별 투입 공수'}
+                        </h4>
+                        <div className="h-56">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={manDayGraphData}>
+                                    <XAxis
+                                        dataKey="label"
+                                        interval={0}
+                                        minTickGap={0}
+                                        height={64}
+                                        tick={{ fill: '#cbd5e1', fontSize: 10 }}
+                                        angle={-45}
+                                        textAnchor="end"
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                                    <Tooltip
+                                        formatter={(value?: number) => [`${formatStatValue(Number(value ?? 0), 1)}`, '투입 공수']}
+                                        labelFormatter={(label: string) => manDayViewMode === 'daily' ? `${label}` : `${label}월`}
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                    />
+                                    <Bar
+                                        key={`manDay-${manDayViewMode}`}
+                                        dataKey="value"
+                                        fill="#06b6d4"
+                                        radius={[6, 6, 0, 0]}
+                                        isAnimationActive={false}
+                                        shape={(props: any) => <AnimatedBarShape {...props} />}
+                                    />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </motion.div>
+
+                    <motion.div
+                        variants={statSectionVariant}
+                        initial="hidden"
+                        whileInView="visible"
+                        viewport={{ once: true, amount: 0.2 }}
+                        transition={{ duration: 0.7, delay: 0.2 }}
+                        className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
+                    >
+                        <h4 className="text-sm text-cyan-200 font-semibold mb-3">
+                            {siteViewMode === 'daily' ? '최근 한달 일자별 출력 현장 수' : '최근 1년 월별 출력 현장 수'}
+                        </h4>
+                        <div className="h-56">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={siteGraphData}>
+                                    <XAxis
+                                        dataKey="label"
+                                        interval={0}
+                                        minTickGap={0}
+                                        height={64}
+                                        tick={{ fill: '#cbd5e1', fontSize: 10 }}
+                                        angle={-45}
+                                        textAnchor="end"
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
+                                    <Tooltip
+                                        formatter={(value?: number) => [`${Number(value ?? 0).toLocaleString()}개 현장`, '현장 수']}
+                                        labelFormatter={(label: string) => siteViewMode === 'daily' ? `${label}` : `${label}월`}
+                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                                    />
+                                    <Bar
+                                        key={`site-${siteViewMode}`}
+                                        dataKey="value"
+                                        fill="#06b6d4"
+                                        radius={[6, 6, 0, 0]}
+                                        isAnimationActive={false}
+                                        shape={(props: any) => <AnimatedBarShape {...props} />}
+                                    />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </motion.div>
+                </div>
+                )}
+            </section>
 
             {/* 2. Feature Cards Section */}
             <div className="relative z-10 px-8 py-32 max-w-[1800px] mx-auto">

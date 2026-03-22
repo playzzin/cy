@@ -83,7 +83,7 @@ const ToolCard: React.FC<ToolCardProps> = ({ title, description, icon, color, pa
                 </p>
 
                 <div className="flex items-center text-xs font-semibold uppercase tracking-wider text-slate-500 group-hover:text-white transition-colors">
-                    <span>Access Tool</span>
+                    <span>도구 열기</span>
                     <FontAwesomeIcon icon={faArrowRight} className="ml-2 transform group-hover:translate-x-1 transition-transform" />
                 </div>
             </div>
@@ -144,14 +144,14 @@ const DesignManagementPage: React.FC = () => {
                     <div className="text-center md:text-left mb-8 md:mb-0">
                         <div className="flex items-center justify-center md:justify-start gap-3 mb-2">
                             <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-bold uppercase tracking-widest">
-                                V12.0.0 System Online
+                                V12.0.0 시스템 운영중
                             </span>
                         </div>
                         <h1 className="text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400 mb-4">
-                            Digital Architect
+                            설계 관리 센터
                         </h1>
                         <p className="text-lg text-slate-400 max-w-lg">
-                            Manage design systems, visualize data structures, and leverage AI services in one central hub.
+                            디자인 시스템, 데이터 구조, AI 보조도구를 한 곳에서 운영하는 통합 설계 관리 허브입니다.
                         </p>
                     </div>
 
@@ -186,8 +186,8 @@ const DesignManagementPage: React.FC = () => {
                     className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
                 >
                     <ToolCard
-                        title="Design Agent"
-                        description="AI-powered prototyping environment. Request UI generation and verify implementations."
+                        title="디자인 에이전트"
+                        description="AI 기반 화면 프로토타이핑 도구입니다. UI 생성 요청과 결과 검증을 한 번에 수행합니다."
                         icon={faRobot}
                         color="cyan"
                         path="/admin/agent-playground"
@@ -195,8 +195,8 @@ const DesignManagementPage: React.FC = () => {
                     />
 
                     <ToolCard
-                        title="Component Gallery"
-                        description="Atomic design system source of truth. Buttons, inputs, tables, and more."
+                        title="컴포넌트 갤러리"
+                        description="버튼, 입력폼, 테이블 등 공통 UI를 확인하는 디자인 시스템 기준 저장소입니다."
                         icon={faPalette}
                         color="pink"
                         path="/design-system"
@@ -204,8 +204,8 @@ const DesignManagementPage: React.FC = () => {
                     />
 
                     <ToolCard
-                        title="Schema Architect"
-                        description="Visualizer for Settlement Logic and Database Relationships. (Legacy: Blueprint)"
+                        title="정산 아키텍처"
+                        description="정산 로직과 데이터 관계를 시각적으로 파악할 수 있는 구조 설계 도구입니다."
                         icon={faSitemap}
                         color="indigo"
                         path="/design/settlement-architecture"
@@ -213,8 +213,8 @@ const DesignManagementPage: React.FC = () => {
                     />
 
                     <ToolCard
-                        title="AI Color Magic"
-                        description="Generate harmonious color palettes instantly using algorithmic color theory."
+                        title="AI 컬러 제너레이터"
+                        description="기준 색상을 바탕으로 조화로운 팔레트를 빠르게 생성해 시안 작업 속도를 높입니다."
                         icon={faWandMagicSparkles}
                         color="violet"
                         onClick={() => setColorModalOpen(true)}
@@ -222,8 +222,8 @@ const DesignManagementPage: React.FC = () => {
                     />
 
                     <ToolCard
-                        title="Menu Manager"
-                        description="Configure system menus, roles, and permissions dynamically."
+                        title="메뉴 관리자"
+                        description="메뉴 구조와 역할별 접근 권한을 동적으로 설정하고 운영 상태를 점검합니다."
                         icon={faLayerGroup}
                         color="emerald"
                         path="/admin/menu-manager"
@@ -231,12 +231,30 @@ const DesignManagementPage: React.FC = () => {
                     />
 
                     <ToolCard
-                        title="Code Snippets"
-                        description="Common React patterns and utility function reference library."
+                        title="코드 스니펫"
+                        description="자주 쓰는 React 패턴과 유틸 함수 예시를 모아둔 레퍼런스 라이브러리입니다."
                         icon={faCode}
                         color="amber"
                         path="/admin/library-guide"
                         delay={0.5}
+                    />
+
+                    <ToolCard
+                        title="데이터 관계도"
+                        description="업무 엔터티 간 연결 구조를 시각화해 설계 누락과 의존성 충돌을 사전에 점검합니다."
+                        icon={faSitemap}
+                        color="blue"
+                        path="/admin/data-relationships"
+                        delay={0.6}
+                    />
+
+                    <ToolCard
+                        title="에이전트 대시보드"
+                        description="AI 작업 이력과 처리 상태를 확인하고 설계 자동화 파이프라인을 모니터링합니다."
+                        icon={faRobot}
+                        color="teal"
+                        path="/admin/agent-dashboard"
+                        delay={0.7}
                     />
 
                 </motion.div>
@@ -300,14 +318,14 @@ const AIColorGeneratorModal: React.FC<{ onClose: () => void }> = ({ onClose }) =
                 <div className="p-6 border-b border-slate-800 flex justify-between items-center">
                     <h3 className="text-xl font-bold text-white flex items-center gap-2">
                         <FontAwesomeIcon icon={faWandMagicSparkles} className="text-violet-500" />
-                        AI Color Generator
+                        AI 컬러 생성기
                     </h3>
                     <button onClick={onClose} className="text-slate-500 hover:text-white transition">✕</button>
                 </div>
 
                 <div className="p-6 space-y-6">
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-2">Base Color (Hex)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-2">기준 색상 (Hex)</label>
                         <div className="flex gap-4">
                             <input
                                 type="color"
@@ -349,7 +367,7 @@ const AIColorGeneratorModal: React.FC<{ onClose: () => void }> = ({ onClose }) =
                 </div>
 
                 <div className="p-4 bg-slate-800/50 flex justify-end">
-                    <button onClick={onClose} className="px-4 py-2 text-slate-300 hover:text-white transition">Close</button>
+                    <button onClick={onClose} className="px-4 py-2 text-slate-300 hover:text-white transition">닫기</button>
                 </div>
             </motion.div>
         </motion.div>

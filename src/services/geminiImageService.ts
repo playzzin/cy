@@ -16,7 +16,7 @@ import {
 import { aiSettingsService } from './aiSettingsService';
 
 // --- Types ---
-export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'business-card' | 'custom';
+export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'custom';
 
 export interface ImagePreset {
     key: ImageCategory;
@@ -80,6 +80,10 @@ export const IMAGE_PRESETS: Record<ImageCategory, ImagePreset> = {
     'character': {
         key: 'character', label: '캐릭터', width: 750, height: 750, maxSizeKB: 1024,
         description: '일러스트 / 캐릭터 캐릭터 (750x750)', promptHint: '일관성 있는 캐릭터 디자인, 전신 또는 흉상 일러스트.'
+    },
+    'birdseye': {
+        key: 'birdseye', label: '조감도', width: 1024, height: 1024, maxSizeKB: 3072,
+        description: '건설현장 조감도 (정사각형 1024x1024)', promptHint: '정사각형 구도의 드론 시점 건설현장 조감도. 공정 구역, 장비 동선, 안전펜스, 크레인, 자재 적치장을 사실적으로 표현.'
     },
     'kakao-square': {
         key: 'kakao-square', label: '카카오 정사각형', width: 720, height: 720, maxSizeKB: 500,
@@ -314,7 +318,7 @@ export async function listGalleryImages(
 export async function migrateStorageToFirestore() {
     console.log('[GeminiImage] Starting migration...');
     const paths: string[] = [];
-    const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'business-card', 'custom'];
+    const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'birdseye', 'business-card', 'custom'];
     categories.forEach(c => paths.push(`${STORAGE_BASE_PATH}/${c}`));
     paths.push(KAKAO_STORAGE_PATH);
 

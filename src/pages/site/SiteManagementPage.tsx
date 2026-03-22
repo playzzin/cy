@@ -42,18 +42,43 @@ interface CompanyManDaySummary {
     color: string;
 }
 
+interface SiteReportSummary {
+    firstDate: string;
+    lastDate: string;
+    totalManDay: number;
+}
+
+const getContractorDisplayName = (site: Site): string => {
+    const candidates = [site.companyName, site.constructorCompanyName, site.partnerName]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+    return candidates[0] || '청연';
+};
+
+const getReportSiteKey = (siteId?: string | null, siteName?: string | null): string => {
+    const id = String(siteId || '').trim();
+    if (id) return `id:${id}`;
+    const name = String(siteName || '').trim();
+    if (name) return `name:${name}`;
+    return '';
+};
+
 // ----------------------------------------------------------------------
 // Component: SiteDetailModal (Dark Theme)
 // ----------------------------------------------------------------------
 
 const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'reports'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'reports' | 'workcontent'>('overview');
     const [loading, setLoading] = useState(false);
 
     // Data States
     const [workerSummaries, setWorkerSummaries] = useState<WorkerSummary[]>([]);
     const [companySummaries, setCompanySummaries] = useState<CompanyManDaySummary[]>([]);
     const [reports, setReports] = useState<DailyReport[]>([]);
+    const totalOutputManDay = useMemo(() => reports.reduce((acc, report) => {
+        const reportManDay = (report.workers || []).reduce((sum, worker) => sum + (typeof worker.manDay === 'number' ? worker.manDay : 0), 0);
+        return acc + reportManDay;
+    }, 0), [reports]);
 
     useEffect(() => {
         if (!site.id) return;
@@ -145,6 +170,12 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
     const renderReportsTab = () => {
         return (
             <div className="space-y-6 h-full flex flex-col">
+                <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 flex items-center justify-between">
+                    <h4 className="text-sm font-bold text-slate-300">총 출력공수</h4>
+                    <span className="px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-sm font-bold">
+                        {totalOutputManDay.toFixed(1)}
+                    </span>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
                     {/* Pie Chart: ManDay by Company */}
                     <div className="bg-slate-800 p-4 rounded-xl border border-slate-700 shadow-sm flex flex-col">
@@ -247,6 +278,57 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
         );
     };
 
+    const renderWorkContentTab = () => {
+        return (
+            <div className="h-full bg-slate-800 rounded-xl border border-slate-700 shadow-sm flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                    <h3 className="font-bold text-slate-200 flex items-center gap-2">
+                        <FontAwesomeIcon icon={faList} className="text-indigo-400" /> 작업내용 이력
+                    </h3>
+                    <span className="text-xs text-slate-500">총 {reports.length}건</span>
+                </div>
+
+                <div className="flex-1 overflow-auto custom-scrollbar">
+                    <table className="w-full text-sm text-left text-slate-400">
+                        <thead className="text-xs text-slate-300 uppercase bg-slate-700/50 sticky top-0 z-10 font-bold tracking-wider">
+                            <tr>
+                                <th className="px-6 py-3 whitespace-nowrap">날짜</th>
+                                <th className="px-6 py-3 whitespace-nowrap">팀명</th>
+                                <th className="px-6 py-3 whitespace-nowrap">작업내용</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-slate-800 divide-y divide-slate-700/50">
+                            {reports.length === 0 ? (
+                                <tr>
+                                    <td colSpan={3} className="px-6 py-10 text-center text-slate-500">
+                                        작업내용 기록이 없습니다.
+                                    </td>
+                                </tr>
+                            ) : (
+                                reports.map((report, idx) => {
+                                    const fallbackFromWorkers = (report.workers || [])
+                                        .map((w) => String(w.workContent || '').trim())
+                                        .filter(Boolean);
+                                    const uniqueWorkerContents = Array.from(new Set(fallbackFromWorkers));
+                                    const content = String(report.workContent || '').trim()
+                                        || (uniqueWorkerContents.length > 0 ? uniqueWorkerContents.join(' / ') : '-');
+
+                                    return (
+                                        <tr key={report.id || `${report.date}-${idx}`} className="hover:bg-slate-700/30 transition-colors border-b border-slate-700/50 last:border-0 align-top">
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-slate-300 font-medium">{report.date || '-'}</td>
+                                            <td className="px-6 py-3.5 whitespace-nowrap text-slate-400">{report.teamName || '-'}</td>
+                                            <td className="px-6 py-3.5 text-slate-200 leading-relaxed break-keep">{content}</td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
             <motion.div
@@ -282,7 +364,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 
                 {/* Tabs */}
                 <div className="flex border-b border-slate-700 bg-slate-800 px-6">
-                    {(['overview', 'reports'] as const).map(tab => (
+                    {(['overview', 'reports', 'workcontent'] as const).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -293,6 +375,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                         >
                             {tab === 'overview' && '개요'}
                             {tab === 'reports' && '출력 일보'}
+                            {tab === 'workcontent' && '작업내용'}
                         </button>
                     ))}
                 </div>
@@ -313,10 +396,12 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                         <dl className="grid grid-cols-2 gap-y-4">
                                             <dt className="text-sm text-slate-500">코드</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.code}</dd>
+                                            <dt className="text-sm text-slate-500">총 출력공수</dt>
+                                            <dd className="text-sm font-medium text-indigo-300">{totalOutputManDay.toFixed(1)}</dd>
                                             <dt className="text-sm text-slate-500">담당 팀</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.responsibleTeamName || '-'}</dd>
                                             <dt className="text-sm text-slate-500">시공사</dt>
-                                            <dd className="text-sm font-medium text-slate-300">{site.companyName || '-'}</dd>
+                                            <dd className="text-sm font-medium text-slate-300">{getContractorDisplayName(site)}</dd>
                                             <dt className="text-sm text-slate-500">발주사</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.clientCompanyName || '-'}</dd>
                                         </dl>
@@ -331,6 +416,7 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                 </div>
                             )}
                             {activeTab === 'reports' && renderReportsTab()}
+                            {activeTab === 'workcontent' && renderWorkContentTab()}
                         </div>
                     )}
                 </div>
@@ -353,15 +439,39 @@ export const SiteManagementPage: React.FC = () => {
     const [keyword, setKeyword] = useState('');
     const [loading, setLoading] = useState(true);
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
+    const [siteReportSummaryMap, setSiteReportSummaryMap] = useState<Record<string, SiteReportSummary>>({});
 
     // Initial Load & Query Param Handling
     useEffect(() => {
         const init = async () => {
             setLoading(true);
             try {
-                const data = await siteService.getSites();
+                const [data, allReports] = await Promise.all([
+                    siteService.getSites(),
+                    dailyReportService.getReports(),
+                ]);
                 setSites(data);
                 setFilteredSites(data);
+
+                const summaryMap: Record<string, SiteReportSummary> = {};
+                allReports.forEach((report) => {
+                    const key = getReportSiteKey(report.siteId, report.siteName);
+                    if (!key || !report.date) return;
+                    const reportManDay = (report.workers || []).reduce((sum, worker) => sum + (typeof worker.manDay === 'number' ? worker.manDay : 0), 0);
+                    const existing = summaryMap[key];
+                    if (!existing) {
+                        summaryMap[key] = {
+                            firstDate: report.date,
+                            lastDate: report.date,
+                            totalManDay: reportManDay,
+                        };
+                        return;
+                    }
+                    if (report.date < existing.firstDate) existing.firstDate = report.date;
+                    if (report.date > existing.lastDate) existing.lastDate = report.date;
+                    existing.totalManDay += reportManDay;
+                });
+                setSiteReportSummaryMap(summaryMap);
 
                 // Auto-open modal if siteId is present in URL
                 const targetSiteId = searchParams.get('siteId');
@@ -380,6 +490,14 @@ export const SiteManagementPage: React.FC = () => {
         init();
     }, [searchParams]);
 
+    const getSiteSummary = useCallback((site: Site): SiteReportSummary | null => {
+        const keyById = getReportSiteKey(site.id, null);
+        if (keyById && siteReportSummaryMap[keyById]) return siteReportSummaryMap[keyById];
+        const keyByName = getReportSiteKey(null, site.name);
+        if (keyByName && siteReportSummaryMap[keyByName]) return siteReportSummaryMap[keyByName];
+        return null;
+    }, [siteReportSummaryMap]);
+
     // Filter Logic
     useEffect(() => {
         if (!keyword.trim()) {
@@ -390,7 +508,11 @@ export const SiteManagementPage: React.FC = () => {
         setFilteredSites(sites.filter(s =>
             s.name.toLowerCase().includes(lower) ||
             s.code.toLowerCase().includes(lower) ||
-            (s.address && s.address.toLowerCase().includes(lower))
+            (s.address && s.address.toLowerCase().includes(lower)) ||
+            (s.responsibleTeamName && s.responsibleTeamName.toLowerCase().includes(lower)) ||
+            (s.companyName && s.companyName.toLowerCase().includes(lower)) ||
+            (s.constructorCompanyName && s.constructorCompanyName.toLowerCase().includes(lower)) ||
+            (s.partnerName && s.partnerName.toLowerCase().includes(lower))
         ));
     }, [keyword, sites]);
 
@@ -431,6 +553,11 @@ export const SiteManagementPage: React.FC = () => {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {filteredSites.map(site => (
+                        (() => {
+                            const siteSummary = getSiteSummary(site);
+                            const periodText = siteSummary ? `${siteSummary.firstDate} ~ ${siteSummary.lastDate}` : '- ~ -';
+                            const totalManDayText = siteSummary ? siteSummary.totalManDay.toFixed(1) : '0.0';
+                            return (
                         <motion.div
                             key={site.id}
                             initial={{ opacity: 0, y: 20 }}
@@ -439,7 +566,7 @@ export const SiteManagementPage: React.FC = () => {
                             onClick={() => setSelectedSite(site)}
                             className="bg-slate-800 rounded-2xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
                         >
-                            <div className="h-32 bg-slate-700 relative overflow-hidden">
+                            <div className="aspect-square w-full bg-slate-700 relative overflow-hidden">
                                 {site.imageUrl ? (
                                     <img src={site.imageUrl} alt={site.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                 ) : (
@@ -458,21 +585,33 @@ export const SiteManagementPage: React.FC = () => {
                             </div>
 
                             <div className="p-5 flex-1 flex flex-col">
-                                <h3 className="text-lg font-bold text-slate-100 mb-1 group-hover:text-blue-400 transition-colors line-clamp-1">
-                                    {site.name}
-                                </h3>
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                    <h3 className="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                                        {site.name}
+                                    </h3>
+                                    <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold whitespace-nowrap">
+                                        총공수 {totalManDayText}
+                                    </span>
+                                </div>
                                 <p className="text-xs text-slate-500 mb-4 font-mono bg-slate-900 inline-block px-1.5 py-0.5 rounded self-start border border-slate-700">
                                     {site.code}
                                 </p>
 
                                 <div className="space-y-2 mt-auto">
+                                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                                        <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
+                                        <span>
+                                            담당팀: {site.responsibleTeamName || '미지정'}
+                                            {' '}| 시공사: {getContractorDisplayName(site)}
+                                        </span>
+                                    </div>
                                     <div className="flex items-start gap-2 text-sm text-slate-400">
                                         <div className="w-4 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>
                                         <span className="line-clamp-2">{site.address || '주소 없음'}</span>
                                     </div>
                                     <div className="flex items-center gap-2 text-sm text-slate-400">
                                         <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faCalendarAlt} /></div>
-                                        <span>{site.startDate || '미정'} ~</span>
+                                        <span>{periodText}</span>
                                     </div>
                                 </div>
                             </div>
@@ -482,6 +621,8 @@ export const SiteManagementPage: React.FC = () => {
                                 <FontAwesomeIcon icon={faChartPie} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
                             </div>
                         </motion.div>
+                            );
+                        })()
                     ))}
                 </div>
             )}

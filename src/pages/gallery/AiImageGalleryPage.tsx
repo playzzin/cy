@@ -5,7 +5,7 @@ import {
     faMagic, faImages, faTrash, faCopy, faDownload, faPen, faTimes, faSpinner,
     faCheck, faSave, faSearch, faExpand, faExclamationCircle, faUpload, faCog,
     faStar, faCrown, faCube, faFlag, faComment, faPlus, faGlobe, faBullhorn,
-    faShareNodes, faAddressCard,
+    faShareNodes, faAddressCard, faBuilding,
     faUserAstronaut,
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
@@ -16,12 +16,16 @@ import {
     migrateStorageToFirestore,
     IMAGE_PRESETS, ImageCategory, GalleryImage, CustomCategory
 } from '../../services/geminiImageService';
+import { manpowerService } from '../../services/manpowerService';
+import { teamService } from '../../services/teamService';
+import { siteService } from '../../services/siteService';
 
 // --- Preset Icon Map ---
 const PRESET_ICONS: Record<ImageCategory, any> = {
     'favicon': faStar, 'logo': faCrown, 'icon': faCube, 'banner': faFlag,
     'og-image': faShareNodes,
     'character': faUserAstronaut,
+    'birdseye': faBuilding,
     'business-card': faAddressCard,
     'kakao-square': faComment, 'kakao-wide': faComment, 'custom': faCube
 };
@@ -33,6 +37,7 @@ const PRESET_COLORS: Record<ImageCategory, string> = {
     'banner': 'from-orange-500 to-rose-500',
     'og-image': 'from-indigo-500 to-purple-500',
     'character': 'from-emerald-500 to-teal-500',
+    'birdseye': 'from-sky-600 to-cyan-700',
     'business-card': 'from-slate-600 to-slate-800',
     'kakao-square': 'from-yellow-400 to-yellow-600',
     'kakao-wide': 'from-yellow-500 to-yellow-700',
@@ -46,6 +51,7 @@ const BADGE_COLORS: Record<ImageCategory, string> = {
     'banner': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
     'og-image': 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
     'character': 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    'birdseye': 'bg-sky-500/20 text-sky-300 border-sky-500/30',
     'business-card': 'bg-slate-600/20 text-slate-300 border-slate-500/30',
     'kakao-square': 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
     'kakao-wide': 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
@@ -57,6 +63,7 @@ const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
     { key: 'favicon', label: '파비콘' },
     { key: 'logo', label: '로고' },
     { key: 'character', label: '캐릭터' },
+    { key: 'birdseye', label: '조감도' },
     { key: 'icon', label: '아이콘' },
     { key: 'banner', label: '배너' },
     { key: 'business-card', label: '명함' },
@@ -66,13 +73,17 @@ const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
 ];
 
 // --- Detail Modal ---
-const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, onApplyLogo }: {
+const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, onApplyLogo, onAssignLeader, assigningLeader, onApplySiteImage, applyingSiteImage }: {
     image: GalleryImage;
     onClose: () => void;
     onDelete: (img: GalleryImage) => void;
     onUpdate: (img: GalleryImage, updates: { customName?: string; tags?: string[] }) => void;
     onApplyFavicon: (img: GalleryImage) => void;
     onApplyLogo: (img: GalleryImage) => void;
+    onAssignLeader: (img: GalleryImage) => void;
+    assigningLeader: boolean;
+    onApplySiteImage: (img: GalleryImage) => void;
+    applyingSiteImage: boolean;
 }) => {
     const [editing, setEditing] = useState(false);
     const [editName, setEditName] = useState(image.customName || image.name);
@@ -209,6 +220,26 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
                         <button onClick={() => onApplyLogo(image)} className="py-2.5 bg-purple-900/50 hover:bg-purple-800/50 text-purple-300 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
                             <FontAwesomeIcon icon={faCrown} /> 로고 적용
                         </button>
+                        {image.category === 'birdseye' && (
+                            <button
+                                onClick={() => onApplySiteImage(image)}
+                                disabled={applyingSiteImage}
+                                className={`col-span-2 py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${applyingSiteImage ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-cyan-900/50 hover:bg-cyan-800/50 text-cyan-300'}`}
+                            >
+                                <FontAwesomeIcon icon={applyingSiteImage ? faSpinner : faBullhorn} spin={applyingSiteImage} />
+                                {applyingSiteImage ? '적용 중...' : '현장 대표이미지로 적용'}
+                            </button>
+                        )}
+                        {image.category === 'character' && (
+                            <button
+                                onClick={() => onAssignLeader(image)}
+                                disabled={assigningLeader}
+                                className={`col-span-2 py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${assigningLeader ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-emerald-900/50 hover:bg-emerald-800/50 text-emerald-300'}`}
+                            >
+                                <FontAwesomeIcon icon={assigningLeader ? faSpinner : faUserAstronaut} spin={assigningLeader} />
+                                {assigningLeader ? '지정 중...' : '팀장 프로필로 지정'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </motion.div>
@@ -251,6 +282,8 @@ export const AiImageGalleryPage = () => {
     const [filterCategory, setFilterCategory] = useState<ImageCategory | 'all'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
+    const [assigningLeaderImage, setAssigningLeaderImage] = useState(false);
+    const [applyingSiteImage, setApplyingSiteImage] = useState(false);
 
     // Panel state
     const [showGenPanel, setShowGenPanel] = useState(true);
@@ -533,6 +566,152 @@ export const AiImageGalleryPage = () => {
             Swal.fire({ icon: 'success', title: '수정 완료', timer: 1000, showConfirmButton: false });
         } else {
             Swal.fire('오류', '수정에 실패했습니다.', 'error');
+        }
+    };
+
+    const handleAssignLeaderImage = async (img: GalleryImage) => {
+        setAssigningLeaderImage(true);
+        try {
+            const [workers, teams] = await Promise.all([
+                manpowerService.getWorkers(true),
+                teamService.getTeams()
+            ]);
+
+            const leaders = workers
+                .filter((w: any) => {
+                    if (!w?.id) return false;
+                    const role = String(w.role || '');
+                    return role.includes('팀장') || role.includes('소장') || teams.some((t: any) => t.leaderId === w.id);
+                })
+                .sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || '')));
+
+            if (leaders.length === 0) {
+                Swal.fire('알림', '지정 가능한 팀장이 없습니다.', 'info');
+                return;
+            }
+
+            const options: Record<string, string> = {};
+            leaders.forEach((w: any) => {
+                const leaderTeam = teams.find((t: any) => t.leaderId === w.id);
+                const teamLabel = leaderTeam?.name || w.teamName || '미배정';
+                const roleLabel = w.role || '팀장';
+                options[w.id] = `${w.name} (${roleLabel}) - ${teamLabel}`;
+            });
+
+            const selected = await Swal.fire({
+                title: '팀장 프로필 지정',
+                text: '이 이미지를 연결할 팀장을 선택하세요.',
+                input: 'select',
+                inputOptions: options,
+                inputPlaceholder: '팀장 선택',
+                showCancelButton: true,
+                confirmButtonText: '지정',
+                cancelButtonText: '취소',
+                inputValidator: (value) => (value ? undefined : '팀장을 선택해주세요.')
+            });
+
+            if (!selected.isConfirmed || !selected.value) {
+                return;
+            }
+
+            const workerId = selected.value;
+            const selectedLeader = leaders.find((w: any) => w.id === workerId);
+            const selectedTeam = teams.find((t: any) => t.leaderId === workerId);
+
+            await manpowerService.updateWorker(workerId, {
+                profileImageUrl: img.url,
+                profileImagePath: img.fullPath,
+                profileImageUpdatedAt: new Date().toISOString()
+            } as any);
+
+            const baseTags = (img.tags || []).filter(tag => !tag.startsWith('worker:') && !tag.startsWith('team:'));
+            const nextTags = Array.from(new Set([
+                ...baseTags,
+                'character',
+                'leader',
+                `worker:${workerId}`,
+                selectedTeam?.id ? `team:${selectedTeam.id}` : ''
+            ].filter(Boolean)));
+
+            const metadataUpdated = await updateImageMetadata(img.fullPath, { tags: nextTags });
+            if (metadataUpdated) {
+                setImages(prev => prev.map(i => i.fullPath === img.fullPath ? { ...i, tags: nextTags } : i));
+                setSelectedImage(prev => prev && prev.fullPath === img.fullPath ? { ...prev, tags: nextTags } : prev);
+            }
+
+            Swal.fire({
+                icon: 'success',
+                title: '팀장 프로필 지정 완료',
+                text: `${selectedLeader?.name || '선택한 팀장'}에게 이미지가 연결되었습니다.`,
+                timer: 1800,
+                showConfirmButton: false
+            });
+        } catch (error) {
+            console.error('[AiImageGallery] Failed to assign leader image:', error);
+            Swal.fire('오류', '팀장 프로필 지정 중 문제가 발생했습니다.', 'error');
+        } finally {
+            setAssigningLeaderImage(false);
+        }
+    };
+
+    const handleApplySiteImage = async (img: GalleryImage) => {
+        setApplyingSiteImage(true);
+        try {
+            const sites = await siteService.getSites();
+            if (!sites.length) {
+                Swal.fire('알림', '등록된 현장이 없습니다.', 'info');
+                return;
+            }
+
+            const options: Record<string, string> = {};
+            sites.forEach((site: any) => {
+                if (!site?.id) return;
+                options[site.id] = `${site.name || '이름없음'} (${site.code || '코드없음'})`;
+            });
+
+            const selected = await Swal.fire({
+                title: '현장 대표이미지 적용',
+                text: '이미지를 적용할 현장을 선택하세요.',
+                input: 'select',
+                inputOptions: options,
+                inputPlaceholder: '현장 선택',
+                showCancelButton: true,
+                confirmButtonText: '적용',
+                cancelButtonText: '취소',
+                inputValidator: (value) => (value ? undefined : '현장을 선택해주세요.')
+            });
+
+            if (!selected.isConfirmed || !selected.value) return;
+
+            const siteId = selected.value;
+            const selectedSite = sites.find((s: any) => s.id === siteId);
+
+            await siteService.updateSite(siteId, { imageUrl: img.url } as any);
+
+            const baseTags = (img.tags || []).filter(tag => !tag.startsWith('site:'));
+            const nextTags = Array.from(new Set([
+                ...baseTags,
+                'birdseye',
+                `site:${siteId}`
+            ]));
+            const updated = await updateImageMetadata(img.fullPath, { tags: nextTags });
+            if (updated) {
+                setImages(prev => prev.map(i => i.fullPath === img.fullPath ? { ...i, tags: nextTags } : i));
+                setSelectedImage(prev => prev && prev.fullPath === img.fullPath ? { ...prev, tags: nextTags } : prev);
+            }
+
+            Swal.fire({
+                icon: 'success',
+                title: '적용 완료',
+                text: `${selectedSite?.name || '선택 현장'} 카드 이미지로 반영되었습니다.`,
+                timer: 1800,
+                showConfirmButton: false
+            });
+        } catch (error) {
+            console.error('[AiImageGallery] Failed to apply site image:', error);
+            Swal.fire('오류', '현장 이미지 적용 중 문제가 발생했습니다.', 'error');
+        } finally {
+            setApplyingSiteImage(false);
         }
     };
 
@@ -944,6 +1123,10 @@ export const AiImageGalleryPage = () => {
                         onUpdate={handleUpdate}
                         onApplyFavicon={handleApplyFavicon}
                         onApplyLogo={handleApplyLogo}
+                        onAssignLeader={handleAssignLeaderImage}
+                        assigningLeader={assigningLeaderImage}
+                        onApplySiteImage={handleApplySiteImage}
+                        applyingSiteImage={applyingSiteImage}
                     />
                 )}
             </AnimatePresence>

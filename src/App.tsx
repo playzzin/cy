@@ -109,6 +109,7 @@ import { MenuManagementPage } from './pages/admin/MenuManagementPage';
 import DataConsolePage from './pages/admin/DataConsolePage';
 import DataBackupPage from './pages/admin/DataBackupPage';
 import StatusGraphPage from './pages/jeonkuk/StatusGraphPage';
+import NationwidePartnersPage from './pages/jeonkuk/NationwidePartnersPage';
 import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
 import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
 import UserManagementPage from './pages/admin/UserManagementPage';
@@ -418,6 +419,7 @@ const App: React.FC = () => {
               <Route path="db-structure" element={<FirestoreStructureViewer />} />
               <Route path="db-design" element={<SchemaDesignViewer />} />
               <Route path="integrated-status" element={<WhiteboardStatusBoard />} />
+              <Route path="nationwide-partners" element={<NationwidePartnersPage />} />
               <Route path="status-graph" element={<StatusGraphPage />} />
               <Route path="integrated-support-status" element={<IntegratedSupportStatusBoard />} />
               <Route path="total-history" element={<TotalPersonnelHistoryPage />} />

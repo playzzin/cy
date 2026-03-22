@@ -101,6 +101,56 @@ a {
     padding: 0;
 }
 
+/* Cheongyeon Mode Main Content Dark Theme */
+.app.cheongyeon-mode {
+    background-color: #0f172a;
+    color: #e2e8f0;
+}
+.app.cheongyeon-mode #main-content {
+    background-color: #0f172a;
+    color: #e2e8f0;
+    min-height: calc(100vh - var(--header-height));
+}
+
+/* Override white backgrounds and borders in content area */
+.app.cheongyeon-mode #main-content .bg-white,
+.app.cheongyeon-mode #main-content [style*="background-color: white"],
+.app.cheongyeon-mode #main-content [style*="background: white"],
+.app.cheongyeon-mode #main-content [style*="background-color: #fff"],
+.app.cheongyeon-mode #main-content [style*="background-color: #ffffff"] {
+    background-color: #1e293b !important; /* Tailwind slate-800 */
+    color: #f8fafc !important; /* Tailwind slate-50 */
+    border-color: #334155 !important; /* Tailwind slate-700 */
+}
+
+/* Override light gray backgrounds (table headers, footers, slight off-white areas) */
+.app.cheongyeon-mode #main-content .bg-gray-50,
+.app.cheongyeon-mode #main-content .bg-gray-100 {
+    background-color: #334155 !important;
+    color: #f8fafc !important;
+    border-color: #475569 !important;
+}
+
+/* Force text colors in light theme components to be readable in dark mode */
+.app.cheongyeon-mode #main-content .text-gray-500,
+.app.cheongyeon-mode #main-content .text-gray-600,
+.app.cheongyeon-mode #main-content .text-gray-700,
+.app.cheongyeon-mode #main-content .text-gray-800,
+.app.cheongyeon-mode #main-content .text-gray-900,
+.app.cheongyeon-mode #main-content [style*="color: #333"],
+.app.cheongyeon-mode #main-content [style*="color: black"],
+.app.cheongyeon-mode #main-content [style*="color: rgb(51, 51, 51)"],
+.app.cheongyeon-mode #main-content [style*="color: rgb(0, 0, 0)"] {
+    color: #f8fafc !important;
+}
+
+/* Smooth out borders */
+.app.cheongyeon-mode #main-content .border-gray-100,
+.app.cheongyeon-mode #main-content .border-gray-200,
+.app.cheongyeon-mode #main-content .border-gray-300 {
+    border-color: #334155 !important;
+}
+
 /* =========================================
    3. Header
    ========================================= */
@@ -179,6 +229,24 @@ a {
 
 .mobile-logo-area i {
     color: var(--primary-color);
+}
+
+/* Cheongyeon Header Dark Theme */
+.cheongyeon-header .header-btn {
+    color: #cbd5e1; /* slate-300 */
+}
+
+.cheongyeon-header .header-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.cheongyeon-header .mobile-logo-area {
+    color: #f8fafc;
+}
+
+.cheongyeon-header .fallback-icon {
+    color: #cbd5e1;
 }
 
 /* =========================================

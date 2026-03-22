@@ -293,7 +293,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     // Cheongyeon Style Check
-    const isCheongyeon = currentSite === 'cheongyeon';
+    const isCheongyeon = currentSite === 'test';
     const sidebarStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {};
     const logoStyle = isCheongyeon ? { color: '#ffffff' } : {};
 

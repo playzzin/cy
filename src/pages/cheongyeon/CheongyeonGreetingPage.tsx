@@ -54,7 +54,7 @@ const CheongyeonGreetingPage: React.FC = () => {
             {/* Content */}
             <div className="relative z-10">
                 {/* Hero Section */}
-                <div className="min-h-screen flex items-center justify-center px-6 py-20">
+                <div className="flex items-center justify-center px-6 pt-20 pb-8 md:pb-10">
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -143,7 +143,7 @@ const CheongyeonGreetingPage: React.FC = () => {
                 </div>
 
                 {/* Bento Grid Section */}
-                <div className="px-6 py-16 bg-gradient-to-b from-transparent via-slate-950/50 to-slate-950">
+                <div className="px-6 pt-4 pb-16 bg-gradient-to-b from-transparent via-slate-950/50 to-slate-950">
                     <div className="max-w-6xl mx-auto">
                         <motion.div
                             variants={containerVariants}

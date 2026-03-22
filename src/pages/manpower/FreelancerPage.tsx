@@ -5,7 +5,7 @@ import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import Handsontable from 'handsontable';
 import { freelancerService } from '../../services/freelancerService';
-import { manpowerService, Worker } from '../../services/manpowerService';
+
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight, faSave } from '@fortawesome/free-solid-svg-icons';
@@ -36,8 +36,6 @@ const FreelancerPage: React.FC = () => {
     const allFreelancersRef = useRef<any[]>([]);
     const modifiedRowsRef = useRef<Set<number>>(new Set());
     const [modifiedRows, setModifiedRows] = useState<Set<number>>(new Set()); // UI 갱신용 (저장 활성화 등)
-    const reportSummaryRef = useRef<{ year: number; summary: any } | null>(null);
-
     const year = currentDate.getFullYear();
     const toFiniteAmount = useCallback((value: unknown): number => {
         if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -53,9 +51,7 @@ const FreelancerPage: React.FC = () => {
         }
         return 0;
     }, []);
-    const normalizeNameKey = useCallback((value: unknown) => String(value ?? '').trim().replace(/\s+/g, ''), []);
     const normalizeTeamNameKey = useCallback((value: unknown) => String(value ?? '').trim().replace(/\s+/g, ''), []);
-    const normalizeResidentNumber = useCallback((value: unknown) => String(value ?? '').replace(/[^0-9]/g, ''), []);
 
     // --- Renderers ---
 
@@ -152,67 +148,6 @@ const FreelancerPage: React.FC = () => {
         return cheongyeonTeamIdMap.get(raw) || raw;
     }, [cheongyeonTeamIdMap]);
 
-    const findDuplicateIndex = useCallback((list: any[], candidate: any) => {
-        return list.findIndex((item: any) => {
-            const candidateId = candidate?.id ? String(candidate.id) : '';
-            const itemId = item?.id ? String(item.id) : '';
-            if (candidateId && itemId && candidateId === itemId) return true;
-
-            const candidateName = normalizeNameKey(candidate?.name);
-            const itemName = normalizeNameKey(item?.name);
-            const candidateResident = normalizeResidentNumber(candidate?.residentNumber);
-            const itemResident = normalizeResidentNumber(item?.residentNumber);
-
-            if (candidateResident && itemResident && candidateName && candidateName === itemName && candidateResident === itemResident) {
-                return true;
-            }
-
-            const candidateTeamId = normalizeTeamId(candidate?.teamId);
-            const itemTeamId = normalizeTeamId(item?.teamId);
-            if (candidateName && itemName && candidateName === itemName && candidateTeamId && itemTeamId && candidateTeamId === itemTeamId) {
-                // 동일 이름/팀이라도 서로 다른 고유 ID가 있으면 다른 인원으로 본다.
-                if (candidateId && itemId && candidateId !== itemId) return false;
-                // 주민번호가 둘 다 있고 값이 다르면 다른 인원으로 본다.
-                if (candidateResident && itemResident && candidateResident !== itemResident) return false;
-                return true;
-            }
-            return false;
-        });
-    }, [normalizeNameKey, normalizeResidentNumber, normalizeTeamId]);
-
-    const mergeFreelancerRows = useCallback((base: any, incoming: any) => {
-        const merged = { ...base };
-        const monthlyKeys = ['m01', 'm02', 'm03', 'm04', 'm05', 'm06', 'm07', 'm08', 'm09', 'm10', 'm11', 'm12'];
-
-        const fillIfEmpty = (key: string) => {
-            if (
-                merged[key] === undefined ||
-                merged[key] === null ||
-                merged[key] === '' ||
-                merged[key] === 0
-            ) {
-                merged[key] = incoming[key];
-            }
-        };
-
-        ['id', 'name', 'residentNumber', 'phone', 'bankName', 'accountNumber', 'teamId', 'teamName', 'companyId', 'companyName', 'paymentMemo', 'depositDate']
-            .forEach(fillIfEmpty);
-
-        monthlyKeys.forEach((key) => {
-            const incomingValue = toFiniteAmount(incoming[key]);
-            const currentValue = toFiniteAmount(merged[key]);
-            merged[key] = incomingValue > currentValue ? incomingValue : currentValue;
-        });
-
-        ['performanceBonus', 'reportingBalance', 'reportableAmount', 'total'].forEach((key) => {
-            const incomingValue = toFiniteAmount(incoming[key]);
-            const currentValue = toFiniteAmount(merged[key]);
-            merged[key] = incomingValue > currentValue ? incomingValue : currentValue;
-        });
-
-        return merged;
-    }, [toFiniteAmount]);
-
     const visibleTeams = useMemo(() => {
         const shouldRestrictByCheongyeonTeam = cheongyeonTeamIdMap.size > 0;
 
@@ -250,371 +185,49 @@ const FreelancerPage: React.FC = () => {
     }, []);
 
     const fetchData = useCallback(async () => {
-        // 마스터 데이터 로딩 중이면 대기
         if (masterLoading) return;
-
         setLoading(true);
-        // 새로운 년도 데이터를 불러오기 전에 기존 데이터 비우기 (잔상 방지)
         setAllFreelancers([]);
 
         try {
-            // 1. 기존 프리랜서 지급 데이터 가져오기 (연간)
+            // 서비스에서 모든 소스(FreelancerPayment + 일보)를 병합한 결과를 가져옴
             const freelancerResult = await freelancerService.getFreelancerYearlyData(year);
 
             const cheongyeonTeamIds = cheongyeonTeams
                 .map(t => t.id)
                 .filter((id): id is string => !!id);
-            const cheongyeonTeamLegacyIds = cheongyeonTeams
-                .map(t => t.legacyId)
-                .filter((id): id is string => !!id);
-            const teamQueryIds = Array.from(new Set([...cheongyeonTeamIds, ...cheongyeonTeamLegacyIds]));
             const shouldRestrictByCheongyeonTeam = cheongyeonTeamIds.length > 0;
-            const monthlyKeys = ['m01', 'm02', 'm03', 'm04', 'm05', 'm06', 'm07', 'm08', 'm09', 'm10', 'm11', 'm12'] as const;
-            const createMonthlyMap = (amounts?: { [month: number]: number }) => ({
-                m01: toFiniteAmount(amounts?.[1]),
-                m02: toFiniteAmount(amounts?.[2]),
-                m03: toFiniteAmount(amounts?.[3]),
-                m04: toFiniteAmount(amounts?.[4]),
-                m05: toFiniteAmount(amounts?.[5]),
-                m06: toFiniteAmount(amounts?.[6]),
-                m07: toFiniteAmount(amounts?.[7]),
-                m08: toFiniteAmount(amounts?.[8]),
-                m09: toFiniteAmount(amounts?.[9]),
-                m10: toFiniteAmount(amounts?.[10]),
-                m11: toFiniteAmount(amounts?.[11]),
-                m12: toFiniteAmount(amounts?.[12])
-            });
 
-            let summary = reportSummaryRef.current?.year === year
-                ? reportSummaryRef.current.summary
-                : null;
-            if (!summary || reportSummaryRef.current?.year !== year) {
-                summary = await freelancerService.getTaxReportWorkSummaryByYear(year);
-                reportSummaryRef.current = { year, summary };
-            }
+            const teamsFound = new Map<string, string>();
 
-            const reportTeamsNormalized = summary.teams
-                .map((t: any) => ({
-                    id: normalizeTeamId(t.id),
-                    name: t.name || cheongyeonTeamNameMap.get(normalizeTeamId(t.id)) || t.name
-                }))
-                .filter((t: any) => t.id && (!shouldRestrictByCheongyeonTeam || cheongyeonTeamIdMap.has(t.id)));
+            const normalized = freelancerResult.freelancers
+                .map((f: any) => {
+                    const normalizedTeamId = normalizeTeamId(f.teamId)
+                        || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(f.teamName))
+                        || f.teamId || '';
+                    const teamName = cheongyeonTeamNameMap.get(normalizedTeamId) || f.teamName || '';
+                    if (normalizedTeamId) teamsFound.set(normalizedTeamId, teamName);
+                    return { ...f, teamId: normalizedTeamId || f.teamId, teamName };
+                })
+                .filter((f: any) => {
+                    if (!shouldRestrictByCheongyeonTeam) return true;
+                    return f.teamId && cheongyeonTeamIdMap.has(f.teamId);
+                });
+
+            // 실제 데이터에서 팀 목록 구성
+            const reportTeamsNormalized = Array.from(teamsFound.entries())
+                .filter(([id]) => !shouldRestrictByCheongyeonTeam || cheongyeonTeamIdMap.has(id))
+                .map(([id, name]) => ({ id, name: cheongyeonTeamNameMap.get(id) || name }));
             setReportTeams(reportTeamsNormalized);
 
-            const reportWorkerIds = Array.from(summary.workerMetaById.keys());
-            const summaryAmountsByNameTeam = new Map<string, { [month: number]: number }>();
-            const summaryAmountsByName = new Map<string, { [month: number]: number }>();
-            const summaryTeamKeysByName = new Map<string, Set<string>>();
-            const resolveCanonicalTeamKey = (teamId?: unknown, teamName?: unknown) => {
-                const normalizedTeamId = normalizeTeamId(teamId as string | null) || '';
-                const normalizedTeamName = normalizeTeamNameKey(teamName);
-                const mappedTeamIdByName = normalizedTeamName ? (cheongyeonTeamIdByNameMap.get(normalizedTeamName) || '') : '';
-                return normalizedTeamId || mappedTeamIdByName || normalizedTeamName || '';
-            };
-            const sumMonthlyAmounts = (base: { [month: number]: number }, incoming: { [month: number]: number }) => {
-                const merged: { [month: number]: number } = {};
-                for (let month = 1; month <= 12; month++) {
-                    merged[month] = Number(base[month] || 0) + Number(incoming[month] || 0);
-                }
-                return merged;
-            };
-            const hasRowBasedNameTeamMap =
-                summary.workerMonthlyAmountsByNameTeam instanceof Map &&
-                summary.workerMonthlyAmountsByNameTeam.size > 0;
-
-            if (hasRowBasedNameTeamMap) {
-                summary.workerMonthlyAmountsByNameTeam.forEach((amounts: { [month: number]: number }, rawKey: string) => {
-                    const key = String(rawKey ?? '');
-                    if (!key.includes('::')) return;
-                    const dividerIndex = key.indexOf('::');
-                    const nameKey = key.slice(0, dividerIndex);
-                    const rawTeamKey = key.slice(dividerIndex + 2);
-                    if (!nameKey || !rawTeamKey) return;
-
-                    const canonicalTeamKey = resolveCanonicalTeamKey(rawTeamKey, rawTeamKey);
-                    const teamKeys = [rawTeamKey, canonicalTeamKey].filter((value, index, arr) =>
-                        !!value && arr.indexOf(value) === index
-                    );
-
-                    teamKeys.forEach((teamKey) => {
-                        const matchKey = `${nameKey}::${teamKey}`;
-                        const current = summaryAmountsByNameTeam.get(matchKey);
-                        summaryAmountsByNameTeam.set(matchKey, current ? sumMonthlyAmounts(current, amounts) : { ...amounts });
-                    });
-
-                    const byNameCurrent = summaryAmountsByName.get(nameKey);
-                    summaryAmountsByName.set(nameKey, byNameCurrent ? sumMonthlyAmounts(byNameCurrent, amounts) : { ...amounts });
-                    const existingSet = summaryTeamKeysByName.get(nameKey) || new Set<string>();
-                    if (canonicalTeamKey || rawTeamKey) existingSet.add(canonicalTeamKey || rawTeamKey);
-                    summaryTeamKeysByName.set(nameKey, existingSet);
-                });
-            } else {
-                summary.workerMetaById.forEach((meta: any, workerKey: string) => {
-                    const amounts = summary.workerMonthlyAmounts.get(workerKey);
-                    if (!amounts) return;
-                    const nameKey = normalizeNameKey(meta?.name);
-                    if (!nameKey) return;
-                    const normalizedTeamId = normalizeTeamId(meta?.teamId);
-                    const normalizedTeamName = normalizeTeamNameKey(meta?.teamName);
-                    const canonicalTeamKey = resolveCanonicalTeamKey(meta?.teamId, meta?.teamName);
-                    const teamKeys = [normalizedTeamId, normalizedTeamName, canonicalTeamKey].filter((value, index, arr) =>
-                        !!value && arr.indexOf(value) === index
-                    );
-
-                    teamKeys.forEach((teamKey) => {
-                        const matchKey = `${nameKey}::${teamKey}`;
-                        const current = summaryAmountsByNameTeam.get(matchKey);
-                        summaryAmountsByNameTeam.set(matchKey, current ? sumMonthlyAmounts(current, amounts) : { ...amounts });
-                    });
-
-                    const byNameCurrent = summaryAmountsByName.get(nameKey);
-                    summaryAmountsByName.set(nameKey, byNameCurrent ? sumMonthlyAmounts(byNameCurrent, amounts) : { ...amounts });
-                    const existingSet = summaryTeamKeysByName.get(nameKey) || new Set<string>();
-                    if (canonicalTeamKey) existingSet.add(canonicalTeamKey);
-                    summaryTeamKeysByName.set(nameKey, existingSet);
-                });
-            }
-
-            const getAmountsFromSummary = (params: {
-                workerId?: unknown;
-                legacyId?: unknown;
-                name?: unknown;
-                teamId?: unknown;
-                teamName?: unknown;
-                allowMultiTeamNameFallback?: boolean;
-            }) => {
-                const workerIdKey = String(params.workerId ?? '').trim();
-                if (workerIdKey) {
-                    const byId = summary.workerMonthlyAmounts.get(workerIdKey);
-                    if (byId) return byId;
-                }
-
-                const legacyIdKey = String(params.legacyId ?? '').trim();
-                if (legacyIdKey) {
-                    const byLegacyId = summary.workerMonthlyAmounts.get(legacyIdKey);
-                    if (byLegacyId) return byLegacyId;
-                }
-
-                const nameKey = normalizeNameKey(params.name);
-                if (!nameKey) return undefined;
-
-                const teamIdKey = normalizeTeamId(params.teamId as string | null) || '';
-                const teamNameKey = normalizeTeamNameKey(params.teamName);
-                const canonicalTeamKey = resolveCanonicalTeamKey(params.teamId, params.teamName);
-                const mappedTeamIdByName = teamNameKey ? (cheongyeonTeamIdByNameMap.get(teamNameKey) || '') : '';
-                const teamCandidates = [teamIdKey, teamNameKey, mappedTeamIdByName, canonicalTeamKey]
-                    .filter((value, index, arr) => !!value && arr.indexOf(value) === index);
-
-                for (const teamKey of teamCandidates) {
-                    const byNameTeam = summaryAmountsByNameTeam.get(`${nameKey}::${teamKey}`);
-                    if (byNameTeam) return byNameTeam;
-                }
-
-                if (params.allowMultiTeamNameFallback) {
-                    return summaryAmountsByName.get(nameKey);
-                }
-
-                // 마지막 fallback: 팀 기준이 없을 때는 같은 이름 합산을 허용
-                if (teamCandidates.length === 0) {
-                    return summaryAmountsByName.get(nameKey);
-                }
-
-                // 같은 이름이 단일 팀에만 존재할 때만 허용 (팀 혼합 방지)
-                const teamsByName = summaryTeamKeysByName.get(nameKey);
-                if (!teamsByName || teamsByName.size <= 1) {
-                    return summaryAmountsByName.get(nameKey);
-                }
-                return undefined;
-            };
-
-            // 청연 팀 소속 인원만 필터링 (불필요한 타 컴퍼니 데이터 제거)
-            const currentFreelancers = shouldRestrictByCheongyeonTeam
-                ? freelancerResult.freelancers
-                    .filter((f: any) => {
-                        const normalizedTeamId = normalizeTeamId(f.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(f.teamName)) || '';
-                        return normalizedTeamId && cheongyeonTeamIdMap.has(normalizedTeamId);
-                    })
-                    .map((f: any) => {
-                        const normalizedTeamId = normalizeTeamId(f.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(f.teamName)) || '';
-                        return {
-                            ...f,
-                            teamId: normalizedTeamId || f.teamId,
-                            teamName: f.teamName || cheongyeonTeamNameMap.get(normalizedTeamId) || f.teamName
-                        };
-                    })
-                : freelancerResult.freelancers.map((f: any) => {
-                    const normalizedTeamId = normalizeTeamId(f.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(f.teamName)) || '';
-                    return {
-                        ...f,
-                        teamId: normalizedTeamId || f.teamId,
-                        teamName: f.teamName || cheongyeonTeamNameMap.get(normalizedTeamId) || f.teamName
-                    };
-                });
-
-            // 2. 마스터 작업자 데이터 가져오기 (출력일보 자동 매칭 보조용)
-            const taxReportWorkers = shouldRestrictByCheongyeonTeam
-                ? await manpowerService.getTaxReportWorkersByTeams(teamQueryIds)
-                : [];
-
-            // 3. 기본 목록 생성 및 기존 데이터 병합
-            const mergedList = [...currentFreelancers];
-
-            // 4. 출력일보 기반 작업자 메타 추가 병합
-            reportWorkerIds.forEach(workerId => {
-                const meta = summary.workerMetaById.get(workerId);
-                if (!meta) return;
-                const normalizedTeamId = normalizeTeamId(meta.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(meta?.teamName)) || '';
-                if (shouldRestrictByCheongyeonTeam && (!normalizedTeamId || !cheongyeonTeamIdMap.has(normalizedTeamId))) return;
-                const workAmounts = getAmountsFromSummary({
-                    workerId,
-                    name: meta?.name,
-                    teamId: normalizedTeamId,
-                    teamName: meta?.teamName
-                }) || {};
-                const monthlyFromSummary = createMonthlyMap(workAmounts);
-                const existingIdx = findDuplicateIndex(mergedList, { id: workerId, name: meta.name, teamId: normalizedTeamId || null });
-
-                if (existingIdx !== -1) {
-                    const existing = mergedList[existingIdx];
-                    mergedList[existingIdx] = {
-                        ...existing,
-                        teamId: normalizeTeamId(existing.teamId) || normalizedTeamId || existing.teamId,
-                        teamName: existing.teamName || meta.teamName || cheongyeonTeamNameMap.get(normalizedTeamId) || existing.teamName,
-                        ...monthlyKeys.reduce((acc, key) => {
-                            const summaryValue = Number(monthlyFromSummary[key] || 0);
-                            const currentValue = toFiniteAmount(existing[key]);
-                            acc[key] = summaryValue || currentValue || 0;
-                            return acc;
-                        }, {} as Record<typeof monthlyKeys[number], number>)
-                    };
-                    return;
-                }
-
-                mergedList.push({
-                    id: workerId,
-                    name: meta.name,
-                    teamId: normalizedTeamId || null,
-                    teamName: meta.teamName || cheongyeonTeamNameMap.get(normalizedTeamId) || meta.teamName,
-                    total: 0,
-                    ...monthlyFromSummary,
-                    performanceBonus: 0,
-                    reportingBalance: 0,
-                    reportableAmount: 0,
-                    depositDate: null,
-                    paymentMemo: '출력일보 자동로드'
-                });
-            });
-
-            // 5. 신고 대상 인원을 기반으로 기본 목록 생성 및 기존 데이터 병합 + 월별 금액 덮어쓰기
-            taxReportWorkers.forEach(worker => {
-                const normalizedWorkerTeamId = normalizeTeamId(worker.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(worker.teamName)) || '';
-                const existingIndex = findDuplicateIndex(mergedList, {
-                    id: worker.id,
-                    name: worker.name,
-                    residentNumber: worker.idNumber,
-                    teamId: normalizedWorkerTeamId || worker.teamId
-                });
-                const workAmounts = getAmountsFromSummary({
-                    workerId: worker.id,
-                    legacyId: worker.legacyId,
-                    name: worker.name,
-                    teamId: normalizedWorkerTeamId || worker.teamId,
-                    teamName: worker.teamName,
-                    allowMultiTeamNameFallback: true
-                });
-                const resolvedMonthlyMap = createMonthlyMap(workAmounts);
-
-                if (existingIndex !== -1) {
-                    const existing = mergedList[existingIndex];
-                    const normalizedExistingTeamId = normalizeTeamId(existing.teamId);
-                    const resolvedTeamId = normalizedExistingTeamId || normalizedWorkerTeamId || normalizeTeamId(worker.teamId) || existing.teamId || worker.teamId || '';
-                    mergedList[existingIndex] = {
-                        ...existing,
-                        residentNumber: existing.residentNumber || worker.idNumber,
-                        phone: existing.phone || worker.contact,
-                        bankName: existing.bankName || worker.bankName,
-                        accountNumber: existing.accountNumber || worker.accountNumber,
-                        teamId: resolvedTeamId,
-                        teamName: existing.teamName || worker.teamName || cheongyeonTeamNameMap.get(String(resolvedTeamId)) || existing.teamName,
-                        companyId: existing.companyId || worker.companyId,
-                        companyName: existing.companyName || worker.companyName,
-                        // 월별 작업 금액은 집계값 우선
-                        ...monthlyKeys.reduce((acc, key) => {
-                            const summaryValue = toFiniteAmount(resolvedMonthlyMap[key]);
-                            const existingValue = toFiniteAmount(existing[key]);
-                            acc[key] = summaryValue || existingValue || 0;
-                            return acc;
-                        }, {} as Record<typeof monthlyKeys[number], number>)
-                    };
-                } else {
-                    mergedList.push({
-                        id: worker.id,
-                        name: worker.name,
-                        residentNumber: worker.idNumber,
-                        phone: worker.contact,
-                        bankName: worker.bankName,
-                        accountNumber: worker.accountNumber,
-                        teamId: normalizedWorkerTeamId || worker.teamId,
-                        teamName: worker.teamName || cheongyeonTeamNameMap.get(normalizedWorkerTeamId) || worker.teamName,
-                        companyId: worker.companyId,
-                        companyName: worker.companyName,
-                        total: 0,
-                        ...resolvedMonthlyMap,
-                        performanceBonus: 0,
-                        reportingBalance: 0,
-                        reportableAmount: 0,
-                        depositDate: null,
-                        paymentMemo: `출력일보 자동로드 (${worker.teamName || '팀 없음'})`
-                    });
-                }
-            });
-
-            const deduped: any[] = [];
-            mergedList.forEach((row: any) => {
-                const idx = findDuplicateIndex(deduped, row);
-                if (idx === -1) {
-                    deduped.push(row);
-                } else {
-                    deduped[idx] = mergeFreelancerRows(deduped[idx], row);
-                }
-            });
-
-            // 최종 단계: 연도 기준 월별 급여를 일보 집계값으로 전체 동기화
-            // (개별 수동 보정 없이 해당 연도 1~12월을 일괄 반영)
-            const syncedRows = deduped.map((row: any) => {
-                const rowTeamId = normalizeTeamId(row?.teamId) || cheongyeonTeamIdByNameMap.get(normalizeTeamNameKey(row?.teamName)) || '';
-                const workAmounts = getAmountsFromSummary({
-                    workerId: row?.id,
-                    legacyId: row?.legacyId,
-                    name: row?.name,
-                    teamId: rowTeamId,
-                    teamName: row?.teamName,
-                    allowMultiTeamNameFallback: String(row?.paymentMemo ?? '').includes('출력일보 자동로드') || !rowTeamId
-                });
-                if (!workAmounts) return row;
-                // [Bug Fix] 일보 집계값이 0보다 큰 달만 덮어쓰기.
-                // 0일 때 무조건 덮어쓰면 FreelancerPayment에 직접 입력한 급여가 사라짐.
-                const monthlyFromSummary = createMonthlyMap(workAmounts);
-                const result = { ...row };
-                monthlyKeys.forEach((key) => {
-                    const summaryValue = toFiniteAmount(monthlyFromSummary[key]);
-                    if (summaryValue > 0) {
-                        result[key] = summaryValue;
-                    }
-                });
-                return result;
-            });
-
-            setAllFreelancers(syncedRows);
-            allFreelancersRef.current = syncedRows;
+            setAllFreelancers(normalized);
+            allFreelancersRef.current = normalized;
         } catch (error) {
-            // 사용자 요청: 데이터를 못 불러오더라도 에러 팝업을 띄우지 않음 (직접력 모드 원활화)
             console.error('Failed to fetch yearly data (suppressed alert):', error);
-            // Swal.fire('Error', '연간 데이터를 불러오는데 실패했습니다.', 'error');
         } finally {
             setLoading(false);
         }
-    }, [year, cheongyeonTeams, masterLoading, cheongyeonTeamIdMap, cheongyeonTeamNameMap, cheongyeonTeamIdByNameMap, normalizeTeamId, normalizeNameKey, normalizeTeamNameKey, findDuplicateIndex, mergeFreelancerRows, toFiniteAmount]);
+    }, [year, cheongyeonTeams, masterLoading, cheongyeonTeamIdMap, cheongyeonTeamNameMap, cheongyeonTeamIdByNameMap, normalizeTeamId, normalizeTeamNameKey]);
 
     useEffect(() => {
         fetchData();
@@ -1045,10 +658,7 @@ const FreelancerPage: React.FC = () => {
                         key={team.id}
                         onClick={() => handleTeamChange(team.id)}
                         className={`team-tab-btn ${selectedTeamId === team.id ? 'active' : ''}`}
-                        style={{
-                            background: team.color || colors[idx % 10], // 팀 색상을 최우선으로 적용
-                            color: '#fff'
-                        }}
+                        style={{ ['--tab-color' as any]: team.color || colors[idx % 10] }}
                     >
                         {team.name}
                     </button>

@@ -194,6 +194,31 @@ const pruneLargeConfig = (config: SiteDataType): SiteDataType => {
     }
 };
 
+const ensureMenuChild = (config: SiteDataType, parentText: string, childText: string): boolean => {
+    let changed = false;
+
+    Object.values(config).forEach((site) => {
+        if (!site || !Array.isArray(site.menu)) return;
+
+        site.menu.forEach((item) => {
+            if (typeof item === 'string' || item.text !== parentText) return;
+
+            const subItems = Array.isArray(item.sub) ? item.sub : [];
+            const hasChild = subItems.some((subItem) => {
+                if (typeof subItem === 'string') return subItem === childText;
+                return subItem?.text === childText;
+            });
+
+            if (!hasChild) {
+                item.sub = [...subItems, childText];
+                changed = true;
+            }
+        });
+    });
+
+    return changed;
+};
+
 // Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
 
 // This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
@@ -618,5 +643,17 @@ export const menuServiceV11 = {
         try { return JSON.parse(raw); } catch { return null; }
     },
     getMenuConfigRaw: async (): Promise<any> => menuServiceV11.getMenuConfig(),
-    runOneTimeMigrations: async (): Promise<void> => { /* no-op shim */ },
+    runOneTimeMigrations: async (): Promise<void> => {
+        try {
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return;
+
+            const changed = ensureMenuChild(config, '현황관리', '전국페이지');
+            if (changed) {
+                await menuServiceV11.saveMenuConfig(config);
+            }
+        } catch (error: any) {
+            console.error('[MenuService] runOneTimeMigrations failed:', error);
+        }
+    },
 };

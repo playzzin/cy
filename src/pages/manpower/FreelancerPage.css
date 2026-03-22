@@ -1,1 +1,86 @@
-/* Recovered build snapshot did not include this stylesheet source. */
+.freelancer-page-container {
+	--bookmark-shadow: 0 6px 14px rgba(15, 23, 42, 0.14);
+	overflow-x: hidden;
+}
+
+.team-tab-navigation {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 10px;
+	padding: 12px 16px 6px;
+	border-bottom: 2px solid #dbe4f0;
+	overflow: hidden;
+	background: linear-gradient(180deg, #f9fbff 0%, #f2f6fb 100%);
+}
+
+.team-tab-navigation .year-picker-container {
+	flex: 0 0 auto;
+}
+
+.team-tab-btn {
+	--tab-color: #3b82f6;
+	position: relative;
+	flex: 0 1 auto;
+	border: 0;
+	color: #ffffff;
+	font-weight: 800;
+	font-size: 13px;
+	line-height: 1;
+	padding: 11px 16px 18px;
+	border-radius: 12px 12px 0 0;
+	background: var(--tab-color);
+	box-shadow: var(--bookmark-shadow);
+	transform: translateY(0);
+	transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+	max-width: min(180px, 42vw);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.team-tab-btn::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	bottom: 6px;
+	width: 12px;
+	height: 8px;
+	background: #f9fbff;
+	clip-path: polygon(0 0, 100% 0, 50% 100%);
+	opacity: 0.95;
+}
+
+.team-tab-btn:hover {
+	transform: translateY(-1px);
+	filter: saturate(1.08);
+}
+
+.team-tab-btn.active {
+	transform: translateY(0);
+	box-shadow: 0 10px 18px rgba(15, 23, 42, 0.2);
+}
+
+.team-tab-btn.active::before {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: -2px;
+	height: 3px;
+	background: var(--tab-color);
+}
+
+@media (max-width: 768px) {
+	.team-tab-navigation {
+		padding: 10px 10px 4px;
+		gap: 8px;
+	}
+
+	.team-tab-btn {
+		font-size: 12px;
+		padding: 10px 12px 16px;
+		max-width: min(140px, 44vw);
+	}
+}
