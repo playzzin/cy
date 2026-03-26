@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
+import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 import Swal from 'sweetalert2';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+    faCopy,
     faDownload,
     faDatabase,
     faMagnifyingGlass,
@@ -68,6 +70,7 @@ interface SummaryFilter {
     teamName: string;
     mode: SummaryMode;
     partnerName: string;
+    siteName: string;
 }
 
 interface LedgerRow {
@@ -106,6 +109,21 @@ interface ReceiptEditDraft {
     note: string;
 }
 
+interface DbEditDraft {
+    id: string;
+    transactionType: WorkbookTransactionType;
+    date: string;
+    partnerName: string;
+    siteName: string;
+    description: string;
+    supplyAmount: string;
+    paymentAmount: string;
+    appliedYear: string;
+    appliedMonth: string;
+    note: string;
+    teamName: string;
+}
+
 const INPUT_ROW_COUNT = 80;
 const DEFAULT_LEDGER_START = '2019-01-01';
 const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
@@ -121,7 +139,6 @@ const DB_HEADERS = [
     '거래처명',
     '현장명',
     '내용',
-    '공수',
     '공급가액',
     '부가세',
     '합계',
@@ -202,6 +219,12 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const escapeHtml = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
     const text = normalizeText(value);
@@ -274,7 +297,6 @@ const toDbRow = (entry: WorkbookLedgerEntry) => ([
     entry.partnerName || '',
     entry.siteName || '',
     entry.description || '',
-    entry.manDays ?? '',
     entry.supplyAmount || '',
     entry.taxAmount || '',
     entry.totalAmount || '',
@@ -285,6 +307,21 @@ const toDbRow = (entry: WorkbookLedgerEntry) => ([
     entry.note || '',
     entry.teamName || ''
 ]);
+
+const createDbEditDraft = (entry: WorkbookLedgerEntry): DbEditDraft => ({
+    id: entry.id ?? '',
+    transactionType: entry.transactionType,
+    date: entry.date || '',
+    partnerName: entry.partnerName || '',
+    siteName: entry.siteName || '',
+    description: entry.description || '',
+    supplyAmount: String(entry.supplyAmount ?? 0),
+    paymentAmount: String(entry.paymentAmount ?? 0),
+    appliedYear: entry.appliedYear ? String(entry.appliedYear) : '',
+    appliedMonth: entry.appliedMonth ? String(entry.appliedMonth) : '',
+    note: entry.note || '',
+    teamName: entry.teamName || ''
+});
 
 const hasInputContent = (row: InputRow) => {
     return Boolean(
@@ -348,7 +385,7 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
         const partnerName = normalizeText(readCell(row, '거래처명'));
         const siteName = normalizeText(readCell(row, '현장명'));
         const description = normalizeText(readCell(row, '내용'));
-        const manDays = toNumberOrNull(readCell(row, '공수'));
+        const manDays = headerIndex.has('공수') ? toNumberOrNull(readCell(row, '공수')) : null;
         const supplyAmount = toNumberOrNull(readCell(row, '공급가액')) ?? 0;
         const taxAmount = toNumberOrNull(readCell(row, '부가세')) ?? 0;
         const totalAmount = toNumberOrNull(readCell(row, '합계')) ?? 0;
@@ -491,6 +528,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         })
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
+        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
         .filter((entry) => !asOfDate || entry.date <= asOfDate)
         .sort(sortWorkbookEntries);
 
@@ -579,6 +617,8 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
 const WorkbookLedgerPage: React.FC = () => {
     const hotRef = useRef<any>(null);
     const dbUploadInputRef = useRef<HTMLInputElement | null>(null);
+    const ledgerCaptureRef = useRef<HTMLDivElement | null>(null);
+    const summaryCaptureRef = useRef<HTMLDivElement | null>(null);
     const { currentUser } = useAuth();
 
     const today = useMemo(() => new Date(), []);
@@ -590,6 +630,8 @@ const WorkbookLedgerPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
+    const [dbActionLoading, setDbActionLoading] = useState(false);
+    const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
     const [partnerNames, setPartnerNames] = useState<string[]>([]);
@@ -623,7 +665,8 @@ const WorkbookLedgerPage: React.FC = () => {
         endMonth: 12,
         teamName: '',
         mode: '미수금',
-        partnerName: ''
+        partnerName: '',
+        siteName: ''
     });
     const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>({
         startYear: currentYear,
@@ -632,8 +675,10 @@ const WorkbookLedgerPage: React.FC = () => {
         endMonth: 12,
         teamName: '',
         mode: '미수금',
-        partnerName: ''
+        partnerName: '',
+        siteName: ''
     });
+    const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
     const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
     const [editingReceiptDraft, setEditingReceiptDraft] = useState<ReceiptEditDraft | null>(null);
 
@@ -746,7 +791,7 @@ const WorkbookLedgerPage: React.FC = () => {
             const paymentAmount = row.paymentAmount ?? 0;
             const appliedMonth = row.appliedMonth ?? getMonthFromDate(row.date);
 
-            if (totalAmount <= 0 && paymentAmount <= 0) {
+            if (totalAmount === 0 && paymentAmount <= 0) {
                 validationErrors.push(`${excelRowNumber}행: 합계 또는 입금금액 중 하나는 입력되어야 합니다.`);
                 return;
             }
@@ -769,7 +814,7 @@ const WorkbookLedgerPage: React.FC = () => {
                 ...basePayload,
                 description:
                     row.description ||
-                    (totalAmount > 0
+                    (totalAmount !== 0
                         ? (row.transactionType === '매출' ? '매출' : '매입')
                         : (row.transactionType === '매출' ? '입금' : '지급')),
                 supplyAmount,
@@ -899,6 +944,417 @@ const WorkbookLedgerPage: React.FC = () => {
             setDownloadingDb(false);
         }
     }, [entries]);
+
+    const handleCopyCapture = useCallback(async (
+        target: 'ledger' | 'summary',
+        element: HTMLDivElement | null,
+        label: string
+    ) => {
+        if (!element) {
+            Swal.fire('안내', `${label} 화면을 찾지 못했습니다.`, 'info');
+            return;
+        }
+
+        setCapturingView(target);
+        try {
+            const captureWidth = Math.max(element.scrollWidth, element.clientWidth);
+            const captureHeight = Math.max(element.scrollHeight, element.clientHeight);
+            const canvas = await (html2canvas as any)(element, {
+                scale: 2,
+                backgroundColor: '#ffffff',
+                logging: false,
+                useCORS: true,
+                width: captureWidth,
+                height: captureHeight,
+                windowWidth: captureWidth,
+                windowHeight: captureHeight,
+                ignoreElements: (node: Element) => (node as HTMLElement).dataset?.html2canvasIgnore === 'true'
+            });
+
+            const blob = await new Promise<Blob | null>((resolve) => {
+                canvas.toBlob((nextBlob: Blob | null) => resolve(nextBlob), 'image/png');
+            });
+
+            if (!blob) {
+                Swal.fire('오류', `${label} 화면 이미지 생성에 실패했습니다.`, 'error');
+                return;
+            }
+
+            const ClipboardItemCtor = (window as typeof window & {
+                ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
+            }).ClipboardItem;
+            const clipboard = navigator.clipboard as Clipboard & {
+                write?: (data: ClipboardItem[]) => Promise<void>;
+            };
+
+            if (!ClipboardItemCtor || !clipboard.write) {
+                Swal.fire('안내', '이 브라우저는 이미지 클립보드 복사를 지원하지 않습니다.', 'info');
+                return;
+            }
+
+            await clipboard.write([
+                new ClipboardItemCtor({
+                    'image/png': blob
+                })
+            ]);
+
+            Swal.fire('복사 완료', `${label} 화면이 클립보드에 복사되었습니다.`, 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', `${label} 화면 복사에 실패했습니다.`, 'error');
+        } finally {
+            setCapturingView((current) => (current === target ? null : current));
+        }
+    }, []);
+
+    const handleEditDbEntry = useCallback(async (entry: WorkbookLedgerEntry) => {
+        if (!entry.id) return;
+
+        const linkedPayments = entries.filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.id);
+        const linkedPaymentTotal = linkedPayments.reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
+
+        const result = await Swal.fire({
+            title: 'DB 행 수정',
+            width: 760,
+            html: `
+                <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;text-align:left;">
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">구분</span>
+                        <select id="db-type" class="swal2-input" style="margin:0;width:100%;">
+                            <option value="매출" ${entry.transactionType === '매출' ? 'selected' : ''}>매출</option>
+                            <option value="매입" ${entry.transactionType === '매입' ? 'selected' : ''}>매입</option>
+                        </select>
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">날짜</span>
+                        <input id="db-date" type="date" value="${escapeHtml(entry.date || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">거래처명</span>
+                        <input id="db-partner" type="text" value="${escapeHtml(entry.partnerName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">현장명</span>
+                        <input id="db-site" type="text" value="${escapeHtml(entry.siteName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;grid-column:1 / -1;">
+                        <span style="font-size:13px;font-weight:700;">내용</span>
+                        <input id="db-description" type="text" value="${escapeHtml(entry.description || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">공급가액</span>
+                        <input id="db-supply" type="number" value="${entry.supplyAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">입금금액</span>
+                        <input id="db-payment" type="number" min="0" value="${entry.paymentAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">적용연도</span>
+                        <input id="db-year" type="number" min="2000" max="2100" value="${entry.appliedYear ?? getYearFromDate(entry.date) ?? baseYear}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">적용월</span>
+                        <input id="db-month" type="number" min="1" max="12" value="${entry.appliedMonth ?? getMonthFromDate(entry.date) ?? 1}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;grid-column:1 / -1;">
+                        <span style="font-size:13px;font-weight:700;">비고</span>
+                        <input id="db-note" type="text" value="${escapeHtml(entry.note || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;grid-column:1 / -1;">
+                        <span style="font-size:13px;font-weight:700;">팀명</span>
+                        <input id="db-team" type="text" value="${escapeHtml(entry.teamName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    ${entry.matchedEntryId ? `
+                        <label style="display:grid;gap:6px;grid-column:1 / -1;">
+                            <span style="font-size:13px;font-weight:700;">매칭매출ID</span>
+                            <input type="text" value="${escapeHtml(entry.matchedEntryId)}" class="swal2-input" style="margin:0;width:100%;background:#f8fafc;" readonly />
+                        </label>
+                    ` : ''}
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '저장',
+            cancelButtonText: '취소',
+            focusConfirm: false,
+            preConfirm: () => {
+                const transactionType = ((document.getElementById('db-type') as HTMLSelectElement | null)?.value ?? '') as WorkbookTransactionType;
+                const date = normalizeDate((document.getElementById('db-date') as HTMLInputElement | null)?.value ?? '');
+                const partnerName = normalizeText((document.getElementById('db-partner') as HTMLInputElement | null)?.value ?? '');
+                const siteName = normalizeText((document.getElementById('db-site') as HTMLInputElement | null)?.value ?? '');
+                const description = normalizeText((document.getElementById('db-description') as HTMLInputElement | null)?.value ?? '');
+                const supplyAmount = toNumberOrNull((document.getElementById('db-supply') as HTMLInputElement | null)?.value ?? '0') ?? 0;
+                const paymentAmount = toNumberOrNull((document.getElementById('db-payment') as HTMLInputElement | null)?.value ?? '0') ?? 0;
+                const appliedYear = toNumberOrNull((document.getElementById('db-year') as HTMLInputElement | null)?.value ?? '') ?? getYearFromDate(date) ?? baseYear;
+                const appliedMonth = toNumberOrNull((document.getElementById('db-month') as HTMLInputElement | null)?.value ?? '') ?? getMonthFromDate(date);
+                const note = normalizeText((document.getElementById('db-note') as HTMLInputElement | null)?.value ?? '');
+                const teamName = normalizeText((document.getElementById('db-team') as HTMLInputElement | null)?.value ?? '');
+                const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
+                const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
+
+                if (transactionType !== '매출' && transactionType !== '매입') {
+                    Swal.showValidationMessage('구분을 선택해 주세요.');
+                    return null;
+                }
+
+                if (!date) {
+                    Swal.showValidationMessage('날짜를 입력해 주세요.');
+                    return null;
+                }
+
+                if (!partnerName) {
+                    Swal.showValidationMessage('거래처명을 입력해 주세요.');
+                    return null;
+                }
+
+                if (totalAmount === 0 && paymentAmount <= 0) {
+                    Swal.showValidationMessage('공급가액 또는 입금금액 중 하나는 입력해 주세요.');
+                    return null;
+                }
+
+                if (paymentAmount < 0) {
+                    Swal.showValidationMessage('입금금액은 0 이상이어야 합니다.');
+                    return null;
+                }
+
+                if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
+                    Swal.showValidationMessage('연결된 입금내역이 있는 매출/매입 행은 구분을 변경할 수 없습니다.');
+                    return null;
+                }
+
+                if (linkedPayments.length > 0 && totalAmount <= 0) {
+                    Swal.showValidationMessage('연결된 입금내역이 있는 행은 합계를 0으로 만들 수 없습니다.');
+                    return null;
+                }
+
+                if (totalAmount > 0) {
+                    const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
+                    if (totalAmount < minimumInvoiceAmount) {
+                        Swal.showValidationMessage(`합계는 연결된 입금 ${formatNumber(minimumInvoiceAmount)}원 이상이어야 합니다.`);
+                        return null;
+                    }
+                }
+
+                if (paymentAmount > 0 && entry.matchedEntryId) {
+                    const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
+                    if (matchedInvoice) {
+                        if (transactionType !== matchedInvoice.transactionType) {
+                            Swal.showValidationMessage('입금 행의 구분은 연결된 원본 행과 같아야 합니다.');
+                            return null;
+                        }
+
+                        const siblingPayments = entries
+                            .filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.matchedEntryId && item.id !== entry.id)
+                            .reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
+                        const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
+
+                        if (paymentAmount > maxPaymentAmount) {
+                            Swal.showValidationMessage(`입금금액은 연결 매출의 잔액 ${formatNumber(maxPaymentAmount)}원을 넘을 수 없습니다.`);
+                            return null;
+                        }
+                    }
+                }
+
+                return {
+                    transactionType,
+                    date,
+                    partnerName,
+                    siteName,
+                    description,
+                    supplyAmount,
+                    taxAmount,
+                    totalAmount,
+                    paymentAmount,
+                    appliedYear,
+                    appliedMonth,
+                    note,
+                    teamName
+                };
+            }
+        });
+
+        if (!result.isConfirmed || !result.value) return;
+
+        setDbActionLoading(true);
+        try {
+            await workbookLedgerService.updateEntry(entry.id, {
+                ...result.value,
+                updatedBy: currentUser?.uid ?? ''
+            });
+            await refreshPageData();
+            Swal.fire('수정 완료', 'DB 행을 수정했습니다.', 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', 'DB 행 수정에 실패했습니다.', 'error');
+        } finally {
+            setDbActionLoading(false);
+        }
+    }, [baseYear, currentUser?.uid, entries, refreshPageData]);
+
+    const handleStartEditDbEntry = useCallback((entry: WorkbookLedgerEntry) => {
+        if (!entry.id) return;
+        setEditingDbDraft(createDbEditDraft(entry));
+    }, []);
+
+    const handleChangeEditingDbDraft = useCallback((field: keyof DbEditDraft, value: string) => {
+        setEditingDbDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
+    }, []);
+
+    const handleCancelEditDbEntry = useCallback(() => {
+        setEditingDbDraft(null);
+    }, []);
+
+    const handleSaveDbEntry = useCallback(async () => {
+        if (!editingDbDraft?.id) return;
+
+        const entry = entries.find((item) => item.id === editingDbDraft.id);
+        if (!entry?.id) {
+            Swal.fire('안내', '수정할 DB 행을 다시 불러와 주세요.', 'info');
+            return;
+        }
+
+        const linkedPayments = entries.filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.id);
+        const linkedPaymentTotal = linkedPayments.reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
+        const transactionType = editingDbDraft.transactionType;
+        const date = normalizeDate(editingDbDraft.date);
+        const partnerName = normalizeText(editingDbDraft.partnerName);
+        const siteName = normalizeText(editingDbDraft.siteName);
+        const description = normalizeText(editingDbDraft.description);
+        const supplyAmount = toNumberOrNull(editingDbDraft.supplyAmount) ?? 0;
+        const paymentAmount = toNumberOrNull(editingDbDraft.paymentAmount) ?? 0;
+        const appliedYear = toNumberOrNull(editingDbDraft.appliedYear) ?? getYearFromDate(date) ?? baseYear;
+        const appliedMonth = toNumberOrNull(editingDbDraft.appliedMonth) ?? getMonthFromDate(date);
+        const note = normalizeText(editingDbDraft.note);
+        const teamName = normalizeText(editingDbDraft.teamName);
+        const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
+        const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
+
+        if (transactionType !== '매출' && transactionType !== '매입') {
+            Swal.fire('입력 확인', '구분을 선택해 주세요.', 'warning');
+            return;
+        }
+
+        if (!date) {
+            Swal.fire('입력 확인', '날짜를 입력해 주세요.', 'warning');
+            return;
+        }
+
+        if (!partnerName) {
+            Swal.fire('입력 확인', '거래처명을 입력해 주세요.', 'warning');
+            return;
+        }
+
+        if (totalAmount === 0 && paymentAmount <= 0) {
+            Swal.fire('입력 확인', '공급가액 또는 입금금액 중 하나를 입력해 주세요.', 'warning');
+            return;
+        }
+
+        if (paymentAmount < 0) {
+            Swal.fire('입력 확인', '입금금액은 0 이상이어야 합니다.', 'warning');
+            return;
+        }
+
+        if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
+            Swal.fire('입력 확인', '연결된 입금내역이 있는 매출/매입 행은 구분을 변경할 수 없습니다.', 'warning');
+            return;
+        }
+
+        if (linkedPayments.length > 0 && totalAmount <= 0) {
+            Swal.fire('입력 확인', '연결된 입금내역이 있는 행은 합계를 0 이하로 변경할 수 없습니다.', 'warning');
+            return;
+        }
+
+        if (totalAmount > 0) {
+            const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
+            if (totalAmount < minimumInvoiceAmount) {
+                Swal.fire('입력 확인', `합계는 연결된 입금 ${formatNumber(minimumInvoiceAmount)}원 이상이어야 합니다.`, 'warning');
+                return;
+            }
+        }
+
+        if (paymentAmount > 0 && entry.matchedEntryId) {
+            const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
+            if (matchedInvoice) {
+                if (transactionType !== matchedInvoice.transactionType) {
+                    Swal.fire('입력 확인', '입금 행의 구분은 연결된 원본 행과 같아야 합니다.', 'warning');
+                    return;
+                }
+
+                const siblingPayments = entries
+                    .filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.matchedEntryId && item.id !== entry.id)
+                    .reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
+                const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
+
+                if (paymentAmount > maxPaymentAmount) {
+                    Swal.fire('입력 확인', `입금금액은 연결 매출의 잔액 ${formatNumber(maxPaymentAmount)}원을 넘을 수 없습니다.`, 'warning');
+                    return;
+                }
+            }
+        }
+
+        setDbActionLoading(true);
+        try {
+            await workbookLedgerService.updateEntry(entry.id, {
+                transactionType,
+                date,
+                partnerName,
+                siteName,
+                description,
+                supplyAmount,
+                taxAmount,
+                totalAmount,
+                paymentAmount,
+                appliedYear,
+                appliedMonth,
+                note,
+                teamName,
+                updatedBy: currentUser?.uid ?? ''
+            });
+            await refreshPageData();
+            setEditingDbDraft(null);
+            Swal.fire('수정 완료', 'DB 행을 수정했습니다.', 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', 'DB 행 수정에 실패했습니다.', 'error');
+        } finally {
+            setDbActionLoading(false);
+        }
+    }, [baseYear, currentUser?.uid, editingDbDraft, entries, refreshPageData]);
+
+    const handleDeleteDbEntry = useCallback(async (entry: WorkbookLedgerEntry) => {
+        if (!entry.id) return;
+
+        const linkedPayments = entries.filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.id);
+
+        if (isInvoiceEntry(entry) && linkedPayments.length > 0) {
+            Swal.fire('삭제 불가', '이 행에 연결된 입금내역이 있습니다. 입금내역을 먼저 삭제해 주세요.', 'warning');
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: 'DB 행 삭제',
+            text: `${entry.date} / ${entry.partnerName} 행을 삭제하시겠습니까?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '삭제',
+            cancelButtonText: '취소'
+        });
+
+        if (!result.isConfirmed) return;
+
+        setDbActionLoading(true);
+        try {
+            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+            await refreshPageData();
+            setEditingDbDraft((prev) => (prev?.id === entry.id ? null : prev));
+            Swal.fire('삭제 완료', 'DB 행을 삭제했습니다.', 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', 'DB 행 삭제에 실패했습니다.', 'error');
+        } finally {
+            setDbActionLoading(false);
+        }
+    }, [currentUser?.uid, entries, refreshPageData]);
 
     const handleRegisterReceipt = useCallback(async (row: SummaryRow) => {
         const result = await Swal.fire({
@@ -1387,7 +1843,6 @@ const WorkbookLedgerPage: React.FC = () => {
                             <th>거래처명</th>
                             <th>현장명</th>
                             <th>내용</th>
-                            <th>공수</th>
                             <th>공급가액</th>
                             <th>부가세</th>
                             <th>합계</th>
@@ -1396,6 +1851,7 @@ const WorkbookLedgerPage: React.FC = () => {
                             <th>적용월</th>
                             <th>비고</th>
                             <th>팀명</th>
+                            <th>처리</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1404,25 +1860,209 @@ const WorkbookLedgerPage: React.FC = () => {
                                 <td colSpan={15} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
                             </tr>
                         )}
-                        {entries.map((entry, index) => (
-                            <tr key={entry.id ?? `${entry.date}-${entry.partnerName}-${index}`}>
-                                <td>{index + 1}</td>
-                                <td>{entry.transactionType}</td>
-                                <td>{entry.date || '-'}</td>
-                                <td>{entry.partnerName || '-'}</td>
-                                <td>{entry.siteName || '-'}</td>
-                                <td>{entry.description || '-'}</td>
-                                <td className="align-right">{entry.manDays !== null && entry.manDays !== undefined ? entry.manDays : '-'}</td>
-                                <td className="align-right">{entry.supplyAmount > 0 ? formatNumber(entry.supplyAmount) : '-'}</td>
-                                <td className="align-right">{entry.taxAmount > 0 ? formatNumber(entry.taxAmount) : '-'}</td>
-                                <td className="align-right">{entry.totalAmount > 0 ? formatNumber(entry.totalAmount) : '-'}</td>
-                                <td className="align-right">{entry.paymentAmount > 0 ? formatNumber(entry.paymentAmount) : '-'}</td>
-                                <td className="align-right">{entry.appliedYear ?? '-'}</td>
-                                <td className="align-right">{entry.appliedMonth ?? '-'}</td>
-                                <td>{entry.note || '-'}</td>
-                                <td>{entry.teamName || '-'}</td>
-                            </tr>
-                        ))}
+                        {entries.map((entry, index) => {
+                            const isEditing = editingDbDraft?.id === entry.id;
+                            const dbDraft = isEditing ? editingDbDraft : null;
+                            const editSupplyAmount = isEditing ? (toNumberOrNull(editingDbDraft?.supplyAmount) ?? 0) : 0;
+                            const editTaxAmount = editSupplyAmount !== 0 ? Math.round(editSupplyAmount * 0.1) : 0;
+                            const editTotalAmount = editSupplyAmount !== 0 ? editSupplyAmount + editTaxAmount : 0;
+
+                            return (
+                                <tr
+                                    key={entry.id ?? `${entry.date}-${entry.partnerName}-${index}`}
+                                    className={isEditing ? 'workbook-inline-edit-row' : undefined}
+                                >
+                                    <td>{index + 1}</td>
+                                    <td>
+                                        {isEditing ? (
+                                            <select
+                                                className="workbook-inline-cell-select"
+                                                value={dbDraft?.transactionType ?? '매출'}
+                                                onChange={(event) => handleChangeEditingDbDraft('transactionType', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            >
+                                                <option value="매출">매출</option>
+                                                <option value="매입">매입</option>
+                                            </select>
+                                        ) : entry.transactionType}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                type="date"
+                                                value={dbDraft?.date ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('date', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.date || '-')}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                list="workbook-partner-options"
+                                                type="text"
+                                                value={dbDraft?.partnerName ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('partnerName', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.partnerName || '-')}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                list="workbook-site-options"
+                                                type="text"
+                                                value={dbDraft?.siteName ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('siteName', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.siteName || '-')}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                type="text"
+                                                value={dbDraft?.description ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('description', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.description || '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input workbook-inline-cell-number"
+                                                type="number"
+                                                value={dbDraft?.supplyAmount ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('supplyAmount', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.supplyAmount !== 0 ? formatNumber(entry.supplyAmount) : '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <span className="workbook-inline-cell-value">{formatNumber(editTaxAmount)}</span>
+                                        ) : (entry.taxAmount !== 0 ? formatNumber(entry.taxAmount) : '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <span className="workbook-inline-cell-value">{formatNumber(editTotalAmount)}</span>
+                                        ) : (entry.totalAmount !== 0 ? formatNumber(entry.totalAmount) : '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input workbook-inline-cell-number"
+                                                type="number"
+                                                min={0}
+                                                value={dbDraft?.paymentAmount ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('paymentAmount', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.paymentAmount !== 0 ? formatNumber(entry.paymentAmount) : '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input workbook-inline-cell-number"
+                                                type="number"
+                                                min={2000}
+                                                max={2100}
+                                                value={dbDraft?.appliedYear ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('appliedYear', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.appliedYear ?? '-')}
+                                    </td>
+                                    <td className="align-right">
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input workbook-inline-cell-number"
+                                                type="number"
+                                                min={1}
+                                                max={12}
+                                                value={dbDraft?.appliedMonth ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('appliedMonth', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.appliedMonth ?? '-')}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                type="text"
+                                                value={dbDraft?.note ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('note', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.note || '-')}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input
+                                                className="workbook-inline-cell-input"
+                                                list="workbook-team-options"
+                                                type="text"
+                                                value={dbDraft?.teamName ?? ''}
+                                                onChange={(event) => handleChangeEditingDbDraft('teamName', event.target.value)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : (entry.teamName || '-')}
+                                    </td>
+                                    <td>
+                                        <div className="workbook-inline-actions">
+                                            {isEditing ? (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={handleSaveDbEntry}
+                                                        disabled={dbActionLoading}
+                                                    >
+                                                        <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faPenToSquare} spin={dbActionLoading} />
+                                                        저장
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={handleCancelEditDbEntry}
+                                                        disabled={dbActionLoading}
+                                                    >
+                                                        취소
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={() => handleStartEditDbEntry(entry)}
+                                                        disabled={dbActionLoading}
+                                                    >
+                                                        <FontAwesomeIcon icon={faPenToSquare} />
+                                                        수정
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                        onClick={() => handleDeleteDbEntry(entry)}
+                                                        disabled={dbActionLoading}
+                                                    >
+                                                        <FontAwesomeIcon icon={faTrashCan} />
+                                                        삭제
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -1435,343 +2075,374 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const renderLedgerTab = () => (
         <section className="workbook-sheet">
-            <table className="sheet-control-table query-sheet-table">
-                <tbody>
-                    <tr>
-                        <th className="sheet-title-dark" colSpan={8}>매출/매입 거래장</th>
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-blue">검색시작일</th>
-                        <td className="sheet-value">
-                            <input
-                                type="date"
-                                value={ledgerDraft.startDate}
-                                onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={6} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-blue">검색종료일</th>
-                        <td className="sheet-value">
-                            <input
-                                type="date"
-                                value={ledgerDraft.endDate}
-                                onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={6} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">팀 명</th>
-                        <td className="sheet-value-light">
-                            <input
-                                list="workbook-team-options"
-                                value={ledgerDraft.teamName}
-                                onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                placeholder="전체"
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={6} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">구 분</th>
-                        <td className="sheet-value-light">
-                            <select
-                                value={ledgerDraft.transactionType}
-                                onChange={(event) => setLedgerDraft((prev) => ({
-                                    ...prev,
-                                    transactionType: event.target.value as WorkbookTransactionType
-                                }))}
-                            >
-                                <option value="매출">매출</option>
-                                <option value="매입">매입</option>
-                            </select>
-                        </td>
-                        <td className="sheet-spacer" colSpan={6} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">거래처</th>
-                        <td className="sheet-value-light">
-                            <input
-                                list="workbook-partner-options"
-                                value={ledgerDraft.partnerName}
-                                onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                placeholder="거래처 전체"
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={4} />
-                        <td className="sheet-button-wrap" colSpan={2}>
-                            <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
-                                <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                조회
-                            </button>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">현장명</th>
-                        <td className="sheet-value-light">
-                            <input
-                                list="workbook-site-options"
-                                value={ledgerDraft.siteName}
-                                onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
-                                placeholder="현장 전체"
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={6} />
-                    </tr>
-                </tbody>
-            </table>
-
-            <div className="sheet-merged-heading">
-                {ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`}
+            <div className="workbook-section-toolbar" data-html2canvas-ignore="true">
+                <button
+                    type="button"
+                    className="workbook-toolbar-button"
+                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
+                    disabled={capturingView === 'ledger'}
+                >
+                    <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
+                    화면 복사
+                </button>
             </div>
 
-            <div className="sheet-table-wrapper">
-                <table className="sheet-table">
-                    <thead>
-                        <tr>
-                            <th>날짜</th>
-                            <th>내용</th>
-                            <th>{ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액'}</th>
-                            <th>{ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액'}</th>
-                            <th>잔액</th>
-                            <th>현장명</th>
-                            <th>비고</th>
-                            <th>팀명</th>
-                        </tr>
-                    </thead>
+            <div ref={ledgerCaptureRef}>
+                <table className="sheet-control-table query-sheet-table">
                     <tbody>
-                        {ledgerRows.length === 0 && (
-                            <tr>
-                                <td colSpan={8} className="sheet-empty-state">조회 결과가 없습니다.</td>
-                            </tr>
-                        )}
-                        {ledgerRows.map((row) => (
-                            <tr key={row.id}>
-                                <td>{row.date}</td>
-                                <td>{row.description}</td>
-                                <td className="align-right">{row.transactionAmount > 0 ? formatNumber(row.transactionAmount) : '-'}</td>
-                                <td className="align-right">{row.paymentAmount > 0 ? formatNumber(row.paymentAmount) : '-'}</td>
-                                <td className="align-right">{formatNumber(row.balance)}</td>
-                                <td>{row.siteName || '-'}</td>
-                                <td>{row.note || '-'}</td>
-                                <td>{row.teamName || '-'}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                    <tfoot>
                         <tr>
-                            <td />
-                            <td>합 계</td>
-                            <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
-                            <td className="align-right">{formatNumber(ledgerTotals.paymentAmount)}</td>
-                            <td className="align-right">{formatNumber(ledgerTotals.balance)}</td>
-                            <td colSpan={3} />
+                            <th className="sheet-title-dark" colSpan={8}>매출/매입 거래장</th>
                         </tr>
-                    </tfoot>
+                        <tr>
+                            <th className="sheet-label-blue">검색시작일</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="date"
+                                    value={ledgerDraft.startDate}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-blue">검색종료일</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="date"
+                                    value={ledgerDraft.endDate}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">팀 명</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-team-options"
+                                    value={ledgerDraft.teamName}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
+                                    placeholder="전체"
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">구 분</th>
+                            <td className="sheet-value-light">
+                                <select
+                                    value={ledgerDraft.transactionType}
+                                    onChange={(event) => setLedgerDraft((prev) => ({
+                                        ...prev,
+                                        transactionType: event.target.value as WorkbookTransactionType
+                                    }))}
+                                >
+                                    <option value="매출">매출</option>
+                                    <option value="매입">매입</option>
+                                </select>
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">거래처</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-partner-options"
+                                    value={ledgerDraft.partnerName}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
+                                    placeholder="거래처 전체"
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={4} />
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
+                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
+                                    조회
+                                </button>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">현장명</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-site-options"
+                                    value={ledgerDraft.siteName}
+                                    onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
+                                    placeholder="현장 전체"
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                        </tr>
+                    </tbody>
                 </table>
+
+                <div className="sheet-merged-heading">
+                    {ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`}
+                </div>
+
+                <div className="sheet-table-wrapper">
+                    <table className="sheet-table">
+                        <thead>
+                            <tr>
+                                <th>날짜</th>
+                                <th>내용</th>
+                                <th>{ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액'}</th>
+                                <th>{ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액'}</th>
+                                <th>잔액</th>
+                                <th>현장명</th>
+                                <th>비고</th>
+                                <th>팀명</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {ledgerRows.length === 0 && (
+                                <tr>
+                                    <td colSpan={8} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                </tr>
+                            )}
+                            {ledgerRows.map((row) => (
+                                <tr key={row.id}>
+                                    <td>{row.date}</td>
+                                    <td>{row.description}</td>
+                                    <td className="align-right">{row.transactionAmount !== 0 ? formatNumber(row.transactionAmount) : '-'}</td>
+                                    <td className="align-right">{row.paymentAmount !== 0 ? formatNumber(row.paymentAmount) : '-'}</td>
+                                    <td className="align-right">{formatNumber(row.balance)}</td>
+                                    <td>{row.siteName || '-'}</td>
+                                    <td>{row.note || '-'}</td>
+                                    <td>{row.teamName || '-'}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td />
+                                <td>합 계</td>
+                                <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
+                                <td className="align-right">{formatNumber(ledgerTotals.paymentAmount)}</td>
+                                <td className="align-right">{formatNumber(ledgerTotals.balance)}</td>
+                                <td colSpan={3} />
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
             </div>
         </section>
     );
 
     const renderSummaryTab = () => (
         <section className="workbook-sheet">
-            <table className="sheet-control-table summary-sheet-table">
-                <tbody>
-                    <tr>
-                        <th className="sheet-title-dark" colSpan={12}>주식회사 청연이엔지</th>
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-dark">시작연도</th>
-                        <td className="sheet-value">
-                            <input
-                                type="number"
-                                min={2000}
-                                max={2100}
-                                value={summaryDraft.startYear}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startYear: Number(event.target.value) || currentYear }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-blue">시작월</th>
-                        <td className="sheet-value">
-                            <input
-                                type="number"
-                                min={1}
-                                max={12}
-                                value={summaryDraft.startMonth}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startMonth: Number(event.target.value) || 1 }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-dark">종료연도</th>
-                        <td className="sheet-value">
-                            <input
-                                type="number"
-                                min={2000}
-                                max={2100}
-                                value={summaryDraft.endYear}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endYear: Number(event.target.value) || currentYear }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-blue">종료월</th>
-                        <td className="sheet-value">
-                            <input
-                                type="number"
-                                min={1}
-                                max={12}
-                                value={summaryDraft.endMonth}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endMonth: Number(event.target.value) || 12 }))}
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">팀 명</th>
-                        <td className="sheet-value-light">
-                            <input
-                                list="workbook-team-options"
-                                value={summaryDraft.teamName}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                placeholder="전체"
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">구 분</th>
-                        <td className="sheet-value-light">
-                            <select
-                                value={summaryDraft.mode}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, mode: event.target.value as SummaryMode }))}
-                            >
-                                <option value="매출">매출</option>
-                                <option value="매입">매입</option>
-                                <option value="미수금">미수금</option>
-                                <option value="미지급금">미지급금</option>
-                            </select>
-                        </td>
-                        <td className="sheet-spacer" colSpan={10} />
-                    </tr>
-                    <tr>
-                        <th className="sheet-label-green">거래처</th>
-                        <td className="sheet-value-light">
-                            <input
-                                list="workbook-partner-options"
-                                value={summaryDraft.partnerName}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                placeholder="거래처 전체"
-                            />
-                        </td>
-                        <td className="sheet-spacer" colSpan={8} />
-                        <td className="sheet-button-wrap" colSpan={2}>
-                            <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
-                                <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                조회
-                            </button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <div className="workbook-section-toolbar" data-html2canvas-ignore="true">
+                <button
+                    type="button"
+                    className="workbook-toolbar-button"
+                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
+                    disabled={capturingView === 'summary'}
+                >
+                    <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
+                    화면 복사
+                </button>
+            </div>
 
-            <div className="sheet-table-wrapper">
-                <table className="sheet-table">
-                    <thead className="summary-header">
-                        <tr>
-                            <th>No</th>
-                            <th>거래처명</th>
-                            <th>현장명</th>
-                            <th>발행일</th>
-                            <th>공급가액</th>
-                            <th>세액</th>
-                            <th>합계</th>
-                            <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급일' : '입금일'}</th>
-                            <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급금액' : '수금금액'}</th>
-                            <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '미지급금' : '미수금'}</th>
-                            <th>비고</th>
-                            <th>팀명</th>
-                            {canRegisterReceipt && <th>처리</th>}
-                        </tr>
-                    </thead>
+            <div ref={summaryCaptureRef}>
+                <table className="sheet-control-table summary-sheet-table">
                     <tbody>
-                        {summaryRows.length === 0 && (
+                        <tr>
+                            <th className="sheet-title-dark" colSpan={12}>주식회사 청연이엔지</th>
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-dark">시작연도</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={2000}
+                                    max={2100}
+                                    value={summaryDraft.startYear}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startYear: Number(event.target.value) || currentYear }))}
+                                />
+                            </td>
+                            <th className="sheet-label-blue">시작월</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={12}
+                                    value={summaryDraft.startMonth}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startMonth: Number(event.target.value) || 1 }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={8} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-dark">종료연도</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={2000}
+                                    max={2100}
+                                    value={summaryDraft.endYear}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endYear: Number(event.target.value) || currentYear }))}
+                                />
+                            </td>
+                            <th className="sheet-label-blue">종료월</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={12}
+                                    value={summaryDraft.endMonth}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endMonth: Number(event.target.value) || 12 }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={8} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">팀 명</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-team-options"
+                                    value={summaryDraft.teamName}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
+                                    placeholder="전체"
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={10} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">구 분</th>
+                            <td className="sheet-value-light">
+                                <select
+                                    value={summaryDraft.mode}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, mode: event.target.value as SummaryMode }))}
+                                >
+                                    <option value="매출">매출</option>
+                                    <option value="매입">매입</option>
+                                    <option value="미수금">미수금</option>
+                                    <option value="미지급금">미지급금</option>
+                                </select>
+                            </td>
+                            <td className="sheet-spacer" colSpan={10} />
+                        </tr>
+                        <tr>
+                            <th className="sheet-label-green">거래처</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-partner-options"
+                                    value={summaryDraft.partnerName}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
+                                    placeholder="거래처 전체"
+                                />
+                            </td>
+                            <th className="sheet-label-green">현장명</th>
+                            <td className="sheet-value-light">
+                                <input
+                                    list="workbook-site-options"
+                                    value={summaryDraft.siteName}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, siteName: event.target.value }))}
+                                    placeholder="현장 전체"
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
+                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
+                                    조회
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div className="sheet-table-wrapper">
+                    <table className="sheet-table">
+                        <thead className="summary-header">
                             <tr>
-                                <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                <th>No</th>
+                                <th>거래처명</th>
+                                <th>현장명</th>
+                                <th>발행일</th>
+                                <th>공급가액</th>
+                                <th>세액</th>
+                                <th>합계</th>
+                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급일' : '입금일'}</th>
+                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급금액' : '수금금액'}</th>
+                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '미지급금' : '미수금'}</th>
+                                <th>비고</th>
+                                <th>팀명</th>
+                                {canRegisterReceipt && <th>처리</th>}
                             </tr>
-                        )}
-                        {summaryRows.map((row, index) => (
-                            <tr key={row.id}>
-                                <td className="align-right">{index + 1}</td>
-                                <td>{row.partnerName}</td>
-                                <td>{row.siteName || '-'}</td>
-                                <td>{row.issueDate}</td>
-                                <td className="align-right">{formatNumber(row.supplyAmount)}</td>
-                                <td className="align-right">{formatNumber(row.taxAmount)}</td>
-                                <td className="align-right">{formatNumber(row.totalAmount)}</td>
-                                <td>
-                                    {row.paymentDates.length > 0 ? (
-                                        <div className="cell-date-list">
-                                            {row.paymentDates.map((paymentDate) => (
-                                                <div key={`${row.id}-${paymentDate}`}>{paymentDate}</div>
-                                            ))}
-                                        </div>
-                                    ) : '-'}
-                                </td>
-                                <td className="align-right">{formatNumber(row.settledAmount)}</td>
-                                <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
-                                <td>{row.note || '-'}</td>
-                                <td>{row.teamName || '-'}</td>
-                                {canRegisterReceipt && (
+                        </thead>
+                        <tbody>
+                            {summaryRows.length === 0 && (
+                                <tr>
+                                    <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                </tr>
+                            )}
+                            {summaryRows.map((row, index) => (
+                                <tr key={row.id}>
+                                    <td className="align-right">{index + 1}</td>
+                                    <td>{row.partnerName}</td>
+                                    <td>{row.siteName || '-'}</td>
+                                    <td>{row.issueDate}</td>
+                                    <td className="align-right">{formatNumber(row.supplyAmount)}</td>
+                                    <td className="align-right">{formatNumber(row.taxAmount)}</td>
+                                    <td className="align-right">{formatNumber(row.totalAmount)}</td>
                                     <td>
-                                        <div className="workbook-inline-actions">
-                                            <button
-                                                type="button"
-                                                className="workbook-toolbar-button workbook-inline-button"
-                                                onClick={() => handleRegisterReceipt(row)}
-                                                disabled={saving || row.outstandingAmount <= 0}
-                                            >
-                                                입금
-                                            </button>
-                                            {canOpenReceiptHistory && (
+                                        {row.paymentDates.length > 0 ? (
+                                            <div className="cell-date-list">
+                                                {row.paymentDates.map((paymentDate) => (
+                                                    <div key={`${row.id}-${paymentDate}`}>{paymentDate}</div>
+                                                ))}
+                                            </div>
+                                        ) : '-'}
+                                    </td>
+                                    <td className="align-right">{formatNumber(row.settledAmount)}</td>
+                                    <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
+                                    <td>{row.note || '-'}</td>
+                                    <td>{row.teamName || '-'}</td>
+                                    {canRegisterReceipt && (
+                                        <td>
+                                            <div className="workbook-inline-actions">
                                                 <button
                                                     type="button"
                                                     className="workbook-toolbar-button workbook-inline-button"
-                                                    onClick={() => handleOpenReceiptHistory(row)}
-                                                    disabled={saving}
+                                                    onClick={() => handleRegisterReceipt(row)}
+                                                    disabled={saving || row.outstandingAmount <= 0}
                                                 >
-                                                    내역
+                                                    입금
                                                 </button>
-                                            )}
-                                        </div>
-                                    </td>
-                                )}
+                                                {canOpenReceiptHistory && (
+                                                    <button
+                                                        type="button"
+                                                        className="workbook-toolbar-button workbook-inline-button"
+                                                        onClick={() => handleOpenReceiptHistory(row)}
+                                                        disabled={saving}
+                                                    >
+                                                        내역
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    )}
+                                </tr>
+                            ))}
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td />
+                                <td>합 계</td>
+                                <td />
+                                <td />
+                                <td className="align-right">{formatNumber(summaryTotals.supplyAmount)}</td>
+                                <td className="align-right">{formatNumber(summaryTotals.taxAmount)}</td>
+                                <td className="align-right">{formatNumber(summaryTotals.totalAmount)}</td>
+                                <td />
+                                <td className="align-right">{formatNumber(summaryTotals.settledAmount)}</td>
+                                <td className="align-right">{formatNumber(summaryTotals.outstandingAmount)}</td>
+                                <td colSpan={canRegisterReceipt ? 3 : 2} />
                             </tr>
-                        ))}
-                    </tbody>
-                    <tfoot>
-                        <tr>
-                            <td />
-                            <td>합 계</td>
-                            <td />
-                            <td />
-                            <td className="align-right">{formatNumber(summaryTotals.supplyAmount)}</td>
-                            <td className="align-right">{formatNumber(summaryTotals.taxAmount)}</td>
-                            <td className="align-right">{formatNumber(summaryTotals.totalAmount)}</td>
-                            <td />
-                            <td className="align-right">{formatNumber(summaryTotals.settledAmount)}</td>
-                            <td className="align-right">{formatNumber(summaryTotals.outstandingAmount)}</td>
-                            <td colSpan={canRegisterReceipt ? 3 : 2} />
-                        </tr>
-                    </tfoot>
-                </table>
+                        </tfoot>
+                    </table>
+                </div>
             </div>
         </section>
     );
