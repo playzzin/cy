@@ -10,10 +10,13 @@ import {
     faDownload,
     faDatabase,
     faMagnifyingGlass,
+    faPenToSquare,
     faRotateRight,
     faSpinner,
     faTableCellsLarge,
-    faUpload
+    faTrashCan,
+    faUpload,
+    faXmark
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { companyService } from '../../services/companyService';
@@ -58,8 +61,9 @@ interface LedgerFilter {
 }
 
 interface SummaryFilter {
-    year: number;
+    startYear: number;
     startMonth: number;
+    endYear: number;
     endMonth: number;
     teamName: string;
     mode: SummaryMode;
@@ -88,11 +92,18 @@ interface SummaryRow {
     supplyAmount: number;
     taxAmount: number;
     totalAmount: number;
-    paymentDate: string;
+    paymentDates: string[];
     settledAmount: number;
     outstandingAmount: number;
     note: string;
     teamName: string;
+}
+
+interface ReceiptEditDraft {
+    id: string;
+    date: string;
+    paymentAmount: string;
+    note: string;
 }
 
 const INPUT_ROW_COUNT = 80;
@@ -250,6 +261,11 @@ const getYearFromDate = (date: string): number | null => {
 
 const getMonthEndDate = (year: number, month: number) => {
     return formatDateInput(new Date(year, month, 0));
+};
+
+const getPeriodCode = (year: number | null, month: number | null) => {
+    if (!year || !month) return null;
+    return year * 100 + month;
 };
 
 const toDbRow = (entry: WorkbookLedgerEntry) => ([
@@ -460,15 +476,18 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
 const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
     const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
-    const asOfDate = getMonthEndDate(filter.year, filter.endMonth);
+    const asOfDate = getMonthEndDate(filter.endYear, filter.endMonth);
+    const startPeriod = getPeriodCode(filter.startYear, filter.startMonth);
+    const endPeriod = getPeriodCode(filter.endYear, filter.endMonth);
 
     const scopedEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
-        .filter((entry) => (entry.appliedYear ?? getYearFromDate(entry.date)) === filter.year)
         .filter((entry) => {
+            const year = entry.appliedYear ?? getYearFromDate(entry.date);
             const month = entry.appliedMonth ?? getMonthFromDate(entry.date);
-            if (!month) return false;
-            return month >= filter.startMonth && month <= filter.endMonth;
+            const periodCode = getPeriodCode(year, month);
+            if (!periodCode || !startPeriod || !endPeriod) return false;
+            return periodCode >= startPeriod && periodCode <= endPeriod;
         })
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
@@ -488,7 +507,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             supplyAmount: entry.supplyAmount ?? 0,
             taxAmount: entry.taxAmount ?? 0,
             totalAmount: entry.totalAmount ?? 0,
-            paymentDate: '',
+            paymentDates: [],
             settledAmount: 0,
             outstandingAmount: entry.totalAmount ?? 0,
             remainingAmount: entry.totalAmount ?? 0,
@@ -515,7 +534,9 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         invoice.settledAmount += appliedAmount;
         invoice.remainingAmount -= appliedAmount;
         invoice.outstandingAmount = invoice.remainingAmount;
-        invoice.paymentDate = paymentDate;
+        if (paymentDate && !invoice.paymentDates.includes(paymentDate)) {
+            invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
+        }
 
         return paymentAmount - appliedAmount;
     };
@@ -569,6 +590,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
+    const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
     const [partnerNames, setPartnerNames] = useState<string[]>([]);
     const [siteNames, setSiteNames] = useState<string[]>([]);
@@ -595,21 +617,25 @@ const WorkbookLedgerPage: React.FC = () => {
     });
 
     const [summaryDraft, setSummaryDraft] = useState<SummaryFilter>({
-        year: currentYear,
+        startYear: currentYear,
         startMonth: 1,
+        endYear: currentYear,
         endMonth: 12,
         teamName: '',
         mode: '미수금',
         partnerName: ''
     });
     const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>({
-        year: currentYear,
+        startYear: currentYear,
         startMonth: 1,
+        endYear: currentYear,
         endMonth: 12,
         teamName: '',
         mode: '미수금',
         partnerName: ''
     });
+    const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
+    const [editingReceiptDraft, setEditingReceiptDraft] = useState<ReceiptEditDraft | null>(null);
 
     const refreshPageData = useCallback(async () => {
         setLoading(true);
@@ -966,17 +992,155 @@ const WorkbookLedgerPage: React.FC = () => {
         }
     }, [currentUser?.uid, refreshPageData, todayString]);
 
+    const handleOpenReceiptHistory = useCallback((row: SummaryRow) => {
+        setReceiptHistoryTargetId(row.id);
+        setEditingReceiptDraft(null);
+    }, []);
+
+    const handleCloseReceiptHistory = useCallback(() => {
+        setReceiptHistoryTargetId(null);
+        setEditingReceiptDraft(null);
+    }, []);
+
+    const handleStartEditReceipt = useCallback((entry: WorkbookLedgerEntry) => {
+        if (!entry.id) return;
+
+        setEditingReceiptDraft({
+            id: entry.id,
+            date: entry.date,
+            paymentAmount: String(entry.paymentAmount ?? ''),
+            note: entry.note ?? ''
+        });
+    }, []);
+
+    const handleCancelEditReceipt = useCallback(() => {
+        setEditingReceiptDraft(null);
+    }, []);
+
+    const handleChangeEditingReceipt = useCallback((field: keyof ReceiptEditDraft, value: string) => {
+        setEditingReceiptDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
+    }, []);
+
+    const handleSaveEditedReceipt = useCallback(async () => {
+        if (!editingReceiptDraft || !receiptHistoryTargetId) return;
+
+        const receiptHistoryInvoice = entries.find(
+            (entry) => entry.id === receiptHistoryTargetId && isInvoiceEntry(entry)
+        );
+
+        if (!receiptHistoryInvoice) {
+            Swal.fire('?덈궡', '?낃툑??湲곗??媛 ?섎뒗 留ㅼ텧 ?꾨룄瑜??ㅼ떆 遺덈윭?ㅼ꽭??', 'info');
+            return;
+        }
+
+        const receiptHistoryEntries = entries
+            .filter((entry) => isPaymentEntry(entry) && entry.matchedEntryId === receiptHistoryTargetId)
+            .sort(sortWorkbookEntries);
+
+        const receiptHistoryTotal = receiptHistoryEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0);
+        const normalizedDate = normalizeDate(editingReceiptDraft.date);
+        const paymentAmount = toNumberOrNull(editingReceiptDraft.paymentAmount) ?? 0;
+        const currentReceipt = receiptHistoryEntries.find((entry) => entry.id === editingReceiptDraft.id);
+
+        if (!currentReceipt) {
+            Swal.fire('?덈궡', '?섏젙???낃툑?댁뿭???ㅼ떆 遺덈윭?ㅼ꽭??', 'info');
+            return;
+        }
+
+        const currentAmount = currentReceipt.paymentAmount ?? 0;
+        const maxAmount = Math.max((receiptHistoryInvoice.totalAmount ?? 0) - (receiptHistoryTotal - currentAmount), 0);
+
+        if (!normalizedDate) {
+            Swal.fire('입력 확인', '입금일자를 입력하세요.', 'warning');
+            return;
+        }
+
+        if (paymentAmount <= 0) {
+            Swal.fire('입력 확인', '입금금액은 0보다 커야 합니다.', 'warning');
+            return;
+        }
+
+        if (paymentAmount > maxAmount) {
+            Swal.fire('입력 확인', '수정 금액이 해당 매출의 잔액을 초과합니다.', 'warning');
+            return;
+        }
+
+        setReceiptActionLoading(true);
+        try {
+            await workbookLedgerService.updateEntry(editingReceiptDraft.id, {
+                date: normalizedDate,
+                paymentAmount,
+                note: normalizeText(editingReceiptDraft.note),
+                updatedBy: currentUser?.uid ?? ''
+            });
+
+            await refreshPageData();
+            setEditingReceiptDraft(null);
+            Swal.fire('수정 완료', '입금내역을 수정했습니다.', 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '입금내역 수정에 실패했습니다.', 'error');
+        } finally {
+            setReceiptActionLoading(false);
+        }
+    }, [currentUser?.uid, editingReceiptDraft, entries, receiptHistoryTargetId, refreshPageData]);
+
+    const handleDeleteReceipt = useCallback(async (entry: WorkbookLedgerEntry) => {
+        if (!entry.id) return;
+
+        const result = await Swal.fire({
+            title: '입금내역 삭제',
+            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}원 입금내역을 삭제하시겠습니까?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '삭제',
+            cancelButtonText: '취소'
+        });
+
+        if (!result.isConfirmed) return;
+
+        setReceiptActionLoading(true);
+        try {
+            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+            await refreshPageData();
+            setEditingReceiptDraft((prev) => (prev?.id === entry.id ? null : prev));
+            Swal.fire('삭제 완료', '입금내역을 삭제했습니다.', 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '입금내역 삭제에 실패했습니다.', 'error');
+        } finally {
+            setReceiptActionLoading(false);
+        }
+    }, [currentUser?.uid, refreshPageData]);
+
     const applyLedgerFilter = useCallback(() => {
         setLedgerFilter({ ...ledgerDraft });
     }, [ledgerDraft]);
 
     const applySummaryFilter = useCallback(() => {
-        setSummaryFilter({
+        const draft = {
             ...summaryDraft,
-            startMonth: Math.min(summaryDraft.startMonth, summaryDraft.endMonth),
-            endMonth: Math.max(summaryDraft.startMonth, summaryDraft.endMonth)
-        });
-    }, [summaryDraft]);
+            startYear: summaryDraft.startYear || currentYear,
+            startMonth: summaryDraft.startMonth || 1,
+            endYear: summaryDraft.endYear || currentYear,
+            endMonth: summaryDraft.endMonth || 12
+        };
+
+        const startPeriod = getPeriodCode(draft.startYear, draft.startMonth) ?? 0;
+        const endPeriod = getPeriodCode(draft.endYear, draft.endMonth) ?? 0;
+
+        setSummaryFilter(
+            startPeriod <= endPeriod
+                ? draft
+                : {
+                    ...draft,
+                    startYear: draft.endYear,
+                    startMonth: draft.endMonth,
+                    endYear: draft.startYear,
+                    endMonth: draft.startMonth
+                }
+        );
+    }, [currentYear, summaryDraft]);
 
     const ledgerRows = useMemo(() => buildLedgerRows(entries, ledgerFilter), [entries, ledgerFilter]);
     const summaryRows = useMemo(() => buildSummaryRows(entries, summaryFilter), [entries, summaryFilter]);
@@ -1000,6 +1164,39 @@ const WorkbookLedgerPage: React.FC = () => {
     }, [summaryRows]);
 
     const canRegisterReceipt = summaryFilter.mode === '미수금';
+    const canOpenReceiptHistory = summaryFilter.mode === '미수금';
+
+    const receiptHistoryInvoice = useMemo(() => {
+        if (!receiptHistoryTargetId) return null;
+        return entries.find((entry) => entry.id === receiptHistoryTargetId && isInvoiceEntry(entry)) ?? null;
+    }, [entries, receiptHistoryTargetId]);
+
+    const receiptHistorySummaryRow = useMemo(() => {
+        if (!receiptHistoryTargetId) return null;
+        return summaryRows.find((row) => row.id === receiptHistoryTargetId) ?? null;
+    }, [receiptHistoryTargetId, summaryRows]);
+
+    const receiptHistoryEntries = useMemo(() => {
+        if (!receiptHistoryTargetId) return [];
+        return entries
+            .filter((entry) => isPaymentEntry(entry) && entry.matchedEntryId === receiptHistoryTargetId)
+            .sort(sortWorkbookEntries);
+    }, [entries, receiptHistoryTargetId]);
+
+    const receiptHistoryTotal = useMemo(
+        () => receiptHistoryEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0),
+        [receiptHistoryEntries]
+    );
+
+    const receiptHistoryOutstanding = useMemo(() => {
+        if (!receiptHistoryInvoice) return 0;
+        return Math.max((receiptHistoryInvoice.totalAmount ?? 0) - receiptHistoryTotal, 0);
+    }, [receiptHistoryInvoice, receiptHistoryTotal]);
+
+    const legacyMatchedGap = useMemo(() => {
+        if (!receiptHistorySummaryRow) return 0;
+        return Math.max(receiptHistorySummaryRow.settledAmount - receiptHistoryTotal, 0);
+    }, [receiptHistorySummaryRow, receiptHistoryTotal]);
 
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
@@ -1177,7 +1374,7 @@ const WorkbookLedgerPage: React.FC = () => {
             </table>
 
             <div className="workbook-help-text">
-                잔액은 선택한 종료월의 말일 기준으로 계산됩니다. 종료월 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
+                잔액은 선택한 종료연도/종료월의 말일 기준으로 계산됩니다. 종료시점 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
             </div>
 
             <div className="sheet-table-wrapper">
@@ -1386,14 +1583,14 @@ const WorkbookLedgerPage: React.FC = () => {
                         <th className="sheet-title-dark" colSpan={12}>주식회사 청연이엔지</th>
                     </tr>
                     <tr>
-                        <th className="sheet-label-dark">연도</th>
+                        <th className="sheet-label-dark">시작연도</th>
                         <td className="sheet-value">
                             <input
                                 type="number"
                                 min={2000}
                                 max={2100}
-                                value={summaryDraft.year}
-                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, year: Number(event.target.value) || currentYear }))}
+                                value={summaryDraft.startYear}
+                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startYear: Number(event.target.value) || currentYear }))}
                             />
                         </td>
                         <td className="sheet-spacer" colSpan={10} />
@@ -1407,6 +1604,19 @@ const WorkbookLedgerPage: React.FC = () => {
                                 max={12}
                                 value={summaryDraft.startMonth}
                                 onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startMonth: Number(event.target.value) || 1 }))}
+                            />
+                        </td>
+                        <td className="sheet-spacer" colSpan={10} />
+                    </tr>
+                    <tr>
+                        <th className="sheet-label-dark">종료연도</th>
+                        <td className="sheet-value">
+                            <input
+                                type="number"
+                                min={2000}
+                                max={2100}
+                                value={summaryDraft.endYear}
+                                onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endYear: Number(event.target.value) || currentYear }))}
                             />
                         </td>
                         <td className="sheet-spacer" colSpan={10} />
@@ -1506,21 +1716,41 @@ const WorkbookLedgerPage: React.FC = () => {
                                 <td className="align-right">{formatNumber(row.supplyAmount)}</td>
                                 <td className="align-right">{formatNumber(row.taxAmount)}</td>
                                 <td className="align-right">{formatNumber(row.totalAmount)}</td>
-                                <td>{row.paymentDate || '-'}</td>
+                                <td>
+                                    {row.paymentDates.length > 0 ? (
+                                        <div className="cell-date-list">
+                                            {row.paymentDates.map((paymentDate) => (
+                                                <div key={`${row.id}-${paymentDate}`}>{paymentDate}</div>
+                                            ))}
+                                        </div>
+                                    ) : '-'}
+                                </td>
                                 <td className="align-right">{formatNumber(row.settledAmount)}</td>
                                 <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
                                 <td>{row.note || '-'}</td>
                                 <td>{row.teamName || '-'}</td>
                                 {canRegisterReceipt && (
                                     <td>
-                                        <button
-                                            type="button"
-                                            className="workbook-toolbar-button"
-                                            onClick={() => handleRegisterReceipt(row)}
-                                            disabled={saving || row.outstandingAmount <= 0}
-                                        >
-                                            입금
-                                        </button>
+                                        <div className="workbook-inline-actions">
+                                            <button
+                                                type="button"
+                                                className="workbook-toolbar-button workbook-inline-button"
+                                                onClick={() => handleRegisterReceipt(row)}
+                                                disabled={saving || row.outstandingAmount <= 0}
+                                            >
+                                                입금
+                                            </button>
+                                            {canOpenReceiptHistory && (
+                                                <button
+                                                    type="button"
+                                                    className="workbook-toolbar-button workbook-inline-button"
+                                                    onClick={() => handleOpenReceiptHistory(row)}
+                                                    disabled={saving}
+                                                >
+                                                    내역
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 )}
                             </tr>
@@ -1584,6 +1814,158 @@ const WorkbookLedgerPage: React.FC = () => {
                 {activeTab === 'database' && renderDatabaseTab()}
                 {activeTab === 'ledger' && renderLedgerTab()}
                 {activeTab === 'summary' && renderSummaryTab()}
+
+                {receiptHistoryTargetId && (
+                    <div className="workbook-modal-overlay" onClick={handleCloseReceiptHistory}>
+                        <div className="workbook-modal" onClick={(event) => event.stopPropagation()}>
+                            <div className="workbook-modal-header">
+                                <div>
+                                    <h2>입금내역</h2>
+                                    <p>선택한 미수금 행에 연결된 입금 이력을 수정하거나 삭제합니다.</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="workbook-modal-close"
+                                    onClick={handleCloseReceiptHistory}
+                                >
+                                    <FontAwesomeIcon icon={faXmark} />
+                                </button>
+                            </div>
+
+                            {receiptHistoryInvoice ? (
+                                <>
+                                    <div className="workbook-modal-summary">
+                                        <div><strong>거래처</strong><span>{receiptHistoryInvoice.partnerName}</span></div>
+                                        <div><strong>현장명</strong><span>{receiptHistoryInvoice.siteName || '-'}</span></div>
+                                        <div><strong>발행일</strong><span>{receiptHistoryInvoice.date}</span></div>
+                                        <div><strong>합계</strong><span>{formatNumber(receiptHistoryInvoice.totalAmount)}원</span></div>
+                                        <div><strong>누적입금</strong><span>{formatNumber(receiptHistoryTotal)}원</span></div>
+                                        <div><strong>잔액</strong><span>{formatNumber(receiptHistoryOutstanding)}원</span></div>
+                                    </div>
+
+                                    {legacyMatchedGap > 0 && (
+                                        <div className="workbook-modal-warning">
+                                            기존 자동매칭 수금 {formatNumber(legacyMatchedGap)}원은 개별 이력이 연결되지 않아 여기서 수정/삭제할 수 없습니다.
+                                        </div>
+                                    )}
+
+                                    <div className="sheet-table-wrapper compact">
+                                        <table className="sheet-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>입금일자</th>
+                                                    <th>입금금액</th>
+                                                    <th>비고</th>
+                                                    <th>처리</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {receiptHistoryEntries.length === 0 && (
+                                                    <tr>
+                                                        <td colSpan={4} className="sheet-empty-state">등록된 입금내역이 없습니다.</td>
+                                                    </tr>
+                                                )}
+                                                {receiptHistoryEntries.map((entry) => (
+                                                    <tr key={entry.id}>
+                                                        <td>{entry.date}</td>
+                                                        <td className="align-right">{formatNumber(entry.paymentAmount)}</td>
+                                                        <td>{entry.note || '-'}</td>
+                                                        <td>
+                                                            <div className="workbook-inline-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button"
+                                                                    onClick={() => handleStartEditReceipt(entry)}
+                                                                    disabled={receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faPenToSquare} />
+                                                                    수정
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                    onClick={() => handleDeleteReceipt(entry)}
+                                                                    disabled={receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faTrashCan} />
+                                                                    삭제
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <div className="workbook-editor-card">
+                                        <div className="workbook-editor-header">
+                                            <h3>입금내역 수정</h3>
+                                            {editingReceiptDraft && (
+                                                <button
+                                                    type="button"
+                                                    className="workbook-toolbar-button workbook-inline-button"
+                                                    onClick={handleCancelEditReceipt}
+                                                    disabled={receiptActionLoading}
+                                                >
+                                                    취소
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {editingReceiptDraft ? (
+                                            <div className="workbook-editor-grid">
+                                                <label>
+                                                    <span>입금일자</span>
+                                                    <input
+                                                        type="date"
+                                                        value={editingReceiptDraft.date}
+                                                        onChange={(event) => handleChangeEditingReceipt('date', event.target.value)}
+                                                        disabled={receiptActionLoading}
+                                                    />
+                                                </label>
+                                                <label>
+                                                    <span>입금금액</span>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={editingReceiptDraft.paymentAmount}
+                                                        onChange={(event) => handleChangeEditingReceipt('paymentAmount', event.target.value)}
+                                                        disabled={receiptActionLoading}
+                                                    />
+                                                </label>
+                                                <label className="workbook-editor-wide">
+                                                    <span>비고</span>
+                                                    <input
+                                                        type="text"
+                                                        value={editingReceiptDraft.note}
+                                                        onChange={(event) => handleChangeEditingReceipt('note', event.target.value)}
+                                                        disabled={receiptActionLoading}
+                                                    />
+                                                </label>
+                                                <div className="workbook-editor-actions">
+                                                    <button
+                                                        type="button"
+                                                        className="excel-button excel-button-green"
+                                                        onClick={handleSaveEditedReceipt}
+                                                        disabled={receiptActionLoading}
+                                                    >
+                                                        <FontAwesomeIcon icon={receiptActionLoading ? faSpinner : faPenToSquare} spin={receiptActionLoading} />
+                                                        수정 저장
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="sheet-empty-state">수정할 입금내역을 선택하세요.</div>
+                                        )}
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="sheet-empty-state">대상 매출을 찾을 수 없습니다.</div>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <datalist id="workbook-partner-options">
                     {partnerNames.map((partner) => (

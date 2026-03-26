@@ -62,6 +62,25 @@
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
 }
 
+.workbook-inline-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.workbook-inline-button {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.workbook-danger-button {
+    color: #991b1b;
+    border-color: rgba(153, 27, 27, 0.2);
+    background: #fff5f5;
+}
+
 .excel-button {
     width: 100%;
     min-height: 44px;
@@ -222,6 +241,144 @@
     display: none;
 }
 
+.workbook-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.46);
+}
+
+.workbook-modal {
+    width: min(980px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    border-radius: 20px;
+    background: #ffffff;
+    box-shadow: 0 30px 80px rgba(15, 23, 42, 0.3);
+    padding: 20px;
+}
+
+.workbook-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.workbook-modal-header h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #172554;
+}
+
+.workbook-modal-header p {
+    margin: 6px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.workbook-modal-close {
+    width: 40px;
+    height: 40px;
+    border: 1px solid #d7dde7;
+    border-radius: 12px;
+    background: #ffffff;
+    color: #0f172a;
+    cursor: pointer;
+}
+
+.workbook-modal-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.workbook-modal-summary div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid #d7dde7;
+    border-radius: 14px;
+    background: #f8fafc;
+}
+
+.workbook-modal-summary strong {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.workbook-modal-warning {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid #fcd34d;
+    border-radius: 14px;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 13px;
+}
+
+.workbook-editor-card {
+    margin-top: 16px;
+    padding: 16px;
+    border: 1px solid #d7dde7;
+    border-radius: 16px;
+    background: #f8fafc;
+}
+
+.workbook-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.workbook-editor-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #172554;
+}
+
+.workbook-editor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.workbook-editor-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: #334155;
+}
+
+.workbook-editor-grid input {
+    height: 38px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 0 12px;
+    background: #ffffff;
+    color: #0f172a;
+}
+
+.workbook-editor-wide {
+    grid-column: 1 / -1;
+}
+
+.workbook-editor-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+}
+
 .input-grid-shell {
     padding: 14px;
     border-top: 1px solid #e2e8f0;
@@ -323,6 +480,12 @@
     text-align: right;
 }
 
+.cell-date-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
 @media (max-width: 768px) {
     .workbook-ledger-page {
         padding: 12px;
@@ -342,5 +505,14 @@
 
     .sheet-title-dark {
         font-size: 16px;
+    }
+
+    .workbook-modal {
+        padding: 14px;
+    }
+
+    .workbook-modal-summary,
+    .workbook-editor-grid {
+        grid-template-columns: 1fr;
     }
 }

@@ -2,6 +2,7 @@ import {
     collection,
     doc,
     getDocs,
+    updateDoc,
     writeBatch
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -28,9 +29,13 @@ export interface WorkbookLedgerEntry {
     createdAt?: string;
     updatedAt?: string;
     createdBy?: string;
+    updatedBy?: string;
+    deletedAt?: string;
+    deletedBy?: string;
 }
 
 type WorkbookLedgerEntryInput = Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>;
+type WorkbookLedgerEntryUpdate = Partial<Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'createdBy' | 'deletedAt' | 'deletedBy'>>;
 
 const COLLECTION_NAME = 'sales_purchase_workbook_entries';
 const BATCH_SIZE = 400;
@@ -80,15 +85,44 @@ const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
     note: normalizeText(entry.note),
     teamName: normalizeText(entry.teamName),
     createdBy: normalizeText(entry.createdBy) || null,
+    updatedBy: normalizeText(entry.updatedBy) || null,
     createdAt: timestamp,
     updatedAt: timestamp
 });
+
+const sanitizeUpdate = (entry: WorkbookLedgerEntryUpdate, timestamp: string) => {
+    const payload: Record<string, unknown> = {
+        updatedAt: timestamp
+    };
+
+    if (entry.transactionType !== undefined) payload.transactionType = entry.transactionType;
+    if (entry.date !== undefined) payload.date = normalizeText(entry.date);
+    if (entry.partnerName !== undefined) payload.partnerName = normalizeText(entry.partnerName);
+    if (entry.siteName !== undefined) payload.siteName = normalizeText(entry.siteName);
+    if (entry.description !== undefined) payload.description = normalizeText(entry.description);
+    if (entry.manDays !== undefined) payload.manDays = entry.manDays === null ? null : normalizeNumber(entry.manDays);
+    if (entry.supplyAmount !== undefined) payload.supplyAmount = normalizeNumber(entry.supplyAmount);
+    if (entry.taxAmount !== undefined) payload.taxAmount = normalizeNumber(entry.taxAmount);
+    if (entry.totalAmount !== undefined) payload.totalAmount = normalizeNumber(entry.totalAmount);
+    if (entry.paymentAmount !== undefined) payload.paymentAmount = normalizeNumber(entry.paymentAmount);
+    if (entry.appliedYear !== undefined) payload.appliedYear = entry.appliedYear === null ? null : normalizeInteger(entry.appliedYear);
+    if (entry.appliedMonth !== undefined) payload.appliedMonth = entry.appliedMonth === null ? null : normalizeInteger(entry.appliedMonth);
+    if (entry.matchedEntryId !== undefined) payload.matchedEntryId = normalizeText(entry.matchedEntryId) || null;
+    if (entry.note !== undefined) payload.note = normalizeText(entry.note);
+    if (entry.teamName !== undefined) payload.teamName = normalizeText(entry.teamName);
+    if (entry.updatedBy !== undefined) payload.updatedBy = normalizeText(entry.updatedBy) || null;
+
+    return payload;
+};
 
 export const workbookLedgerService = {
     async getEntries(): Promise<WorkbookLedgerEntry[]> {
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));
         const entries = snapshot.docs.map((entryDoc) => {
             const data = entryDoc.data() as Record<string, unknown>;
+            const deletedAt = normalizeText(data.deletedAt);
+
+            if (deletedAt) return null;
 
             return {
                 id: entryDoc.id,
@@ -109,9 +143,12 @@ export const workbookLedgerService = {
                 teamName: normalizeText(data.teamName),
                 createdAt: normalizeText(data.createdAt),
                 updatedAt: normalizeText(data.updatedAt),
-                createdBy: normalizeText(data.createdBy)
+                createdBy: normalizeText(data.createdBy),
+                updatedBy: normalizeText(data.updatedBy),
+                deletedAt,
+                deletedBy: normalizeText(data.deletedBy)
             } as WorkbookLedgerEntry;
-        });
+        }).filter((entry): entry is WorkbookLedgerEntry => entry !== null);
 
         entries.sort(sortEntries);
         return entries;
@@ -133,5 +170,19 @@ export const workbookLedgerService = {
 
             await batch.commit();
         }
+    },
+
+    async updateEntry(id: string, updates: WorkbookLedgerEntryUpdate): Promise<void> {
+        const now = new Date().toISOString();
+        await updateDoc(doc(collection(db, COLLECTION_NAME), id), sanitizeUpdate(updates, now));
+    },
+
+    async softDeleteEntry(id: string, deletedBy?: string): Promise<void> {
+        const now = new Date().toISOString();
+        await updateDoc(doc(collection(db, COLLECTION_NAME), id), {
+            deletedAt: now,
+            deletedBy: normalizeText(deletedBy) || null,
+            updatedAt: now
+        });
     }
 };
