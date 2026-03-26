@@ -72,6 +72,20 @@
 	background: var(--tab-color);
 }
 
+.black-title-bar {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 76px;
+	padding: 18px 24px;
+	color: #ffffff;
+	font-size: clamp(24px, 2.1vw, 32px);
+	font-weight: 900;
+	line-height: 1.25;
+	text-align: center;
+	letter-spacing: -0.02em;
+}
+
 @media (max-width: 768px) {
 	.team-tab-navigation {
 		padding: 10px 10px 4px;
@@ -82,5 +96,11 @@
 		font-size: 12px;
 		padding: 10px 12px 16px;
 		max-width: min(140px, 44vw);
+	}
+
+	.black-title-bar {
+		min-height: 64px;
+		padding: 14px 16px;
+		font-size: 22px;
 	}
 }

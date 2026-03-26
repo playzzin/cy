@@ -423,7 +423,8 @@ const WorkerSummaryPage: React.FC = () => {
             const contact = w.contact || '연락처 없음';
             const address = w.address || '주소 없음';
             const bloodType = w.bloodType ? ` / ${w.bloodType}형` : '';
-            return `${team}${w.name} (${idNum}) / ${contact} / ${address}${bloodType}`;
+            const name = w.name.replace(/[0-9]/g, '');
+            return `${team}${name} (${idNum}) / ${contact} / ${address}${bloodType}`;
         }).join('\n');
 
     }, [selectedWorkerIds, workers]);
@@ -489,7 +490,8 @@ const WorkerSummaryPage: React.FC = () => {
 
                     // File name: Name_IDNumber(first 6).png or similar
                     const idNum = w.idNumber ? w.idNumber.substring(0, 6) : 'unknown';
-                    const fileName = `${w.name}_${idNum}.png`; // Assuming PNG or standard image
+                    const cleanName = w.name.replace(/[0-9]/g, '');
+                    const fileName = `${cleanName}_${idNum}.png`; // Assuming PNG or standard image
 
                     zip.file(fileName, blob);
                 } catch (err) {
@@ -537,7 +539,8 @@ const WorkerSummaryPage: React.FC = () => {
                 }
                 const item = new ClipboardItem({ 'image/png': blob });
                 await navigator.clipboard.write([item]);
-                toast.success(`${workerName}님의 신분증이 복사되었습니다.`);
+                const cleanName = workerName.replace(/[0-9]/g, '');
+                toast.success(`${cleanName}님의 신분증이 복사되었습니다.`);
             });
 
         } catch (error) {
@@ -669,7 +672,7 @@ const WorkerSummaryPage: React.FC = () => {
                                         .map((w, index) => (
                                             <tr key={w.id} className="hover:bg-slate-50 transition-colors">
                                                 <td className="px-4 py-3 text-slate-500 text-center align-middle">{index + 1}</td>
-                                                <td className="px-4 py-3 font-medium text-slate-900 text-center align-middle">{w.name}</td>
+                                                <td className="px-4 py-3 font-medium text-slate-900 text-center align-middle">{w.name.replace(/[0-9]/g, '')}</td>
                                                 <td className="px-2 py-3 text-slate-600 font-mono tracking-tight text-center text-sm align-middle">
                                                     {w.idNumber ? w.idNumber : '-'}
                                                 </td>

@@ -147,6 +147,42 @@ const roundToThousand = (value: number): number => {
   return Math.floor(value / 1000) * 1000;
 };
 
+const statementHeaderCellBaseClass =
+  'border-b border-r border-slate-200 px-2 py-2 text-center align-middle transition-colors uppercase tracking-wider';
+
+const getStatementHeaderCellClass = (
+  tone: 'index' | 'name' | 'ssn' | 'address' | 'summary' | 'rate' | 'amount' | 'bank'
+): string => {
+  switch (tone) {
+    case 'index':
+      return `${statementHeaderCellBaseClass} bg-slate-50 text-slate-500 font-bold`;
+    case 'name':
+      return `${statementHeaderCellBaseClass} bg-indigo-50/50 text-indigo-900 font-extrabold`;
+    case 'ssn':
+      return `${statementHeaderCellBaseClass} bg-slate-50 text-slate-600 font-bold`;
+    case 'address':
+      return `${statementHeaderCellBaseClass} bg-indigo-50/50 text-indigo-900 font-bold`;
+    case 'summary':
+      return `${statementHeaderCellBaseClass} bg-orange-50 text-orange-900 font-bold`;
+    case 'rate':
+      return `${statementHeaderCellBaseClass} bg-slate-100 text-slate-700 font-bold`;
+    case 'amount':
+      return `${statementHeaderCellBaseClass} bg-emerald-50 text-emerald-900 font-bold`;
+    case 'bank':
+      return `${statementHeaderCellBaseClass} bg-slate-50 text-slate-700 font-bold`;
+    default:
+      return `${statementHeaderCellBaseClass} bg-slate-50 text-slate-600`;
+  }
+};
+
+const getStatementDayHeaderClass = (dayNumber: number): string => {
+  const toneClass = dayNumber <= 15
+    ? 'bg-slate-50 text-slate-400'
+    : 'bg-slate-100/50 text-slate-400';
+
+  return `${statementHeaderCellBaseClass} ${toneClass} p-1 text-[10px] font-bold`;
+};
+
 // --- Component ---
 const LaborCostStatementGeneratorPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -909,17 +945,17 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               </div>
 
               <div className="flex-1 min-w-[300px] text-center">
-                <h1 className="text-3xl font-extrabold text-slate-800 underline decoration-double decoration-slate-400 underline-offset-8 whitespace-nowrap">
+                <h1 className="text-3xl font-extrabold text-slate-900 border-b-2 border-slate-300 pb-1 whitespace-nowrap tracking-tight">
                   {statementTitle || '노무내역서'}
                 </h1>
               </div>
 
               <div className="flex-1 min-w-[300px] flex justify-end">
-                <table className="text-[11px] border-collapse bg-white border border-black shadow-sm">
+                <table className="text-[11px] border-separate border-spacing-0 bg-white border border-slate-200 rounded-lg overflow-hidden shadow-sm">
                   <tbody>
                     <tr>
-                      <th className="border border-black bg-amber-100/50 px-3 py-1.5 font-bold text-slate-700 w-[60px] text-center">기간</th>
-                      <td className="border border-black px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[160px] text-center" colSpan={3}>
+                      <th className="border-b border-r border-slate-200 bg-slate-50 px-3 py-1.5 font-bold text-slate-600 w-[60px] text-center">기간</th>
+                      <td className="border-b border-slate-200 px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[160px] text-center" colSpan={3}>
                         {(() => {
                           if (!month) return '-';
                           const [y, m] = month.split('-');
@@ -929,12 +965,12 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       </td>
                     </tr>
                     <tr>
-                      <th className="border border-black bg-amber-100/50 px-3 py-1.5 font-bold text-slate-700 w-[60px] text-center">회사명</th>
-                      <td className="border border-black px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[100px] text-center">
+                      <th className="border-r border-slate-200 bg-slate-50 px-3 py-1.5 font-bold text-slate-600 w-[60px] text-center">회사명</th>
+                      <td className="border-r border-slate-200 px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[100px] text-center">
                         {companyName || '-'}
                       </td>
-                      <th className="border border-black bg-amber-100/50 px-3 py-1.5 font-bold text-slate-700 w-[60px] text-center">현장명</th>
-                      <td className="border border-black px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[100px] text-center">
+                      <th className="border-l border-r border-slate-200 bg-slate-50 px-3 py-1.5 font-bold text-slate-600 w-[60px] text-center">현장명</th>
+                      <td className="px-3 py-1.5 font-bold text-slate-800 bg-white min-w-[100px] text-center">
                         {siteNameInput || '전체 통합'}
                       </td>
                     </tr>
@@ -943,36 +979,38 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               </div>
             </div>
 
-            <table className="w-full border-collapse min-w-[1200px] border border-black">
-              <thead className="bg-slate-100 sticky top-0 z-10 shadow-sm text-[11px] font-bold text-slate-500">
+
+
+            <table className="w-full border-separate border-spacing-0 min-w-[1200px] border border-slate-200 rounded-lg overflow-hidden shrink-0 bg-white shadow-sm">
+              <thead className="sticky top-0 z-10 shadow-sm text-[11px] font-bold">
                 <tr>
-                  <th className="border border-black p-2 w-[40px] text-center" rowSpan={isSplitView ? 2 : 1}>No</th>
-                  <th className="border border-black p-2 w-[95px] text-center text-indigo-600 font-bold bg-slate-50 border-r-2 border-r-slate-300" rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('index')} w-[40px]`} rowSpan={isSplitView ? 2 : 1}>No</th>
+                  <th className={`${getStatementHeaderCellClass('name')} w-[95px] border-r-2 border-slate-300`} rowSpan={isSplitView ? 2 : 1}>
                     <div>성명</div>
                     {showTeamUnderName && <div className="text-[10px] font-normal text-slate-400 mt-1">소속팀</div>}
                   </th>
-                  <th className="border border-black p-2 w-[100px] text-center" rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('ssn')} w-[100px]`} rowSpan={isSplitView ? 2 : 1}>
                     <div>주민등록번호</div>
                     <div className="text-[10px] font-normal text-slate-400">전화번호</div>
                   </th>
-                  <th className="border border-black p-2 w-[300px] text-center text-indigo-600" rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('address')} w-[300px] border-r-2 border-slate-300`} rowSpan={isSplitView ? 2 : 1}>
                     <div>주소</div>
                     {showBankUnderAddress && <div className="text-[10px] font-normal text-slate-400 mt-1">계좌정보</div>}
                   </th>
 
                   {/* Days 1-16 or 1-31 */}
                   {Array.from({ length: isSplitView ? 16 : 31 }).map((_, i) => (
-                    <th key={i} className="border border-black p-1 w-[30px] text-center bg-slate-50 text-[10px] text-slate-400">
+                    <th key={i} className={`${getStatementDayHeaderClass(i + 1)} w-[30px]`}>
                       {i + 1}
                     </th>
                   ))}
 
-                  <th className="border border-black p-2 w-[50px] text-center bg-orange-50 text-slate-700" rowSpan={isSplitView ? 2 : 1}>공수</th>
-                  <th className="border border-black p-2 w-[90px] text-center bg-slate-50 text-slate-600" rowSpan={isSplitView ? 2 : 1}>단가</th>
-                  <th className="border border-black p-2 w-[105px] text-center bg-emerald-50 text-emerald-800" rowSpan={isSplitView ? 2 : 1}>총액</th>
+                  <th className="border border-slate-200 p-2 w-[50px] text-center bg-orange-50 text-slate-700" rowSpan={isSplitView ? 2 : 1}>공수</th>
+                  <th className="border border-slate-200 p-2 w-[90px] text-center bg-slate-50 text-slate-600" rowSpan={isSplitView ? 2 : 1}>단가</th>
+                  <th className="border border-slate-200 p-2 w-[105px] text-center bg-emerald-50 text-emerald-800" rowSpan={isSplitView ? 2 : 1}>총액</th>
 
                   {showBankColumn && (
-                    <th className="border border-black p-2 w-[260px] text-center" rowSpan={isSplitView ? 2 : 1}>
+                    <th className={`${getStatementHeaderCellClass('bank')} w-[260px] border-l-2 border-l-black`} rowSpan={isSplitView ? 2 : 1}>
                       계좌정보 / 지급구분
                       <div className="text-[9px] font-normal text-slate-400 mt-1">(직불·위임 선택)</div>
                     </th>
@@ -982,7 +1020,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   <tr>
                     {/* Days 17-31 */}
                     {Array.from({ length: 15 }).map((_, i) => (
-                      <th key={i + 16} className="border border-black p-1 w-[30px] text-center bg-slate-50 text-[10px] text-slate-400">
+                      <th key={i + 16} className={`${getStatementDayHeaderClass(i + 17)} w-[30px]`}>
                         {i + 17}
                       </th>
                     ))}
@@ -992,9 +1030,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               <tbody>
                 {rows.map((row, idx) => (
                   <React.Fragment key={row.id}>
-                    <tr className="hover:bg-indigo-50/20 group transition-colors border-b border-black font-semibold text-slate-800">
-                      <td className="border-r border-black text-center text-xs font-bold text-slate-400 bg-slate-50/50" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
-                      <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
+                    <tr className="hover:bg-indigo-50/20 group transition-colors border-b border-slate-200 font-semibold text-slate-800">
+                      <td className="border-r border-slate-200 text-center text-xs font-bold text-slate-400 bg-slate-50/50" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
+                      <td className="border-r border-slate-200 p-0" rowSpan={isSplitView ? 2 : 1}>
                         <div className="flex flex-col h-full justify-center">
                           <input type="text" value={row.workerName} onChange={e => updateRow(row.id, { workerName: e.target.value })}
                             className="w-full h-8 min-h-[32px] px-2 text-center text-xs font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 border-b border-transparent" placeholder="이름"
@@ -1006,7 +1044,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           )}
                         </div>
                       </td>
-                      <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
+                      <td className="border-r border-slate-200 p-0" rowSpan={isSplitView ? 2 : 1}>
                         <div className="flex flex-col h-full justify-center">
                           <input type="text" value={row.workerSsn} onChange={e => updateRow(row.id, { workerSsn: e.target.value })}
                             className="w-full h-8 px-2 text-center text-xs font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tighter placeholder-slate-300 border-b border-slate-100" placeholder="800101-1..."
@@ -1016,7 +1054,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           />
                         </div>
                       </td>
-                      <td className={`border-r border-black p-0 ${row.payType === 'delegate' && showBankUnderAddress ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
+                      <td className={`border-r border-slate-200 p-0 ${row.payType === 'delegate' && showBankUnderAddress ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                         <div className="flex flex-col h-full justify-center">
                           <input type="text" value={row.workerAddress} onChange={e => updateRow(row.id, { workerAddress: e.target.value })}
                             className="w-full h-8 min-h-[32px] px-2 text-left text-[11px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 border-b border-transparent" placeholder="상세주소 입력"
@@ -1042,7 +1080,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
                       {/* Days 1-16 or 1-31 */}
                       {row.days.slice(0, isSplitView ? 16 : 31).map((val, dIdx) => (
-                        <td key={dIdx} className="border-r border-black p-0">
+                        <td key={dIdx} className="border-r border-slate-200 p-0">
                           <input type="text" value={val}
                             onChange={e => {
                               const newDays = [...row.days];
@@ -1054,20 +1092,20 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                         </td>
                       ))}
 
-                      <td className="border-r border-black text-center text-xs font-black text-slate-700 bg-orange-50/30" rowSpan={isSplitView ? 2 : 1}>
+                      <td className="border-r border-slate-200 text-center text-xs font-black text-slate-700 bg-orange-50/30" rowSpan={isSplitView ? 2 : 1}>
                         {sumDays(row.days).toFixed(1)}
                       </td>
-                      <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
+                      <td className="border-r border-slate-200 p-0" rowSpan={isSplitView ? 2 : 1}>
                         <input type="text" value={row.unitPrice} onChange={e => updateRow(row.id, { unitPrice: e.target.value })}
                           className="w-full h-full min-h-[36px] px-2 text-right text-xs font-bold text-slate-800 bg-transparent outline-none focus:bg-indigo-50"
                         />
                       </td>
-                      <td className="border-r border-black text-right px-2 text-xs font-bold text-slate-800 bg-emerald-50/30" rowSpan={isSplitView ? 2 : 1}>
+                      <td className="border-r border-slate-200 text-right px-2 text-xs font-bold text-slate-800 bg-emerald-50/30" rowSpan={isSplitView ? 2 : 1}>
                         {getRowTotalAmount(row).toLocaleString()}
                       </td>
 
                       {showBankColumn && (
-                        <td className={`border-black p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
+                        <td className={`border-slate-200 p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                           <div className="flex flex-col gap-1 h-full justify-center">
                             {/* Pay Type */}
                             <div className="flex items-center justify-center gap-4 text-[11px] border-b border-slate-200/50 pb-1 mb-1">
@@ -1120,10 +1158,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       )}
                     </tr>
                     {isSplitView && (
-                      <tr className="hover:bg-indigo-50/20 group transition-colors border-b border-black">
+                      <tr className="hover:bg-indigo-50/20 group transition-colors border-b border-slate-200">
                         {/* Days 17-31 */}
                         {row.days.slice(16, 31).map((val, dIdx) => (
-                          <td key={dIdx + 16} className="border-r border-black p-0">
+                          <td key={dIdx + 16} className="border-r border-slate-200 p-0">
                             <input type="text" value={val}
                               onChange={e => {
                                 const newDays = [...row.days];
@@ -1139,27 +1177,27 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   </React.Fragment>
                 ))}
               </tbody>
-              <tfoot className="bg-slate-100 font-bold text-slate-800 border-t-2 border-black">
+              <tfoot className="bg-slate-50 font-bold text-slate-800 border-t-2 border-slate-300">
                 <tr>
-                  <td colSpan={4} className="border border-black p-2 text-center text-sm" rowSpan={isSplitView ? 2 : 1}>합 계</td>
+                  <td colSpan={4} className="border border-slate-200 p-2 text-center text-sm" rowSpan={isSplitView ? 2 : 1}>합 계</td>
 
                   {/* Footer Days 1-16 or 1-31 */}
                   {statementSummary.dailyTotals.slice(0, isSplitView ? 16 : 31).map((val, idx) => (
-                    <td key={idx} className="border border-black p-1 text-center text-[10px] text-slate-600 bg-slate-50">
+                    <td key={idx} className="border border-slate-200 p-1 text-center text-[10px] text-slate-600 bg-slate-50">
                       {val > 0 ? val.toFixed(1) : ''}
                     </td>
                   ))}
 
-                  <td className="border border-black p-2 text-center text-sm bg-orange-100" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalDays.toFixed(1)}</td>
-                  <td className="border border-black p-2 text-center" rowSpan={isSplitView ? 2 : 1}></td>
-                  <td className="border border-black p-2 text-right text-sm bg-emerald-100" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalAmount.toLocaleString()}</td>
-                  {showBankColumn && <td className="border border-black p-2" rowSpan={isSplitView ? 2 : 1}></td>}
+                  <td className="border border-slate-200 p-2 text-center text-sm bg-orange-100" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalDays.toFixed(1)}</td>
+                  <td className="border border-slate-200 p-2 text-center" rowSpan={isSplitView ? 2 : 1}></td>
+                  <td className="border border-slate-200 p-2 text-right text-sm bg-emerald-100" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalAmount.toLocaleString()}</td>
+                  {showBankColumn && <td className="border border-slate-200 p-2" rowSpan={isSplitView ? 2 : 1}></td>}
                 </tr>
                 {isSplitView && (
                   <tr>
                     {/* Footer Days 17-31 */}
                     {statementSummary.dailyTotals.slice(16, 31).map((val, idx) => (
-                      <td key={idx + 16} className="border border-black p-1 text-center text-[10px] text-slate-600 bg-slate-50">
+                      <td key={idx + 16} className="border border-slate-200 p-1 text-center text-[10px] text-slate-600 bg-slate-50">
                         {val > 0 ? val.toFixed(1) : ''}
                       </td>
                     ))}

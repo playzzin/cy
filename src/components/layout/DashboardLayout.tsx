@@ -524,7 +524,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             closeAll();
                         }
                     }}>
-                        <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                        <ErrorBoundary
+                            FallbackComponent={ErrorFallback}
+                            onReset={() => window.location.reload()}
+                            resetKeys={[location.pathname, location.search]}
+                        >
                             {children}
                         </ErrorBoundary>
                     </main>
@@ -595,7 +599,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         closeAll();
                     }
                 }}>
-                    <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+                    <ErrorBoundary
+                        FallbackComponent={ErrorFallback}
+                        onReset={() => window.location.reload()}
+                        resetKeys={[location.pathname, location.search]}
+                    >
                         {children}
                     </ErrorBoundary>
                 </main>

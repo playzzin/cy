@@ -383,7 +383,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 const blob = await getBlob(ref(storage, worker.fileNameSaved!));
 
                 const ext = worker.fileNameSaved!.split('.').pop() || 'jpg';
-                const filename = `${worker.name}_${worker.idNumber}.${ext}`;
+                const cleanName = (worker.name || '').replace(/[0-9]/g, '');
+                const filename = `${cleanName}_${worker.idNumber}.${ext}`;
 
                 zip.file(filename, blob);
 
@@ -430,7 +431,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
             const ext = worker.fileNameSaved.split('.').pop() || 'jpg';
             const safeIdNumber = worker.idNumber || '미등록';
-            const filename = `${worker.name}_${safeIdNumber}.${ext}`;
+            const cleanName = (worker.name || '').replace(/[0-9]/g, '');
+            const filename = `${cleanName}_${safeIdNumber}.${ext}`;
 
             const downloadUrl = new URL(url);
             downloadUrl.searchParams.set(

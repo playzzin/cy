@@ -119,6 +119,18 @@ const roundToThousand = (value: number): number => {
   return Math.floor(value / 1000) * 1000;
 };
 
+const parseAmountInput = (value: string | number | null | undefined): number => {
+  const digits = String(value ?? '').replace(/,/g, '').replace(/[^\d]/g, '');
+  return digits ? Number(digits) : 0;
+};
+
+const formatAmountInput = (value: string | number | null | undefined): string => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const amount = parseAmountInput(raw);
+  return Number.isFinite(amount) ? amount.toLocaleString('ko-KR') : '';
+};
+
 const extractDayOfMonth = (dateValue: unknown): number | null => {
   if (!dateValue) return null;
   const s = String(dateValue);
@@ -420,7 +432,7 @@ const DailyWageStatementPage: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => {
         if (String(r.unitPrice ?? '').trim().length > 0) return r;
-        return { ...r, unitPrice: String(rate) };
+        return { ...r, unitPrice: formatAmountInput(rate) };
       })
     );
   }, [globalRate]);
@@ -444,7 +456,7 @@ const DailyWageStatementPage: React.FC = () => {
 
   const applyRateToAll = () => {
     const rate = roundToThousand(globalRate);
-    setRows((prev) => prev.map((r) => ({ ...r, unitPrice: String(rate) })));
+    setRows((prev) => prev.map((r) => ({ ...r, unitPrice: formatAmountInput(rate) })));
   };
 
   const updateRow = (rowId: number, patch: Partial<RowState>) => {
@@ -469,8 +481,7 @@ const DailyWageStatementPage: React.FC = () => {
   const getRowTotalDays = (r: RowState): number => sumDays(r.days);
 
   const getRowUnitPrice = (r: RowState): number => {
-    const v = parseFloat(String(r.unitPrice).replace(/,/g, '').trim());
-    return Number.isFinite(v) ? v : 0;
+    return parseAmountInput(r.unitPrice);
   };
 
   const getRowTotalAmount = (r: RowState): number => {
@@ -582,8 +593,7 @@ const DailyWageStatementPage: React.FC = () => {
       const rowDays = sumDays(r.days);
       totalDays += rowDays;
 
-      const unit = parseFloat(String(r.unitPrice).replace(/,/g, '').trim());
-      const unitPrice = Number.isFinite(unit) ? unit : 0;
+      const unitPrice = parseAmountInput(r.unitPrice);
       totalAmount += Math.round(rowDays * unitPrice);
     });
 
@@ -604,11 +614,17 @@ const DailyWageStatementPage: React.FC = () => {
       : '0';
   }, [statementSummary.totalAmount]);
 
+  const statementTitle = useMemo(() => {
+    return selectedTeamId === 'ALL'
+      ? '전체 통합 일급 명세서'
+      : `${selectedTeamLabel} 일급 명세서`;
+  }, [selectedTeamId, selectedTeamLabel]);
+
   const fillRowWithWorker = (rowId: number, worker: Worker | null, workerKey?: string) => {
     const w = worker ?? null;
 
     const unitPriceFromWorker = typeof w?.unitPrice === 'number' ? w.unitPrice : Number((w as any)?.unitPrice || 0);
-    const unitPrice = unitPriceFromWorker > 0 ? String(unitPriceFromWorker) : '';
+    const unitPrice = unitPriceFromWorker > 0 ? formatAmountInput(unitPriceFromWorker) : '';
 
     updateRow(rowId, {
       workerId: w?.id ?? (workerKey ? String(workerKey) : null),
@@ -639,7 +655,7 @@ const DailyWageStatementPage: React.FC = () => {
 
         const unitPrice = String(r.unitPrice ?? '').trim().length > 0
           ? r.unitPrice
-          : (entry.unitPrice && entry.unitPrice > 0 ? String(entry.unitPrice) : r.unitPrice);
+          : (entry.unitPrice && entry.unitPrice > 0 ? formatAmountInput(entry.unitPrice) : r.unitPrice);
 
         return { ...r, days, unitPrice };
       })
@@ -769,6 +785,10 @@ const DailyWageStatementPage: React.FC = () => {
         }
 
         .labor-statement-generator .toolbar-main {
+          display: none;
+        }
+
+        .labor-statement-generator .toolbar-runtime-title {
           font-size: 22px;
           font-weight: 800;
           color: #0f172a;
@@ -1001,6 +1021,19 @@ const DailyWageStatementPage: React.FC = () => {
           border-color: #166534;
         }
 
+        .labor-statement-generator .statement-print-title {
+          position: relative;
+          font-size: 0 !important;
+          line-height: 1;
+        }
+
+        .labor-statement-generator .statement-print-title::after {
+          content: attr(data-title);
+          font-size: 30px;
+          font-weight: 800;
+          color: #0f172a;
+        }
+
         .labor-statement-generator.hide-bank-col {
           --col-bank-active: 0px;
         }
@@ -1064,7 +1097,23 @@ const DailyWageStatementPage: React.FC = () => {
         .labor-statement-generator .header-yellow { background-color: #fffacd; font-weight: bold; }
         .labor-statement-generator .header-blue { background-color: #008080; color: white; font-size: 10px; }
         .labor-statement-generator .header-red { background-color: #a52a2a; color: white; font-size: 10px; }
-        .labor-statement-generator .total-row { background-color: #f08080; font-weight: bold; }
+        .labor-statement-generator .total-row {
+          background-color: #fca5a5;
+          font-weight: 900;
+          font-size: 13px;
+        }
+        .labor-statement-generator .total-row .total-label-cell,
+        .labor-statement-generator .total-row .footer-summary-input {
+          font-size: 14px;
+          font-weight: 900;
+          color: #7f1d1d;
+        }
+        .labor-statement-generator .total-row .footer-total-days {
+          color: #7f1d1d;
+        }
+        .labor-statement-generator .total-row .footer-total-amount {
+          font-size: 15px;
+        }
 
         .labor-statement-generator .cell-delegate { background-color: #ffff00 !important; }
         .labor-statement-generator .cell-delegate input { font-weight: bold; color: #b45309; }
@@ -1115,6 +1164,7 @@ const DailyWageStatementPage: React.FC = () => {
             <div className="toolbar-title">
               <span className="toolbar-eyebrow">DAILY WAGE STATEMENT</span>
               <h1 className="toolbar-main">일급제 명세서 통합 뷰</h1>
+              <div className="toolbar-runtime-title">{statementTitle}</div>
               <p className="toolbar-sub">
                 지급월 {month} · 기간 {startDate} ~ {endDate} · 팀 {selectedTeamLabel}
               </p>
@@ -1197,11 +1247,11 @@ const DailyWageStatementPage: React.FC = () => {
                   <div className="control-body">
                     <div className="month-picker">
                       <input
-                        type="number"
+                        type="text"
                         className="rate-input"
-                        value={globalRate}
-                        step={1000}
-                        onChange={(e) => setGlobalRate(Number(e.target.value || 0))}
+                        value={formatAmountInput(globalRate)}
+                        inputMode="numeric"
+                        onChange={(e) => setGlobalRate(parseAmountInput(e.target.value))}
                       />
                       <button type="button" onClick={applyRateToAll} className="btn-secondary">
                         단가 일괄 적용
@@ -1244,7 +1294,10 @@ const DailyWageStatementPage: React.FC = () => {
         <div className="mb-6 flex flex-col gap-4 lg:grid lg:grid-cols-[350px_1fr_350px] lg:items-end">
           <div className="hidden lg:block" />
           <div className="text-center">
-            <h1 className="text-3xl font-bold underline decoration-4 underline-offset-8 bg-yellow-50 inline-block px-6 py-2 border border-black shadow-sm">
+            <h1
+              className="statement-print-title text-3xl font-bold underline decoration-4 underline-offset-8 bg-yellow-50 inline-block px-6 py-2 border border-black shadow-sm"
+              data-title={statementTitle}
+            >
               노무내역서
             </h1>
           </div>
@@ -1393,11 +1446,11 @@ const DailyWageStatementPage: React.FC = () => {
 
                       <td className="p-0">
                         <input
-                          type="number"
+                          type="text"
                           className="unit-price-input text-right pr-2 font-bold text-slate-800"
-                          step={1000}
+                          inputMode="numeric"
                           value={r.unitPrice}
-                          onChange={(e) => updateRow(r.id, { unitPrice: e.target.value })}
+                          onChange={(e) => updateRow(r.id, { unitPrice: formatAmountInput(e.target.value) })}
                         />
                       </td>
 
@@ -1484,22 +1537,22 @@ const DailyWageStatementPage: React.FC = () => {
 
             <tfoot>
               <tr className="total-row">
-                <td rowSpan={2} colSpan={3} className="text-left font-bold pl-2">
+                <td rowSpan={2} colSpan={3} className="total-label-cell text-left font-bold pl-2">
                   합계
                 </td>
 
                 {Array.from({ length: 15 }, (_, i) => (
                   <td key={`sum-d1-${i}`} className="p-0">
-                    <input type="text" className="day-input font-bold" readOnly value={formatDaysTotal(statementSummary.dayTotals[i] ?? 0)} />
+                    <input type="text" className="day-input font-bold footer-summary-input" readOnly value={formatDaysTotal(statementSummary.dayTotals[i] ?? 0)} />
                   </td>
                 ))}
 
                 <td rowSpan={2} className="p-0">
-                  <input type="text" className="days-total font-bold" readOnly value={formatDaysTotal(statementSummary.totalDays)} />
+                  <input type="text" className="days-total font-bold footer-summary-input footer-total-days" readOnly value={formatDaysTotal(statementSummary.totalDays)} />
                 </td>
 
                 <td className="p-0">
-                  <input type="text" className="unit-price-input text-right pr-2" readOnly value="" />
+                  <input type="text" className="unit-price-input text-right pr-2 footer-summary-input" readOnly value="" />
                 </td>
 
                 <td rowSpan={2} className="bank-col" />
@@ -1510,7 +1563,7 @@ const DailyWageStatementPage: React.FC = () => {
                   <td key={`sum-d2-${i}`} className="p-0">
                     <input
                       type="text"
-                      className="day-input font-bold"
+                      className="day-input font-bold footer-summary-input"
                       readOnly
                       value={formatDaysTotal(statementSummary.dayTotals[i + 15] ?? 0)}
                     />
@@ -1520,7 +1573,7 @@ const DailyWageStatementPage: React.FC = () => {
                 <td className="p-0">
                   <input
                     type="text"
-                    className="total-price-input font-bold text-right pr-2"
+                    className="total-price-input font-bold text-right pr-2 footer-summary-input footer-total-amount"
                     readOnly
                     value={Number.isFinite(statementSummary.totalAmount) ? statementSummary.totalAmount.toLocaleString() : '0'}
                   />
@@ -1546,8 +1599,8 @@ const DailyWageStatementPage: React.FC = () => {
 const unitPriceFromRows = (rows: RowState[], globalRate: number): number => {
   const existing = rows.find((r) => String(r.unitPrice ?? '').trim().length > 0);
   if (!existing) return roundToThousand(globalRate);
-  const v = parseFloat(String(existing.unitPrice).replace(/,/g, '').trim());
-  return Number.isFinite(v) ? v : roundToThousand(globalRate);
+  const unitPrice = parseAmountInput(existing.unitPrice);
+  return Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : roundToThousand(globalRate);
 };
 
 const unitPriceHint = (value: number): string => {

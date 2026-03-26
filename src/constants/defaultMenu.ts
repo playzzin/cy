@@ -79,7 +79,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세무 관리",
                 icon: "fa-file-invoice-dollar",
-                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)"]
+                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)", "매입매출 관리"]
             },
             {
                 text: "노무비 지급명세서 생성기",
@@ -116,7 +116,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세금관리",
                 icon: "fa-file-invoice",
-                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리"]
+                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 관리"]
             },
             {
                 text: "숙소관리",
@@ -167,7 +167,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세금관리",
                 icon: "fa-file-invoice",
-                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리"]
+                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 관리"]
             },
             {
                 text: "숙소관리",

@@ -152,6 +152,7 @@ import ReceivablesManagerPage from './pages/taxinvoice/ReceivablesManagerPage';
 
 import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
+import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 import AccountInquiryPage from './pages/taxinvoice/AccountInquiryPage';
 import { useWorkerTeamIdMigration } from './hooks/useWorkerTeamIdMigration';
@@ -321,6 +322,7 @@ const App: React.FC = () => {
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />
               <Route path="kakao-test" element={<KakaoTestPage />} />

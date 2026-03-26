@@ -56,10 +56,10 @@ const PrintContainer = styled.div`
     margin: 0;
     box-shadow: none;
     border: none;
-    padding: 20mm 15mm; // Slightly adjusted for actual print margin safety
+    padding: 20mm 15mm;
     
     &::before {
-        display: none; // Often distracts in actual print, or keep if desired. Let's keep distinct paper feel.
+        display: none;
     }
   }
 `;
@@ -111,7 +111,7 @@ const Th = styled.th`
   padding: 10px;
   font-weight: 500;
   font-size: 0.95rem;
-  width: 18%; // Fixed label width
+  width: 18%;
   vertical-align: middle;
   text-align: center;
   color: #555;
@@ -134,34 +134,13 @@ const ProofText = styled.div`
         font-size: 1.3rem;
         font-weight: 500;
         letter-spacing: 0.05rem;
-        color: #1f2937; // gray-800
+        color: #1f2937;
     }
 `;
 
-// New Footer area
-const StampArea = styled.div`
-    margin-top: auto;
-    padding-top: 3rem;
-    text-align: center;
-    position: relative;
-    padding-bottom: 2rem;
-`;
-
-const IssueDateText = styled.div`
-  font-family: 'Noto Serif KR', serif;
-  font-size: 1.2rem;
-  gap: 10px;
-`;
-
 const OfficialSeal = styled.div`
-  position: absolute;
-  top: 50%;
-  right: 15%; // Adjust based on layout
-  transform: translateY(-50%);
   width: 80px;
   height: 80px;
-  // border: 3px solid rgba(220, 38, 38, 0.8); // Removed border for image
-  // border-radius: 4px; // Square-ish for Korean seals usually, or keep circle depending on 'seal' style. Example used square radius 4px.
   display: flex;
   align-items: center;
   justify-content: center;
@@ -170,21 +149,21 @@ const OfficialSeal = styled.div`
   font-size: 1.1rem;
   line-height: 1.2;
   text-align: center;
-  // background-color: rgba(255, 255, 255, 0.5); // Transparent white mix
   pointer-events: none;
   font-family: 'Noto Serif KR', serif;
-    
-    img {
+  margin-left: 12px;
+
+  img {
     width: 100%;
     height: 100%;
     object-fit: contain;
-    opacity: 0.8; // Match the seal look
-}
+    opacity: 0.8;
+  }
 
-@media print {
+  @media print {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-}
+  }
 `;
 
 const CompanyInfoGrid = styled.div`
@@ -192,7 +171,7 @@ const CompanyInfoGrid = styled.div`
   padding-top: 1.5rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 40px; // Row gap 10, Col gap 40
+  gap: 10px 40px;
   font-size: 0.9rem;
   color: #555;
   line-height: 1.6;
@@ -228,7 +207,6 @@ const DateText = styled.div`
 `;
 
 const SignatureArea = styled.div`
-  position: relative;
   text-align: center;
   margin-bottom: 4rem;
   display: flex;
@@ -249,7 +227,7 @@ const CompanyNameObj = styled.div`
 const CeoText = styled.div`
   font-size: 1.4rem;
   font-weight: 700;
-  color: #374151; // gray-700
+  color: #374151;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -311,19 +289,9 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
         const formattedEndDate = isServing ? '현재' : formatDate(endDate);
         const todayStr = formatDate(new Date());
 
-        // Mask ID number partially (standard practice: 123456-1******)
-        const maskIdNumber = (idNum?: string) => {
-            if (!idNum) return '';
-            if (idNum.length >= 8) {
-                return idNum.substring(0, 8) + '******';
-            }
-            return idNum;
-        };
-
         // Seal Text Logic
         const getSealText = (compName?: string) => {
             if (!compName) return '회사\n인';
-            // Simple truncation or logic to fit 4 chars 2 lines if possible, or just plain text
             const simpleName = compName.replace('(주)', '').replace('주식회사', '').trim();
             if (simpleName.length <= 4) return simpleName + '\n인';
             return simpleName.substring(0, 2) + '\n' + simpleName.substring(2, 4) + '인';
@@ -401,17 +369,19 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
 
                         <SignatureArea>
                             <CompanyNameObj>{company?.name || '(주) 건설사 명칭'}</CompanyNameObj>
-                            <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
-
-                            <OfficialSeal>
-                                {sealUrl ? (
-                                    <img src={sealUrl} alt="직인" />
-                                ) : (
-                                    getSealText(company?.name).split('\n').map((line, i) => (
-                                        <div key={i}>{line}</div>
-                                    ))
-                                )}
-                            </OfficialSeal>
+                            {/* 도장을 대표이사 줄 우측에 나란히 배치하여 회사명과 겹치지 않도록 함 */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <CeoText>대표이사 {company?.ceoName || 'OOO'} (인)</CeoText>
+                                <OfficialSeal>
+                                    {sealUrl ? (
+                                        <img src={sealUrl} alt="직인" />
+                                    ) : (
+                                        getSealText(company?.name).split('\n').map((line, i) => (
+                                            <div key={i}>{line}</div>
+                                        ))
+                                    )}
+                                </OfficialSeal>
+                            </div>
                         </SignatureArea>
 
                         <CompanyInfoGrid>

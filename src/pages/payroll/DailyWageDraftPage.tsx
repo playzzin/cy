@@ -43,12 +43,17 @@ type DraftRowTotals = {
     reportTotal: number;
 };
 
+type ViewMode = 'daily' | 'monthly';
+
 const DailyWageDraftPage: React.FC = () => {
     const navigate = useNavigate();
 
     const today = new Date().toISOString().split('T')[0];
+    const currentMonth = today.slice(0, 7);
 
     const [selectedDate, setSelectedDate] = useState<string>(today);
+    const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
+    const [viewMode, setViewMode] = useState<ViewMode>('daily');
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
 
     const [teams, setTeams] = useState<TeamWithId[]>([]);
@@ -118,6 +123,32 @@ const DailyWageDraftPage: React.FC = () => {
         },
         [toYyyyMmDd]
     );
+
+    const addMonths = useCallback((baseYearMonth: string, diffMonths: number): string => {
+        const [yyyy, mm] = baseYearMonth.split('-').map((v) => Number(v));
+        const safeDate = new Date(yyyy, (mm ?? 1) - 1, 1);
+        safeDate.setMonth(safeDate.getMonth() + diffMonths);
+        return safeDate.toISOString().slice(0, 7);
+    }, []);
+
+    const getMonthPeriod = useCallback((yearMonth: string): { startDate: string; endDate: string } => {
+        const normalizedYearMonth = toYearMonth(yearMonth);
+        if (!normalizedYearMonth) {
+            return { startDate: '', endDate: '' };
+        }
+
+        const [yyyy, mm] = normalizedYearMonth.split('-').map((value) => Number(value));
+        if (!yyyy || !mm) {
+            return { startDate: '', endDate: '' };
+        }
+
+        const endDate = new Date(yyyy, mm, 0);
+
+        return {
+            startDate: `${normalizedYearMonth}-01`,
+            endDate: toYyyyMmDd(endDate),
+        };
+    }, [toYearMonth, toYyyyMmDd]);
 
     useEffect(() => {
         const loadTeams = async () => {
@@ -261,10 +292,15 @@ const DailyWageDraftPage: React.FC = () => {
         return { isValid, errors };
     }, []);
 
-    const fetchData = useCallback(async (overrideDate?: string) => {
-        const date = (overrideDate ?? selectedDate).trim();
+    const fetchData = useCallback(async (options?: { mode?: ViewMode; date?: string; month?: string }) => {
+        const mode = options?.mode ?? viewMode;
+        const date = (options?.date ?? selectedDate).trim();
+        const month = (options?.month ?? selectedMonth).trim() || toYearMonth(date) || getThisYearMonth();
+        const period = mode === 'monthly'
+            ? getMonthPeriod(month)
+            : { startDate: date, endDate: date };
 
-        if (!date) {
+        if (!period.startDate || !period.endDate) {
             toast.error('조회 날짜를 입력해 주세요.');
             return;
         }
@@ -272,7 +308,7 @@ const DailyWageDraftPage: React.FC = () => {
         setLoading(true);
         try {
             const [reports, allWorkers] = await Promise.all([
-                dailyReportService.getReports(date),
+                dailyReportService.getReports({ startDate: period.startDate, endDate: period.endDate }),
                 manpowerService.getWorkers(),
             ]);
 
@@ -366,7 +402,7 @@ const DailyWageDraftPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [allTeams, normalizeTeamName, selectedDate, validateRow]);
+    }, [allTeams, getMonthPeriod, getThisYearMonth, normalizeTeamName, selectedDate, selectedMonth, toYearMonth, validateRow, viewMode]);
 
     useEffect(() => {
         if (!filtersReady) return;
@@ -414,19 +450,26 @@ const DailyWageDraftPage: React.FC = () => {
         setRows(originalRows.map((row) => ({ ...row })));
     }, [fetchData, originalRows]);
 
-    const resetDraftForDate = useCallback(() => {
+    const resetDraftForSelection = useCallback(() => {
         setRows([]);
         setOriginalRows([]);
         setErrorCount(0);
         setBulkActualDeductionUnitPrice(0);
         setBulkBillingDeductionUnitPrice(0);
         setBulkReportDeductionUnitPrice(0);
-        void fetchData(selectedDate);
-    }, [fetchData, selectedDate]);
+        void fetchData({ mode: viewMode, date: selectedDate, month: selectedMonth });
+    }, [fetchData, selectedDate, selectedMonth, viewMode]);
 
     const formatNumber = useCallback((value: number) => {
         return new Intl.NumberFormat('ko-KR').format(value);
     }, []);
+
+    const currentYearMonth = useMemo(() => {
+        if (viewMode === 'monthly') {
+            return selectedMonth || toYearMonth(selectedDate) || getThisYearMonth();
+        }
+        return toYearMonth(selectedDate) || selectedMonth || getThisYearMonth();
+    }, [getThisYearMonth, selectedDate, selectedMonth, toYearMonth, viewMode]);
 
     const tableColSpan = showAccountColumns ? 11 : 8;
 
@@ -446,24 +489,55 @@ const DailyWageDraftPage: React.FC = () => {
 
             <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 mb-6">
                 <div className="flex flex-wrap gap-3 items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-end gap-3">
                         <div>
+                            <div className="text-xs text-slate-500 mb-1">조회 기준</div>
+                            <div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('daily')}
+                                    className={`px-3 py-1.5 rounded-md text-sm font-semibold transition ${viewMode === 'daily'
+                                        ? 'bg-white text-blue-700 shadow-sm'
+                                        : 'text-slate-600 hover:text-slate-800'
+                                        }`}
+                                >
+                                    일별
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('monthly')}
+                                    className={`px-3 py-1.5 rounded-md text-sm font-semibold transition ${viewMode === 'monthly'
+                                        ? 'bg-white text-blue-700 shadow-sm'
+                                        : 'text-slate-600 hover:text-slate-800'
+                                        }`}
+                                >
+                                    월별
+                                </button>
+                            </div>
+                        </div>
+                        <div className={viewMode === 'monthly' ? 'hidden' : ''}>
                             <div className="text-xs text-slate-500 mb-1">날짜</div>
                             <input
                                 type="date"
                                 value={selectedDate}
-                                onChange={(e) => setSelectedDate(e.target.value)}
+                                onChange={(e) => {
+                                    const next = e.target.value;
+                                    setSelectedDate(next);
+                                    const nextMonth = toYearMonth(next);
+                                    if (nextMonth) setSelectedMonth(nextMonth);
+                                }}
                                 className="h-9 border border-slate-300 rounded-lg px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                             />
                         </div>
-                        <div className="flex gap-2 self-end">
+                        <div className={`flex gap-2 self-end ${viewMode === 'monthly' ? 'hidden' : ''}`}>
                             <button
                                 type="button"
                                 onClick={() => {
                                     const base = selectedDate || today;
                                     const next = addDays(base, -1);
                                     setSelectedDate(next);
-                                    void fetchData(next);
+                                    const nextMonth = toYearMonth(next);
+                                    if (nextMonth) setSelectedMonth(nextMonth);
                                 }}
                                 className="h-9 bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={loading}
@@ -474,7 +548,7 @@ const DailyWageDraftPage: React.FC = () => {
                                 type="button"
                                 onClick={() => {
                                     setSelectedDate(today);
-                                    void fetchData(today);
+                                    setSelectedMonth(currentMonth);
                                 }}
                                 className="h-9 bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
                                 disabled={loading}
@@ -483,6 +557,38 @@ const DailyWageDraftPage: React.FC = () => {
                             </button>
                         </div>
                     </div>
+
+                    {viewMode === 'monthly' && (
+                        <div className="flex items-end gap-2">
+                            <div>
+                                <div className="text-xs text-slate-500 mb-1">조회 월</div>
+                                <input
+                                    type="month"
+                                    value={selectedMonth}
+                                    onChange={(e) => setSelectedMonth(e.target.value)}
+                                    className="h-9 border border-slate-300 rounded-lg px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                />
+                            </div>
+                            <div className="flex gap-2 self-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedMonth((prev) => addMonths(prev || currentMonth, -1))}
+                                    className="h-9 bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled={loading}
+                                >
+                                    이전 달
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedMonth(currentMonth)}
+                                    className="h-9 bg-slate-100 text-slate-700 hover:bg-slate-200 px-3 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    disabled={loading}
+                                >
+                                    이번 달
+                                </button>
+                            </div>
+                        </div>
+                    )}
 
                     <select
                         value={selectedTeamId}
@@ -522,7 +628,7 @@ const DailyWageDraftPage: React.FC = () => {
                     <div className="flex gap-2">
                         <button
                             type="button"
-                            onClick={() => void fetchData()}
+                            onClick={() => void fetchData({ mode: viewMode, date: selectedDate, month: selectedMonth })}
                             className="bg-slate-100 text-slate-600 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             disabled={loading}
                         >
@@ -531,7 +637,7 @@ const DailyWageDraftPage: React.FC = () => {
                         </button>
                         <button
                             type="button"
-                            onClick={resetDraftForDate}
+                            onClick={resetDraftForSelection}
                             className="bg-white text-slate-600 border border-slate-300 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
                             disabled={loading}
                         >
@@ -539,7 +645,7 @@ const DailyWageDraftPage: React.FC = () => {
                         </button>
                         <button
                             type="button"
-                            onClick={() => openLaborCostStatement(toYearMonth(selectedDate) || getThisYearMonth())}
+                            onClick={() => openLaborCostStatement(currentYearMonth)}
                             className="bg-slate-700 text-white hover:bg-slate-800 px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             disabled={loading}
                         >

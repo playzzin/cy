@@ -3692,7 +3692,6 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
         const zip = new JSZip();
-        const folder = zip.folder(`노임명세서_${rangeLabel || currentYearMonth}_${selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name : '전체'}`);
 
         try {
             let processedCount = 0;
@@ -3712,7 +3711,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                 const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
                 if (blob) {
-                    folder?.file(`${item.workerName}_${item.month}.png`, blob);
+                    const cleanWorkerName = (item.workerName || '').replace(/[0-9]/g, '');
+                    zip.file(`${cleanWorkerName}_${item.month}.png`, blob);
                     processedCount++;
                 }
             }

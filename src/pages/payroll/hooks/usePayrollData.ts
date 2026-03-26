@@ -451,6 +451,7 @@ export const usePayrollData = (
         if (!months.includes(reportYM)) return;
 
         const reportSite = siteMap.get(report.siteId);
+        const reportPaymentMethod = String(report.paymentType ?? '').trim();
         const reportTeamId = report.teamId || allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(report.teamName))?.id || '';
         const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
 
@@ -473,7 +474,10 @@ export const usePayrollData = (
           const resolvedTeamName = (w.teamName ?? '').trim() || reportTeamName || '';
           const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
           const unitPrice = rw.unitPrice ?? w.unitPrice ?? 0;
-          const isLabor = reportSite?.paymentMethod === '노무';
+          const entryPaymentMethod = String(rw.paymentType ?? '').trim()
+            || reportPaymentMethod
+            || String(reportSite?.paymentMethod ?? '').trim();
+          const entryIsLabor = entryPaymentMethod === '노무';
 
           const baseParams = {
             workerId: rw.workerId,
@@ -484,12 +488,12 @@ export const usePayrollData = (
             month: reportYM,
             manDay: rw.manDay,
             unitPrice,
-            isLabor,
+            isLabor: entryIsLabor,
             reportDate: report.date,
             siteName: report.siteName || reportSite?.name || '-',
             siteId: report.siteId,
             clientCompanyId: reportSite?.clientCompanyId || '',
-            paymentMethod: reportSite?.paymentMethod || '-'
+            paymentMethod: entryPaymentMethod || '-'
           };
 
           const paymentKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;

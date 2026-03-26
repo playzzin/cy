@@ -50,6 +50,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\uc11c\uba85\uc704\uc784\uc7a5": "/payroll/delegation-letter",
     "\uc704\uc784\uc7a5v2": "/payroll/delegation-letter-v2",
     "\uacc4\uc88c\uc870\ud68c": "/payroll/taxinvoice/account-inquiry",
+    "\ub9e4\uc785\ub9e4\ucd9c \uad00\ub9ac": "/payroll/workbook-ledger",
     "\uc0ac\ubb34\uc2e4 \uad00\ub9ac": "/office/management",
     "\uc77c\ubcf4 \ud1b5\uacc4": "/reports/statistics",
     "\uc77c\uae09\uc81c \uc6d4\uae09\uc81c \ud1b5\uacc4": "/payroll/statistics",

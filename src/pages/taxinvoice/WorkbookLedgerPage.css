@@ -1,0 +1,346 @@
+.workbook-ledger-page {
+    min-height: 100%;
+    background:
+        linear-gradient(180deg, #eef3fb 0%, #f8fafc 100%);
+    padding: 24px;
+    color: #1f2937;
+    font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+}
+
+.workbook-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.workbook-titlebar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.workbook-titlebar h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #172554;
+}
+
+.workbook-titlebar p {
+    margin: 6px 0 0;
+    color: #475569;
+    font-size: 14px;
+}
+
+.workbook-title-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.workbook-toolbar-button,
+.excel-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid rgba(15, 23, 42, 0.18);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.workbook-toolbar-button {
+    background: #ffffff;
+    color: #0f172a;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.excel-button {
+    width: 100%;
+    min-height: 44px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.excel-button-green {
+    background: linear-gradient(180deg, #22663c 0%, #17472a 100%);
+    color: #f8fafc;
+}
+
+.excel-button-blue {
+    background: linear-gradient(180deg, #1f5ea8 0%, #18457a 100%);
+    color: #f8fafc;
+}
+
+.workbook-toolbar-button:hover,
+.excel-button:hover {
+    transform: translateY(-1px);
+}
+
+.workbook-toolbar-button:disabled,
+.excel-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.65;
+    transform: none;
+}
+
+.workbook-tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+
+.workbook-tab {
+    border: 1px solid #cbd5e1;
+    background: linear-gradient(180deg, #dbe4ef 0%, #c8d5e6 100%);
+    color: #334155;
+    padding: 10px 16px;
+    border-radius: 12px 12px 0 0;
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.workbook-tab.active {
+    background: #ffffff;
+    color: #0f172a;
+    border-bottom-color: #ffffff;
+    box-shadow: 0 -1px 0 #ffffff inset;
+}
+
+.workbook-status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 10px 14px;
+    border: 1px solid #dbe2ea;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.85);
+    color: #475569;
+    font-size: 13px;
+}
+
+.workbook-status-bar span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.workbook-sheet {
+    border: 1px solid #d7dde5;
+    border-radius: 18px;
+    background: #ffffff;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+}
+
+.sheet-control-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.sheet-control-table th,
+.sheet-control-table td {
+    border: 1px solid #d8dee7;
+    padding: 8px 10px;
+    font-size: 13px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.sheet-control-table input,
+.sheet-control-table select {
+    width: 100%;
+    height: 34px;
+    border: none;
+    background: transparent;
+    color: #0f172a;
+    font-size: 13px;
+    outline: none;
+}
+
+.sheet-title-dark {
+    background: linear-gradient(180deg, #263240 0%, #19212c 100%);
+    color: #f8fafc;
+    font-size: 18px;
+    font-weight: 800;
+    text-align: center;
+    letter-spacing: 0.02em;
+    padding: 14px 12px;
+}
+
+.sheet-label-yellow {
+    background: #ffd966;
+    font-weight: 700;
+    color: #111827;
+}
+
+.sheet-label-blue {
+    background: #0070c0;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.sheet-label-green {
+    background: #a9d18e;
+    color: #111827;
+    font-weight: 700;
+}
+
+.sheet-label-dark {
+    background: #44546a;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.sheet-value {
+    background: #fff56b;
+}
+
+.sheet-value-light {
+    background: #e2f0d9;
+}
+
+.sheet-spacer {
+    background: #ffffff;
+}
+
+.sheet-button-wrap {
+    padding: 0;
+}
+
+.workbook-hidden-input {
+    display: none;
+}
+
+.input-grid-shell {
+    padding: 14px;
+    border-top: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.workbook-input-grid .handsontable {
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.workbook-input-grid .ht_master .wtHolder,
+.workbook-input-grid .ht_clone_top .wtHolder {
+    background: #ffffff;
+}
+
+.workbook-input-grid .handsontable thead th {
+    background: #222a35;
+    color: #f8fafc;
+    font-weight: 700;
+    border-color: #1a2330;
+}
+
+.workbook-input-grid .handsontable tbody td {
+    border-color: #d7dde7;
+    background: #ffffff;
+}
+
+.workbook-input-grid .handsontable .workbook-readonly-cell {
+    background: #fff2cc;
+    color: #475569;
+}
+
+.workbook-help-text {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px 16px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.sheet-merged-heading {
+    padding: 14px 16px;
+    background: linear-gradient(180deg, #365f91 0%, #27466b 100%);
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.sheet-table-wrapper {
+    overflow: auto;
+}
+
+.sheet-table-wrapper.compact {
+    max-height: 520px;
+}
+
+.sheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.sheet-table th,
+.sheet-table td {
+    border: 1px solid #d7dde7;
+    padding: 8px 10px;
+    font-size: 13px;
+    background: #ffffff;
+}
+
+.sheet-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #2e75b6;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.sheet-table .summary-header th {
+    background: #ffd966;
+    color: #111827;
+}
+
+.sheet-table tfoot td {
+    background: #f8fafc;
+    font-weight: 700;
+}
+
+.sheet-empty-state {
+    padding: 32px 16px !important;
+    color: #64748b;
+    text-align: center;
+}
+
+.align-right {
+    text-align: right;
+}
+
+@media (max-width: 768px) {
+    .workbook-ledger-page {
+        padding: 12px;
+    }
+
+    .workbook-titlebar {
+        flex-direction: column;
+    }
+
+    .sheet-control-table th,
+    .sheet-control-table td,
+    .sheet-table th,
+    .sheet-table td {
+        font-size: 12px;
+        padding: 7px 8px;
+    }
+
+    .sheet-title-dark {
+        font-size: 16px;
+    }
+}
