@@ -22,6 +22,7 @@ export interface WorkbookLedgerEntry {
     paymentAmount: number;
     appliedYear?: number | null;
     appliedMonth?: number | null;
+    matchedEntryId?: string;
     note?: string;
     teamName?: string;
     createdAt?: string;
@@ -75,6 +76,7 @@ const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
     paymentAmount: normalizeNumber(entry.paymentAmount),
     appliedYear: normalizeInteger(entry.appliedYear),
     appliedMonth: normalizeInteger(entry.appliedMonth),
+    matchedEntryId: normalizeText(entry.matchedEntryId) || null,
     note: normalizeText(entry.note),
     teamName: normalizeText(entry.teamName),
     createdBy: normalizeText(entry.createdBy) || null,
@@ -102,6 +104,7 @@ export const workbookLedgerService = {
                 paymentAmount: normalizeNumber(data.paymentAmount),
                 appliedYear: normalizeInteger(data.appliedYear),
                 appliedMonth: normalizeInteger(data.appliedMonth),
+                matchedEntryId: normalizeText(data.matchedEntryId),
                 note: normalizeText(data.note),
                 teamName: normalizeText(data.teamName),
                 createdAt: normalizeText(data.createdAt),
@@ -132,4 +135,3 @@ export const workbookLedgerService = {
         }
     }
 };
-

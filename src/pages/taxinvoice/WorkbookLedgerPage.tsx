@@ -83,6 +83,8 @@ interface SummaryRow {
     partnerName: string;
     siteName: string;
     issueDate: string;
+    appliedYear: number | null;
+    appliedMonth: number | null;
     supplyAmount: number;
     taxAmount: number;
     totalAmount: number;
@@ -115,6 +117,7 @@ const DB_HEADERS = [
     '입금금액',
     '적용연도',
     '적용월',
+    '매칭매출ID',
     '비고',
     '팀명'
 ] as const;
@@ -245,6 +248,10 @@ const getYearFromDate = (date: string): number | null => {
     return Number(normalized.slice(0, 4));
 };
 
+const getMonthEndDate = (year: number, month: number) => {
+    return formatDateInput(new Date(year, month, 0));
+};
+
 const toDbRow = (entry: WorkbookLedgerEntry) => ([
     entry.transactionType,
     entry.date || '',
@@ -258,6 +265,7 @@ const toDbRow = (entry: WorkbookLedgerEntry) => ([
     entry.paymentAmount || '',
     entry.appliedYear ?? '',
     entry.appliedMonth ?? '',
+    entry.matchedEntryId || '',
     entry.note || '',
     entry.teamName || ''
 ]);
@@ -331,6 +339,7 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
         const paymentAmount = toNumberOrNull(readCell(row, '입금금액')) ?? 0;
         const appliedYear = toNumberOrNull(readCell(row, '적용연도')) ?? getYearFromDate(date) ?? fallbackYear;
         const appliedMonth = toNumberOrNull(readCell(row, '적용월')) ?? getMonthFromDate(date);
+        const matchedEntryId = normalizeText(readCell(row, '매칭매출ID'));
         const note = normalizeText(readCell(row, '비고'));
         const teamName = normalizeText(readCell(row, '팀명')) || fallbackTeamName;
 
@@ -347,6 +356,7 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
             paymentAmount,
             appliedYear,
             appliedMonth,
+            matchedEntryId,
             note,
             teamName
         };
@@ -450,6 +460,7 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
 const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
     const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
+    const asOfDate = getMonthEndDate(filter.year, filter.endMonth);
 
     const scopedEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
@@ -461,6 +472,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         })
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
+        .filter((entry) => !asOfDate || entry.date <= asOfDate)
         .sort(sortWorkbookEntries);
 
     type WorkingSummaryRow = SummaryRow & { remainingAmount: number };
@@ -471,6 +483,8 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             partnerName: entry.partnerName,
             siteName: entry.siteName ?? '',
             issueDate: entry.date,
+            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
+            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
             supplyAmount: entry.supplyAmount ?? 0,
             taxAmount: entry.taxAmount ?? 0,
             totalAmount: entry.totalAmount ?? 0,
@@ -482,6 +496,11 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             teamName: entry.teamName ?? ''
         }));
 
+    const invoiceById = new Map<string, WorkingSummaryRow>();
+    invoices.forEach((invoice) => {
+        invoiceById.set(invoice.id, invoice);
+    });
+
     const invoicesByPartner = new Map<string, WorkingSummaryRow[]>();
     invoices.forEach((invoice) => {
         const bucket = invoicesByPartner.get(invoice.partnerName) ?? [];
@@ -489,22 +508,41 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         invoicesByPartner.set(invoice.partnerName, bucket);
     });
 
+    const applyPaymentToInvoice = (invoice: WorkingSummaryRow, paymentAmount: number, paymentDate: string) => {
+        if (paymentAmount <= 0 || invoice.remainingAmount <= 0) return paymentAmount;
+
+        const appliedAmount = Math.min(invoice.remainingAmount, paymentAmount);
+        invoice.settledAmount += appliedAmount;
+        invoice.remainingAmount -= appliedAmount;
+        invoice.outstandingAmount = invoice.remainingAmount;
+        invoice.paymentDate = paymentDate;
+
+        return paymentAmount - appliedAmount;
+    };
+
     scopedEntries
         .filter(isPaymentEntry)
         .forEach((paymentEntry) => {
-            const bucket = invoicesByPartner.get(paymentEntry.partnerName) ?? [];
             let remainingPayment = paymentEntry.paymentAmount ?? 0;
+
+            if (paymentEntry.matchedEntryId) {
+                const matchedInvoice = invoiceById.get(paymentEntry.matchedEntryId);
+                if (matchedInvoice) {
+                    remainingPayment = applyPaymentToInvoice(matchedInvoice, remainingPayment, paymentEntry.date);
+                }
+            }
+
+            const bucket = invoicesByPartner.get(paymentEntry.partnerName) ?? [];
 
             for (const invoice of bucket) {
                 if (remainingPayment <= 0) break;
                 if (invoice.remainingAmount <= 0) continue;
 
-                const appliedAmount = Math.min(invoice.remainingAmount, remainingPayment);
-                invoice.settledAmount += appliedAmount;
-                invoice.remainingAmount -= appliedAmount;
-                invoice.outstandingAmount = invoice.remainingAmount;
-                invoice.paymentDate = paymentEntry.date;
-                remainingPayment -= appliedAmount;
+                if (paymentEntry.matchedEntryId && invoice.id === paymentEntry.matchedEntryId) {
+                    continue;
+                }
+
+                remainingPayment = applyPaymentToInvoice(invoice, remainingPayment, paymentEntry.date);
             }
         });
 
@@ -836,6 +874,98 @@ const WorkbookLedgerPage: React.FC = () => {
         }
     }, [entries]);
 
+    const handleRegisterReceipt = useCallback(async (row: SummaryRow) => {
+        const result = await Swal.fire({
+            title: '입금 등록',
+            html: `
+                <div style="display:grid;gap:12px;text-align:left;">
+                    <div>
+                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">거래처</div>
+                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${row.partnerName}</div>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">미수잔액</div>
+                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(row.outstandingAmount)}원</div>
+                    </div>
+                    <div>
+                        <label for="receipt-date" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">입금일자</label>
+                        <input id="receipt-date" type="date" value="${todayString}" class="swal2-input" style="margin:0;width:100%;" />
+                    </div>
+                    <div>
+                        <label for="receipt-amount" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">입금금액</label>
+                        <input id="receipt-amount" type="number" min="1" max="${Math.max(1, row.outstandingAmount)}" value="${row.outstandingAmount}" class="swal2-input" style="margin:0;width:100%;" />
+                    </div>
+                    <div>
+                        <label for="receipt-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">비고</label>
+                        <input id="receipt-note" type="text" class="swal2-input" style="margin:0;width:100%;" placeholder="입금 메모" />
+                    </div>
+                </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '저장',
+            cancelButtonText: '취소',
+            focusConfirm: false,
+            preConfirm: () => {
+                const date = (document.getElementById('receipt-date') as HTMLInputElement | null)?.value ?? '';
+                const amount = Number((document.getElementById('receipt-amount') as HTMLInputElement | null)?.value ?? '0');
+                const note = (document.getElementById('receipt-note') as HTMLInputElement | null)?.value ?? '';
+
+                if (!date) {
+                    Swal.showValidationMessage('입금일자를 입력하세요.');
+                    return null;
+                }
+
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    Swal.showValidationMessage('입금금액은 0보다 커야 합니다.');
+                    return null;
+                }
+
+                if (amount > row.outstandingAmount) {
+                    Swal.showValidationMessage('입금금액은 현재 미수잔액보다 클 수 없습니다.');
+                    return null;
+                }
+
+                return { date, amount, note };
+            }
+        });
+
+        if (!result.isConfirmed || !result.value) return;
+
+        const { date, amount, note } = result.value;
+        const appliedYear = row.appliedYear ?? getYearFromDate(row.issueDate) ?? getYearFromDate(date);
+        const appliedMonth = row.appliedMonth ?? getMonthFromDate(row.issueDate) ?? getMonthFromDate(date);
+
+        setSaving(true);
+        try {
+            await workbookLedgerService.addEntries([{
+                transactionType: '매출',
+                date,
+                partnerName: row.partnerName,
+                siteName: row.siteName,
+                description: '입금',
+                manDays: null,
+                supplyAmount: 0,
+                taxAmount: 0,
+                totalAmount: 0,
+                paymentAmount: amount,
+                appliedYear,
+                appliedMonth,
+                matchedEntryId: row.id,
+                note: normalizeText(note),
+                teamName: row.teamName,
+                createdBy: currentUser?.uid ?? ''
+            }]);
+
+            await refreshPageData();
+            Swal.fire('저장 완료', `${formatNumber(amount)}원 입금을 등록했습니다.`, 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '입금 등록에 실패했습니다.', 'error');
+        } finally {
+            setSaving(false);
+        }
+    }, [currentUser?.uid, refreshPageData, todayString]);
+
     const applyLedgerFilter = useCallback(() => {
         setLedgerFilter({ ...ledgerDraft });
     }, [ledgerDraft]);
@@ -868,6 +998,8 @@ const WorkbookLedgerPage: React.FC = () => {
             outstandingAmount: accumulator.outstandingAmount + row.outstandingAmount
         }), { supplyAmount: 0, taxAmount: 0, totalAmount: 0, settledAmount: 0, outstandingAmount: 0 });
     }, [summaryRows]);
+
+    const canRegisterReceipt = summaryFilter.mode === '미수금';
 
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
@@ -1043,6 +1175,10 @@ const WorkbookLedgerPage: React.FC = () => {
                     </tr>
                 </tbody>
             </table>
+
+            <div className="workbook-help-text">
+                잔액은 선택한 종료월의 말일 기준으로 계산됩니다. 종료월 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
+            </div>
 
             <div className="sheet-table-wrapper">
                 <table className="sheet-table">
@@ -1352,12 +1488,13 @@ const WorkbookLedgerPage: React.FC = () => {
                             <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '미지급금' : '미수금'}</th>
                             <th>비고</th>
                             <th>팀명</th>
+                            {canRegisterReceipt && <th>처리</th>}
                         </tr>
                     </thead>
                     <tbody>
                         {summaryRows.length === 0 && (
                             <tr>
-                                <td colSpan={12} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">조회 결과가 없습니다.</td>
                             </tr>
                         )}
                         {summaryRows.map((row, index) => (
@@ -1374,6 +1511,18 @@ const WorkbookLedgerPage: React.FC = () => {
                                 <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
                                 <td>{row.note || '-'}</td>
                                 <td>{row.teamName || '-'}</td>
+                                {canRegisterReceipt && (
+                                    <td>
+                                        <button
+                                            type="button"
+                                            className="workbook-toolbar-button"
+                                            onClick={() => handleRegisterReceipt(row)}
+                                            disabled={saving || row.outstandingAmount <= 0}
+                                        >
+                                            입금
+                                        </button>
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>
@@ -1389,7 +1538,7 @@ const WorkbookLedgerPage: React.FC = () => {
                             <td />
                             <td className="align-right">{formatNumber(summaryTotals.settledAmount)}</td>
                             <td className="align-right">{formatNumber(summaryTotals.outstandingAmount)}</td>
-                            <td colSpan={2} />
+                            <td colSpan={canRegisterReceipt ? 3 : 2} />
                         </tr>
                     </tfoot>
                 </table>
