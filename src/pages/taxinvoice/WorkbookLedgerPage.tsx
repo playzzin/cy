@@ -65,8 +65,10 @@ interface LedgerFilter {
 interface SummaryFilter {
     startYear: number;
     startMonth: number;
+    startDay: number;
     endYear: number;
     endMonth: number;
+    endDay: number;
     teamName: string;
     mode: SummaryMode;
     partnerName: string;
@@ -280,6 +282,22 @@ const getYearFromDate = (date: string): number | null => {
     const normalized = normalizeDate(date);
     if (!normalized) return null;
     return Number(normalized.slice(0, 4));
+};
+
+const buildDateFromParts = (year: number, month: number, day: number) => {
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+    if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+
+    const candidate = new Date(year, month - 1, day);
+    if (
+        candidate.getFullYear() !== year ||
+        candidate.getMonth() !== month - 1 ||
+        candidate.getDate() !== day
+    ) {
+        return '';
+    }
+
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 };
 
 const getMonthEndDate = (year: number, month: number) => {
@@ -513,28 +531,22 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
 const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
     const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
-    const asOfDate = getMonthEndDate(filter.endYear, filter.endMonth);
-    const startPeriod = getPeriodCode(filter.startYear, filter.startMonth);
-    const endPeriod = getPeriodCode(filter.endYear, filter.endMonth);
+    const startDate = buildDateFromParts(filter.startYear, filter.startMonth, filter.startDay);
+    const endDate = buildDateFromParts(filter.endYear, filter.endMonth, filter.endDay);
 
-    const scopedEntries = entries
+    if (!startDate || !endDate) return [];
+
+    const invoiceEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
-        .filter((entry) => {
-            const year = entry.appliedYear ?? getYearFromDate(entry.date);
-            const month = entry.appliedMonth ?? getMonthFromDate(entry.date);
-            const periodCode = getPeriodCode(year, month);
-            if (!periodCode || !startPeriod || !endPeriod) return false;
-            return periodCode >= startPeriod && periodCode <= endPeriod;
-        })
+        .filter(isInvoiceEntry)
+        .filter((entry) => entry.date >= startDate && entry.date <= endDate)
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
-        .filter((entry) => !asOfDate || entry.date <= asOfDate)
         .sort(sortWorkbookEntries);
 
     type WorkingSummaryRow = SummaryRow & { remainingAmount: number };
-    const invoices = scopedEntries
-        .filter(isInvoiceEntry)
+    const invoices = invoiceEntries
         .map((entry) => ({
             id: entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`,
             partnerName: entry.partnerName,
@@ -565,6 +577,15 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         invoicesByPartner.set(invoice.partnerName, bucket);
     });
 
+    const paymentEntries = entries
+        .filter((entry) => entry.transactionType === transactionType)
+        .filter(isPaymentEntry)
+        .filter((entry) => entry.date <= endDate)
+        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
+        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
+        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
+        .sort(sortWorkbookEntries);
+
     const applyPaymentToInvoice = (invoice: WorkingSummaryRow, paymentAmount: number, paymentDate: string) => {
         if (paymentAmount <= 0 || invoice.remainingAmount <= 0) return paymentAmount;
 
@@ -579,9 +600,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         return paymentAmount - appliedAmount;
     };
 
-    scopedEntries
-        .filter(isPaymentEntry)
-        .forEach((paymentEntry) => {
+    paymentEntries.forEach((paymentEntry) => {
             let remainingPayment = paymentEntry.paymentAmount ?? 0;
 
             if (paymentEntry.matchedEntryId) {
@@ -589,6 +608,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
                 if (matchedInvoice) {
                     remainingPayment = applyPaymentToInvoice(matchedInvoice, remainingPayment, paymentEntry.date);
                 }
+            }
+
+            if (paymentEntry.date < startDate) {
+                return;
             }
 
             const bucket = invoicesByPartner.get(paymentEntry.partnerName) ?? [];
@@ -623,6 +646,8 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const today = useMemo(() => new Date(), []);
     const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+    const currentDay = today.getDate();
     const todayString = formatDateInput(today);
 
     const [activeTab, setActiveTab] = useState<WorkbookTab>('input');
@@ -661,8 +686,10 @@ const WorkbookLedgerPage: React.FC = () => {
     const [summaryDraft, setSummaryDraft] = useState<SummaryFilter>({
         startYear: currentYear,
         startMonth: 1,
+        startDay: 1,
         endYear: currentYear,
-        endMonth: 12,
+        endMonth: currentMonth,
+        endDay: currentDay,
         teamName: '',
         mode: '미수금',
         partnerName: '',
@@ -671,8 +698,10 @@ const WorkbookLedgerPage: React.FC = () => {
     const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>({
         startYear: currentYear,
         startMonth: 1,
+        startDay: 1,
         endYear: currentYear,
-        endMonth: 12,
+        endMonth: currentMonth,
+        endDay: currentDay,
         teamName: '',
         mode: '미수금',
         partnerName: '',
@@ -1578,25 +1607,34 @@ const WorkbookLedgerPage: React.FC = () => {
             ...summaryDraft,
             startYear: summaryDraft.startYear || currentYear,
             startMonth: summaryDraft.startMonth || 1,
+            startDay: summaryDraft.startDay || 1,
             endYear: summaryDraft.endYear || currentYear,
-            endMonth: summaryDraft.endMonth || 12
+            endMonth: summaryDraft.endMonth || currentMonth,
+            endDay: summaryDraft.endDay || currentDay
         };
 
-        const startPeriod = getPeriodCode(draft.startYear, draft.startMonth) ?? 0;
-        const endPeriod = getPeriodCode(draft.endYear, draft.endMonth) ?? 0;
+        const startDate = buildDateFromParts(draft.startYear, draft.startMonth, draft.startDay);
+        const endDate = buildDateFromParts(draft.endYear, draft.endMonth, draft.endDay);
+
+        if (!startDate || !endDate) {
+            Swal.fire('입력 확인', '시작일과 종료일을 올바른 연/월/일로 입력해 주세요.', 'warning');
+            return;
+        }
 
         setSummaryFilter(
-            startPeriod <= endPeriod
+            startDate <= endDate
                 ? draft
                 : {
                     ...draft,
                     startYear: draft.endYear,
                     startMonth: draft.endMonth,
+                    startDay: draft.endDay,
                     endYear: draft.startYear,
-                    endMonth: draft.startMonth
+                    endMonth: draft.startMonth,
+                    endDay: draft.startDay
                 }
         );
-    }, [currentYear, summaryDraft]);
+    }, [currentDay, currentMonth, currentYear, summaryDraft]);
 
     const ledgerRows = useMemo(() => buildLedgerRows(entries, ledgerFilter), [entries, ledgerFilter]);
     const summaryRows = useMemo(() => buildSummaryRows(entries, summaryFilter), [entries, summaryFilter]);
@@ -1830,7 +1868,7 @@ const WorkbookLedgerPage: React.FC = () => {
             </table>
 
             <div className="workbook-help-text">
-                잔액은 선택한 종료연도/종료월의 말일 기준으로 계산됩니다. 종료시점 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
+                잔액은 선택한 종료일 기준으로 계산됩니다. 종료일 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
             </div>
 
             <div className="sheet-table-wrapper">
@@ -2270,7 +2308,17 @@ const WorkbookLedgerPage: React.FC = () => {
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startMonth: Number(event.target.value) || 1 }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={8} />
+                            <th className="sheet-label-blue">시작일</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={summaryDraft.startDay}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDay: Number(event.target.value) || 1 }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
                         </tr>
                         <tr>
                             <th className="sheet-label-dark">종료연도</th>
@@ -2293,7 +2341,17 @@ const WorkbookLedgerPage: React.FC = () => {
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endMonth: Number(event.target.value) || 12 }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={8} />
+                            <th className="sheet-label-blue">종료일</th>
+                            <td className="sheet-value">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={summaryDraft.endDay}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDay: Number(event.target.value) || currentDay }))}
+                                />
+                            </td>
+                            <td className="sheet-spacer" colSpan={6} />
                         </tr>
                         <tr>
                             <th className="sheet-label-green">팀 명</th>
