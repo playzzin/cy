@@ -524,6 +524,12 @@
     text-align: right;
 }
 
+.summary-sheet-table > tbody > tr:nth-child(4),
+.summary-sheet-table > tbody > tr:nth-child(5),
+.summary-sheet-table > tbody > tr:nth-child(6) {
+    display: none;
+}
+
 @media (max-width: 768px) {
     .workbook-ledger-page {
         padding: 12px;
