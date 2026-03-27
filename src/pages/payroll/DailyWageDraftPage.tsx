@@ -218,7 +218,7 @@ const DailyWageDraftPage: React.FC = () => {
         }
 
         return { allowedTeamIds, allowedTeamNameNormalized };
-    }, [allTeams, normalizeTeamName, selectedTeamId]);
+    }, [allTeams, normalizeTeamName, selectedTeamId, teams]);
 
     const scopedRows = useMemo(() => {
         if (teamScope.allowedTeamIds.size === 0 && teamScope.allowedTeamNameNormalized.size === 0) {
@@ -229,7 +229,13 @@ const DailyWageDraftPage: React.FC = () => {
             const normalized = normalizeTeamName(row.teamName);
             return normalized ? teamScope.allowedTeamNameNormalized.has(normalized) : false;
         });
-    }, [normalizeTeamName, rows, teamScope.allowedTeamIds, teamScope.allowedTeamNameNormalized]);
+    }, [
+        normalizeTeamName,
+        rows,
+        selectedTeamId,
+        teamScope.allowedTeamIds,
+        teamScope.allowedTeamNameNormalized,
+    ]);
 
     const filteredRows = scopedRows;
 
@@ -341,7 +347,7 @@ const DailyWageDraftPage: React.FC = () => {
                                 ? reportWorker.payType
                                 : workerDetails.salaryModel || workerDetails.payType) ?? '';
 
-                    if (snapshotSalaryModel && snapshotSalaryModel !== '일급제') return;
+                    // snapshotSalaryModel 필터 제거 (모든 작업자를 대상으로 함)
 
                     const originalUnitPrice = reportWorker.unitPrice ?? workerDetails.unitPrice ?? 0;
                     const actualUnitPrice = originalUnitPrice;
@@ -385,13 +391,13 @@ const DailyWageDraftPage: React.FC = () => {
 
             setRows(nextRows);
             setOriginalRows(nextRows.map((row) => ({ ...row })));
-        setErrorCount(nextErrorCount);
+            setErrorCount(nextErrorCount);
 
             if (nextRows.length === 0) {
                 toast.info('조회 결과가 없습니다.');
             }
         } catch (error) {
-            console.error('Fetch error:', error);
+            console.error(error);
             toast.error('데이터를 불러오는 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
