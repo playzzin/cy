@@ -664,7 +664,6 @@ export const menuServiceV11 = {
             const config = normalizeSiteDataType(baseConfig);
             let changed = false;
 
-            changed = ensureMenuChild(config, '현황관리', '전국페이지') || changed;
             changed = ensureWorkbookLedgerMenus(config) || changed;
 
             if (changed) {

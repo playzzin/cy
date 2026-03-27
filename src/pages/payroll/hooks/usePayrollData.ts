@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
-import { siteService, Site } from '../../../services/siteService';
 import { teamService, Team } from '../../../services/teamService';
 import {
   payrollConfigService,
@@ -21,6 +20,46 @@ const normalizeTeamName = (value: string | undefined): string => {
     .replace(/\(.*?\)/g, '')
     .replace(/\s+/g, '')
     .trim();
+};
+
+const normalizeCategoryKey = (value: unknown): string => {
+  return String(value ?? '')
+    .replace(/\s+/g, '')
+    .trim();
+};
+
+const isLaborWorkEntryBySnapshot = (params: {
+  paymentType?: unknown;
+  siteType?: unknown;
+  salaryModel?: unknown;
+}): boolean => {
+  const paymentKey = normalizeCategoryKey(params.paymentType);
+  if (paymentKey.includes('노무')) return true;
+  if (paymentKey.includes('계산서') || paymentKey.includes('계산')) return false;
+
+  const siteTypeKey = normalizeCategoryKey(params.siteType);
+  if (siteTypeKey.includes('직영')) return true;
+  if (siteTypeKey.includes('도급') || siteTypeKey.includes('지원')) return false;
+
+  const salaryModelKey = normalizeCategoryKey(params.salaryModel);
+  if (salaryModelKey.includes('지원')) return false;
+
+  return true;
+};
+
+const resolveSnapshotPaymentMethod = (params: {
+  paymentType?: unknown;
+  siteType?: unknown;
+  salaryModel?: unknown;
+}): string => {
+  const paymentType = String(params.paymentType ?? '').trim();
+  if (paymentType) {
+    const paymentKey = normalizeCategoryKey(paymentType);
+    if (paymentKey.includes('노무')) return '노무';
+    if (paymentKey.includes('계산서') || paymentKey.includes('계산')) return '계산서';
+    return paymentType;
+  }
+  return isLaborWorkEntryBySnapshot(params) ? '노무' : '계산서';
 };
 
 // Helper: Build month range [YYYY-MM, ...]
@@ -317,9 +356,8 @@ export const usePayrollData = (
     setLoading(true);
     try {
       // 1. 기초 데이터 페칭
-      const [allWorkers, allSites, allTeams, config] = await Promise.all([
+      const [allWorkers, allTeams, config] = await Promise.all([
         manpowerService.getWorkers(),
-        siteService.getSites(),
         teamService.getTeams(),
         payrollConfigService.getConfig()
       ]);
@@ -327,14 +365,6 @@ export const usePayrollData = (
 
       const workerMap = new Map<string, Worker>();
       allWorkers.forEach(w => { if (w.id) workerMap.set(w.id, w); });
-
-      const siteMap = new Map<string, Site>();
-      allSites.forEach(s => {
-        const id = (s.id ?? '').trim();
-        if (id) siteMap.set(id, s);
-        const legacyId = (s.legacyId ?? '').trim();
-        if (legacyId && !siteMap.has(legacyId)) siteMap.set(legacyId, s);
-      });
 
       const teamMap = new Map<string, Team>();
       allTeams.forEach(t => { if (t.id) teamMap.set(t.id, t); });
@@ -439,6 +469,8 @@ export const usePayrollData = (
           siteName: params.siteName,
           clientCompanyId: params.clientCompanyId,
           isLaborSite: params.isLabor,
+          siteType: params.siteType,
+          salaryModel: params.salaryModel,
           manDay: params.manDay,
           unitPrice: params.unitPrice,
           amount: entryAmount,
@@ -450,8 +482,8 @@ export const usePayrollData = (
         const reportYM = (report.date ?? '').slice(0, 7);
         if (!months.includes(reportYM)) return;
 
-        const reportSite = siteMap.get(report.siteId);
-        const reportPaymentMethod = String(report.paymentType ?? '').trim();
+        const reportPaymentType = String(report.paymentType ?? '').trim();
+        const reportSiteType = String(report.siteType ?? '').trim();
         const reportTeamId = report.teamId || allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(report.teamName))?.id || '';
         const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
 
@@ -474,9 +506,13 @@ export const usePayrollData = (
           const resolvedTeamName = (w.teamName ?? '').trim() || reportTeamName || '';
           const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
           const unitPrice = rw.unitPrice ?? w.unitPrice ?? 0;
-          const entryPaymentMethod = String(rw.paymentType ?? '').trim()
-            || reportPaymentMethod
-            || String(reportSite?.paymentMethod ?? '').trim();
+          const entrySiteType = String(rw.siteType ?? '').trim() || reportSiteType;
+          const entryPaymentType = String(rw.paymentType ?? '').trim() || reportPaymentType;
+          const entryPaymentMethod = resolveSnapshotPaymentMethod({
+            paymentType: entryPaymentType,
+            siteType: entrySiteType,
+            salaryModel,
+          });
           const entryIsLabor = entryPaymentMethod === '노무';
 
           const baseParams = {
@@ -490,10 +526,12 @@ export const usePayrollData = (
             unitPrice,
             isLabor: entryIsLabor,
             reportDate: report.date,
-            siteName: report.siteName || reportSite?.name || '-',
+            siteName: String(report.siteName ?? '').trim() || '-',
             siteId: report.siteId,
-            clientCompanyId: reportSite?.clientCompanyId || '',
-            paymentMethod: entryPaymentMethod || '-'
+            clientCompanyId: String(report.companyId ?? '').trim(),
+            paymentMethod: entryPaymentMethod || '-',
+            siteType: entrySiteType,
+            salaryModel,
           };
 
           const paymentKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;

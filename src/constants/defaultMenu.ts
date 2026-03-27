@@ -13,7 +13,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "현황관리",
                 icon: "fa-chart-simple",
-                sub: ["통합 현황판", "전국페이지", "인원전체내역조회"]
+                sub: ["통합 현황판", "인원전체내역조회"]
             },
             {
                 text: "통합DB", icon: "fa-circle-info", path: "/database/manpower-db"
@@ -156,7 +156,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "대표",
         icon: "fa-crown",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -190,7 +190,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저1",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -204,7 +204,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저2",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -218,7 +218,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저3",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -232,7 +232,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "팀장",
         icon: "fa-user-gear",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -246,7 +246,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "반장",
         icon: "fa-users",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -260,7 +260,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "일반",
         icon: "fa-user",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -274,7 +274,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "신규",
         icon: "fa-user-plus",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {

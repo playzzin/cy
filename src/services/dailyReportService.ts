@@ -217,8 +217,6 @@ export const dailyReportService = {
         const rows: DailyReportWorkerRow[] = [];
         reports.forEach(report => {
             const site = report.siteId ? siteMap.get(report.siteId) : undefined;
-            const fallbackSiteType = site?.siteType || '';
-            const fallbackPaymentType = site?.paymentMethod || '';
 
             report.workers.forEach(worker => {
                 const unitPrice = worker.unitPrice || 0;
@@ -241,8 +239,8 @@ export const dailyReportService = {
                     payType: worker.payType,
                     salaryModel: worker.salaryModel,
                     workContent: worker.workContent,
-                    siteType: worker.siteType || report.siteType || fallbackSiteType || '',
-                    paymentType: worker.paymentType || report.paymentType || fallbackPaymentType || '',
+                    siteType: worker.siteType || report.siteType || '',
+                    paymentType: worker.paymentType || report.paymentType || '',
                     createdAt: report.createdAt,
                     workerTeamName: worker.workerTeamName,
                     workerTeamId: worker.teamId,
@@ -487,5 +485,4 @@ export const dailyReportService = {
         await dailyReportService._updateStats(tempReport, 1);
     },
 };
-
 

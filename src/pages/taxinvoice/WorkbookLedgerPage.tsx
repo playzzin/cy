@@ -142,6 +142,13 @@ interface DatabaseDisplayRow {
     nested: boolean;
 }
 
+type DbSortField = 'date' | 'partnerName' | 'amount';
+
+interface DbSortState {
+    field: DbSortField;
+    direction: 'asc' | 'desc';
+}
+
 interface DbFilterState {
     transactionType: string;
     date: string;
@@ -515,11 +522,46 @@ const sortWorkbookEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEnt
     return (left.id ?? '').localeCompare(right.id ?? '', 'en');
 };
 
-const sortSummaryRowsByRecent = (left: SummaryRow, right: SummaryRow) => {
-    const dateCompare = (right.issueDate ?? '').localeCompare(left.issueDate ?? '', 'en');
+const getDbEntrySortAmount = (entry: WorkbookLedgerEntry) => {
+    if ((entry.totalAmount ?? 0) !== 0) return entry.totalAmount ?? 0;
+    return entry.paymentAmount ?? 0;
+};
+
+const compareDbEntriesBySortState = (
+    left: WorkbookLedgerEntry,
+    right: WorkbookLedgerEntry,
+    sortState: DbSortState
+) => {
+    const fallbackCompare = sortWorkbookEntries(left, right);
+    const direction = sortState.direction === 'asc' ? 1 : -1;
+
+    if (sortState.field === 'date') {
+        return fallbackCompare * direction;
+    }
+
+    if (sortState.field === 'partnerName') {
+        const nameCompare = (left.partnerName ?? '').localeCompare(right.partnerName ?? '', 'ko');
+        if (nameCompare !== 0) return nameCompare * direction;
+
+        const siteCompare = (left.siteName ?? '').localeCompare(right.siteName ?? '', 'ko');
+        if (siteCompare !== 0) return siteCompare * direction;
+
+        return fallbackCompare;
+    }
+
+    const amountCompare = getDbEntrySortAmount(left) - getDbEntrySortAmount(right);
+    if (amountCompare !== 0) {
+        return amountCompare * direction;
+    }
+
+    return fallbackCompare;
+};
+
+const sortSummaryRowsByDate = (left: SummaryRow, right: SummaryRow) => {
+    const dateCompare = (left.issueDate ?? '').localeCompare(right.issueDate ?? '', 'en');
     if (dateCompare !== 0) return dateCompare;
 
-    return (right.id ?? '').localeCompare(left.id ?? '', 'en');
+    return (left.id ?? '').localeCompare(right.id ?? '', 'en');
 };
 
 const matchesFilter = (source: string | undefined, keyword: string) => {
@@ -613,7 +655,7 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
     let runningBalance = 0;
 
-    const ledgerRows = scopedEntries.map((entry) => {
+    return scopedEntries.map((entry) => {
         const transactionAmount = entry.totalAmount ?? 0;
         const paymentAmount = entry.paymentAmount ?? 0;
         runningBalance += transactionAmount - paymentAmount;
@@ -630,8 +672,6 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
             teamName: entry.teamName ?? ''
         };
     });
-
-    return ledgerRows.reverse();
 };
 
 const buildReceiptHistorySettlementEntries = (
@@ -758,15 +798,20 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
         .sort(sortWorkbookEntries);
 
-    const applyPaymentToInvoice = (invoice: WorkingSummaryRow, paymentAmount: number, paymentDate: string) => {
+    const applyPaymentToInvoice = (
+        invoice: WorkingSummaryRow,
+        paymentAmount: number,
+        paymentDate: string,
+        options?: { recordDate?: boolean }
+    ) => {
         if (paymentAmount <= 0 || invoice.remainingAmount <= 0) return paymentAmount;
 
         const appliedAmount = Math.min(invoice.remainingAmount, paymentAmount);
         invoice.settledAmount += appliedAmount;
         invoice.remainingAmount -= appliedAmount;
         invoice.outstandingAmount = invoice.remainingAmount;
-        if (paymentDate && !invoice.paymentDates.includes(paymentDate)) {
-            invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => right.localeCompare(left, 'en'));
+        if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDates.includes(paymentDate)) {
+            invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
         }
 
         return paymentAmount - appliedAmount;
@@ -811,6 +856,74 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         return null;
     };
 
+    const applyLegacyPartnerFifo = (paymentEntry: WorkbookLedgerEntry, paymentAmount: number) => {
+        const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
+        if (!partnerKey || paymentAmount <= 0) return false;
+
+        const paymentDate = normalizeDate(paymentEntry.date);
+        const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
+        const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
+        const appliedYear = paymentEntry.appliedYear ?? null;
+        const appliedMonth = paymentEntry.appliedMonth ?? null;
+        const partnerInvoices = invoicesByPartner.get(partnerKey) ?? [];
+
+        const eligibleInvoices = partnerInvoices.filter((invoice) => {
+            if (invoice.remainingAmount <= 0) return false;
+            if (paymentDate && invoice.issueDate > paymentDate) return false;
+            return true;
+        });
+
+        if (!eligibleInvoices.length) return false;
+
+        const filterInvoices = (
+            source: WorkingSummaryRow[],
+            predicate: (invoice: WorkingSummaryRow) => boolean
+        ) => source.filter(predicate);
+
+        const matchesSite = (invoice: WorkingSummaryRow) => (
+            !normalizedSiteName || normalizeText(invoice.siteName).toLowerCase() === normalizedSiteName
+        );
+        const matchesTeam = (invoice: WorkingSummaryRow) => (
+            !normalizedTeamName || normalizeText(invoice.teamName).toLowerCase() === normalizedTeamName
+        );
+        const matchesPeriod = (invoice: WorkingSummaryRow) => (
+            (appliedYear === null || invoice.appliedYear === appliedYear) &&
+            (appliedMonth === null || invoice.appliedMonth === appliedMonth)
+        );
+
+        const buckets: WorkingSummaryRow[][] = [
+            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesTeam(invoice) && matchesPeriod(invoice)),
+            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesTeam(invoice)),
+            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesPeriod(invoice)),
+            filterInvoices(eligibleInvoices, (invoice) => matchesTeam(invoice) && matchesPeriod(invoice)),
+            filterInvoices(eligibleInvoices, matchesSite),
+            filterInvoices(eligibleInvoices, matchesTeam),
+            filterInvoices(eligibleInvoices, matchesPeriod),
+            eligibleInvoices
+        ];
+
+        let remainingAmount = paymentAmount;
+        let applied = false;
+        const visitedInvoiceIds = new Set<string>();
+
+        for (const bucket of buckets) {
+            for (const invoice of bucket) {
+                if (remainingAmount <= 0) break;
+                if (visitedInvoiceIds.has(invoice.id)) continue;
+                visitedInvoiceIds.add(invoice.id);
+                const nextRemaining = applyPaymentToInvoice(invoice, remainingAmount, paymentEntry.date, { recordDate: false });
+                if (nextRemaining !== remainingAmount) {
+                    applied = true;
+                    remainingAmount = nextRemaining;
+                }
+            }
+
+            if (remainingAmount <= 0) break;
+        }
+
+        return applied;
+    };
+
     paymentEntries.forEach((paymentEntry) => {
         const paymentAmount = paymentEntry.paymentAmount ?? 0;
         if (paymentAmount <= 0) return;
@@ -834,7 +947,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry);
         if (legacyMatchedInvoice) {
             applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date);
+            return;
         }
+
+        applyLegacyPartnerFifo(paymentEntry, paymentAmount);
     });
 
     adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
@@ -852,7 +968,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry);
         if (legacyMatchedInvoice) {
             applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date);
+            return;
         }
+
+        applyLegacyPartnerFifo(adjustmentEntry, adjustmentAmount);
     });
 
     const finalizedPositiveRowsById = new Map<string, SummaryRow>();
@@ -876,10 +995,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     if (filter.mode === '미수금' || filter.mode === '미지급금') {
         return finalizedRows
             .filter((row) => row.outstandingAmount > 0)
-            .sort(sortSummaryRowsByRecent);
+            .sort(sortSummaryRowsByDate);
     }
 
-    return finalizedRows.sort(sortSummaryRowsByRecent);
+    return finalizedRows.sort(sortSummaryRowsByDate);
 };
 
 const WorkbookLedgerPage: React.FC = () => {
@@ -951,6 +1070,7 @@ const WorkbookLedgerPage: React.FC = () => {
         siteName: ''
     });
     const [dbFilter, setDbFilter] = useState<DbFilterState>(emptyDbFilter);
+    const [dbSort, setDbSort] = useState<DbSortState>({ field: 'date', direction: 'asc' });
     const [dbPage, setDbPage] = useState(1);
     const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
     const [expandedDbEntryIds, setExpandedDbEntryIds] = useState<string[]>([]);
@@ -2028,10 +2148,10 @@ const WorkbookLedgerPage: React.FC = () => {
     );
 
     const ledgerTotals = useMemo(() => {
-        return ledgerRows.reduce((accumulator, row, index) => ({
+        return ledgerRows.reduce((accumulator, row) => ({
             transactionAmount: accumulator.transactionAmount + row.transactionAmount,
             paymentAmount: accumulator.paymentAmount + row.paymentAmount,
-            balance: index === 0 ? row.balance : accumulator.balance
+            balance: row.balance
         }), { transactionAmount: 0, paymentAmount: 0, balance: 0 });
     }, [ledgerRows]);
 
@@ -2127,6 +2247,23 @@ const WorkbookLedgerPage: React.FC = () => {
                 </tr>
             `)
             .join('');
+
+        const totalRowHtml = `
+            <tr class="summary-total-row">
+                <td></td>
+                <td>합계</td>
+                <td></td>
+                <td></td>
+                <td class="align-right">${formatNumber(summaryTotals.supplyAmount)}</td>
+                <td class="align-right">${formatNumber(summaryTotals.taxAmount)}</td>
+                <td class="align-right">${formatNumber(summaryTotals.totalAmount)}</td>
+                <td></td>
+                <td class="align-right">${formatNumber(summaryTotals.settledAmount)}</td>
+                <td class="align-right">${formatNumber(summaryTotals.outstandingAmount)}</td>
+                <td></td>
+                <td></td>
+            </tr>
+        `;
 
         setPrintingSummary(true);
 
@@ -2240,7 +2377,7 @@ const WorkbookLedgerPage: React.FC = () => {
                             font-weight: 700;
                         }
 
-                        tfoot td {
+                        .summary-total-row td {
                             background: #f8fafc;
                             font-weight: 700;
                         }
@@ -2282,23 +2419,8 @@ const WorkbookLedgerPage: React.FC = () => {
                             </thead>
                             <tbody>
                                 ${rowsHtml}
+                                ${totalRowHtml}
                             </tbody>
-                            <tfoot>
-                                <tr>
-                                    <td></td>
-                                    <td>합계</td>
-                                    <td></td>
-                                    <td></td>
-                                    <td class="align-right">${formatNumber(summaryTotals.supplyAmount)}</td>
-                                    <td class="align-right">${formatNumber(summaryTotals.taxAmount)}</td>
-                                    <td class="align-right">${formatNumber(summaryTotals.totalAmount)}</td>
-                                    <td></td>
-                                    <td class="align-right">${formatNumber(summaryTotals.settledAmount)}</td>
-                                    <td class="align-right">${formatNumber(summaryTotals.outstandingAmount)}</td>
-                                    <td></td>
-                                    <td></td>
-                                </tr>
-                            </tfoot>
                         </table>
                     </div>
                 </body>
@@ -2462,14 +2584,20 @@ const WorkbookLedgerPage: React.FC = () => {
         return nextMap;
     }, [hasActiveDbFilter, linkedDbEntriesByParentId, matchingDbEntries]);
 
+    const sortedDbTopLevelEntries = useMemo(() => {
+        const entryIds = new Set(entries.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+
+        return entries
+            .filter((entry) => !(isPaymentEntry(entry) && entry.matchedEntryId && entryIds.has(entry.matchedEntryId)))
+            .slice()
+            .sort((left, right) => compareDbEntriesBySortState(left, right, dbSort));
+    }, [dbSort, entries]);
+
     const databaseDisplayRows = useMemo(() => {
         const rows: DatabaseDisplayRow[] = [];
         let topLevelIndex = 0;
-        const entryIds = new Set(entries.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
 
-        entries.forEach((entry) => {
-            if (isPaymentEntry(entry) && entry.matchedEntryId && entryIds.has(entry.matchedEntryId)) return;
-
+        sortedDbTopLevelEntries.forEach((entry) => {
             const visibleLinkedEntries = entry.id ? (filteredLinkedDbEntriesByParentId.get(entry.id) ?? []) : [];
             const matchesTopLevel = hasActiveDbFilter ? (matchingDbEntries?.has(entry) ?? false) : true;
 
@@ -2497,7 +2625,7 @@ const WorkbookLedgerPage: React.FC = () => {
         });
 
         return rows;
-    }, [entries, expandedDbEntryIds, filteredLinkedDbEntriesByParentId, hasActiveDbFilter, matchingDbEntries]);
+    }, [expandedDbEntryIds, filteredLinkedDbEntriesByParentId, hasActiveDbFilter, matchingDbEntries, sortedDbTopLevelEntries]);
 
     const totalDbPages = useMemo(
         () => Math.max(1, Math.ceil(databaseDisplayRows.length / DB_PAGE_SIZE)),
@@ -2511,7 +2639,7 @@ const WorkbookLedgerPage: React.FC = () => {
 
     useEffect(() => {
         setDbPage(1);
-    }, [dbFilter]);
+    }, [dbFilter, dbSort]);
 
     useEffect(() => {
         if (dbPage <= totalDbPages) return;
@@ -2525,6 +2653,19 @@ const WorkbookLedgerPage: React.FC = () => {
                 : [...prev, entryId]
         ));
     }, []);
+
+    const handleChangeDbSort = useCallback((field: DbSortField) => {
+        setDbSort((prev) => (
+            prev.field === field
+                ? { field, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
+                : { field, direction: 'asc' }
+        ));
+    }, []);
+
+    const getDbSortLabel = useCallback((field: DbSortField, baseLabel: string) => {
+        if (dbSort.field !== field) return baseLabel;
+        return `${baseLabel} ${dbSort.direction === 'asc' ? '▲' : '▼'}`;
+    }, [dbSort]);
 
     const handleMoveDbPage = useCallback((direction: 'prev' | 'next') => {
         setDbPage((prev) => {
@@ -2691,7 +2832,47 @@ const WorkbookLedgerPage: React.FC = () => {
                     <tr>
                         <th className="sheet-label-green">저장건수</th>
                         <td className="sheet-value-light">{entries.length.toLocaleString()}건</td>
-                        <td className="sheet-spacer" colSpan={8} />
+                        <td className="sheet-spacer workbook-db-sort-cell" colSpan={6}>
+                            <div className="workbook-db-sort-actions">
+                                <button
+                                    type="button"
+                                    className={[
+                                        'workbook-toolbar-button',
+                                        'workbook-db-sort-button',
+                                        dbSort.field === 'date' ? 'active' : ''
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={() => handleChangeDbSort('date')}
+                                    disabled={entries.length === 0}
+                                >
+                                    {getDbSortLabel('date', '날짜순')}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={[
+                                        'workbook-toolbar-button',
+                                        'workbook-db-sort-button',
+                                        dbSort.field === 'partnerName' ? 'active' : ''
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={() => handleChangeDbSort('partnerName')}
+                                    disabled={entries.length === 0}
+                                >
+                                    {getDbSortLabel('partnerName', '이름순')}
+                                </button>
+                                <button
+                                    type="button"
+                                    className={[
+                                        'workbook-toolbar-button',
+                                        'workbook-db-sort-button',
+                                        dbSort.field === 'amount' ? 'active' : ''
+                                    ].filter(Boolean).join(' ')}
+                                    onClick={() => handleChangeDbSort('amount')}
+                                    disabled={entries.length === 0}
+                                >
+                                    {getDbSortLabel('amount', '금액순')}
+                                </button>
+                            </div>
+                        </td>
+                        <td className="sheet-spacer" colSpan={2} />
                         <td className="sheet-button-wrap" colSpan={2}>
                             <button
                                 type="button"

@@ -218,7 +218,7 @@ const DailyWageDraftPage: React.FC = () => {
         }
 
         return { allowedTeamIds, allowedTeamNameNormalized };
-    }, [allTeams, normalizeTeamName, selectedTeamId, teams]);
+    }, [allTeams, normalizeTeamName, selectedTeamId]);
 
     const scopedRows = useMemo(() => {
         if (teamScope.allowedTeamIds.size === 0 && teamScope.allowedTeamNameNormalized.size === 0) {
@@ -229,13 +229,7 @@ const DailyWageDraftPage: React.FC = () => {
             const normalized = normalizeTeamName(row.teamName);
             return normalized ? teamScope.allowedTeamNameNormalized.has(normalized) : false;
         });
-    }, [
-        normalizeTeamName,
-        rows,
-        selectedTeamId,
-        teamScope.allowedTeamIds,
-        teamScope.allowedTeamNameNormalized,
-    ]);
+    }, [normalizeTeamName, rows, teamScope.allowedTeamIds, teamScope.allowedTeamNameNormalized]);
 
     const filteredRows = scopedRows;
 
@@ -391,13 +385,13 @@ const DailyWageDraftPage: React.FC = () => {
 
             setRows(nextRows);
             setOriginalRows(nextRows.map((row) => ({ ...row })));
-            setErrorCount(nextErrorCount);
+        setErrorCount(nextErrorCount);
 
             if (nextRows.length === 0) {
                 toast.info('조회 결과가 없습니다.');
             }
         } catch (error) {
-            console.error(error);
+            console.error('Fetch error:', error);
             toast.error('데이터를 불러오는 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);

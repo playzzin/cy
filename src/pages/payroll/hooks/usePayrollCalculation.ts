@@ -29,7 +29,7 @@ export const usePayrollCalculation = (config: any) => {
       : 0;
 
     const totalDeduction = insuranceAmount + businessIncomeTax;
-    const netAmount = Math.max(0, safeAmount - totalDeduction);
+    const netAmount = safeAmount - totalDeduction;
 
     return {
       insuranceAmount,

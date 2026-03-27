@@ -3144,12 +3144,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 otherTaxTotal += amount;
             });
 
-            const insuranceAfterTaxAmount = Math.max(0, Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal));
+            const insuranceAfterTaxAmount = Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal);
             const withholdingGrossAmount = item.withholdingAppliedSummary
                 ? toNumber(item.withholdingAppliedSummary.grossAmount ?? item.withholdingAppliedSummary.appliedAmount)
                 : 0;
-            const withholdingAfterTaxAmount = Math.max(0, Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal));
-            const businessAfterTaxAmount = Math.max(0, Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
+            const withholdingAfterTaxAmount = Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal);
+            const businessAfterTaxAmount = Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal);
 
             cache.set(item.id, {
                 deductionBreakdownForDisplay,

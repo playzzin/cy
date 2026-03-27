@@ -295,9 +295,9 @@ const PayrollStatisticsPage: React.FC = () => {
           const originalUnitPrice = toNumber(rw.unitPrice ?? worker?.unitPrice ?? 0);
           const originalAmount = manDay * originalUnitPrice;
 
-          const actualUnitPrice = Math.max(0, originalUnitPrice - dailyDeductionInputs.actualDeductionUnitPrice);
-          const billingUnitPrice = Math.max(0, originalUnitPrice - dailyDeductionInputs.billingDeductionUnitPrice);
-          const reportUnitPrice = Math.max(0, originalUnitPrice - dailyDeductionInputs.reportDeductionUnitPrice);
+          const actualUnitPrice = originalUnitPrice - dailyDeductionInputs.actualDeductionUnitPrice;
+          const billingUnitPrice = originalUnitPrice - dailyDeductionInputs.billingDeductionUnitPrice;
+          const reportUnitPrice = originalUnitPrice - dailyDeductionInputs.reportDeductionUnitPrice;
 
           const actualAmount = manDay * actualUnitPrice;
           const billingAmount = manDay * billingUnitPrice;
@@ -379,7 +379,7 @@ const PayrollStatisticsPage: React.FC = () => {
         : 0;
 
       const allAmount = entries.reduce((sum, e) => sum + toNumber(e.amount), 0);
-      const businessBaseAmount = applyBusinessIncome ? Math.max(0, allAmount - insuranceBaseAmount) : 0;
+      const businessBaseAmount = applyBusinessIncome ? (allAmount - insuranceBaseAmount) : 0;
 
       const lines: DeductionLine[] = [];
 

@@ -13,6 +13,8 @@ import {
 import { format, parseISO, isValid } from 'date-fns';
 
 import { siteService, Site } from '../../services/siteService';
+import { teamService, Team } from '../../services/teamService';
+import { companyService, Company } from '../../services/companyService';
 import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
 import materialService from '../../services/materialService';
@@ -62,19 +64,45 @@ interface MaterialTransactionSummary {
     unit: string;
 }
 
-const getContractorDisplayName = (site: Site): string => {
-    const candidates = [site.companyName, site.constructorCompanyName, site.partnerName]
-        .map((value) => String(value || '').trim())
-        .filter(Boolean);
-    return candidates[0] || '청연';
-};
-
 const getReportSiteKey = (siteId?: string | null, siteName?: string | null): string => {
     const id = String(siteId || '').trim();
     if (id) return `id:${id}`;
     const name = String(siteName || '').trim();
     if (name) return `name:${name}`;
     return '';
+};
+
+const includesCheongyeonKeyword = (value: string | null | undefined) => (
+    String(value || '').trim().toLowerCase().includes('청연')
+);
+
+const findResponsibleTeam = (site: Site, teams: Team[]) => {
+    const normalize = (value: string | null | undefined) => String(value || '').trim().toLowerCase();
+    const responsibleTeamId = String(site.responsibleTeamId || '').trim();
+    const responsibleTeamName = normalize(site.responsibleTeamName);
+
+    return teams.find((team) => {
+        const teamId = String(team.id || '').trim();
+        const teamLegacyId = String(team.legacyId || '').trim();
+        const teamName = normalize(team.name);
+        return (responsibleTeamId && (teamId === responsibleTeamId || teamLegacyId === responsibleTeamId))
+            || (responsibleTeamName && teamName === responsibleTeamName);
+    });
+};
+
+const resolveTeamCompanyName = (team: Team | undefined, companies: Company[]) => {
+    if (!team) return '';
+    const rawCompanyId = String(team.companyId || '').trim();
+    const linkedCompany = rawCompanyId
+        ? companies.find((company) => company.id === rawCompanyId || company.legacyId === rawCompanyId)
+        : null;
+
+    return String(linkedCompany?.name || team.companyName || '').trim();
+};
+
+const hasCheongyeonResponsibleTeam = (site: Site, teams: Team[], companies: Company[]) => {
+    const responsibleTeam = findResponsibleTeam(site, teams);
+    return includesCheongyeonKeyword(resolveTeamCompanyName(responsibleTeam, companies));
 };
 
 // ----------------------------------------------------------------------
@@ -541,8 +569,6 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                             <dd className="text-sm font-medium text-indigo-300">{totalOutputManDay.toFixed(1)}</dd>
                                             <dt className="text-sm text-slate-500">담당 팀</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.responsibleTeamName || '-'}</dd>
-                                            <dt className="text-sm text-slate-500">시공사</dt>
-                                            <dd className="text-sm font-medium text-slate-300">{getContractorDisplayName(site)}</dd>
                                             <dt className="text-sm text-slate-500">발주사</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.clientCompanyName || '-'}</dd>
                                         </dl>
@@ -579,6 +605,8 @@ export const SiteManagementPage: React.FC = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const [sites, setSites] = useState<Site[]>([]);
+    const [teams, setTeams] = useState<Team[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const [filteredSites, setFilteredSites] = useState<Site[]>([]);
     const [keyword, setKeyword] = useState('');
     const [loading, setLoading] = useState(true);
@@ -615,10 +643,11 @@ export const SiteManagementPage: React.FC = () => {
                         setUserTeams(validTeams);
                         
                         // Check if any team belongs to '청연'
+                        const allCompanies = await companyService.getCompanies();
                         const cheongyeonAffiliation = validTeams.some(t => 
-                            (t?.companyName || '').includes('청연') || 
-                            (t?.name || '').includes('청연') ||
-                            (userData.department || '').includes('청연')
+                            includesCheongyeonKeyword(resolveTeamCompanyName(t as Team, allCompanies)) ||
+                            includesCheongyeonKeyword(t?.name) ||
+                            includesCheongyeonKeyword(userData.department)
                         );
                         
                         if (cheongyeonAffiliation) {
@@ -628,11 +657,15 @@ export const SiteManagementPage: React.FC = () => {
                 }
 
                 // 2. Fetch Sites & Reports
-                const [data, allReports] = await Promise.all([
+                const [data, allReports, allTeams, allCompanies] = await Promise.all([
                     siteService.getSites(),
                     dailyReportService.getReports(),
+                    teamService.getTeams(),
+                    companyService.getCompanies(),
                 ]);
                 setSites(data);
+                setTeams(allTeams);
+                setCompanies(allCompanies);
                 setFilteredSites(data);
 
                 const summaryMap: Record<string, SiteReportSummary> = {};
@@ -658,7 +691,9 @@ export const SiteManagementPage: React.FC = () => {
                 // Auto-open modal if siteId is present in URL
                 const targetSiteId = searchParams.get('siteId');
                 if (targetSiteId) {
-                    const targetSite = data.find(s => s.id === targetSiteId);
+                    const targetSite = data.find(
+                        (site) => site.id === targetSiteId && hasCheongyeonResponsibleTeam(site, allTeams, allCompanies)
+                    );
                     if (targetSite) {
                         setSelectedSite(targetSite);
                     }
@@ -682,12 +717,12 @@ export const SiteManagementPage: React.FC = () => {
 
     // Filter Logic
     useEffect(() => {
-        let baseSites = sites;
+        let baseSites = sites.filter((site) => hasCheongyeonResponsibleTeam(site, teams, companies));
 
         // Apply Restriction Filter
         if (isRestricted) {
             const allowedTeamIds = userTeams.map(t => t.id);
-            baseSites = sites.filter(s => allowedTeamIds.includes(s.responsibleTeamId));
+            baseSites = baseSites.filter(s => allowedTeamIds.includes(s.responsibleTeamId));
         }
 
         const lower = keyword.toLowerCase().trim();
@@ -705,7 +740,7 @@ export const SiteManagementPage: React.FC = () => {
             (s.constructorCompanyName && s.constructorCompanyName.toLowerCase().includes(lower)) ||
             (s.partnerName && s.partnerName.toLowerCase().includes(lower))
         ));
-    }, [keyword, sites, isRestricted, userTeams]);
+    }, [companies, keyword, sites, isRestricted, teams, userTeams]);
 
     return (
         <div className="min-h-screen bg-slate-900 p-6 md:p-10 flex flex-col">
@@ -800,10 +835,7 @@ export const SiteManagementPage: React.FC = () => {
                                         <div className="space-y-2 mt-auto">
                                             <div className="flex items-center gap-2 text-sm text-slate-400">
                                                 <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
-                                                <span>
-                                                    담당팀: {site.responsibleTeamName || '미지정'}
-                                                    {' '}| 시공사: {getContractorDisplayName(site)}
-                                                </span>
+                                                <span>담당팀: {site.responsibleTeamName || '미지정'}</span>
                                             </div>
                                             <div className="flex items-start gap-2 text-sm text-slate-400">
                                                 <div className="w-4 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>

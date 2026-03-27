@@ -239,6 +239,30 @@
     padding: 0;
 }
 
+.workbook-db-sort-cell {
+    padding: 4px 8px;
+}
+
+.workbook-db-sort-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: flex-start;
+}
+
+.workbook-db-sort-button {
+    min-height: 34px;
+    padding: 7px 12px;
+    font-size: 12px;
+    box-shadow: none;
+}
+
+.workbook-db-sort-button.active {
+    background: linear-gradient(180deg, #e0ecff 0%, #c8dcff 100%);
+    border-color: #7aa2e3;
+    color: #0f172a;
+}
+
 .query-sheet-table th,
 .query-sheet-table td {
     padding: 5px 8px;
