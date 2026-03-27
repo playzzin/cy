@@ -1,10 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
-import html2canvas from 'html2canvas';
-import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
 import Swal from 'sweetalert2';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -107,6 +104,16 @@ interface SummaryRow {
     teamName: string;
 }
 
+interface LegacyMatchCandidate {
+    id: string;
+    partnerName: string;
+    siteName: string;
+    issueDate: string;
+    appliedYear: number | null;
+    appliedMonth: number | null;
+    teamName: string;
+}
+
 interface ReceiptEditDraft {
     id: string;
     date: string;
@@ -129,7 +136,30 @@ interface DbEditDraft {
     teamName: string;
 }
 
+interface DatabaseDisplayRow {
+    entry: WorkbookLedgerEntry;
+    indexLabel: string;
+    nested: boolean;
+}
+
+interface DbFilterState {
+    transactionType: string;
+    date: string;
+    partnerName: string;
+    siteName: string;
+    description: string;
+    supplyAmount: string;
+    taxAmount: string;
+    totalAmount: string;
+    paymentAmount: string;
+    appliedYear: string;
+    appliedMonth: string;
+    note: string;
+    teamName: string;
+}
+
 const INPUT_ROW_COUNT = 80;
+const DB_PAGE_SIZE = 100;
 const DEFAULT_LEDGER_START = '2019-01-01';
 const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
     { id: 'input', label: '입력폼' },
@@ -168,6 +198,22 @@ const emptyInputRow = (): InputRow => ({
     paymentAmount: null,
     appliedYear: null,
     appliedMonth: null,
+    note: '',
+    teamName: ''
+});
+
+const emptyDbFilter = (): DbFilterState => ({
+    transactionType: '',
+    date: '',
+    partnerName: '',
+    siteName: '',
+    description: '',
+    supplyAmount: '',
+    taxAmount: '',
+    totalAmount: '',
+    paymentAmount: '',
+    appliedYear: '',
+    appliedMonth: '',
     note: '',
     teamName: ''
 });
@@ -474,8 +520,66 @@ const matchesFilter = (source: string | undefined, keyword: string) => {
     return (source ?? '').toLowerCase().includes(keyword.trim().toLowerCase());
 };
 
+const getWorkbookEntryKey = (entry: Pick<WorkbookLedgerEntry, 'id' | 'date' | 'partnerName' | 'description'>) => (
+    entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`
+);
+
+const getLegacyMatchKey = (
+    entry: Pick<WorkbookLedgerEntry, 'partnerName' | 'siteName' | 'teamName' | 'appliedYear' | 'appliedMonth'>,
+    includePeriod: boolean
+) => [
+    normalizeText(entry.partnerName).toLowerCase(),
+    normalizeText(entry.siteName).toLowerCase(),
+    normalizeText(entry.teamName).toLowerCase(),
+    includePeriod ? String(entry.appliedYear ?? '') : '',
+    includePeriod ? String(entry.appliedMonth ?? '') : ''
+].join('|');
+
 const isInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) > 0;
+const isNegativeInvoiceEntry = (entry: WorkbookLedgerEntry) => (entry.totalAmount ?? 0) < 0;
 const isPaymentEntry = (entry: WorkbookLedgerEntry) => (entry.paymentAmount ?? 0) > 0;
+
+const findLegacyMatchedCandidateId = (
+    paymentEntry: Pick<WorkbookLedgerEntry, 'date' | 'partnerName' | 'siteName' | 'teamName' | 'appliedYear' | 'appliedMonth'>,
+    candidates: LegacyMatchCandidate[]
+) => {
+    const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
+    if (!partnerKey) return null;
+
+    const partnerCandidates = candidates.filter((candidate) => normalizeText(candidate.partnerName).toLowerCase() === partnerKey);
+    if (!partnerCandidates.length) return null;
+
+    const paymentDate = normalizeDate(paymentEntry.date);
+    const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
+    const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
+    const appliedYear = paymentEntry.appliedYear ?? null;
+    const appliedMonth = paymentEntry.appliedMonth ?? null;
+
+    const matchesBaseConditions = (candidate: LegacyMatchCandidate) => {
+        if (paymentDate && candidate.issueDate > paymentDate) return false;
+        if (normalizedSiteName && normalizeText(candidate.siteName).toLowerCase() !== normalizedSiteName) return false;
+        if (normalizedTeamName && normalizeText(candidate.teamName).toLowerCase() !== normalizedTeamName) return false;
+        return true;
+    };
+
+    const strictCandidates = partnerCandidates.filter((candidate) => {
+        if (!matchesBaseConditions(candidate)) return false;
+        if (appliedYear !== null && candidate.appliedYear !== appliedYear) return false;
+        if (appliedMonth !== null && candidate.appliedMonth !== appliedMonth) return false;
+        return true;
+    });
+
+    if (strictCandidates.length === 1) {
+        return strictCandidates[0].id;
+    }
+
+    const relaxedCandidates = partnerCandidates.filter(matchesBaseConditions);
+    if (relaxedCandidates.length === 1) {
+        return relaxedCandidates[0].id;
+    }
+
+    return null;
+};
 
 const getSettlementLabels = (transactionType: WorkbookTransactionType | undefined) => {
     const isPurchase = transactionType === '매입';
@@ -521,6 +625,46 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
     });
 };
 
+const buildReceiptHistorySettlementEntries = (
+    entries: WorkbookLedgerEntry[],
+    filter: SummaryFilter,
+    targetId: string | null
+) => {
+    if (!targetId) return [];
+
+    const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
+    const startDate = normalizeDate(filter.startDate);
+    const endDate = normalizeDate(filter.endDate);
+
+    if (!startDate || !endDate) return [];
+
+    const candidates: LegacyMatchCandidate[] = entries
+        .filter((entry) => entry.transactionType === transactionType)
+        .filter(isInvoiceEntry)
+        .filter((entry) => entry.date >= startDate && entry.date <= endDate)
+        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
+        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
+        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
+        .map((entry) => ({
+            id: getWorkbookEntryKey(entry),
+            partnerName: entry.partnerName,
+            siteName: entry.siteName ?? '',
+            issueDate: entry.date,
+            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
+            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
+            teamName: entry.teamName ?? ''
+        }));
+
+    return entries
+        .filter((entry) => {
+            if (!isPaymentEntry(entry)) return false;
+            if (entry.matchedEntryId === targetId) return true;
+            if (entry.matchedEntryId) return false;
+            return findLegacyMatchedCandidateId(entry, candidates) === targetId;
+        })
+        .sort(sortWorkbookEntries);
+};
+
 const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
     const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
     const startDate = normalizeDate(filter.startDate);
@@ -528,19 +672,22 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
 
     if (!startDate || !endDate) return [];
 
-    const invoiceEntries = entries
+    const summaryInvoiceEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
-        .filter(isInvoiceEntry)
+        .filter((entry) => (entry.totalAmount ?? 0) !== 0)
         .filter((entry) => entry.date >= startDate && entry.date <= endDate)
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
         .sort(sortWorkbookEntries);
 
+    const positiveInvoiceEntries = summaryInvoiceEntries.filter(isInvoiceEntry);
+    const adjustmentInvoiceEntries = summaryInvoiceEntries.filter(isNegativeInvoiceEntry);
+
     type WorkingSummaryRow = SummaryRow & { remainingAmount: number };
-    const invoices = invoiceEntries
+    const invoices = positiveInvoiceEntries
         .map((entry) => ({
-            id: entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`,
+            id: getWorkbookEntryKey(entry),
             transactionType: entry.transactionType,
             partnerName: entry.partnerName,
             siteName: entry.siteName ?? '',
@@ -558,16 +705,39 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             teamName: entry.teamName ?? ''
         }));
 
-    const invoiceById = new Map<string, WorkingSummaryRow>();
-    invoices.forEach((invoice) => {
-        invoiceById.set(invoice.id, invoice);
+    const adjustmentRowsById = new Map<string, SummaryRow>();
+    adjustmentInvoiceEntries.forEach((entry) => {
+        const adjustmentId = getWorkbookEntryKey(entry);
+        adjustmentRowsById.set(adjustmentId, {
+            id: adjustmentId,
+            transactionType: entry.transactionType,
+            partnerName: entry.partnerName,
+            siteName: entry.siteName ?? '',
+            issueDate: entry.date,
+            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
+            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
+            supplyAmount: entry.supplyAmount ?? 0,
+            taxAmount: entry.taxAmount ?? 0,
+            totalAmount: entry.totalAmount ?? 0,
+            paymentDates: [],
+            settledAmount: 0,
+            outstandingAmount: 0,
+            note: entry.note ?? '',
+            teamName: entry.teamName ?? ''
+        });
     });
 
+    const invoiceById = new Map<string, WorkingSummaryRow>();
     const invoicesByPartner = new Map<string, WorkingSummaryRow[]>();
     invoices.forEach((invoice) => {
-        const bucket = invoicesByPartner.get(invoice.partnerName) ?? [];
+        invoiceById.set(invoice.id, invoice);
+
+        const partnerKey = normalizeText(invoice.partnerName).toLowerCase();
+        if (!partnerKey) return;
+
+        const bucket = invoicesByPartner.get(partnerKey) ?? [];
         bucket.push(invoice);
-        invoicesByPartner.set(invoice.partnerName, bucket);
+        invoicesByPartner.set(partnerKey, bucket);
     });
 
     const paymentEntries = entries
@@ -593,35 +763,106 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         return paymentAmount - appliedAmount;
     };
 
-    paymentEntries.forEach((paymentEntry) => {
-            let remainingPayment = paymentEntry.paymentAmount ?? 0;
+    const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry) => {
+        const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
+        if (!partnerKey) return null;
 
-            if (paymentEntry.matchedEntryId) {
-                const matchedInvoice = invoiceById.get(paymentEntry.matchedEntryId);
-                if (matchedInvoice) {
-                    remainingPayment = applyPaymentToInvoice(matchedInvoice, remainingPayment, paymentEntry.date);
-                }
-            }
+        const partnerInvoices = invoicesByPartner.get(partnerKey) ?? [];
+        if (!partnerInvoices.length) return null;
 
-            if (paymentEntry.date < startDate) {
-                return;
-            }
+        const paymentDate = normalizeDate(paymentEntry.date);
+        const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
+        const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
+        const appliedYear = paymentEntry.appliedYear ?? null;
+        const appliedMonth = paymentEntry.appliedMonth ?? null;
 
-            const bucket = invoicesByPartner.get(paymentEntry.partnerName) ?? [];
+        const matchesBaseConditions = (invoice: WorkingSummaryRow) => {
+            if (paymentDate && invoice.issueDate > paymentDate) return false;
+            if (normalizedSiteName && normalizeText(invoice.siteName).toLowerCase() !== normalizedSiteName) return false;
+            if (normalizedTeamName && normalizeText(invoice.teamName).toLowerCase() !== normalizedTeamName) return false;
+            return true;
+        };
 
-            for (const invoice of bucket) {
-                if (remainingPayment <= 0) break;
-                if (invoice.remainingAmount <= 0) continue;
-
-                if (paymentEntry.matchedEntryId && invoice.id === paymentEntry.matchedEntryId) {
-                    continue;
-                }
-
-                remainingPayment = applyPaymentToInvoice(invoice, remainingPayment, paymentEntry.date);
-            }
+        const strictCandidates = partnerInvoices.filter((invoice) => {
+            if (!matchesBaseConditions(invoice)) return false;
+            if (appliedYear !== null && invoice.appliedYear !== appliedYear) return false;
+            if (appliedMonth !== null && invoice.appliedMonth !== appliedMonth) return false;
+            return true;
         });
 
-    const finalizedRows = invoices.map(({ remainingAmount, ...row }) => row);
+        if (strictCandidates.length === 1) {
+            return strictCandidates[0];
+        }
+
+        const relaxedCandidates = partnerInvoices.filter(matchesBaseConditions);
+        if (relaxedCandidates.length === 1) {
+            return relaxedCandidates[0];
+        }
+
+        return null;
+    };
+
+    paymentEntries.forEach((paymentEntry) => {
+        const paymentAmount = paymentEntry.paymentAmount ?? 0;
+        if (paymentAmount <= 0) return;
+
+        const paymentEntryKey = getWorkbookEntryKey(paymentEntry);
+        const selfInvoice = isInvoiceEntry(paymentEntry) ? invoiceById.get(paymentEntryKey) : null;
+
+        if (paymentEntry.matchedEntryId) {
+            const matchedInvoice = invoiceById.get(paymentEntry.matchedEntryId);
+            if (matchedInvoice) {
+                applyPaymentToInvoice(matchedInvoice, paymentAmount, paymentEntry.date);
+            }
+            return;
+        }
+
+        if (selfInvoice) {
+            applyPaymentToInvoice(selfInvoice, paymentAmount, paymentEntry.date);
+            return;
+        }
+
+        const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry);
+        if (legacyMatchedInvoice) {
+            applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date);
+        }
+    });
+
+    adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
+        const adjustmentAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
+        if (adjustmentAmount <= 0) return;
+
+        if (adjustmentEntry.matchedEntryId) {
+            const matchedInvoice = invoiceById.get(adjustmentEntry.matchedEntryId);
+            if (matchedInvoice) {
+                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date);
+            }
+            return;
+        }
+
+        const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry);
+        if (legacyMatchedInvoice) {
+            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date);
+        }
+    });
+
+    const finalizedPositiveRowsById = new Map<string, SummaryRow>();
+    invoices.forEach(({ remainingAmount, ...row }) => {
+        finalizedPositiveRowsById.set(row.id, row);
+    });
+
+    const finalizedRows = summaryInvoiceEntries
+        .map((entry) => {
+            const entryId = getWorkbookEntryKey(entry);
+            if (isInvoiceEntry(entry)) {
+                return finalizedPositiveRowsById.get(entryId) ?? null;
+            }
+            if (isNegativeInvoiceEntry(entry)) {
+                return adjustmentRowsById.get(entryId) ?? null;
+            }
+            return null;
+        })
+        .filter((row): row is SummaryRow => Boolean(row));
 
     if (filter.mode === '미수금' || filter.mode === '미지급금') {
         return finalizedRows.filter((row) => row.outstandingAmount > 0);
@@ -652,9 +893,15 @@ const WorkbookLedgerPage: React.FC = () => {
     const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
+    const [entriesLoaded, setEntriesLoaded] = useState(false);
     const [partnerNames, setPartnerNames] = useState<string[]>([]);
     const [siteNames, setSiteNames] = useState<string[]>([]);
     const [teamNames, setTeamNames] = useState<string[]>([]);
+    const partnerSeedNamesRef = useRef<string[]>([]);
+    const siteSeedNamesRef = useRef<string[]>([]);
+    const teamSeedNamesRef = useRef<string[]>([]);
+    const catalogsLoadedRef = useRef(false);
+    const entriesLoadedRef = useRef(false);
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
     const [inputRows, setInputRows] = useState<InputRow[]>(() => Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow));
@@ -692,59 +939,76 @@ const WorkbookLedgerPage: React.FC = () => {
         partnerName: '',
         siteName: ''
     });
+    const [dbFilter, setDbFilter] = useState<DbFilterState>(emptyDbFilter);
+    const [dbPage, setDbPage] = useState(1);
     const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
+    const [expandedDbEntryIds, setExpandedDbEntryIds] = useState<string[]>([]);
     const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
     const [editingReceiptDraft, setEditingReceiptDraft] = useState<ReceiptEditDraft | null>(null);
 
-    const refreshPageData = useCallback(async () => {
+    const rebuildLookupOptions = useCallback((savedEntries: WorkbookLedgerEntry[]) => {
+        const nextPartnerNames = new Set(partnerSeedNamesRef.current);
+        const nextSiteNames = new Set(siteSeedNamesRef.current);
+        const nextTeamNames = new Set(teamSeedNamesRef.current);
+
+        savedEntries.forEach((entry) => {
+            if (entry.partnerName) nextPartnerNames.add(entry.partnerName);
+            if (entry.siteName) nextSiteNames.add(entry.siteName);
+            if (entry.teamName) nextTeamNames.add(entry.teamName);
+        });
+
+        setEntries(savedEntries);
+        setPartnerNames(Array.from(nextPartnerNames).sort((left, right) => left.localeCompare(right, 'ko')));
+        setSiteNames(Array.from(nextSiteNames).sort((left, right) => left.localeCompare(right, 'ko')));
+        setTeamNames(Array.from(nextTeamNames).sort((left, right) => left.localeCompare(right, 'ko')));
+    }, []);
+
+    const refreshPageData = useCallback(async (options?: { forceEntries?: boolean; forceCatalogs?: boolean; loadEntries?: boolean }) => {
         setLoading(true);
         try {
+            const shouldLoadCatalogs = options?.forceCatalogs || !catalogsLoadedRef.current;
+            const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
             const [savedEntries, companies, sites, teams] = await Promise.all([
-                workbookLedgerService.getEntries(),
-                companyService.getActiveCompanies(),
-                siteService.getSites(),
-                teamService.getTeams()
+                shouldLoadEntries ? workbookLedgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
+                shouldLoadCatalogs ? companyService.getActiveCompanies() : Promise.resolve(null),
+                shouldLoadCatalogs ? siteService.getSites() : Promise.resolve(null),
+                shouldLoadCatalogs ? teamService.getTeams() : Promise.resolve(null)
             ]);
 
-            const nextPartnerNames = new Set<string>();
-            companies.forEach((company) => {
-                if (company.name) nextPartnerNames.add(company.name);
-            });
-            savedEntries.forEach((entry) => {
-                if (entry.partnerName) nextPartnerNames.add(entry.partnerName);
-            });
+            if (shouldLoadCatalogs) {
+                partnerSeedNamesRef.current = (companies ?? [])
+                    .map((company) => company.name)
+                    .filter((name): name is string => Boolean(name));
+                siteSeedNamesRef.current = (sites ?? [])
+                    .map((site) => site.name)
+                    .filter((name): name is string => Boolean(name));
+                teamSeedNamesRef.current = (teams ?? [])
+                    .map((team) => team.name)
+                    .filter((name): name is string => Boolean(name));
+                catalogsLoadedRef.current = true;
+            }
 
-            const nextSiteNames = new Set<string>();
-            sites.forEach((site) => {
-                if (site.name) nextSiteNames.add(site.name);
-            });
-            savedEntries.forEach((entry) => {
-                if (entry.siteName) nextSiteNames.add(entry.siteName);
-            });
-
-            const nextTeamNames = new Set<string>();
-            teams.forEach((team) => {
-                if (team.name) nextTeamNames.add(team.name);
-            });
-            savedEntries.forEach((entry) => {
-                if (entry.teamName) nextTeamNames.add(entry.teamName);
-            });
-
-            setEntries(savedEntries);
-            setPartnerNames(Array.from(nextPartnerNames).sort((left, right) => left.localeCompare(right, 'ko')));
-            setSiteNames(Array.from(nextSiteNames).sort((left, right) => left.localeCompare(right, 'ko')));
-            setTeamNames(Array.from(nextTeamNames).sort((left, right) => left.localeCompare(right, 'ko')));
+            if (savedEntries) {
+                rebuildLookupOptions(savedEntries);
+                entriesLoadedRef.current = true;
+                setEntriesLoaded(true);
+            }
         } catch (error) {
             console.error(error);
             Swal.fire('오류', '전용 장부 데이터를 불러오지 못했습니다.', 'error');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [rebuildLookupOptions]);
 
     useEffect(() => {
-        refreshPageData();
+        refreshPageData({ forceCatalogs: true, loadEntries: false });
     }, [refreshPageData]);
+
+    useEffect(() => {
+        if (activeTab === 'input' || entriesLoadedRef.current) return;
+        refreshPageData({ loadEntries: true });
+    }, [activeTab, refreshPageData]);
 
     useEffect(() => {
         setInputRows((prevRows) => {
@@ -781,7 +1045,7 @@ const WorkbookLedgerPage: React.FC = () => {
         }
 
         const validationErrors: string[] = [];
-        const preparedEntries: Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>[] = [];
+        const preparedEntries: Omit<WorkbookLedgerEntry, 'createdAt' | 'updatedAt'>[] = [];
 
         filledRows.forEach(({ row, excelRowNumber }) => {
             if (!row.transactionType) {
@@ -823,6 +1087,36 @@ const WorkbookLedgerPage: React.FC = () => {
                 teamName: row.teamName || selectedTeam,
                 createdBy: currentUser?.uid ?? ''
             };
+
+            const baseDescription = row.description || row.transactionType;
+
+            if (totalAmount !== 0) {
+                const sourceEntryId = `${row.transactionType}-${row.date}-${excelRowNumber}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+                preparedEntries.push({
+                    id: sourceEntryId,
+                    ...basePayload,
+                    description: baseDescription,
+                    supplyAmount,
+                    taxAmount,
+                    totalAmount,
+                    paymentAmount: 0
+                });
+
+                if (paymentAmount > 0) {
+                    preparedEntries.push({
+                        ...basePayload,
+                        description: getSettlementLabels(row.transactionType).action,
+                        supplyAmount: 0,
+                        taxAmount: 0,
+                        totalAmount: 0,
+                        paymentAmount,
+                        matchedEntryId: sourceEntryId
+                    });
+                }
+
+                return;
+            }
 
             preparedEntries.push({
                 ...basePayload,
@@ -874,6 +1168,7 @@ const WorkbookLedgerPage: React.FC = () => {
 
         setUploadingDb(true);
         try {
+            const XLSX = await import('xlsx');
             const buffer = await file.arrayBuffer();
             const workbook = XLSX.read(buffer, { type: 'array' });
             const sheetName = workbook.SheetNames.includes('DB') ? 'DB' : workbook.SheetNames[0];
@@ -933,6 +1228,8 @@ const WorkbookLedgerPage: React.FC = () => {
 
         setDownloadingDb(true);
         try {
+            const XLSX = await import('xlsx');
+            const { saveAs } = await import('file-saver');
             const worksheet = XLSX.utils.aoa_to_sheet([
                 [...DB_HEADERS],
                 ...entries.map(toDbRow)
@@ -971,6 +1268,7 @@ const WorkbookLedgerPage: React.FC = () => {
 
         setCapturingView(target);
         try {
+            const { default: html2canvas } = await import('html2canvas');
             const captureWidth = Math.max(element.scrollWidth, element.clientWidth);
             const captureHeight = Math.max(element.scrollHeight, element.clientHeight);
             const canvas = await (html2canvas as any)(element, {
@@ -1598,11 +1896,10 @@ const WorkbookLedgerPage: React.FC = () => {
             return;
         }
 
-        const linkedEntries = entries
-            .filter((entry) => isPaymentEntry(entry) && entry.matchedEntryId === receiptHistoryTargetId)
-            .sort(sortWorkbookEntries);
+        const linkedEntries = buildReceiptHistorySettlementEntries(entries, summaryFilter, receiptHistoryTargetId);
 
-        const linkedTotal = linkedEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0);
+        const originalPaymentAmount = isPaymentEntry(sourceEntry) ? (sourceEntry.paymentAmount ?? 0) : 0;
+        const linkedTotal = originalPaymentAmount + linkedEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0);
         const normalizedDate = normalizeDate(editingReceiptDraft.date);
         const paymentAmount = toNumberOrNull(editingReceiptDraft.paymentAmount) ?? 0;
         const currentEntry = linkedEntries.find((entry) => entry.id === editingReceiptDraft.id);
@@ -1649,7 +1946,7 @@ const WorkbookLedgerPage: React.FC = () => {
         } finally {
             setReceiptActionLoading(false);
         }
-    }, [currentUser?.uid, editingReceiptDraft, entries, receiptHistoryTargetId, refreshPageData]);
+    }, [currentUser?.uid, editingReceiptDraft, entries, receiptHistoryTargetId, refreshPageData, summaryFilter]);
 
     const handleDeleteSettlement = useCallback(async (entry: WorkbookLedgerEntry) => {
         if (!entry.id) return;
@@ -1710,8 +2007,14 @@ const WorkbookLedgerPage: React.FC = () => {
         );
     }, [summaryDraft, todayString]);
 
-    const ledgerRows = useMemo(() => buildLedgerRows(entries, ledgerFilter), [entries, ledgerFilter]);
-    const summaryRows = useMemo(() => buildSummaryRows(entries, summaryFilter), [entries, summaryFilter]);
+    const ledgerRows = useMemo(
+        () => (activeTab === 'ledger' ? buildLedgerRows(entries, ledgerFilter) : []),
+        [activeTab, entries, ledgerFilter]
+    );
+    const summaryRows = useMemo(
+        () => (activeTab === 'summary' || receiptHistoryTargetId ? buildSummaryRows(entries, summaryFilter) : []),
+        [activeTab, entries, receiptHistoryTargetId, summaryFilter]
+    );
 
     const ledgerTotals = useMemo(() => {
         return ledgerRows.reduce((accumulator, row) => ({
@@ -1746,16 +2049,19 @@ const WorkbookLedgerPage: React.FC = () => {
         return summaryRows.find((row) => row.id === receiptHistoryTargetId) ?? null;
     }, [receiptHistoryTargetId, summaryRows]);
 
-    const receiptHistoryEntries = useMemo(() => {
-        if (!receiptHistoryTargetId) return [];
-        return entries
-            .filter((entry) => isPaymentEntry(entry) && entry.matchedEntryId === receiptHistoryTargetId)
-            .sort(sortWorkbookEntries);
-    }, [entries, receiptHistoryTargetId]);
+    const receiptHistoryEntries = useMemo(
+        () => buildReceiptHistorySettlementEntries(entries, summaryFilter, receiptHistoryTargetId),
+        [entries, receiptHistoryTargetId, summaryFilter]
+    );
+
+    const receiptHistoryOriginalPaymentAmount = useMemo(() => {
+        if (!receiptHistoryInvoice || !isPaymentEntry(receiptHistoryInvoice)) return 0;
+        return receiptHistoryInvoice.paymentAmount ?? 0;
+    }, [receiptHistoryInvoice]);
 
     const receiptHistoryTotal = useMemo(
-        () => receiptHistoryEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0),
-        [receiptHistoryEntries]
+        () => receiptHistoryOriginalPaymentAmount + receiptHistoryEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0),
+        [receiptHistoryEntries, receiptHistoryOriginalPaymentAmount]
     );
 
     const receiptHistoryOutstanding = useMemo(() => {
@@ -1772,6 +2078,213 @@ const WorkbookLedgerPage: React.FC = () => {
         () => getSettlementLabels(receiptHistoryInvoice?.transactionType ?? receiptHistorySummaryRow?.transactionType),
         [receiptHistoryInvoice?.transactionType, receiptHistorySummaryRow?.transactionType]
     );
+
+    const linkedDbEntriesByParentId = useMemo(() => {
+        const nextMap = new Map<string, WorkbookLedgerEntry[]>();
+
+        entries.forEach((entry) => {
+            if (!isPaymentEntry(entry) || !entry.matchedEntryId) return;
+
+            const bucket = nextMap.get(entry.matchedEntryId) ?? [];
+            bucket.push(entry);
+            nextMap.set(entry.matchedEntryId, bucket);
+        });
+
+        nextMap.forEach((bucket) => {
+            bucket.sort(sortWorkbookEntries);
+        });
+
+        return nextMap;
+    }, [entries]);
+
+    const deferredDbFilter = useDeferredValue(dbFilter);
+
+    const hasDbFilterInput = useMemo(
+        () => Object.values(dbFilter).some((value) => normalizeText(value) !== ''),
+        [dbFilter]
+    );
+
+    const hasActiveDbFilter = useMemo(
+        () => Object.values(deferredDbFilter).some((value) => normalizeText(value) !== ''),
+        [deferredDbFilter]
+    );
+
+    const dbFilterCriteria = useMemo(() => ({
+        transactionType: normalizeText(deferredDbFilter.transactionType).toLowerCase(),
+        date: normalizeText(deferredDbFilter.date).toLowerCase(),
+        partnerName: normalizeText(deferredDbFilter.partnerName).toLowerCase(),
+        siteName: normalizeText(deferredDbFilter.siteName).toLowerCase(),
+        description: normalizeText(deferredDbFilter.description).toLowerCase(),
+        supplyAmount: normalizeText(deferredDbFilter.supplyAmount).replace(/,/g, ''),
+        taxAmount: normalizeText(deferredDbFilter.taxAmount).replace(/,/g, ''),
+        totalAmount: normalizeText(deferredDbFilter.totalAmount).replace(/,/g, ''),
+        paymentAmount: normalizeText(deferredDbFilter.paymentAmount).replace(/,/g, ''),
+        appliedYear: normalizeText(deferredDbFilter.appliedYear).replace(/,/g, ''),
+        appliedMonth: normalizeText(deferredDbFilter.appliedMonth).replace(/,/g, ''),
+        note: normalizeText(deferredDbFilter.note).toLowerCase(),
+        teamName: normalizeText(deferredDbFilter.teamName).toLowerCase()
+    }), [deferredDbFilter]);
+
+    const dbEntryFilterIndex = useMemo(() => {
+        const nextMap = new Map<WorkbookLedgerEntry, DbFilterState>();
+
+        entries.forEach((entry) => {
+            nextMap.set(entry, {
+                transactionType: String(entry.transactionType ?? '').toLowerCase(),
+                date: String(entry.date ?? '').toLowerCase(),
+                partnerName: String(entry.partnerName ?? '').toLowerCase(),
+                siteName: String(entry.siteName ?? '').toLowerCase(),
+                description: String(entry.description ?? '').toLowerCase(),
+                supplyAmount: String(entry.supplyAmount ?? ''),
+                taxAmount: String(entry.taxAmount ?? ''),
+                totalAmount: String(entry.totalAmount ?? ''),
+                paymentAmount: String(entry.paymentAmount ?? ''),
+                appliedYear: String(entry.appliedYear ?? ''),
+                appliedMonth: String(entry.appliedMonth ?? ''),
+                note: String(entry.note ?? '').toLowerCase(),
+                teamName: String(entry.teamName ?? '').toLowerCase()
+            });
+        });
+
+        return nextMap;
+    }, [entries]);
+
+    const matchesDbFilter = useCallback((entry: WorkbookLedgerEntry) => {
+        const indexedEntry = dbEntryFilterIndex.get(entry);
+        if (!indexedEntry) return false;
+
+        const includesText = (source: string, keyword: string) => {
+            if (!keyword) return true;
+            return source.includes(keyword);
+        };
+
+        const includesNumber = (source: string, keyword: string) => {
+            if (!keyword) return true;
+            return source.includes(keyword);
+        };
+
+        return (
+            includesText(indexedEntry.transactionType, dbFilterCriteria.transactionType) &&
+            includesText(indexedEntry.date, dbFilterCriteria.date) &&
+            includesText(indexedEntry.partnerName, dbFilterCriteria.partnerName) &&
+            includesText(indexedEntry.siteName, dbFilterCriteria.siteName) &&
+            includesText(indexedEntry.description, dbFilterCriteria.description) &&
+            includesNumber(indexedEntry.supplyAmount, dbFilterCriteria.supplyAmount) &&
+            includesNumber(indexedEntry.taxAmount, dbFilterCriteria.taxAmount) &&
+            includesNumber(indexedEntry.totalAmount, dbFilterCriteria.totalAmount) &&
+            includesNumber(indexedEntry.paymentAmount, dbFilterCriteria.paymentAmount) &&
+            includesNumber(indexedEntry.appliedYear, dbFilterCriteria.appliedYear) &&
+            includesNumber(indexedEntry.appliedMonth, dbFilterCriteria.appliedMonth) &&
+            includesText(indexedEntry.note, dbFilterCriteria.note) &&
+            includesText(indexedEntry.teamName, dbFilterCriteria.teamName)
+        );
+    }, [dbEntryFilterIndex, dbFilterCriteria]);
+
+    const matchingDbEntries = useMemo(() => {
+        if (!hasActiveDbFilter) return null;
+
+        const nextSet = new Set<WorkbookLedgerEntry>();
+        entries.forEach((entry) => {
+            if (matchesDbFilter(entry)) {
+                nextSet.add(entry);
+            }
+        });
+        return nextSet;
+    }, [entries, hasActiveDbFilter, matchesDbFilter]);
+
+    const filteredLinkedDbEntriesByParentId = useMemo(() => {
+        if (!hasActiveDbFilter) return linkedDbEntriesByParentId;
+
+        const nextMap = new Map<string, WorkbookLedgerEntry[]>();
+        linkedDbEntriesByParentId.forEach((bucket, parentId) => {
+            const filteredBucket = bucket.filter((entry) => matchingDbEntries?.has(entry));
+            if (filteredBucket.length > 0) {
+                nextMap.set(parentId, filteredBucket);
+            }
+        });
+        return nextMap;
+    }, [hasActiveDbFilter, linkedDbEntriesByParentId, matchingDbEntries]);
+
+    const databaseDisplayRows = useMemo(() => {
+        const rows: DatabaseDisplayRow[] = [];
+        let topLevelIndex = 0;
+        const entryIds = new Set(entries.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+
+        entries.forEach((entry) => {
+            if (isPaymentEntry(entry) && entry.matchedEntryId && entryIds.has(entry.matchedEntryId)) return;
+
+            const visibleLinkedEntries = entry.id ? (filteredLinkedDbEntriesByParentId.get(entry.id) ?? []) : [];
+            const matchesTopLevel = hasActiveDbFilter ? (matchingDbEntries?.has(entry) ?? false) : true;
+
+            if (hasActiveDbFilter && !matchesTopLevel && visibleLinkedEntries.length === 0) {
+                return;
+            }
+
+            topLevelIndex += 1;
+            rows.push({
+                entry,
+                indexLabel: String(topLevelIndex),
+                nested: false
+            });
+
+            if (!entry.id) return;
+            if (!hasActiveDbFilter && !expandedDbEntryIds.includes(entry.id)) return;
+
+            visibleLinkedEntries.forEach((linkedEntry, linkedIndex) => {
+                rows.push({
+                    entry: linkedEntry,
+                    indexLabel: `${topLevelIndex}-${linkedIndex + 1}`,
+                    nested: true
+                });
+            });
+        });
+
+        return rows;
+    }, [entries, expandedDbEntryIds, filteredLinkedDbEntriesByParentId, hasActiveDbFilter, matchingDbEntries]);
+
+    const totalDbPages = useMemo(
+        () => Math.max(1, Math.ceil(databaseDisplayRows.length / DB_PAGE_SIZE)),
+        [databaseDisplayRows.length]
+    );
+
+    const pagedDatabaseDisplayRows = useMemo(() => {
+        const startIndex = (dbPage - 1) * DB_PAGE_SIZE;
+        return databaseDisplayRows.slice(startIndex, startIndex + DB_PAGE_SIZE);
+    }, [databaseDisplayRows, dbPage]);
+
+    useEffect(() => {
+        setDbPage(1);
+    }, [dbFilter]);
+
+    useEffect(() => {
+        if (dbPage <= totalDbPages) return;
+        setDbPage(totalDbPages);
+    }, [dbPage, totalDbPages]);
+
+    const handleToggleDbEntryDetails = useCallback((entryId: string) => {
+        setExpandedDbEntryIds((prev) => (
+            prev.includes(entryId)
+                ? prev.filter((item) => item !== entryId)
+                : [...prev, entryId]
+        ));
+    }, []);
+
+    const handleMoveDbPage = useCallback((direction: 'prev' | 'next') => {
+        setDbPage((prev) => {
+            if (direction === 'prev') {
+                return Math.max(1, prev - 1);
+            }
+            return Math.min(totalDbPages, prev + 1);
+        });
+    }, [totalDbPages]);
+
+    const handleChangeDbFilter = useCallback((field: keyof DbFilterState, value: string) => {
+        setDbFilter((prev) => ({ ...prev, [field]: value }));
+    }, []);
+
+    const handleResetDbFilter = useCallback(() => {
+        setDbFilter(emptyDbFilter());
+    }, []);
 
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
@@ -1916,12 +2429,23 @@ const WorkbookLedgerPage: React.FC = () => {
             <table className="sheet-control-table query-sheet-table">
                 <tbody>
                     <tr>
-                        <th className="sheet-title-dark" colSpan={15}>DB</th>
+                        <th className="sheet-title-dark" colSpan={16}>DB</th>
                     </tr>
                     <tr>
                         <th className="sheet-label-green">저장건수</th>
                         <td className="sheet-value-light">{entries.length.toLocaleString()}건</td>
-                        <td className="sheet-spacer" colSpan={9} />
+                        <td className="sheet-spacer" colSpan={8} />
+                        <td className="sheet-button-wrap" colSpan={2}>
+                            <button
+                                type="button"
+                                className="excel-button excel-button-gray"
+                                onClick={handleResetDbFilter}
+                                disabled={!hasDbFilterInput || uploadingDb || downloadingDb || dbActionLoading}
+                            >
+                                <FontAwesomeIcon icon={faRotateRight} />
+                                필터 초기화
+                            </button>
+                        </td>
                         <td className="sheet-button-wrap" colSpan={2}>
                             <button
                                 type="button"
@@ -1970,28 +2494,163 @@ const WorkbookLedgerPage: React.FC = () => {
                             <th>적용월</th>
                             <th>비고</th>
                             <th>팀명</th>
+                            <th>내역</th>
                             <th>처리</th>
+                        </tr>
+                        <tr className="workbook-filter-row">
+                            <th className="workbook-filter-spacer" />
+                            <th>
+                                <select
+                                    className="workbook-filter-input"
+                                    value={dbFilter.transactionType}
+                                    onChange={(event) => handleChangeDbFilter('transactionType', event.target.value)}
+                                >
+                                    <option value="">전체</option>
+                                    <option value="매출">매출</option>
+                                    <option value="매입">매입</option>
+                                </select>
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.date}
+                                    onChange={(event) => handleChangeDbFilter('date', event.target.value)}
+                                    placeholder="날짜"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.partnerName}
+                                    onChange={(event) => handleChangeDbFilter('partnerName', event.target.value)}
+                                    placeholder="거래처명"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.siteName}
+                                    onChange={(event) => handleChangeDbFilter('siteName', event.target.value)}
+                                    placeholder="현장명"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.description}
+                                    onChange={(event) => handleChangeDbFilter('description', event.target.value)}
+                                    placeholder="내용"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.supplyAmount}
+                                    onChange={(event) => handleChangeDbFilter('supplyAmount', event.target.value)}
+                                    placeholder="공급가액"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.taxAmount}
+                                    onChange={(event) => handleChangeDbFilter('taxAmount', event.target.value)}
+                                    placeholder="부가세"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.totalAmount}
+                                    onChange={(event) => handleChangeDbFilter('totalAmount', event.target.value)}
+                                    placeholder="합계"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.paymentAmount}
+                                    onChange={(event) => handleChangeDbFilter('paymentAmount', event.target.value)}
+                                    placeholder="입금금액"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.appliedYear}
+                                    onChange={(event) => handleChangeDbFilter('appliedYear', event.target.value)}
+                                    placeholder="연도"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.appliedMonth}
+                                    onChange={(event) => handleChangeDbFilter('appliedMonth', event.target.value)}
+                                    placeholder="월"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.note}
+                                    onChange={(event) => handleChangeDbFilter('note', event.target.value)}
+                                    placeholder="비고"
+                                />
+                            </th>
+                            <th>
+                                <input
+                                    className="workbook-filter-input"
+                                    type="text"
+                                    value={dbFilter.teamName}
+                                    onChange={(event) => handleChangeDbFilter('teamName', event.target.value)}
+                                    placeholder="팀명"
+                                />
+                            </th>
+                            <th className="workbook-filter-spacer" />
+                            <th className="workbook-filter-spacer" />
                         </tr>
                     </thead>
                     <tbody>
-                        {entries.length === 0 && (
+                        {databaseDisplayRows.length === 0 && (
                             <tr>
-                                <td colSpan={15} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
+                                <td colSpan={16} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
                             </tr>
                         )}
-                        {entries.map((entry, index) => {
+                        {pagedDatabaseDisplayRows.map((row) => {
+                            const { entry, indexLabel, nested } = row;
                             const isEditing = editingDbDraft?.id === entry.id;
                             const dbDraft = isEditing ? editingDbDraft : null;
                             const editSupplyAmount = isEditing ? (toNumberOrNull(editingDbDraft?.supplyAmount) ?? 0) : 0;
                             const editTaxAmount = editSupplyAmount !== 0 ? Math.round(editSupplyAmount * 0.1) : 0;
                             const editTotalAmount = editSupplyAmount !== 0 ? editSupplyAmount + editTaxAmount : 0;
+                            const linkedEntries = !nested && entry.id ? (linkedDbEntriesByParentId.get(entry.id) ?? []) : [];
+                            const visibleLinkedEntries = !nested && entry.id ? (filteredLinkedDbEntriesByParentId.get(entry.id) ?? []) : [];
+                            const canToggleDetails = !nested && isInvoiceEntry(entry) && linkedEntries.length > 0;
+                            const isExpanded = hasActiveDbFilter
+                                ? visibleLinkedEntries.length > 0
+                                : !!entry.id && expandedDbEntryIds.includes(entry.id);
 
                             return (
                                 <tr
-                                    key={entry.id ?? `${entry.date}-${entry.partnerName}-${index}`}
-                                    className={isEditing ? 'workbook-inline-edit-row' : undefined}
+                                    key={entry.id ?? `${entry.date}-${entry.partnerName}-${indexLabel}`}
+                                    className={[
+                                        isEditing ? 'workbook-inline-edit-row' : '',
+                                        nested ? 'workbook-linked-row' : ''
+                                    ].filter(Boolean).join(' ') || undefined}
                                 >
-                                    <td>{index + 1}</td>
+                                    <td>{indexLabel}</td>
                                     <td>
                                         {isEditing ? (
                                             <select
@@ -2131,7 +2790,31 @@ const WorkbookLedgerPage: React.FC = () => {
                                                 onChange={(event) => handleChangeEditingDbDraft('teamName', event.target.value)}
                                                 disabled={dbActionLoading}
                                             />
-                                        ) : (entry.teamName || '-')}
+                                        ) : (
+                                            nested
+                                                ? <span className="workbook-linked-cell">{entry.teamName || '-'}</span>
+                                                : (entry.teamName || '-')
+                                        )}
+                                    </td>
+                                    <td>
+                                        {canToggleDetails && hasActiveDbFilter ? (
+                                            visibleLinkedEntries.length > 0
+                                                ? <span className="workbook-linked-badge">필터 {visibleLinkedEntries.length}건</span>
+                                                : '-'
+                                        ) : canToggleDetails ? (
+                                            <button
+                                                type="button"
+                                                className="workbook-toolbar-button workbook-inline-button"
+                                                onClick={() => handleToggleDbEntryDetails(entry.id!)}
+                                                disabled={dbActionLoading}
+                                            >
+                                                {isExpanded ? '닫기' : `내역 ${linkedEntries.length}건`}
+                                            </button>
+                                        ) : (
+                                            nested
+                                                ? <span className="workbook-linked-badge">연결내역</span>
+                                                : '-'
+                                        )}
                                     </td>
                                     <td>
                                         <div className="workbook-inline-actions">
@@ -2186,8 +2869,35 @@ const WorkbookLedgerPage: React.FC = () => {
                 </table>
             </div>
 
+            {databaseDisplayRows.length > 0 && (
+                <div className="workbook-pagination" data-html2canvas-ignore="true">
+                    <span className="workbook-pagination-status">
+                        {`${(dbPage - 1) * DB_PAGE_SIZE + 1}-${Math.min(dbPage * DB_PAGE_SIZE, databaseDisplayRows.length)} / ${databaseDisplayRows.length}`}
+                    </span>
+                    <button
+                        type="button"
+                        className="workbook-toolbar-button workbook-pagination-button"
+                        onClick={() => handleMoveDbPage('prev')}
+                        disabled={dbPage <= 1}
+                    >
+                        이전 100개
+                    </button>
+                    <span className="workbook-pagination-status">
+                        {`${dbPage} / ${totalDbPages} 페이지`}
+                    </span>
+                    <button
+                        type="button"
+                        className="workbook-toolbar-button workbook-pagination-button"
+                        onClick={() => handleMoveDbPage('next')}
+                        disabled={dbPage >= totalDbPages}
+                    >
+                        다음 100개
+                    </button>
+                </div>
+            )}
+
             <p className="workbook-help-text">
-                입력폼에서 저장한 행은 전용 장부 DB에 그대로 저장되고 이 탭에서 바로 확인할 수 있습니다. 업로드는 현재 DB에 추가 저장됩니다.
+                입력폼에서 저장한 원본 행과 조회에서 등록한 입금/지급 행은 DB에 함께 저장됩니다. 연결된 정산 행은 내역 버튼으로 같이 펼쳐 보고, 같은 화면에서 수정/삭제할 수 있습니다.
             </p>
         </section>
     );
@@ -2620,7 +3330,12 @@ const WorkbookLedgerPage: React.FC = () => {
                         <p>엑셀 통합문서 UI를 웹 화면으로 옮긴 전용 장부 페이지입니다.</p>
                     </div>
                     <div className="workbook-title-actions">
-                        <button type="button" className="workbook-toolbar-button" onClick={refreshPageData} disabled={loading}>
+                        <button
+                            type="button"
+                            className="workbook-toolbar-button"
+                            onClick={() => refreshPageData({ forceEntries: true, forceCatalogs: true })}
+                            disabled={loading}
+                        >
                             <FontAwesomeIcon icon={loading ? faSpinner : faRotateRight} spin={loading} />
                             새로고침
                         </button>
@@ -2678,6 +3393,68 @@ const WorkbookLedgerPage: React.FC = () => {
                                         <div><strong>{receiptHistoryLabels.outstanding}</strong><span>{formatNumber(receiptHistoryOutstanding)}원</span></div>
                                     </div>
 
+                                    <div className="workbook-editor-card">
+                                        <div className="workbook-editor-header">
+                                            <h3>원본 행</h3>
+                                        </div>
+
+                                        <div className="sheet-table-wrapper compact">
+                                            <table className="sheet-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>구분</th>
+                                                        <th>일자</th>
+                                                        <th>현장명</th>
+                                                        <th>내용</th>
+                                                        <th>공급가액</th>
+                                                        <th>세액</th>
+                                                        <th>합계</th>
+                                                        <th>{receiptHistoryLabels.amount}</th>
+                                                        <th>비고</th>
+                                                        <th>팀명</th>
+                                                        <th>처리</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr>
+                                                        <td>{receiptHistoryInvoice.transactionType}</td>
+                                                        <td>{receiptHistoryInvoice.date}</td>
+                                                        <td>{receiptHistoryInvoice.siteName || '-'}</td>
+                                                        <td>{receiptHistoryInvoice.description || '-'}</td>
+                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.supplyAmount)}</td>
+                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.taxAmount)}</td>
+                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.totalAmount)}</td>
+                                                        <td className="align-right">{formatNumber(receiptHistoryInvoice.paymentAmount)}</td>
+                                                        <td>{receiptHistoryInvoice.note || '-'}</td>
+                                                        <td>{receiptHistoryInvoice.teamName || '-'}</td>
+                                                        <td>
+                                                            <div className="workbook-inline-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button"
+                                                                    onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
+                                                                    disabled={dbActionLoading || receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faPenToSquare} />
+                                                                    수정
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                    onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
+                                                                    disabled={dbActionLoading || receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faTrashCan} />
+                                                                    삭제
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
                                     {legacyMatchedGap > 0 && (
                                         <div className="workbook-modal-warning">
                                             기존 자동매칭 수금 {formatNumber(legacyMatchedGap)}원은 개별 이력이 연결되지 않아 여기서 수정/삭제할 수 없습니다.
@@ -2695,9 +3472,38 @@ const WorkbookLedgerPage: React.FC = () => {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {receiptHistoryEntries.length === 0 && (
+                                                {receiptHistoryOriginalPaymentAmount <= 0 && receiptHistoryEntries.length === 0 && (
                                                     <tr>
                                                         <td colSpan={4} className="sheet-empty-state">등록된 {receiptHistoryLabels.history}이 없습니다.</td>
+                                                    </tr>
+                                                )}
+                                                {receiptHistoryInvoice && receiptHistoryOriginalPaymentAmount > 0 && (
+                                                    <tr key={`original-${receiptHistoryInvoice.id ?? receiptHistoryInvoice.date}`}>
+                                                        <td>{receiptHistoryInvoice.date}</td>
+                                                        <td className="align-right">{formatNumber(receiptHistoryOriginalPaymentAmount)}</td>
+                                                        <td>{receiptHistoryInvoice.note || '원본 업로드 행'}</td>
+                                                        <td>
+                                                            <div className="workbook-inline-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button"
+                                                                    onClick={() => handleEditDbEntry(receiptHistoryInvoice)}
+                                                                    disabled={dbActionLoading || receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faPenToSquare} />
+                                                                    원본수정
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    className="workbook-toolbar-button workbook-inline-button workbook-danger-button"
+                                                                    onClick={() => handleDeleteDbEntry(receiptHistoryInvoice)}
+                                                                    disabled={dbActionLoading || receiptActionLoading}
+                                                                >
+                                                                    <FontAwesomeIcon icon={faTrashCan} />
+                                                                    원본삭제
+                                                                </button>
+                                                            </div>
+                                                        </td>
                                                     </tr>
                                                 )}
                                                 {receiptHistoryEntries.map((entry) => (

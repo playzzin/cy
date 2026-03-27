@@ -34,11 +34,15 @@ export interface WorkbookLedgerEntry {
     deletedBy?: string;
 }
 
-type WorkbookLedgerEntryInput = Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>;
+type WorkbookLedgerEntryInput = Omit<WorkbookLedgerEntry, 'createdAt' | 'updatedAt'>;
 type WorkbookLedgerEntryUpdate = Partial<Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'createdBy' | 'deletedAt' | 'deletedBy'>>;
+type GetEntriesOptions = {
+    force?: boolean;
+};
 
 const COLLECTION_NAME = 'sales_purchase_workbook_entries';
 const BATCH_SIZE = 400;
+let cachedEntries: WorkbookLedgerEntry[] | null = null;
 
 const normalizeNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -66,6 +70,12 @@ const sortEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
     if (createdCompare !== 0) return createdCompare;
 
     return (left.id ?? '').localeCompare(right.id ?? '', 'en');
+};
+
+const cloneEntry = (entry: WorkbookLedgerEntry): WorkbookLedgerEntry => ({ ...entry });
+const cloneEntries = (entries: WorkbookLedgerEntry[]) => entries.map(cloneEntry);
+const setCachedEntries = (entries: WorkbookLedgerEntry[]) => {
+    cachedEntries = cloneEntries(entries).sort(sortEntries);
 };
 
 const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
@@ -116,7 +126,11 @@ const sanitizeUpdate = (entry: WorkbookLedgerEntryUpdate, timestamp: string) => 
 };
 
 export const workbookLedgerService = {
-    async getEntries(): Promise<WorkbookLedgerEntry[]> {
+    async getEntries(options: GetEntriesOptions = {}): Promise<WorkbookLedgerEntry[]> {
+        if (!options.force && cachedEntries) {
+            return cloneEntries(cachedEntries);
+        }
+
         const snapshot = await getDocs(collection(db, COLLECTION_NAME));
         const entries = snapshot.docs.map((entryDoc) => {
             const data = entryDoc.data() as Record<string, unknown>;
@@ -150,31 +164,52 @@ export const workbookLedgerService = {
             } as WorkbookLedgerEntry;
         }).filter((entry): entry is WorkbookLedgerEntry => entry !== null);
 
-        entries.sort(sortEntries);
-        return entries;
+        setCachedEntries(entries);
+        return cloneEntries(entries);
     },
 
-    async addEntries(entries: WorkbookLedgerEntryInput[]): Promise<void> {
-        if (entries.length === 0) return;
+    async addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]> {
+        if (entries.length === 0) return [];
 
         const now = new Date().toISOString();
+        const createdEntries: WorkbookLedgerEntry[] = [];
 
         for (let index = 0; index < entries.length; index += BATCH_SIZE) {
             const batch = writeBatch(db);
             const chunk = entries.slice(index, index + BATCH_SIZE);
 
             chunk.forEach((entry) => {
-                const entryRef = doc(collection(db, COLLECTION_NAME));
-                batch.set(entryRef, sanitizeEntry(entry, now));
+                const entryRef = entry.id
+                    ? doc(collection(db, COLLECTION_NAME), entry.id)
+                    : doc(collection(db, COLLECTION_NAME));
+                const payload = sanitizeEntry(entry, now);
+                batch.set(entryRef, payload);
+                createdEntries.push({
+                    id: entryRef.id,
+                    ...(payload as Omit<WorkbookLedgerEntry, 'id'>)
+                });
             });
 
             await batch.commit();
         }
+
+        if (cachedEntries) {
+            setCachedEntries([...cachedEntries, ...createdEntries]);
+        }
+
+        return cloneEntries(createdEntries);
     },
 
     async updateEntry(id: string, updates: WorkbookLedgerEntryUpdate): Promise<void> {
         const now = new Date().toISOString();
-        await updateDoc(doc(collection(db, COLLECTION_NAME), id), sanitizeUpdate(updates, now));
+        const payload = sanitizeUpdate(updates, now);
+        await updateDoc(doc(collection(db, COLLECTION_NAME), id), payload);
+
+        if (cachedEntries) {
+            setCachedEntries(
+                cachedEntries.map((entry) => (entry.id === id ? { ...entry, ...(payload as Partial<WorkbookLedgerEntry>) } : entry))
+            );
+        }
     },
 
     async softDeleteEntry(id: string, deletedBy?: string): Promise<void> {
@@ -184,5 +219,13 @@ export const workbookLedgerService = {
             deletedBy: normalizeText(deletedBy) || null,
             updatedAt: now
         });
+
+        if (cachedEntries) {
+            setCachedEntries(cachedEntries.filter((entry) => entry.id !== id));
+        }
+    },
+
+    invalidateCache(): void {
+        cachedEntries = null;
     }
 };

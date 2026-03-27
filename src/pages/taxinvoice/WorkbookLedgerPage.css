@@ -97,6 +97,11 @@
     color: #f8fafc;
 }
 
+.excel-button-gray {
+    background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+    color: #f8fafc;
+}
+
 .workbook-toolbar-button:hover,
 .excel-button:hover {
     transform: translateY(-1px);
@@ -496,6 +501,23 @@
     background: #fffef2;
 }
 
+.workbook-linked-row td {
+    background: #f8fbff;
+}
+
+.workbook-linked-badge,
+.workbook-linked-cell {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #e0f2fe;
+    color: #0f172a;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 .workbook-inline-cell-input,
 .workbook-inline-cell-select {
     width: 100%;
@@ -507,6 +529,48 @@
     color: #0f172a;
     font-size: 12px;
     outline: none;
+}
+
+.workbook-filter-row th {
+    padding: 6px;
+    background: #f8fafc;
+}
+
+.workbook-filter-input {
+    width: 100%;
+    min-width: 0;
+    height: 32px;
+    padding: 0 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #0f172a;
+    font-size: 12px;
+    outline: none;
+}
+
+.workbook-filter-spacer {
+    background: #f8fafc;
+}
+
+.workbook-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.workbook-pagination-status {
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+}
+
+.workbook-pagination-button {
+    min-width: 104px;
+    min-height: 36px;
+    padding: 8px 12px;
 }
 
 .workbook-inline-cell-number {

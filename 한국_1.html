@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Korea Map Dashboard</title>
+
+    <script src="https://cdn.amcharts.com/lib/5/index.js"></script>
+    <script src="https://cdn.amcharts.com/lib/5/map.js"></script>
+    <script src="https://cdn.amcharts.com/lib/5/geodata/southKoreaLow.js"></script>
+    <script src="https://cdn.amcharts.com/lib/5/themes/Animated.js"></script>
+
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Pretendard', sans-serif;
+            background: #0b1120;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+
+        #chartdiv {
+            flex: 1;
+            background: radial-gradient(circle at 50% 50%, #1e293b 0%, #020617 100%);
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+        }
+
+        .sidebar {
+            width: 400px;
+            background: rgba(15, 23, 42, 0.95);
+            border-left: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            z-index: 20;
+            box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .header {
+            padding: 24px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .brand {
+            font-size: 20px;
+            font-weight: 800;
+            color: #38bdf8;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .info-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 16px;
+            padding: 24px;
+            animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+        }
+
+        .flag {
+            font-size: 48px;
+            line-height: 1;
+        }
+
+        .status {
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .c-name {
+            font-size: 28px;
+            font-weight: 800;
+            margin-bottom: 4px;
+            color: #f8fafc;
+        }
+
+        .c-desc {
+            font-size: 14px;
+            color: #94a3b8;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .stat-box {
+            background: #0f172a;
+            border-radius: 12px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        .stat-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e2e8f0;
+        }
+
+        .empty-state {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #475569;
+        }
+
+        .empty-state i {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 1000px) {
+            body { flex-direction: column; }
+            .sidebar {
+                width: 100%;
+                height: 45vh;
+                border-left: none;
+                border-top: 1px solid #334155;
+            }
+            #chartdiv { height: 55vh; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="chartdiv"></div>
+
+    <div class="sidebar">
+        <div class="header">
+            <div class="brand">
+                <i class="ph-fill ph-map-trifold"></i>
+                KOREA VIEW
+            </div>
+        </div>
+        <div class="content" id="panel">
+            <div class="empty-state">
+                <i class="ph-duotone ph-map-trifold"></i>
+                <p>지역을 클릭하면<br>상세 정보가 표시됩니다.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        am5.ready(function () {
+            var root = am5.Root.new("chartdiv");
+
+            root.setThemes([
+                am5themes_Animated.new(root)
+            ]);
+
+            var chart = root.container.children.push(am5map.MapChart.new(root, {
+                panX: "translateX",
+                panY: "translateY",
+                projection: am5map.geoMercator(),
+                minZoomLevel: 1,
+                maxZoomLevel: 20,
+                homeGeoPoint: { longitude: 127.8, latitude: 36.2 },
+                homeZoomLevel: 1
+            }));
+
+            // 1. 지도 지역 그리기
+            var polygonSeries = chart.series.push(am5map.MapPolygonSeries.new(root, {
+                geoJSON: am5geodata_southKoreaLow
+            }));
+
+            polygonSeries.mapPolygons.template.setAll({
+                tooltipText: "{name}",
+                toggleKey: "active",
+                interactive: true,
+                fill: am5.color(0x334155),
+                stroke: am5.color(0x0f172a),
+                strokeWidth: 1.2
+            });
+
+            polygonSeries.mapPolygons.template.states.create("hover", {
+                fill: am5.color(0x475569),
+                stroke: am5.color(0x38bdf8)
+            });
+
+            polygonSeries.mapPolygons.template.states.create("active", {
+                fill: am5.color(0x38bdf8),
+                stroke: am5.color(0xffffff),
+                strokeWidth: 3,
+                // 활성화 시 빛번짐(글로우)을 주어 시각적으로 더 커 보이게 연출
+                shadowColor: am5.color(0x38bdf8),
+                shadowBlur: 15,
+                shadowOpacity: 0.8
+            });
+
+            // 2. 화살표 라인 시리즈
+            var lineSeries = chart.series.push(am5map.MapLineSeries.new(root, {}));
+            lineSeries.mapLines.template.setAll({
+                stroke: am5.color(0x38bdf8),
+                strokeWidth: 1.5,
+                strokeOpacity: 0.3,
+                strokeDasharray: [3, 3] // 점선 효과
+            });
+
+            // 라인을 따라 움직이는 화살표 애니메이션
+            lineSeries.bullets.push(function (root, series, dataItem) {
+                var arrow = am5.Graphics.new(root, {
+                    fill: am5.color(0x38bdf8),
+                    centerY: am5.p50,
+                    centerX: am5.p50,
+                    shadowColor: am5.color(0x38bdf8),
+                    shadowBlur: 6,
+                    shadowOffsetX: 0,
+                    shadowOffsetY: 0,
+                    shadowOpacity: 0.8,
+                    draw: function (display) {
+                        display.moveTo(0, -4);
+                        display.lineTo(10, 0);
+                        display.lineTo(0, 4);
+                        display.lineTo(3, 0);
+                        display.lineTo(0, -4);
+                    }
+                });
+
+                // 무한 반복 애니메이션 (속도를 랜덤하게 부여해 자연스럽게 구성)
+                arrow.animate({
+                    key: "positionOnLine",
+                    to: 1,
+                    from: 0,
+                    duration: 1500 + Math.random() * 2000, 
+                    loops: Infinity
+                });
+
+                return am5.Bullet.new(root, {
+                    sprite: arrow,
+                    autoRotate: true, // 화살표가 라인의 방향을 따라가도록 설정
+                    autoRotateAngle: 0
+                });
+            });
+
+            // 3. 지역 중심점 야광 포인트 시리즈
+            var pointSeries = chart.series.push(am5map.MapPointSeries.new(root, {}));
+            pointSeries.bullets.push(function (root, series, dataItem) {
+                var isOrigin = dataItem.dataContext.id === "ANSAN";
+                var circle = am5.Circle.new(root, {
+                    radius: isOrigin ? 6 : 3,
+                    fill: am5.color(0x38bdf8),
+                    stroke: am5.color(0xffffff),
+                    strokeWidth: isOrigin ? 2 : 1,
+                    tooltipText: "{name}",
+                    shadowColor: am5.color(0x38bdf8),
+                    shadowBlur: isOrigin ? 12 : 5,
+                    shadowOffsetX: 0,
+                    shadowOffsetY: 0,
+                    shadowOpacity: 0.8
+                });
+
+                // 출발점(안산) 포인트는 쿵쿵 뛰는(Pulsing) 애니메이션 추가
+                if (isOrigin) {
+                    circle.animate({
+                        key: "radius",
+                        to: 8,
+                        from: 6,
+                        duration: 800,
+                        loops: Infinity,
+                        direction: "alternate"
+                    });
+                }
+
+                return am5.Bullet.new(root, {
+                    sprite: circle
+                });
+            });
+
+
+            // 지역별 샘플 데이터
+            var regionDB = {
+                "KR-11": { name: "서울특별시", flag: "🏙️", branches: 24, type: "본사", revenue: "₩8.2B" },
+                "KR-26": { name: "부산광역시", flag: "🚢", branches: 11, type: "물류 거점", revenue: "₩2.9B" },
+                "KR-27": { name: "대구광역시", flag: "🏭", branches: 8, type: "생산 지원", revenue: "₩1.8B" },
+                "KR-28": { name: "인천광역시", flag: "✈️", branches: 10, type: "국제 허브", revenue: "₩2.4B" },
+                "KR-29": { name: "광주광역시", flag: "🔧", branches: 6, type: "기술 지원", revenue: "₩1.1B" },
+                "KR-30": { name: "대전광역시", flag: "🧪", branches: 7, type: "R&D 센터", revenue: "₩1.5B" },
+                "KR-31": { name: "울산광역시", flag: "⛽", branches: 5, type: "산업 거점", revenue: "₩1.7B" },
+                "KR-41": { name: "경기도", flag: "🏢", branches: 33, type: "핵심 운영지역", revenue: "₩10.4B" },
+                "KR-42": { name: "강원특별자치도", flag: "⛰️", branches: 4, type: "관광/리테일", revenue: "₩0.8B" },
+                "KR-43": { name: "충청북도", flag: "🚚", branches: 5, type: "내륙 물류", revenue: "₩1.0B" },
+                "KR-44": { name: "충청남도", flag: "🏗️", branches: 7, type: "제조 허브", revenue: "₩1.6B" },
+                "KR-45": { name: "전북특별자치도", flag: "🌾", branches: 4, type: "지역 운영", revenue: "₩0.9B" },
+                "KR-46": { name: "전라남도", flag: "⚓", branches: 6, type: "항만 운영", revenue: "₩1.2B" },
+                "KR-47": { name: "경상북도", flag: "🏞️", branches: 9, type: "생산 네트워크", revenue: "₩2.1B" },
+                "KR-48": { name: "경상남도", flag: "🏭", branches: 12, type: "제조 클러스터", revenue: "₩3.0B" },
+                "KR-49": { name: "제주특별자치도", flag: "🌴", branches: 3, type: "관광 특화", revenue: "₩0.7B" },
+                "KR-50": { name: "세종특별자치시", flag: "🏛️", branches: 2, type: "행정 거점", revenue: "₩0.4B" }
+            };
+
+            // 데이터가 유효화(그려질 준비) 되었을 때 선과 점 데이터를 계산하여 주입
+            polygonSeries.events.on("datavalidated", function () {
+                var lineData = [];
+                var pointData = [];
+                var ansanCoords = { longitude: 126.8308, latitude: 37.3219 }; // 안산의 실제 위경도 좌표
+
+                // 1. 안산(시작점) 야광 포인트 추가
+                pointData.push({
+                    geometry: { type: "Point", coordinates: [ansanCoords.longitude, ansanCoords.latitude] },
+                    id: "ANSAN",
+                    name: "안산 (출발점)"
+                });
+
+                // 2. 나머지 지역들을 순회하며 안산에서 뻗어나가는 화살표 라인 구축
+                polygonSeries.mapPolygons.each(function (polygon) {
+                    var ctx = polygon.dataItem.dataContext;
+                    var id = ctx.id;
+                    var data = regionDB[id];
+
+                    if (data) {
+                        // 지역 활성화 색상 반영
+                        polygon.set("fill", am5.color(0x475569));
+                        polygon.set("stroke", am5.color(0x64748b));
+
+                        var targetCentroid = polygon.geoCentroid();
+                        if (targetCentroid) {
+                            
+                            // 서울(KR-11), 인천(KR-28), 경기(KR-41)는 트래픽이 많은 것처럼 화살표(라인) 다중 생성
+                            var isHeavyTraffic = (id === "KR-11" || id === "KR-28" || id === "KR-41");
+                            var lineCount = isHeavyTraffic ? 6 : 1; // 해당 수도권 지역들은 6배의 화살표 생성
+
+                            for (var i = 0; i < lineCount; i++) {
+                                // 라인 데이터 (안산 -> 타지역)
+                                lineData.push({
+                                    geometry: {
+                                        type: "LineString",
+                                        coordinates: [
+                                            [ansanCoords.longitude, ansanCoords.latitude],
+                                            [targetCentroid.longitude, targetCentroid.latitude]
+                                        ]
+                                    }
+                                });
+                            }
+
+                            // 해당 지역 중심 포인트 (도착점)
+                            pointData.push({
+                                geometry: { type: "Point", coordinates: [targetCentroid.longitude, targetCentroid.latitude] },
+                                id: id,
+                                name: ctx.name
+                            });
+                        }
+                    }
+                });
+
+                // 계산된 데이터를 시리즈에 세팅
+                lineSeries.data.setAll(lineData);
+                pointSeries.data.setAll(pointData);
+            });
+
+            var previousPolygon = null;
+
+            polygonSeries.mapPolygons.template.on("active", function (active, target) {
+                if (previousPolygon && previousPolygon !== target) {
+                    previousPolygon.set("active", false);
+                    // 다른 지역 클릭 시 이전 지역 원래대로 복구
+                    previousPolygon.set("dy", 0);
+                    previousPolygon.set("layer", 0);
+                }
+
+                if (target.get("active")) {
+                    previousPolygon = target;
+
+                    var ctx = target.dataItem.dataContext;
+                    var regionId = ctx.id;
+                    var regionName = ctx.name;
+
+                    updatePanel(regionId, regionName);
+                    
+                    // 지도 확대(Zoom) 기능 제거하고, 선택된 지역만 위로 튀어오르는 효과 연출
+                    target.set("layer", 30); // 다른 지역들에 가려지지 않게 최상단으로 올림
+                    target.animate({
+                        key: "dy",
+                        to: -8, // 위로 살짝 이동하여 팝업되는 느낌
+                        duration: 300,
+                        easing: am5.ease.out(am5.ease.cubic)
+                    });
+                } else {
+                    resetPanel();
+                    
+                    // 전체 줌 아웃(goHome) 제거 및 해당 지역만 원래 위치로 복귀
+                    target.animate({
+                        key: "dy",
+                        to: 0,
+                        duration: 300,
+                        easing: am5.ease.out(am5.ease.cubic)
+                    });
+                    
+                    // 애니메이션이 끝난 후 레이어 원상복구
+                    setTimeout(function() {
+                        if (!target.get("active")) {
+                            target.set("layer", 0);
+                        }
+                    }, 300);
+                }
+            });
+
+            function updatePanel(id, mapName) {
+                var data = regionDB[id];
+                var panel = document.getElementById("panel");
+
+                if (data) {
+                    panel.innerHTML = `
+                        <div class="info-card">
+                            <div class="card-top">
+                                <div class="flag">${data.flag}</div>
+                                <div class="status">ACTIVE REGION</div>
+                            </div>
+
+                            <div class="c-name">${data.name}</div>
+                            <div class="c-desc">
+                                <i class="ph-fill ph-map-pin"></i>
+                                ${data.type}
+                            </div>
+
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <div class="stat-label">지점 수</div>
+                                    <div class="stat-value">${data.branches}</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">매출</div>
+                                    <div class="stat-value">${data.revenue}</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">지역 코드</div>
+                                    <div class="stat-value">${id}</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-label">상태</div>
+                                    <div class="stat-value" style="color:#4ade80">운영 중</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    panel.innerHTML = `
+                        <div class="info-card" style="border-color:#ef4444;">
+                            <div class="card-top">
+                                <div class="flag">📍</div>
+                                <div class="status" style="color:#ef4444; background:rgba(239,68,68,0.15)">NO DATA</div>
+                            </div>
+
+                            <div class="c-name">${mapName}</div>
+                            <div class="c-desc" style="color:#f87171">
+                                등록된 지역 데이터가 없습니다
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+
+            function resetPanel() {
+                document.getElementById("panel").innerHTML = `
+                    <div class="empty-state">
+                        <i class="ph-duotone ph-map-trifold"></i>
+                        <p>지역을 클릭하면<br>상세 정보가 표시됩니다.</p>
+                    </div>
+                `;
+            }
+
+            chart.appear(1000, 100);
+        });
+    </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recha
 import { storage } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { DashboardSlider } from './components/DashboardSlider';
 
 type SiteWorkerHighlight = {
     id: string;
@@ -585,8 +586,13 @@ const CheongyeonHome: React.FC = () => {
                 <div className={`absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-slate-900/80 transition-opacity duration-1000 ${isIntro ? 'opacity-0' : 'opacity-100'}`} />
             </div>
 
+            {/* 0. Premium Image Slider Section */}
+            <div className={`relative z-10 pt-24 px-8 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                <DashboardSlider />
+            </div>
+
             {/* 1. Recent Daily Report Highlights */}
-            <section className={`relative z-10 px-8 pt-28 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+            <section className={`relative z-10 px-8 pt-10 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
                 <div className="mb-10 max-w-5xl animate-slideUp">
                     <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 backdrop-blur-md border border-white/10 w-fit">
                         <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
