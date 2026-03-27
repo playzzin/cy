@@ -68,11 +68,26 @@
     gap: 6px;
 }
 
+.workbook-inline-actions-horizontal {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 4px;
+}
+
 .workbook-inline-button {
     width: 100%;
     min-height: 36px;
     padding: 8px 10px;
     font-size: 12px;
+}
+
+.workbook-inline-actions-horizontal .workbook-inline-button {
+    width: auto;
+    min-width: 52px;
+    flex: 1 1 0;
+    min-height: 32px;
+    padding: 6px 8px;
+    font-size: 11px;
 }
 
 .workbook-danger-button {
@@ -138,30 +153,6 @@
     color: #0f172a;
     border-bottom-color: #ffffff;
     box-shadow: 0 -1px 0 #ffffff inset;
-}
-
-.workbook-status-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 18px;
-    padding: 10px 14px;
-    border: 1px solid #dbe2ea;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.85);
-    color: #475569;
-    font-size: 13px;
-}
-
-.workbook-status-bar span {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.workbook-section-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 12px 16px 0;
 }
 
 .workbook-sheet {
@@ -246,6 +237,84 @@
 
 .sheet-button-wrap {
     padding: 0;
+}
+
+.query-sheet-table th,
+.query-sheet-table td {
+    padding: 5px 8px;
+}
+
+.query-sheet-table input,
+.query-sheet-table select,
+.sheet-filter-input {
+    height: 28px;
+    font-size: 12px;
+}
+
+.query-sheet-table .sheet-value,
+.query-sheet-table .sheet-value-light {
+    padding: 4px 8px;
+}
+
+.query-sheet-table .sheet-label-blue,
+.query-sheet-table .sheet-label-green {
+    white-space: nowrap;
+}
+
+.sheet-filter-date-cell {
+    min-width: 178px;
+}
+
+.sheet-filter-wide-cell {
+    min-width: 220px;
+}
+
+.sheet-button-stack {
+    padding: 4px 6px;
+}
+
+.query-sheet-table .excel-button {
+    min-height: 34px;
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+.sheet-button-count {
+    color: #475569;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: right;
+    line-height: 1.2;
+}
+
+.sheet-filter-count-cell {
+    text-align: right;
+    padding-right: 12px;
+}
+
+.workbook-summary-filter-table th,
+.workbook-summary-filter-table td {
+    border-color: #e5cf87;
+}
+
+.workbook-summary-filter-table .sheet-title-dark {
+    background: linear-gradient(180deg, #ffe08a 0%, #f2c94c 100%);
+    color: #111827;
+}
+
+.workbook-summary-filter-table .sheet-label-blue,
+.workbook-summary-filter-table .sheet-label-green {
+    background: #ffd966;
+    color: #111827;
+}
+
+.workbook-summary-filter-table .sheet-value,
+.workbook-summary-filter-table .sheet-value-light {
+    background: #fff8d9;
+}
+
+.workbook-summary-filter-table .sheet-spacer {
+    background: #fffdf2;
 }
 
 .workbook-hidden-input {
@@ -481,6 +550,100 @@
     font-weight: 700;
 }
 
+.workbook-ledger-table .workbook-ledger-col-date {
+    width: 82px;
+}
+
+.workbook-ledger-table .workbook-ledger-col-description {
+    width: 280px;
+}
+
+.workbook-ledger-table .workbook-ledger-col-transaction,
+.workbook-ledger-table .workbook-ledger-col-payment,
+.workbook-ledger-table .workbook-ledger-col-balance {
+    width: 92px;
+}
+
+.workbook-ledger-table .workbook-ledger-col-site {
+    width: 200px;
+}
+
+.workbook-ledger-table .workbook-ledger-col-note {
+    width: 100px;
+}
+
+.workbook-ledger-table .workbook-ledger-col-team {
+    width: 64px;
+}
+
+.workbook-summary-table .workbook-summary-col-no {
+    width: 42px;
+}
+
+.workbook-summary-table .workbook-summary-col-partner {
+    width: 132px;
+}
+
+.workbook-summary-table .workbook-summary-col-site {
+    width: 250px;
+}
+
+.workbook-summary-table .workbook-summary-col-issue-date {
+    width: 74px;
+}
+
+.workbook-summary-table .workbook-summary-col-amount,
+.workbook-summary-table .workbook-summary-col-tax,
+.workbook-summary-table .workbook-summary-col-total,
+.workbook-summary-table .workbook-summary-col-settled,
+.workbook-summary-table .workbook-summary-col-outstanding {
+    width: 80px;
+}
+
+.workbook-summary-table .workbook-summary-col-payment-date {
+    width: 74px;
+}
+
+.workbook-summary-table .workbook-summary-col-note {
+    width: 72px;
+}
+
+.workbook-summary-table .workbook-summary-col-team {
+    width: 54px;
+}
+
+.workbook-summary-table .workbook-summary-col-action {
+    width: 110px;
+}
+
+.workbook-summary-table th:first-child,
+.workbook-summary-table td:first-child {
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+.workbook-summary-table th,
+.workbook-summary-table td {
+    padding: 6px 7px;
+    font-size: 12px;
+}
+
+.workbook-summary-table .summary-header th {
+    padding-top: 7px;
+    padding-bottom: 7px;
+}
+
+.workbook-summary-table .workbook-inline-actions-horizontal .workbook-inline-button {
+    min-height: 28px;
+    padding: 5px 7px;
+    font-size: 10px;
+}
+
+.workbook-summary-table .cell-date-list {
+    gap: 1px;
+    line-height: 1.2;
+}
+
 .sheet-empty-state {
     padding: 32px 16px !important;
     color: #64748b;
@@ -586,12 +749,6 @@
     border-radius: 8px;
     background: #f8fafc;
     text-align: right;
-}
-
-.summary-sheet-table > tbody > tr:nth-child(4),
-.summary-sheet-table > tbody > tr:nth-child(5),
-.summary-sheet-table > tbody > tr:nth-child(6) {
-    display: none;
 }
 
 @media (max-width: 768px) {

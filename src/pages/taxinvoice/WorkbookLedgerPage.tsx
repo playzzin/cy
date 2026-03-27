@@ -10,9 +10,9 @@ import {
     faDatabase,
     faMagnifyingGlass,
     faPenToSquare,
+    faPrint,
     faRotateRight,
     faSpinner,
-    faTableCellsLarge,
     faTrashCan,
     faUpload,
     faXmark
@@ -160,7 +160,7 @@ interface DbFilterState {
 
 const INPUT_ROW_COUNT = 80;
 const DB_PAGE_SIZE = 100;
-const DEFAULT_LEDGER_START = '2019-01-01';
+const buildDefaultLedgerStart = (year: number) => `${year}-01-01`;
 const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
     { id: 'input', label: '입력폼' },
     { id: 'database', label: 'DB' },
@@ -515,6 +515,13 @@ const sortWorkbookEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEnt
     return (left.id ?? '').localeCompare(right.id ?? '', 'en');
 };
 
+const sortSummaryRowsByRecent = (left: SummaryRow, right: SummaryRow) => {
+    const dateCompare = (right.issueDate ?? '').localeCompare(left.issueDate ?? '', 'en');
+    if (dateCompare !== 0) return dateCompare;
+
+    return (right.id ?? '').localeCompare(left.id ?? '', 'en');
+};
+
 const matchesFilter = (source: string | undefined, keyword: string) => {
     if (!keyword.trim()) return true;
     return (source ?? '').toLowerCase().includes(keyword.trim().toLowerCase());
@@ -606,7 +613,7 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
     let runningBalance = 0;
 
-    return scopedEntries.map((entry) => {
+    const ledgerRows = scopedEntries.map((entry) => {
         const transactionAmount = entry.totalAmount ?? 0;
         const paymentAmount = entry.paymentAmount ?? 0;
         runningBalance += transactionAmount - paymentAmount;
@@ -623,6 +630,8 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
             teamName: entry.teamName ?? ''
         };
     });
+
+    return ledgerRows.reverse();
 };
 
 const buildReceiptHistorySettlementEntries = (
@@ -757,7 +766,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         invoice.remainingAmount -= appliedAmount;
         invoice.outstandingAmount = invoice.remainingAmount;
         if (paymentDate && !invoice.paymentDates.includes(paymentDate)) {
-            invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
+            invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => right.localeCompare(left, 'en'));
         }
 
         return paymentAmount - appliedAmount;
@@ -865,10 +874,12 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         .filter((row): row is SummaryRow => Boolean(row));
 
     if (filter.mode === '미수금' || filter.mode === '미지급금') {
-        return finalizedRows.filter((row) => row.outstandingAmount > 0);
+        return finalizedRows
+            .filter((row) => row.outstandingAmount > 0)
+            .sort(sortSummaryRowsByRecent);
     }
 
-    return finalizedRows;
+    return finalizedRows.sort(sortSummaryRowsByRecent);
 };
 
 const WorkbookLedgerPage: React.FC = () => {
@@ -880,9 +891,8 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const today = useMemo(() => new Date(), []);
     const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1;
-    const currentDay = today.getDate();
     const todayString = formatDateInput(today);
+    const defaultLedgerStart = buildDefaultLedgerStart(currentYear);
 
     const [activeTab, setActiveTab] = useState<WorkbookTab>('input');
     const [loading, setLoading] = useState(false);
@@ -891,6 +901,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const [downloadingDb, setDownloadingDb] = useState(false);
     const [dbActionLoading, setDbActionLoading] = useState(false);
     const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
+    const [printingSummary, setPrintingSummary] = useState(false);
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
     const [entriesLoaded, setEntriesLoaded] = useState(false);
@@ -907,7 +918,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const [inputRows, setInputRows] = useState<InputRow[]>(() => Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow));
 
     const [ledgerDraft, setLedgerDraft] = useState<LedgerFilter>({
-        startDate: DEFAULT_LEDGER_START,
+        startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
         transactionType: '매출',
@@ -915,7 +926,7 @@ const WorkbookLedgerPage: React.FC = () => {
         siteName: ''
     });
     const [ledgerFilter, setLedgerFilter] = useState<LedgerFilter>({
-        startDate: DEFAULT_LEDGER_START,
+        startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
         transactionType: '매출',
@@ -924,7 +935,7 @@ const WorkbookLedgerPage: React.FC = () => {
     });
 
     const [summaryDraft, setSummaryDraft] = useState<SummaryFilter>({
-        startDate: DEFAULT_LEDGER_START,
+        startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
         mode: '미수금',
@@ -932,7 +943,7 @@ const WorkbookLedgerPage: React.FC = () => {
         siteName: ''
     });
     const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>({
-        startDate: DEFAULT_LEDGER_START,
+        startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
         mode: '미수금',
@@ -1984,7 +1995,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const applySummaryFilter = useCallback(() => {
         const draft = {
             ...summaryDraft,
-            startDate: normalizeDate(summaryDraft.startDate) || DEFAULT_LEDGER_START,
+            startDate: normalizeDate(summaryDraft.startDate) || defaultLedgerStart,
             endDate: normalizeDate(summaryDraft.endDate) || todayString
         };
 
@@ -2005,7 +2016,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     endDate: draft.startDate
                 }
         );
-    }, [summaryDraft, todayString]);
+    }, [defaultLedgerStart, summaryDraft, todayString]);
 
     const ledgerRows = useMemo(
         () => (activeTab === 'ledger' ? buildLedgerRows(entries, ledgerFilter) : []),
@@ -2017,10 +2028,10 @@ const WorkbookLedgerPage: React.FC = () => {
     );
 
     const ledgerTotals = useMemo(() => {
-        return ledgerRows.reduce((accumulator, row) => ({
+        return ledgerRows.reduce((accumulator, row, index) => ({
             transactionAmount: accumulator.transactionAmount + row.transactionAmount,
             paymentAmount: accumulator.paymentAmount + row.paymentAmount,
-            balance: row.balance
+            balance: index === 0 ? row.balance : accumulator.balance
         }), { transactionAmount: 0, paymentAmount: 0, balance: 0 });
     }, [ledgerRows]);
 
@@ -2078,6 +2089,252 @@ const WorkbookLedgerPage: React.FC = () => {
         () => getSettlementLabels(receiptHistoryInvoice?.transactionType ?? receiptHistorySummaryRow?.transactionType),
         [receiptHistoryInvoice?.transactionType, receiptHistorySummaryRow?.transactionType]
     );
+
+    const handlePrintSummary = useCallback(() => {
+        if (summaryRows.length === 0) {
+            Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
+            return;
+        }
+
+        const paymentDateLabel = summarySettlementLabels.date;
+        const settledAmountLabel = summarySettlementLabels.amount;
+        const outstandingLabel = summarySettlementLabels.outstanding;
+        const countText = `${summaryRows.length.toLocaleString()}건`;
+        const filterItems = [
+            ['검색기간', `${summaryFilter.startDate} ~ ${summaryFilter.endDate}`],
+            ['구분', summaryFilter.mode],
+            ['팀명', summaryFilter.teamName || '전체'],
+            ['거래처', summaryFilter.partnerName || '전체'],
+            ['현장명', summaryFilter.siteName || '전체'],
+            ['건수', countText]
+        ];
+
+        const rowsHtml = summaryRows
+            .map((row, index) => `
+                <tr>
+                    <td class="align-right">${index + 1}</td>
+                    <td>${escapeHtml(row.partnerName || '-')}</td>
+                    <td>${escapeHtml(row.siteName || '-')}</td>
+                    <td>${escapeHtml(row.issueDate || '-')}</td>
+                    <td class="align-right">${formatNumber(row.supplyAmount)}</td>
+                    <td class="align-right">${formatNumber(row.taxAmount)}</td>
+                    <td class="align-right">${formatNumber(row.totalAmount)}</td>
+                    <td>${row.paymentDates.length > 0 ? row.paymentDates.map((paymentDate) => escapeHtml(paymentDate)).join('<br />') : '-'}</td>
+                    <td class="align-right">${formatNumber(row.settledAmount)}</td>
+                    <td class="align-right">${formatNumber(row.outstandingAmount)}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
+                    <td>${escapeHtml(row.teamName || '-')}</td>
+                </tr>
+            `)
+            .join('');
+
+        setPrintingSummary(true);
+
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.style.visibility = 'hidden';
+        document.body.appendChild(iframe);
+
+        const cleanup = () => {
+            setPrintingSummary(false);
+            if (iframe.parentNode) {
+                iframe.parentNode.removeChild(iframe);
+            }
+        };
+
+        const printWindow = iframe.contentWindow;
+
+        if (!printWindow) {
+            cleanup();
+            Swal.fire('오류', '인쇄 미리보기를 열 수 없습니다.', 'error');
+            return;
+        }
+
+        const printableHtml = `
+            <!DOCTYPE html>
+            <html lang="ko">
+                <head>
+                    <meta charset="utf-8" />
+                    <title>전체 조회 인쇄</title>
+                    <style>
+                        @page {
+                            size: A4 landscape;
+                            margin: 12mm;
+                        }
+
+                        * {
+                            box-sizing: border-box;
+                        }
+
+                        body {
+                            margin: 0;
+                            font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+                            color: #111827;
+                            background: #ffffff;
+                        }
+
+                        .print-shell {
+                            padding: 20px 24px 28px;
+                        }
+
+                        .print-header {
+                            margin-bottom: 16px;
+                        }
+
+                        .print-header h1 {
+                            margin: 0;
+                            font-size: 26px;
+                        }
+
+                        .print-header p {
+                            margin: 6px 0 0;
+                            color: #475569;
+                            font-size: 12px;
+                        }
+
+                        .print-filter-grid {
+                            display: grid;
+                            grid-template-columns: repeat(3, minmax(0, 1fr));
+                            gap: 8px;
+                            margin-bottom: 16px;
+                        }
+
+                        .print-filter-item {
+                            padding: 8px 10px;
+                            border: 1px solid #d7dde7;
+                            border-radius: 10px;
+                            background: #f8fafc;
+                            font-size: 12px;
+                        }
+
+                        .print-filter-item strong {
+                            display: inline-block;
+                            margin-right: 6px;
+                            color: #334155;
+                        }
+
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            table-layout: fixed;
+                        }
+
+                        th,
+                        td {
+                            border: 1px solid #cbd5e1;
+                            padding: 7px 8px;
+                            font-size: 11px;
+                            vertical-align: top;
+                            word-break: break-word;
+                        }
+
+                        thead th {
+                            background: #ffd966;
+                            color: #111827;
+                            font-weight: 700;
+                        }
+
+                        tfoot td {
+                            background: #f8fafc;
+                            font-weight: 700;
+                        }
+
+                        .align-right {
+                            text-align: right;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="print-shell">
+                        <div class="print-header">
+                            <h1>전체 조회</h1>
+                            <p>현재 조회 조건으로 검색된 결과만 인쇄합니다.</p>
+                        </div>
+                        <div class="print-filter-grid">
+                            ${filterItems.map(([label, value]) => `
+                                <div class="print-filter-item">
+                                    <strong>${escapeHtml(label)}</strong>${escapeHtml(value)}
+                                </div>
+                            `).join('')}
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>No</th>
+                                    <th>거래처명</th>
+                                    <th>현장명</th>
+                                    <th>발행일</th>
+                                    <th>공급가액</th>
+                                    <th>세액</th>
+                                    <th>합계</th>
+                                    <th>${escapeHtml(paymentDateLabel)}</th>
+                                    <th>${escapeHtml(settledAmountLabel)}</th>
+                                    <th>${escapeHtml(outstandingLabel)}</th>
+                                    <th>비고</th>
+                                    <th>팀명</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rowsHtml}
+                            </tbody>
+                            <tfoot>
+                                <tr>
+                                    <td></td>
+                                    <td>합계</td>
+                                    <td></td>
+                                    <td></td>
+                                    <td class="align-right">${formatNumber(summaryTotals.supplyAmount)}</td>
+                                    <td class="align-right">${formatNumber(summaryTotals.taxAmount)}</td>
+                                    <td class="align-right">${formatNumber(summaryTotals.totalAmount)}</td>
+                                    <td></td>
+                                    <td class="align-right">${formatNumber(summaryTotals.settledAmount)}</td>
+                                    <td class="align-right">${formatNumber(summaryTotals.outstandingAmount)}</td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </body>
+            </html>
+        `;
+
+        printWindow.document.open();
+        printWindow.document.write(printableHtml);
+        printWindow.document.close();
+
+        const handleAfterPrint = () => {
+            printWindow.removeEventListener('afterprint', handleAfterPrint);
+            cleanup();
+        };
+
+        printWindow.addEventListener('afterprint', handleAfterPrint);
+
+        iframe.onload = () => {
+            setTimeout(() => {
+                try {
+                    printWindow.focus();
+                    printWindow.print();
+                } catch (error) {
+                    console.error(error);
+                    cleanup();
+                    Swal.fire('오류', '인쇄 미리보기를 여는 중 문제가 발생했습니다.', 'error');
+                }
+            }, 150);
+        };
+
+        window.setTimeout(() => {
+            if (iframe.parentNode) {
+                cleanup();
+            }
+        }, 60000);
+    }, [summaryFilter, summaryRows, summarySettlementLabels, summaryTotals]);
 
     const linkedDbEntriesByParentId = useMemo(() => {
         const nextMap = new Map<string, WorkbookLedgerEntry[]>();
@@ -2479,24 +2736,6 @@ const WorkbookLedgerPage: React.FC = () => {
             <div className="sheet-table-wrapper">
                 <table className="sheet-table">
                     <thead>
-                        <tr>
-                            <th>No.</th>
-                            <th>구분</th>
-                            <th>날짜</th>
-                            <th>거래처명</th>
-                            <th>현장명</th>
-                            <th>내용</th>
-                            <th>공급가액</th>
-                            <th>부가세</th>
-                            <th>합계</th>
-                            <th>입금금액</th>
-                            <th>적용연도</th>
-                            <th>적용월</th>
-                            <th>비고</th>
-                            <th>팀명</th>
-                            <th>내역</th>
-                            <th>처리</th>
-                        </tr>
                         <tr className="workbook-filter-row">
                             <th className="workbook-filter-spacer" />
                             <th>
@@ -2904,62 +3143,65 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const renderLedgerTab = () => (
         <section className="workbook-sheet">
-            <div className="workbook-section-toolbar" data-html2canvas-ignore="true">
-                <button
-                    type="button"
-                    className="workbook-toolbar-button"
-                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
-                    disabled={capturingView === 'ledger'}
-                >
-                    <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
-                    화면 복사
-                </button>
-            </div>
-
             <div>
-                <table className="sheet-control-table query-sheet-table">
+                <table className="sheet-control-table query-sheet-table workbook-summary-filter-table">
                     <tbody>
                         <tr>
-                            <th className="sheet-title-dark" colSpan={8}>매출/매입 거래장</th>
+                            <th className="sheet-title-dark" colSpan={16}>매출/매입 거래장</th>
                         </tr>
                         <tr>
                             <th className="sheet-label-blue">검색시작일</th>
-                            <td className="sheet-value">
+                            <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
+                                    className="sheet-filter-input"
                                     value={ledgerDraft.startDate}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-blue">검색종료일</th>
-                            <td className="sheet-value">
+                            <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
+                                    className="sheet-filter-input"
                                     value={ledgerDraft.endDate}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, endDate: event.target.value }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
+                            <td className="sheet-spacer" colSpan={4} />
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button
+                                    type="button"
+                                    className="excel-button excel-button-blue"
+                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
+                                    disabled={capturingView === 'ledger'}
+                                >
+                                    <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
+                                    화면 복사
+                                </button>
+                            </td>
+                            <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
+                                <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
+                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
+                                    조회
+                                </button>
+                            </td>
                         </tr>
                         <tr>
                             <th className="sheet-label-green">팀 명</th>
                             <td className="sheet-value-light">
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-team-options"
                                     value={ledgerDraft.teamName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
                                     placeholder="전체"
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-green">구 분</th>
                             <td className="sheet-value-light">
                                 <select
+                                    className="sheet-filter-input"
                                     value={ledgerDraft.transactionType}
                                     onChange={(event) => setLedgerDraft((prev) => ({
                                         ...prev,
@@ -2970,37 +3212,29 @@ const WorkbookLedgerPage: React.FC = () => {
                                     <option value="매입">매입</option>
                                 </select>
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-green">거래처</th>
-                            <td className="sheet-value-light">
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-partner-options"
                                     value={ledgerDraft.partnerName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
                                     placeholder="거래처 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={4} />
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
-                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
-                                </button>
-                            </td>
-                        </tr>
-                        <tr>
                             <th className="sheet-label-green">현장명</th>
-                            <td className="sheet-value-light">
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-site-options"
                                     value={ledgerDraft.siteName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
                                     placeholder="현장 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
+                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
+                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -3010,7 +3244,17 @@ const WorkbookLedgerPage: React.FC = () => {
                 </div>
 
                 <div className="sheet-table-wrapper">
-                    <table className="sheet-table" ref={ledgerCaptureRef}>
+                    <table className="sheet-table workbook-ledger-table" ref={ledgerCaptureRef}>
+                        <colgroup>
+                            <col className="workbook-ledger-col-date" />
+                            <col className="workbook-ledger-col-description" />
+                            <col className="workbook-ledger-col-transaction" />
+                            <col className="workbook-ledger-col-payment" />
+                            <col className="workbook-ledger-col-balance" />
+                            <col className="workbook-ledger-col-site" />
+                            <col className="workbook-ledger-col-note" />
+                            <col className="workbook-ledger-col-team" />
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th>날짜</th>
@@ -3045,7 +3289,7 @@ const WorkbookLedgerPage: React.FC = () => {
                         <tfoot>
                             <tr>
                                 <td />
-                                <td>합 계</td>
+                                <td>합계</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.paymentAmount)}</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.balance)}</td>
@@ -3057,134 +3301,78 @@ const WorkbookLedgerPage: React.FC = () => {
             </div>
         </section>
     );
-
     const renderSummaryTab = () => (
         <section className="workbook-sheet">
-            <div className="workbook-section-toolbar" data-html2canvas-ignore="true">
-                <button
-                    type="button"
-                    className="workbook-toolbar-button"
-                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
-                    disabled={capturingView === 'summary'}
-                >
-                    <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
-                    화면 복사
-                </button>
-            </div>
-
             <div>
-                <table className="sheet-control-table summary-sheet-table">
+                <table className="sheet-control-table query-sheet-table">
                     <tbody>
                         <tr>
-                            <th className="sheet-title-dark" colSpan={12}>주식회사 청연엔지</th>
+                            <th className="sheet-title-dark" colSpan={16}>전체 조회</th>
                         </tr>
                         <tr>
                             <th className="sheet-label-blue">검색시작일</th>
-                            <td className="sheet-value">
+                            <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
+                                    className="sheet-filter-input"
                                     value={summaryDraft.startDate}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDate: event.target.value }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={10} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-blue">검색종료일</th>
-                            <td className="sheet-value">
+                            <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
+                                    className="sheet-filter-input"
                                     value={summaryDraft.endDate}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDate: event.target.value }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={10} />
-                        </tr>
-                        <tr>
-                            <th className="sheet-title-dark" colSpan={12}>주식회사 청연이엔지</th>
-                        </tr>
-                        <tr>
-                            <th className="sheet-label-dark">시작연도</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={2000}
-                                    max={2100}
-                                    value={summaryDraft.startYear}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startYear: Number(event.target.value) || currentYear }))}
-                                />
-                            </td>
-                            <th className="sheet-label-blue">시작월</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={12}
-                                    value={summaryDraft.startMonth}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startMonth: Number(event.target.value) || 1 }))}
-                                />
-                            </td>
-                            <th className="sheet-label-blue">시작일</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={31}
-                                    value={summaryDraft.startDay}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDay: Number(event.target.value) || 1 }))}
-                                />
-                            </td>
                             <td className="sheet-spacer" colSpan={6} />
-                        </tr>
-                        <tr>
-                            <th className="sheet-label-dark">종료연도</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={2000}
-                                    max={2100}
-                                    value={summaryDraft.endYear}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endYear: Number(event.target.value) || currentYear }))}
-                                />
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button
+                                    type="button"
+                                    className="excel-button excel-button-blue"
+                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
+                                    disabled={capturingView === 'summary'}
+                                >
+                                    <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
+                                    화면 복사
+                                </button>
                             </td>
-                            <th className="sheet-label-blue">종료월</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={12}
-                                    value={summaryDraft.endMonth}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endMonth: Number(event.target.value) || 12 }))}
-                                />
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button
+                                    type="button"
+                                    className="excel-button excel-button-gray"
+                                    onClick={handlePrintSummary}
+                                    disabled={printingSummary}
+                                >
+                                    <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
+                                    인쇄
+                                </button>
                             </td>
-                            <th className="sheet-label-blue">종료일</th>
-                            <td className="sheet-value">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={31}
-                                    value={summaryDraft.endDay}
-                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDay: Number(event.target.value) || currentDay }))}
-                                />
+                            <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
+                                <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
+                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
+                                    조회
+                                </button>
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
                         </tr>
                         <tr>
                             <th className="sheet-label-green">팀 명</th>
                             <td className="sheet-value-light">
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-team-options"
                                     value={summaryDraft.teamName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
                                     placeholder="전체"
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={10} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-green">구 분</th>
                             <td className="sheet-value-light">
                                 <select
+                                    className="sheet-filter-input"
                                     value={summaryDraft.mode}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, mode: event.target.value as SummaryMode }))}
                                 >
@@ -3194,12 +3382,10 @@ const WorkbookLedgerPage: React.FC = () => {
                                     <option value="미지급금">미지급금</option>
                                 </select>
                             </td>
-                            <td className="sheet-spacer" colSpan={10} />
-                        </tr>
-                        <tr>
                             <th className="sheet-label-green">거래처</th>
-                            <td className="sheet-value-light">
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-partner-options"
                                     value={summaryDraft.partnerName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
@@ -3207,27 +3393,39 @@ const WorkbookLedgerPage: React.FC = () => {
                                 />
                             </td>
                             <th className="sheet-label-green">현장명</th>
-                            <td className="sheet-value-light">
+                            <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
+                                    className="sheet-filter-input"
                                     list="workbook-site-options"
                                     value={summaryDraft.siteName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, siteName: event.target.value }))}
                                     placeholder="현장 전체"
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={6} />
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
-                                    <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
-                                </button>
+                            <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
+                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
 
                 <div className="sheet-table-wrapper">
-                    <table className="sheet-table" ref={summaryCaptureRef}>
+                    <table className="sheet-table workbook-summary-table" ref={summaryCaptureRef}>
+                        <colgroup>
+                            <col className="workbook-summary-col-no" />
+                            <col className="workbook-summary-col-partner" />
+                            <col className="workbook-summary-col-site" />
+                            <col className="workbook-summary-col-issue-date" />
+                            <col className="workbook-summary-col-amount" />
+                            <col className="workbook-summary-col-tax" />
+                            <col className="workbook-summary-col-total" />
+                            <col className="workbook-summary-col-payment-date" />
+                            <col className="workbook-summary-col-settled" />
+                            <col className="workbook-summary-col-outstanding" />
+                            <col className="workbook-summary-col-note" />
+                            <col className="workbook-summary-col-team" />
+                            {canRegisterReceipt && <col className="workbook-summary-col-action" />}
+                        </colgroup>
                         <thead className="summary-header">
                             <tr>
                                 <th>No</th>
@@ -3275,7 +3473,7 @@ const WorkbookLedgerPage: React.FC = () => {
                                     <td>{row.teamName || '-'}</td>
                                     {canRegisterReceipt && (
                                         <td>
-                                            <div className="workbook-inline-actions">
+                                            <div className="workbook-inline-actions workbook-inline-actions-horizontal">
                                                 <button
                                                     type="button"
                                                     className="workbook-toolbar-button workbook-inline-button"
@@ -3303,7 +3501,7 @@ const WorkbookLedgerPage: React.FC = () => {
                         <tfoot>
                             <tr>
                                 <td />
-                                <td>합 계</td>
+                                <td>합계</td>
                                 <td />
                                 <td />
                                 <td className="align-right">{formatNumber(summaryTotals.supplyAmount)}</td>
@@ -3320,7 +3518,6 @@ const WorkbookLedgerPage: React.FC = () => {
             </div>
         </section>
     );
-
     return (
         <div className="workbook-ledger-page">
             <div className="workbook-shell">
@@ -3353,11 +3550,6 @@ const WorkbookLedgerPage: React.FC = () => {
                             {tab.label}
                         </button>
                     ))}
-                </div>
-
-                <div className="workbook-status-bar">
-                    <span><FontAwesomeIcon icon={faDatabase} /> 저장된 장부 행: {entries.length.toLocaleString()}건</span>
-                    <span><FontAwesomeIcon icon={faTableCellsLarge} /> 입력 기준연도: {baseYear}년</span>
                 </div>
 
                 {activeTab === 'input' && renderInputTab()}

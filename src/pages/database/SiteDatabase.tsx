@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSearch, faFilter, faDownload, faPenToSquare, faPlus, faTable, faTrash,
     faChevronDown, faChevronRight, faBuilding, faMapMarkerAlt, faTimes, faUsers, faHardHat,
-    faBriefcase, faHandshake, faFileInvoiceDollar, faUserTie
+    faBriefcase, faHandshake, faFileInvoiceDollar, faUserTie, faShieldHalved, faExclamationTriangle
 } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
@@ -17,6 +17,9 @@ import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import InputPopover from '../../components/common/InputPopover';
+import { useAuth } from '../../contexts/AuthContext';
+import { userService } from '../../services/userService';
+import { useNavigate } from 'react-router-dom';
 
 const SITE_COLUMNS = [
     { key: 'name', label: '현장명' },
@@ -41,8 +44,14 @@ interface SiteHistoryData {
 }
 
 const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlightedId }) => {
-    // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
+    // Context & Auth
     const { companies, teams, sites, refreshSites } = useMasterData();
+    const { currentUser } = useAuth();
+    const navigate = useNavigate();
+
+    // Permission State
+    const [isRestricted, setIsRestricted] = useState<boolean | null>(null);
+    const [userData, setUserData] = useState<any>(null);
 
     const companyUuidByAnyId = useMemo(() => {
         const map = new Map<string, string>();
@@ -73,7 +82,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [showInactive, setShowInactive] = useState(false);
-    const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
+    const [isStickyHeader, setIsStickyHeader] = useState(false);
 
     // Selection & Edit State
     const [selectedSiteIds, setSelectedSiteIds] = useState<string[]>([]);
@@ -86,9 +95,78 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const [historyLoading, setHistoryLoading] = useState(false);
     const [siteHistory, setSiteHistory] = useState<SiteHistoryData | null>(null);
 
-    // Highlight scroll control (for Integrity "관리" navigation)
+    // Highlight scroll control
     const highlightScrolledRef = useRef(false);
     const lastHighlightIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const checkPermission = async () => {
+            if (!currentUser) return;
+            try {
+                const user = await userService.getUser(currentUser.uid);
+                setUserData(user);
+                
+                // 청연 소속이며 admin/사장이 아닌 경우 제한
+                const isCheongyeon = user?.department?.includes('청연');
+                const isAdmin = user?.role === 'admin' || user?.role === '사장';
+                
+                if (isCheongyeon && !isAdmin) {
+                    setIsRestricted(true);
+                } else {
+                    setIsRestricted(false);
+                }
+            } catch (error) {
+                console.error("Error checking permission:", error);
+                setIsRestricted(false);
+            }
+        };
+        checkPermission();
+    }, [currentUser]);
+
+    if (isRestricted === true) {
+        return (
+            <div style={{ 
+                height: '80vh', 
+                display: 'flex', 
+                flexDirection: 'column', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                gap: '20px',
+                color: '#64748b'
+            }}>
+                <div style={{ display: 'flex', position: 'relative' }}>
+                    <FontAwesomeIcon icon={faShieldHalved} size="4x" style={{ color: '#cbd5e1' }} />
+                    <FontAwesomeIcon icon={faExclamationTriangle} size="2x" style={{ 
+                        color: '#ef4444', 
+                        position: 'absolute',
+                        bottom: '-5px',
+                        right: '-5px'
+                    }} />
+                </div>
+                <h2 style={{ color: '#1e293b' }}>접근 권한이 없습니다</h2>
+                <p>현장 데이터베이스 관리 권한이 없습니다. 관리자에게 문의하세요.</p>
+                <button 
+                    onClick={() => navigate('/site/management')}
+                    style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold'
+                    }}
+                >
+                    현장 관리 페이지로 이동
+                </button>
+            </div>
+        );
+    }
+
+    if (isRestricted === null) {
+        return <div style={{ padding: '20px', textAlign: 'center' }}>권한 확인 중...</div>;
+    }
+
 
     // Column Settings Hook
     const {
