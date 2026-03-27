@@ -99,6 +99,14 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const highlightScrolledRef = useRef(false);
     const lastHighlightIdRef = useRef<string | null>(null);
 
+    // Column Settings Hook
+    const {
+        visibleColumns,
+        toggleColumn,
+        showColumnSettings,
+        setShowColumnSettings
+    } = useColumnSettings('site_db_v5', SITE_COLUMNS);
+
     useEffect(() => {
         const checkPermission = async () => {
             if (!currentUser) return;
@@ -122,6 +130,11 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         };
         checkPermission();
     }, [currentUser]);
+
+    // 통계 데이터 로드
+    useEffect(() => {
+        loadStats();
+    }, []);
 
     if (isRestricted === true) {
         return (
@@ -168,18 +181,6 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     }
 
 
-    // Column Settings Hook
-    const {
-        visibleColumns,
-        toggleColumn,
-        showColumnSettings,
-        setShowColumnSettings
-    } = useColumnSettings('site_db_v5', SITE_COLUMNS);
-
-    // 통계 데이터만 별도 로드
-    useEffect(() => {
-        loadStats();
-    }, []);
 
     const loadStats = async () => {
         setLoading(true);
