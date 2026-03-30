@@ -1,616 +1,1041 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { useOrganizationTree, OrgNode } from './hooks/useOrganizationTree';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
-    faBuilding, faUsers, faUserTie, faHardHat, faSearch,
-    faSitemap, faCrown, faArrowRight, faIdCard, faMapMarkerAlt,
-    faPhone, faEnvelope, faTimes, faChevronRight, faProjectDiagram
+    faBoxesStacked,
+    faBuilding,
+    faCalculator,
+    faChartLine,
+    faChevronDown,
+    faCrown,
+    faHardHat,
+    faHelmetSafety,
+    faLayerGroup,
+    faMapMarkerAlt,
+    faSitemap,
+    faUserTie,
+    faUsers,
 } from '@fortawesome/free-solid-svg-icons';
-import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { AnimatePresence, motion, Variants } from 'framer-motion';
+import { Site, siteService } from '../../services/siteService';
+import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
 
-// --- Types ---
-type TabType = 'construction' | 'partner';
+type DepartmentKey = 'construction' | 'sales' | 'finance' | 'materials';
 
-type MemberReportRow = {
-    reportId: string;
-    date: string;
-    siteName: string;
-    manDay: number;
-    workContent: string;
+type TeamSlot = {
+    slot: number;
+    displayName: string;
+    originalName: string;
+    leaderName: string;
+    leaderImageUrl: string;
+    memberCount: number;
+    siteNames: string[];
+    statusLabel: string;
+    members: OrgNode[];
+    isPlaceholder: boolean;
+    source?: OrgNode;
 };
 
-// --- Animations ---
-const containerVariants: Variants = {
-    hidden: { opacity: 0 },
-    visible: {
-        opacity: 1,
-        transition: { staggerChildren: 0.05 }
-    },
-    exit: { opacity: 0 }
+type DepartmentCardConfig = {
+    key: DepartmentKey;
+    title: string;
+    english: string;
+    description: string;
+    icon: IconDefinition;
+    accent: string;
+    iconGradient: string;
+    highlights: string[];
+    members: Array<{ name: string; role: string }>;
+    value: string;
 };
 
-const itemVariants: Variants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: {
-        y: 0,
-        opacity: 1,
-        transition: { type: "spring", stiffness: 300, damping: 30 }
+const PYRAMID_ROW_SIZES = [1, 2, 3, 4];
+const TEAM_SLOT_LEADERS: Array<string | undefined> = [
+    '이재욱',
+    '김봉수',
+    '김세흔',
+    '김덕기',
+    '김군회',
+    '박상국',
+    undefined,
+    '김동혁',
+    '임효재',
+    '유재훈',
+];
+
+const isCheongyeonName = (value?: string) => {
+    const normalized = String(value ?? '').replace(/\s+/g, '').toLowerCase();
+    return normalized.includes('청연') || normalized.includes('cheongyeon');
+};
+
+const getTeamWorkers = (team: OrgNode) => team.children.filter((child) => child.type === 'worker');
+
+const findWorkerByName = (team: OrgNode, targetName?: string) => {
+    if (!targetName) {
+        return undefined;
     }
+
+    return getTeamWorkers(team).find((worker) => worker.name === targetName);
+};
+
+const getTeamLeader = (team: OrgNode) => {
+    const leaderId = String(team.data?.leaderId ?? '');
+    const leaderName = String(team.data?.leaderName ?? '');
+
+    return getTeamWorkers(team).find((worker) => {
+        const rank = String(worker.data?.rank ?? '');
+        const role = String(worker.data?.role ?? '');
+        const profile = `${rank} ${role}`;
+
+        return (
+            (leaderId && worker.id === leaderId) ||
+            (leaderName && worker.name === leaderName) ||
+            /(팀장|소장|반장|부장|이사)/.test(profile)
+        );
+    });
+};
+
+const getSiteNames = (team: OrgNode) => {
+    const rawValues = [
+        ...(Array.isArray(team.data?.siteNames) ? team.data.siteNames : []),
+        team.data?.assignedSiteName,
+    ];
+
+    return Array.from(
+        new Set(
+            rawValues
+                .map((value) => String(value ?? '').trim())
+                .filter(Boolean)
+        )
+    );
+};
+
+const getTeamSiteNames = (team: OrgNode, sites: Site[]) => {
+    const teamId = String(team.id ?? '').trim();
+    const teamName = String(team.name ?? '').trim();
+    const baseSiteNames = getSiteNames(team);
+    const responsibleSiteNames = sites
+        .filter((site) => {
+            const responsibleTeamId = String(site.responsibleTeamId ?? '').trim();
+            const responsibleTeamName = String(site.responsibleTeamName ?? '').trim();
+
+            return (
+                (teamId && responsibleTeamId === teamId) ||
+                (teamName && responsibleTeamName === teamName)
+            );
+        })
+        .map((site) => String(site.name ?? '').trim())
+        .filter(Boolean);
+
+    return Array.from(new Set([...baseSiteNames, ...responsibleSiteNames]));
+};
+
+const getStatusLabel = (status?: string) => {
+    switch (String(status ?? 'active')) {
+        case 'active':
+            return '운영 중';
+        case 'waiting':
+            return '세팅 중';
+        case 'closed':
+            return '종료';
+        default:
+            return String(status ?? '운영 중');
+    }
+};
+
+const getTeamSortOrder = (team: OrgNode) => {
+    const matchedNumber = team.name.match(/(\d+)\s*팀/);
+    if (matchedNumber) {
+        return Number(matchedNumber[1]);
+    }
+    return Number.MAX_SAFE_INTEGER;
+};
+
+const formatNumber = (value: number) => new Intl.NumberFormat('ko-KR').format(value);
+
+const pyramidRevealVariants: Variants = {
+    hidden: { opacity: 0, y: 28, filter: 'blur(16px)' },
+    visible: {
+        opacity: 1,
+        y: 0,
+        filter: 'blur(0px)',
+        transition: {
+            duration: 0.5,
+            ease: 'easeOut',
+            when: 'beforeChildren',
+            staggerChildren: 0.06,
+            delayChildren: 0.08,
+        },
+    },
+    exit: {
+        opacity: 0,
+        y: -18,
+        filter: 'blur(12px)',
+        transition: { duration: 0.28, ease: 'easeInOut' },
+    },
+};
+
+const pyramidItemVariants: Variants = {
+    hidden: { opacity: 0, y: 22, scale: 0.97, filter: 'blur(10px)' },
+    visible: {
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        filter: 'blur(0px)',
+        transition: { duration: 0.42, ease: 'easeOut' },
+    },
+    exit: { opacity: 0, y: -10, scale: 0.98, filter: 'blur(8px)', transition: { duration: 0.2 } },
 };
 
 const CheongyeonOrgChartPage: React.FC = () => {
     const { treeData, loading } = useOrganizationTree();
-    const [activeTab, setActiveTab] = useState<TabType>('construction');
-    const [selectedTeam, setSelectedTeam] = useState<OrgNode | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedSlot, setSelectedSlot] = useState<number>(1);
+    const [isConstructionOpen, setIsConstructionOpen] = useState(false);
+    const [sites, setSites] = useState<Site[]>([]);
+    const [sitesLoading, setSitesLoading] = useState(true);
+    const pyramidSectionRef = useRef<HTMLElement | null>(null);
 
-    // --- Data Processing ---
-    const { constructionGroups, partnerGroups } = useMemo(() => {
-        const construction: { company: OrgNode, teams: OrgNode[] }[] = [];
-        const partner: { company: OrgNode, teams: OrgNode[] }[] = [];
+    useEffect(() => {
+        let mounted = true;
 
-        treeData.forEach(comp => {
-            if (comp.type === 'company') {
-                const group = { company: comp, teams: comp.children.filter(c => c.type === 'team') };
-                if (comp.data?.type === '시공사') {
-                    construction.push(group);
-                } else {
-                    partner.push(group);
+        const loadSites = async () => {
+            try {
+                const siteList = await siteService.getSites();
+                if (mounted) {
+                    setSites(siteList);
+                }
+            } catch (error) {
+                console.error('Failed to load sites for organization chart', error);
+            } finally {
+                if (mounted) {
+                    setSitesLoading(false);
                 }
             }
+        };
+
+        void loadSites();
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    const companyNodes = useMemo(
+        () => treeData.filter((node) => node.type === 'company'),
+        [treeData]
+    );
+
+    const cheongyeonCompanies = useMemo(
+        () => companyNodes.filter((node) => isCheongyeonName(node.name)),
+        [companyNodes]
+    );
+
+    const primaryCompany = useMemo(
+        () =>
+            cheongyeonCompanies[0] ??
+            companyNodes.find((node) => node.data?.type === '시공사') ??
+            null,
+        [cheongyeonCompanies, companyNodes]
+    );
+
+    const constructionTeams = useMemo(() => {
+        const sourceCompanies =
+            cheongyeonCompanies.length > 0
+                ? cheongyeonCompanies
+                : primaryCompany
+                    ? [primaryCompany]
+                    : [];
+
+        return sourceCompanies
+            .flatMap((company) => company.children.filter((child) => child.type === 'team'))
+            .sort((left, right) => {
+                const orderGap = getTeamSortOrder(left) - getTeamSortOrder(right);
+                if (orderGap !== 0) {
+                    return orderGap;
+                }
+                return left.name.localeCompare(right.name, 'ko');
+            });
+    }, [cheongyeonCompanies, primaryCompany]);
+
+    const uniqueSiteCount = useMemo(
+        () => new Set(constructionTeams.flatMap((team) => getTeamSiteNames(team, sites))).size,
+        [constructionTeams, sites]
+    );
+
+    const totalMembers = useMemo(
+        () => constructionTeams.reduce((sum, team) => sum + getTeamWorkers(team).length, 0),
+        [constructionTeams]
+    );
+
+    const slottedConstructionTeams = useMemo(() => {
+        const remainingTeams = [...constructionTeams];
+
+        return Array.from({ length: 10 }, (_, index) => {
+            const preferredLeaderName = TEAM_SLOT_LEADERS[index];
+
+            if (preferredLeaderName) {
+                const matchedIndex = remainingTeams.findIndex((team) => {
+                    const directLeaderName = String(team.data?.leaderName ?? '').trim();
+                    return (
+                        directLeaderName === preferredLeaderName ||
+                        Boolean(findWorkerByName(team, preferredLeaderName))
+                    );
+                });
+
+                if (matchedIndex >= 0) {
+                    return remainingTeams.splice(matchedIndex, 1)[0];
+                }
+            }
+
+            return remainingTeams.shift();
         });
+    }, [constructionTeams]);
 
-        return { constructionGroups: construction, partnerGroups: partner };
-    }, [treeData]);
+    const teamSlots = useMemo<TeamSlot[]>(
+        () =>
+            Array.from({ length: 10 }, (_, index) => {
+                const source = slottedConstructionTeams[index];
+                const members = source ? getTeamWorkers(source) : [];
+                const preferredLeaderName = TEAM_SLOT_LEADERS[index];
+                const preferredLeader = source ? findWorkerByName(source, preferredLeaderName) : undefined;
+                const leader = preferredLeader ?? (source ? getTeamLeader(source) : undefined);
 
-    const activeGroups = activeTab === 'construction' ? constructionGroups : partnerGroups;
+                return {
+                    slot: index + 1,
+                    displayName: `청연 ${index + 1}팀`,
+                    originalName: source?.name ?? '확장 예정 라인',
+                    leaderName:
+                        preferredLeaderName ??
+                        leader?.name ??
+                        source?.data?.leaderName ??
+                        (source ? '현장 리더 확인 필요' : '배치 예정'),
+                    leaderImageUrl: String(
+                        preferredLeader?.data?.profileImageUrl ??
+                        leader?.data?.profileImageUrl ??
+                        ''
+                    ),
+                    memberCount: members.length,
+                    siteNames: source ? getTeamSiteNames(source, sites) : [],
+                    statusLabel: source ? getStatusLabel(source.data?.status) : '확장 예정',
+                    members,
+                    isPlaceholder: !source,
+                    source,
+                };
+            }),
+        [sites, slottedConstructionTeams]
+    );
 
-    const filteredGroups = useMemo(() => {
-        if (!searchTerm) return activeGroups;
-        const lowerTerm = searchTerm.toLowerCase();
+    const pyramidRows = useMemo(() => {
+        let cursor = 0;
+        return PYRAMID_ROW_SIZES.map((size) => {
+            const row = teamSlots.slice(cursor, cursor + size);
+            cursor += size;
+            return row;
+        });
+    }, [teamSlots]);
 
-        return activeGroups.map(group => {
-            const companyMatch = group.company.name.toLowerCase().includes(lowerTerm);
-            const matchingTeams = group.teams.filter(team =>
-                team.name.toLowerCase().includes(lowerTerm) ||
-                team.children.some(member => member.name.toLowerCase().includes(lowerTerm))
-            );
+    const selectedTeam = teamSlots.find((slot) => slot.slot === selectedSlot) ?? teamSlots[0];
+    const extraTeamCount = Math.max(0, constructionTeams.length - 10);
+    const selectedTeamMembers = useMemo(() => {
+        const selectedLeaderName = selectedTeam.leaderName;
 
-            if (companyMatch) return group;
-            if (matchingTeams.length > 0) return { ...group, teams: matchingTeams };
-            return null;
-        }).filter(Boolean) as { company: OrgNode, teams: OrgNode[] }[];
-    }, [activeGroups, searchTerm]);
+        return [...selectedTeam.members].sort((left, right) => {
+            const leftLabel = `${String(left.data?.rank ?? '')} ${String(left.data?.role ?? '')}`;
+            const rightLabel = `${String(right.data?.rank ?? '')} ${String(right.data?.role ?? '')}`;
+            const leftPriority =
+                left.name === selectedLeaderName || /(팀장|소장|반장|부장|이사)/.test(leftLabel) ? 0 : 1;
+            const rightPriority =
+                right.name === selectedLeaderName || /(팀장|소장|반장|부장|이사)/.test(rightLabel) ? 0 : 1;
 
-    if (loading) {
+            if (leftPriority !== rightPriority) {
+                return leftPriority - rightPriority;
+            }
+
+            return left.name.localeCompare(right.name, 'ko');
+        });
+    }, [selectedTeam]);
+
+    const departmentCards = useMemo<DepartmentCardConfig[]>(
+        () => [
+            {
+                key: 'construction',
+                title: '시공팀',
+                english: 'Construction Operations',
+                description: '현장 공정, 인력 운영, 품질과 안전을 실시간으로 총괄합니다.',
+                icon: faHelmetSafety,
+                accent: 'from-cyan-500/25 via-sky-500/15 to-white/5',
+                iconGradient: 'from-cyan-400 to-blue-500',
+                value: `${Math.min(constructionTeams.length, 10)}/10`,
+                highlights: [
+                    `${formatNumber(totalMembers)}명 투입`,
+                    `${formatNumber(uniqueSiteCount)}개 현장`,
+                    '1~10팀 피라미드 운영',
+                ],
+                members: [
+                    { name: '청연 1팀~10팀', role: `전체 ${formatNumber(totalMembers)}명 운영` },
+                ],
+            },
+            {
+                key: 'sales',
+                title: '영업팀',
+                english: 'Sales & Bidding',
+                description: '입찰, 견적, 수주 파이프라인과 대외 커뮤니케이션을 담당합니다.',
+                icon: faChartLine,
+                accent: 'from-emerald-500/25 via-teal-500/15 to-white/5',
+                iconGradient: 'from-emerald-400 to-teal-500',
+                value: 'Bid Flow',
+                highlights: ['입찰 전략', '수주 관리', '고객 대응'],
+                members: [{ name: '김팀장', role: '수주/입찰 리드' }],
+            },
+            {
+                key: 'finance',
+                title: '경리팀',
+                english: 'Finance & Accounting',
+                description: '원가, 정산, 회계 마감과 자금 흐름을 안정적으로 관리합니다.',
+                icon: faCalculator,
+                accent: 'from-amber-500/25 via-orange-500/15 to-white/5',
+                iconGradient: 'from-amber-400 to-orange-500',
+                value: 'Cost Control',
+                highlights: ['정산 관리', '회계 마감', '세금 자료'],
+                members: [
+                    { name: '이대리', role: '정산/회계 운영' },
+                    { name: '고과장', role: '원가/마감 총괄' },
+                ],
+            },
+            {
+                key: 'materials',
+                title: '자재팀',
+                english: 'Materials & Logistics',
+                description: '자재 발주, 재고 운영, 납기 대응을 연결해 현장 공급을 책임집니다.',
+                icon: faBoxesStacked,
+                accent: 'from-fuchsia-500/20 via-violet-500/10 to-white/5',
+                iconGradient: 'from-fuchsia-400 to-violet-500',
+                value: 'Supply Chain',
+                highlights: ['발주/조달', '재고 추적', '납기 대응'],
+                members: [{ name: '이차장', role: '자재/물류 총괄' }],
+            },
+        ],
+        [constructionTeams.length, totalMembers, uniqueSiteCount]
+    );
+
+    const ceoName = String(primaryCompany?.data?.ceoName ?? '').trim() || '대표이사';
+    const companyName = primaryCompany?.name ?? '청연ENG';
+
+    useEffect(() => {
+        if (!isConstructionOpen) {
+            return;
+        }
+
+        window.setTimeout(() => {
+            pyramidSectionRef.current?.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start',
+            });
+        }, 90);
+    }, [isConstructionOpen]);
+
+    if (loading || sitesLoading) {
         return (
-            <div className="flex flex-col items-center justify-center h-screen bg-[#0f172a] text-slate-400">
-                <div className="relative w-20 h-20 mb-8">
-                    <div className="absolute inset-0 border-4 border-cyan-500/30 rounded-full animate-ping"></div>
-                    <div className="absolute inset-0 border-4 border-t-cyan-500 rounded-full animate-spin"></div>
-                    <FontAwesomeIcon icon={faSitemap} className="absolute inset-0 m-auto text-2xl text-cyan-500" />
+            <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 text-slate-300">
+                <div className="relative mb-8 h-20 w-20">
+                    <div className="absolute inset-0 rounded-full border border-cyan-400/30" />
+                    <div className="absolute inset-2 rounded-full border-2 border-t-cyan-300 border-r-transparent border-b-transparent border-l-transparent animate-spin" />
+                    <div className="absolute inset-0 flex items-center justify-center text-cyan-300">
+                        <FontAwesomeIcon icon={faSitemap} className="text-2xl" />
+                    </div>
                 </div>
-                <h2 className="text-xl font-bold text-slate-300 tracking-widest uppercase">System Loading</h2>
+                <p className="text-lg font-semibold tracking-[0.3em] text-cyan-100/80">ORGANIZATION LOADING</p>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-cyan-500/30 flex flex-col relative overflow-hidden">
-            {/* Ambient Background */}
-            <div className="fixed inset-0 pointer-events-none">
-                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/10 blur-[150px]" />
-                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-cyan-900/10 blur-[150px]" />
+        <div
+            className="min-h-screen bg-[#08111f] text-slate-100"
+            style={{ fontFamily: "'Pretendard Variable','Pretendard','SUIT Variable','Noto Sans KR',sans-serif" }}
+        >
+            <div className="pointer-events-none fixed inset-0 overflow-hidden">
+                <div className="absolute left-[-10%] top-[-18%] h-[32rem] w-[32rem] rounded-full bg-cyan-500/12 blur-[160px]" />
+                <div className="absolute bottom-[-20%] right-[-6%] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[180px]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.08),transparent_32%),linear-gradient(to_bottom,rgba(8,17,31,0.18),rgba(8,17,31,0.94))]" />
             </div>
 
-            {/* Header - Premium Upgrade */}
-            <header className="sticky top-0 z-40 bg-[#0f172a]/70 backdrop-blur-2xl border-b border-white/5 shadow-[0_4px_30px_rgba(0,0,0,0.3)]">
-                <div className="max-w-7xl mx-auto px-6 h-24 flex items-center justify-between">
-                    <div
-                        className="flex items-center gap-5 cursor-pointer group"
-                        onClick={() => setSelectedTeam(null)}
-                    >
-                        <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-[0_0_20px_rgba(6,182,212,0.4)] group-hover:shadow-[0_0_30px_rgba(6,182,212,0.6)] group-hover:scale-105 transition-all duration-300 overflow-hidden">
-                            <div className="absolute inset-0 bg-white/20 blur-md rounded-full -top-4 -left-4 w-10 h-10 transform scale-0 group-hover:scale-150 transition-transform duration-500 origin-top-left" />
-                            <FontAwesomeIcon icon={faProjectDiagram} className="text-2xl relative z-10" />
-                        </div>
-                        <div className="flex flex-col justify-center">
-                            <h1 className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400 tracking-tight group-hover:from-cyan-300 group-hover:to-blue-400 transition-all duration-300 drop-shadow-sm">청연 건설 조직도</h1>
-                            <p className="text-xs text-cyan-500/80 font-bold uppercase tracking-[0.2em] mt-0.5 group-hover:text-cyan-400 transition-colors">Integrated Organization System</p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-6">
-                        {/* Tabs - Premium Segmented Control */}
-                        <div className="hidden sm:flex p-1.5 bg-slate-900/80 backdrop-blur-xl border border-white/10 rounded-2xl shadow-inner shadow-black/50">
-                            <TabButton
-                                active={activeTab === 'construction'}
-                                onClick={() => { setActiveTab('construction'); setSelectedTeam(null); }}
-                                icon={faBuilding}
-                                label="시공사 그룹"
-                            />
-                            <TabButton
-                                active={activeTab === 'partner'}
-                                onClick={() => { setActiveTab('partner'); setSelectedTeam(null); }}
-                                icon={faUsers}
-                                label="협력사 그룹"
-                            />
-                        </div>
-
-                        {/* Search Bar - Premium */}
-                        <div className="relative group hidden md:block">
-                            <input
-                                type="text"
-                                placeholder="팀, 현장, 직원명 검색..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-72 md:w-80 pl-11 pr-4 py-3 bg-slate-900/40 border border-white/10 rounded-2xl focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 focus:bg-slate-900/80 transition-all text-sm text-white placeholder-slate-500 outline-none hover:bg-slate-900/60 shadow-inner"
-                            />
-                            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-500 group-focus-within:text-cyan-400 transition-colors pointer-events-none">
-                                <FontAwesomeIcon icon={faSearch} />
+            <main className="relative z-10 mx-auto flex w-full max-w-[1520px] flex-col gap-8 px-4 py-6 md:px-8 md:py-8 xl:px-10">
+                <motion.section
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.45 }}
+                    className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] shadow-[0_32px_120px_rgba(2,6,23,0.55)] backdrop-blur-xl"
+                >
+                    <div className="grid gap-8 px-6 py-8 md:px-8 lg:grid-cols-[minmax(0,1.2fr)_420px] lg:items-center lg:px-10">
+                        <div className="space-y-5">
+                            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/85">
+                                <FontAwesomeIcon icon={faLayerGroup} />
+                                Cheongyeon Organization Blueprint
+                            </div>
+                            <div className="space-y-3">
+                                <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">
+                                    CEO 중심의 피라미드 조직도로
+                                    <br className="hidden md:block" /> 청연 운영 라인을 재정렬했습니다.
+                                </h1>
+                                <p className="max-w-3xl text-sm leading-7 text-slate-300 md:text-base">
+                                    최상단은 CEO, 그 아래는 시공팀 · 영업팀 · 경리팀 · 자재팀으로 분기하고,
+                                    시공팀은 현장 운영 흐름이 한눈에 보이도록 1팀부터 10팀까지 피라미드 구조로 배치했습니다.
+                                </p>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </header>
 
-            {/* Main Content */}
-            <main className="flex-1 w-full max-w-7xl mx-auto p-6 relative z-10">
-                <AnimatePresence mode="wait">
-                    {selectedTeam ? (
-                        <TeamDetailOverlay
-                            key="detail"
-                            team={selectedTeam}
-                            onClose={() => setSelectedTeam(null)}
-                        />
-                    ) : (
+                        <div className="grid grid-cols-2 gap-3 md:gap-4">
+                            <OverviewCard label="표준 팀 슬롯" value="10" accent="from-cyan-400 to-blue-500" />
+                            <OverviewCard
+                                label="실운영 팀"
+                                value={formatNumber(Math.min(constructionTeams.length, 10))}
+                                accent="from-emerald-400 to-teal-500"
+                            />
+                            <OverviewCard
+                                label="투입 인원"
+                                value={formatNumber(totalMembers)}
+                                accent="from-amber-400 to-orange-500"
+                            />
+                            <OverviewCard
+                                label="운영 현장"
+                                value={formatNumber(uniqueSiteCount)}
+                                accent="from-fuchsia-400 to-violet-500"
+                            />
+                        </div>
+                    </div>
+                </motion.section>
+
+                <motion.section
+                    initial={{ opacity: 0, y: 22 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, delay: 0.05 }}
+                    className="rounded-[36px] border border-white/10 bg-slate-950/55 px-4 py-6 shadow-[0_32px_110px_rgba(2,6,23,0.55)] backdrop-blur-2xl md:px-6 md:py-8 xl:px-8"
+                >
+                    <div className="flex justify-center">
                         <motion.div
-                            key="list"
-                            variants={containerVariants}
-                            initial="hidden"
-                            animate="visible"
-                            exit="exit"
-                            className="space-y-12 pb-20"
+                            whileHover={{ y: -4, scale: 1.01 }}
+                            className="relative w-full max-w-[420px] overflow-hidden rounded-[28px] border border-cyan-300/25 bg-gradient-to-br from-slate-900 via-slate-950 to-cyan-950/60 px-6 py-6 text-center shadow-[0_24px_60px_rgba(34,211,238,0.18)]"
                         >
-                            {filteredGroups.map((group) => (
-                                <section key={group.company.id} className="pt-4">
-                                    <div className="flex flex-col mb-8 relative">
-                                        <div className="flex flex-wrap md:flex-nowrap items-center justify-between px-2 relative z-10 w-full gap-4">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700/50 flex items-center justify-center shadow-lg shadow-black/20 shrink-0">
-                                                    <FontAwesomeIcon icon={faBuilding} className="text-xl text-cyan-400/80" />
-                                                </div>
-                                                <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight drop-shadow-md">
-                                                    {group.company.name}
-                                                </h2>
+                            <div className="absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
+                            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-[0_16px_32px_rgba(59,130,246,0.35)]">
+                                <FontAwesomeIcon icon={faCrown} className="text-xl" />
+                            </div>
+                            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/80">
+                                Chief Executive Officer
+                            </div>
+                            <div className="text-3xl font-black tracking-tight text-white">{ceoName}</div>
+                            <div className="mt-2 text-sm text-slate-300">{companyName}</div>
+                            <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-300">
+                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                                    최고 의사결정
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                                    조직 운영 총괄
+                                </span>
+                                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">
+                                    현장 전략 컨트롤타워
+                                </span>
+                            </div>
+                        </motion.div>
+                    </div>
+
+                    <div className="relative mt-10">
+                        <div className="absolute left-1/2 top-[-38px] hidden h-10 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/80 to-transparent xl:block" />
+                        <div className="absolute left-[12.5%] right-[12.5%] top-0 hidden h-px bg-gradient-to-r from-transparent via-cyan-300/65 to-transparent xl:block" />
+
+                        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                            {departmentCards.map((card) => (
+                                <DepartmentCard
+                                    key={card.key}
+                                    card={card}
+                                    isActive={card.key === 'construction' && isConstructionOpen}
+                                    onClick={
+                                        card.key === 'construction'
+                                            ? () => setIsConstructionOpen(true)
+                                            : undefined
+                                    }
+                                />
+                            ))}
+                        </div>
+                    </div>
+                </motion.section>
+
+                <section
+                    ref={pyramidSectionRef}
+                    className={isConstructionOpen ? 'grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]' : 'grid gap-6'}
+                >
+                    <motion.div
+                        initial={{ opacity: 0, y: 24 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.1 }}
+                        className="overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.045] px-5 py-6 shadow-[0_30px_100px_rgba(2,6,23,0.5)] backdrop-blur-xl md:px-6 md:py-7 xl:px-8"
+                    >
+                        <AnimatePresence mode="wait" initial={false}>
+                            {isConstructionOpen ? (
+                                <motion.div
+                                    key="construction-open-panel"
+                                    variants={pyramidRevealVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    exit="exit"
+                                >
+                                    <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                                        <div className="space-y-2">
+                                            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/80">
+                                                <FontAwesomeIcon icon={faHardHat} />
+                                                Construction Pyramid
                                             </div>
-                                            <div className="flex items-center gap-2 shrink-0 border border-slate-700/50 bg-slate-800/50 p-1 rounded-full px-3">
-                                                <span className="text-xs font-bold text-slate-400 uppercase">Registered Teams</span>
-                                                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold">
-                                                    {group.teams.length}
-                                                </div>
-                                            </div>
+                                            <h2 className="text-2xl font-black tracking-tight text-white md:text-3xl">
+                                                시공팀 1~10 운영 피라미드
+                                            </h2>
+                                            <p className="max-w-3xl text-sm leading-7 text-slate-300">
+                                                상단에서 하단으로 갈수록 현장 운영 라인이 넓어지도록 배치했습니다.
+                                                팀 카드를 누르면 현재 연결된 실제 팀 정보와 인원 구성을 오른쪽에서 확인할 수 있습니다.
+                                            </p>
                                         </div>
-                                        {/* Premium Divider */}
-                                        <div className="mt-5 w-full h-[1px] bg-gradient-to-r from-cyan-500/40 via-indigo-500/10 to-transparent relative">
-                                            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-24 h-[2px] bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]" />
+
+                                        <div className="rounded-2xl border border-cyan-300/15 bg-cyan-400/8 px-4 py-3 text-sm text-cyan-50">
+                                            <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-100/70">Current Coverage</div>
+                                            <div className="mt-1 text-xl font-black">
+                                                {formatNumber(Math.min(constructionTeams.length, 10))} / 10 팀 연결
+                                            </div>
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                        {group.teams.map(team => (
-                                            <TeamCard
-                                                key={team.id}
-                                                team={team}
-                                                onClick={() => setSelectedTeam(team)}
-                                            />
+                                    <div className="relative mt-10 space-y-4">
+                                        <div className="pointer-events-none absolute left-1/2 top-[-12px] hidden h-[calc(100%-4rem)] w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/25 via-white/0 to-white/0 xl:block" />
+                                        {pyramidRows.map((row, rowIndex) => (
+                                            <motion.div
+                                                key={`row-${rowIndex}`}
+                                                variants={pyramidItemVariants}
+                                                className="flex flex-wrap justify-center gap-4"
+                                            >
+                                                {row.map((slot) => (
+                                                    <motion.button
+                                                        key={slot.slot}
+                                                        type="button"
+                                                        onClick={() => setSelectedSlot(slot.slot)}
+                                                        className="w-full max-w-[220px] text-left focus:outline-none"
+                                                        variants={pyramidItemVariants}
+                                                    >
+                                                        <motion.div
+                                                            whileHover={{ y: -6, scale: 1.02 }}
+                                                            animate={{
+                                                                y: selectedSlot === slot.slot ? -4 : 0,
+                                                                scale: selectedSlot === slot.slot ? 1.02 : 1,
+                                                            }}
+                                                            transition={{ duration: 0.28, ease: 'easeOut' }}
+                                                            className={`relative overflow-hidden rounded-[26px] border px-5 py-5 shadow-[0_18px_46px_rgba(2,6,23,0.35)] transition-all duration-300 ${
+                                                                selectedSlot === slot.slot
+                                                                    ? 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950'
+                                                                    : slot.isPlaceholder
+                                                                        ? 'border-white/10 bg-white/[0.035] hover:border-white/20'
+                                                                        : 'border-white/12 bg-slate-950/72 hover:border-cyan-300/35'
+                                                            }`}
+                                                        >
+                                                            <div className="absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60" />
+                                                            <div className="flex items-start justify-between gap-3">
+                                                                <div>
+                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+                                                                        Team {slot.slot}
+                                                                    </div>
+                                                                    <div className="mt-2 text-xl font-black tracking-tight text-white">
+                                                                        {slot.displayName}
+                                                                    </div>
+                                                                </div>
+                                                                <div className="flex flex-col items-end gap-2">
+                                                                    <LeaderAvatar
+                                                                        imageUrl={slot.leaderImageUrl}
+                                                                        name={slot.leaderName}
+                                                                        size="sm"
+                                                                    />
+                                                                    <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200">
+                                                                        {slot.statusLabel}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="mt-4 text-sm text-slate-300">
+                                                                {slot.originalName}
+                                                            </div>
+
+                                                            <div className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-300">
+                                                                <SmallStat label="리더" value={slot.leaderName} />
+                                                                <SmallStat label="인원" value={`${formatNumber(slot.memberCount)}명`} />
+                                                            </div>
+
+                                                            <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
+                                                                <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-300/80" />
+                                                                {slot.siteNames.length > 0 ? `${slot.siteNames.length}개 현장 연결·담당` : '현장 연결 대기'}
+                                                            </div>
+                                                        </motion.div>
+                                                    </motion.button>
+                                                ))}
+                                            </motion.div>
                                         ))}
-                                        {group.teams.length === 0 && (
-                                            <div className="col-span-full py-12 text-center text-slate-600 bg-slate-900/30 rounded-2xl border border-dashed border-slate-800">
-                                                소속된 팀이 없습니다.
+                                    </div>
+
+                                    {extraTeamCount > 0 && (
+                                        <div className="mt-8 rounded-2xl border border-amber-300/15 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
+                                            10팀 이후 추가로 연결된 시공팀이 {formatNumber(extraTeamCount)}개 있습니다. 현재 화면은 요청 기준에 맞춰 1팀부터 10팀까지만 피라미드에 노출합니다.
+                                        </div>
+                                    )}
+                                </motion.div>
+                            ) : (
+                                <motion.div
+                                    key="construction-closed-panel"
+                                    initial={{ opacity: 0, y: 18, filter: 'blur(10px)' }}
+                                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                                    exit={{ opacity: 0, y: -12, filter: 'blur(10px)' }}
+                                    transition={{ duration: 0.32, ease: 'easeOut' }}
+                                    className="flex flex-col gap-5"
+                                >
+                                    <div className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">
+                                        <FontAwesomeIcon icon={faHelmetSafety} />
+                                        Team Reveal
+                                    </div>
+                                    <div className="space-y-3">
+                                        <h2 className="text-2xl font-black tracking-tight text-white">
+                                            시공팀 카드를 누르면 팀 피라미드가 펼쳐집니다.
+                                        </h2>
+                                        <p className="max-w-3xl text-sm leading-7 text-slate-300">
+                                            시공팀을 클릭하면 청연 1팀부터 10팀까지가 순차적으로 나타나고,
+                                            선택한 팀의 전체 인원과 현장 연결 정보도 함께 전환됩니다.
+                                        </p>
+                                    </div>
+                                    <motion.button
+                                        type="button"
+                                        whileHover={{ y: -4, scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        onClick={() => setIsConstructionOpen(true)}
+                                        className="inline-flex w-fit items-center gap-3 rounded-2xl border border-cyan-300/25 bg-gradient-to-r from-cyan-400/15 to-blue-500/15 px-5 py-3 text-sm font-semibold text-cyan-50 shadow-[0_16px_36px_rgba(34,211,238,0.12)]"
+                                    >
+                                        <span>시공팀 펼치기</span>
+                                        <motion.span
+                                            animate={{ y: [0, 4, 0] }}
+                                            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+                                        >
+                                            <FontAwesomeIcon icon={faChevronDown} />
+                                        </motion.span>
+                                    </motion.button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </motion.div>
+
+                    <AnimatePresence initial={false}>
+                        {isConstructionOpen && (
+                            <motion.aside
+                                variants={pyramidItemVariants}
+                                initial="hidden"
+                                animate="visible"
+                                exit="exit"
+                                className="rounded-[34px] border border-white/10 bg-slate-950/65 px-5 py-6 shadow-[0_28px_90px_rgba(2,6,23,0.52)] backdrop-blur-2xl md:px-6 xl:sticky xl:top-6 xl:self-start"
+                            >
+                                <AnimatePresence mode="wait">
+                                    <motion.div
+                                        key={selectedTeam.slot}
+                                        initial={{ opacity: 0, y: 18, scale: 0.985 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: -14, scale: 0.985 }}
+                                        transition={{ duration: 0.32, ease: 'easeOut' }}
+                                    >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/70">
+                                            Focus Team
+                                        </div>
+                                        <h3 className="mt-2 text-2xl font-black tracking-tight text-white">
+                                            {selectedTeam.displayName}
+                                        </h3>
+                                        <p className="mt-2 text-sm text-slate-300">{selectedTeam.originalName}</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-3">
+                                        <LeaderAvatar
+                                            imageUrl={selectedTeam.leaderImageUrl}
+                                            name={selectedTeam.leaderName}
+                                            size="lg"
+                                        />
+                                        <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
+                                            {selectedTeam.statusLabel}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 grid grid-cols-2 gap-3">
+                                    <DetailMetric icon={faUserTie} label="리더" value={selectedTeam.leaderName} />
+                                    <DetailMetric icon={faUsers} label="인원" value={`${formatNumber(selectedTeam.memberCount)}명`} />
+                                    <DetailMetric icon={faBuilding} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} />
+                                    <DetailMetric icon={faSitemap} label="조직 단계" value={`시공팀 > ${selectedTeam.slot}팀`} />
+                                </div>
+
+                                <div className="mt-6 rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+                                    <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                                        운영 메모
+                                    </div>
+                                    <p className="mt-3 text-sm leading-7 text-slate-300">
+                                        {selectedTeam.isPlaceholder
+                                            ? '이 슬롯은 아직 실제 팀 데이터가 연결되지 않았습니다. 향후 팀 확장 시 해당 위치에 즉시 반영되도록 준비된 자리입니다.'
+                                            : '실제 청연 팀 데이터를 연결한 슬롯입니다. 원본 팀명과 현장 인원 정보를 유지하면서 조직도 표시는 1팀부터 10팀까지 통일했습니다.'}
+                                    </p>
+                                </div>
+
+                                        <div className="mt-6">
+                                            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                                                연결 현장 / 담당팀 현장
+                                            </div>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {selectedTeam.siteNames.length > 0 ? (
+                                            selectedTeam.siteNames.map((siteName, index) => (
+                                                <motion.span
+                                                    key={`${selectedTeam.slot}-${siteName}`}
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    transition={{ duration: 0.24, delay: index * 0.03 }}
+                                                    className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs text-slate-200"
+                                                >
+                                                    {siteName}
+                                                </motion.span>
+                                            ))
+                                        ) : (
+                                            <span className="rounded-full border border-dashed border-white/15 px-3 py-1.5 text-xs text-slate-400">
+                                                연결된 현장이 없습니다.
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="mt-6">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                                            팀 인원
+                                        </div>
+                                        <motion.div
+                                            key={`member-count-${selectedTeam.slot}`}
+                                            initial={{ opacity: 0, scale: 0.9 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-50"
+                                        >
+                                            전체 {formatNumber(selectedTeam.memberCount)}명
+                                        </motion.div>
+                                    </div>
+                                    <div className="mt-3 max-h-[28rem] space-y-2 overflow-y-auto pr-1">
+                                        {selectedTeamMembers.length > 0 ? (
+                                            selectedTeamMembers.map((member, index) => (
+                                                <motion.div
+                                                    key={`${selectedTeam.slot}-${member.id ?? member.name}`}
+                                                    initial={{ opacity: 0, x: 18 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    transition={{ duration: 0.26, delay: Math.min(index * 0.025, 0.28) }}
+                                                    className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/[0.035] px-3 py-2.5"
+                                                >
+                                                    <div>
+                                                        <div className="text-sm font-semibold text-white">{member.name}</div>
+                                                        <div className="text-xs text-slate-400">
+                                                            {String(member.data?.rank ?? member.data?.role ?? '직책 미등록')}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-xs text-slate-500">
+                                                        {String(member.data?.status ?? '재직')}
+                                                    </div>
+                                                </motion.div>
+                                            ))
+                                        ) : (
+                                            <div className="rounded-2xl border border-dashed border-white/12 px-4 py-4 text-sm text-slate-400">
+                                                연결된 팀원이 없습니다.
                                             </div>
                                         )}
                                     </div>
-                                </section>
-                            ))}
-
-                            {filteredGroups.length === 0 && (
-                                <div className="text-center py-32">
-                                    <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-600">
-                                        <FontAwesomeIcon icon={faSearch} className="text-3xl" />
-                                    </div>
-                                    <h3 className="text-xl font-bold text-slate-400 mb-2">검색 결과가 없습니다</h3>
-                                    <p className="text-slate-600">다른 키워드로 검색해보세요.</p>
                                 </div>
-                            )}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                                    </motion.div>
+                                </AnimatePresence>
+                            </motion.aside>
+                        )}
+                    </AnimatePresence>
+                </section>
             </main>
         </div>
     );
 };
 
-// --- Sub Components ---
-
-const TabButton = ({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: any, label: string }) => (
-    <button
-        onClick={onClick}
-        className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2.5 relative overflow-hidden group ${active ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-    >
-        {active && (
-            <motion.div
-                layoutId="activeOrgTab"
-                className="absolute inset-0 bg-gradient-to-r from-cyan-600/90 to-indigo-600/90 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.3)] border border-white/10"
-                transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            />
-        )}
-        {!active && (
-             <div className="absolute inset-0 bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl" />
-        )}
-        <span className="relative z-10 flex items-center gap-2.5">
-            <FontAwesomeIcon icon={icon} className={active ? "text-white" : "text-slate-600 group-hover:text-slate-400 transition-colors"} /> 
-            {label}
-        </span>
-    </button>
+const OverviewCard = ({
+    label,
+    value,
+    accent,
+}: {
+    label: string;
+    value: string;
+    accent: string;
+}) => (
+    <div className="relative overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/55 p-4 shadow-[0_18px_40px_rgba(2,6,23,0.42)]">
+        <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
+        <div className="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-400">{label}</div>
+        <div className="mt-4 text-2xl font-black text-white md:text-3xl">{value}</div>
+    </div>
 );
 
-const TeamCard: React.FC<{ team: OrgNode, onClick: () => void }> = ({ team, onClick }) => {
-    const leader = team.children.find(w => w.data?.role === '팀장' || w.data?.role === '소장' || w.name === team.data?.leaderName);
-    const memberCount = team.children.filter(c => c.type === 'worker').length;
+const DepartmentCard = ({
+    card,
+    isActive = false,
+    onClick,
+}: {
+    card: DepartmentCardConfig;
+    isActive?: boolean;
+    onClick?: () => void;
+}) => {
+    const body = (
+        <>
+            <div className={`absolute inset-0 bg-gradient-to-br ${card.accent}`} />
+            <div className="absolute left-1/2 top-[-24px] hidden h-6 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/70 to-transparent xl:block" />
+            <div className="relative z-10">
+                <div className="flex items-start justify-between gap-3">
+                    <div
+                        className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.iconGradient} text-white shadow-[0_16px_28px_rgba(15,23,42,0.38)]`}
+                    >
+                        <FontAwesomeIcon icon={card.icon} className="text-lg" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {onClick && (
+                            <motion.span
+                                animate={{ rotate: isActive ? 180 : 0 }}
+                                transition={{ duration: 0.28, ease: 'easeOut' }}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/15 bg-cyan-400/10 text-cyan-50"
+                            >
+                                <FontAwesomeIcon icon={faChevronDown} className="text-xs" />
+                            </motion.span>
+                        )}
+                        <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/90">
+                            {card.value}
+                        </div>
+                    </div>
+                </div>
 
-    // Extract site info
-    const sites = team.data?.siteNames && team.data.siteNames.length > 0
-        ? team.data.siteNames
-        : (team.data?.assignedSiteName ? [team.data.assignedSiteName] : []);
+                <div className="mt-5">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+                        {card.english}
+                    </div>
+                    <div className="mt-2 text-2xl font-black tracking-tight text-white">{card.title}</div>
+                    <p className="mt-3 text-sm leading-7 text-slate-300">{card.description}</p>
+                </div>
+
+                {onClick && (
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-50">
+                        {isActive ? '팀 접기' : '팀 펼치기'}
+                    </div>
+                )}
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                    {card.highlights.map((highlight) => (
+                        <span
+                            key={highlight}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200"
+                        >
+                            {highlight}
+                        </span>
+                    ))}
+                </div>
+
+                <div className="mt-5 space-y-2">
+                    {card.members.map((member, index) => (
+                        <motion.div
+                            key={`${card.key}-${member.name}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true, amount: 0.5 }}
+                            transition={{ duration: 0.24, delay: index * 0.06 }}
+                            className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/10 px-3 py-2.5"
+                        >
+                            <div className="text-sm font-semibold text-white">{member.name}</div>
+                            <div className="text-xs text-slate-300">{member.role}</div>
+                        </motion.div>
+                    ))}
+                </div>
+            </div>
+        </>
+    );
+
+    if (onClick) {
+        return (
+            <motion.button
+                type="button"
+                whileHover={{ y: -6, scale: 1.01 }}
+                whileTap={{ scale: 0.985 }}
+                transition={{ duration: 0.2 }}
+                onClick={onClick}
+                className={`relative overflow-hidden rounded-[28px] border bg-white/[0.04] p-5 text-left shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${
+                    isActive ? 'border-cyan-300/40' : 'border-white/10'
+                }`}
+            >
+                {body}
+            </motion.button>
+        );
+    }
 
     return (
         <motion.div
-            variants={itemVariants}
-            whileHover={{ y: -8, transition: { duration: 0.2 } }}
-            onClick={onClick}
-            className="group relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden cursor-pointer hover:border-cyan-500/50 hover:shadow-[0_0_30px_-10px_rgba(6,182,212,0.3)] transition-all duration-300"
+            whileHover={{ y: -6, scale: 1.01 }}
+            transition={{ duration: 0.2 }}
+            className="relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_48px_rgba(2,6,23,0.36)]"
         >
-            <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <FontAwesomeIcon icon={faArrowRight} className="text-cyan-500 -rotate-45" />
-            </div>
-
-            <div className="p-6">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-5">
-                    <div className="w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-xl text-slate-400 group-hover:bg-cyan-500/10 group-hover:text-cyan-400 group-hover:border-cyan-500/30 transition-colors">
-                        <FontAwesomeIcon icon={faUsers} />
-                    </div>
-                    {leader && (
-                        <div className="text-right">
-                            <span className="inline-block px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-bold rounded-full mb-1">
-                                <FontAwesomeIcon icon={faCrown} className="mr-1" /> 팀장
-                            </span>
-                            <div className="flex items-center justify-end gap-2">
-                                <div className="w-8 h-8 rounded-full overflow-hidden border border-amber-400/30 bg-slate-800 flex items-center justify-center text-slate-500">
-                                    {leader.data?.profileImageUrl ? (
-                                        <img
-                                            src={leader.data.profileImageUrl}
-                                            alt={`${leader.name} 프로필`}
-                                            className="w-full h-full object-cover"
-                                            loading="lazy"
-                                        />
-                                    ) : (
-                                        <FontAwesomeIcon icon={faUserTie} className="text-xs" />
-                                    )}
-                                </div>
-                                <div className="text-sm font-bold text-slate-200">{leader.name}</div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Content */}
-                <div className="mb-6">
-                    <h3 className="text-lg font-bold text-white mb-1 group-hover:text-cyan-400 transition-colors truncate">{team.name}</h3>
-                    <p className="text-xs text-slate-500 font-mono">{team.data?.code || 'NO-CODE'}</p>
-                </div>
-
-                {/* Footer Info */}
-                <div className="space-y-3">
-                    {/* Member Avatars */}
-                    <div className="flex items-center justify-between">
-                        <div className="flex -space-x-2">
-                            {team.children.slice(0, 3).map((member, i) => (
-                                <div key={member.id} className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] text-slate-400 font-bold overflow-hidden">
-                                    {member.name.charAt(0)}
-                                </div>
-                            ))}
-                            {memberCount > 3 && (
-                                <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] text-slate-500">
-                                    +{memberCount - 3}
-                                </div>
-                            )}
-                        </div>
-                        <span className="text-xs font-medium text-slate-400">총 {memberCount}명</span>
-                    </div>
-
-                    {/* Site Badges */}
-                    {sites.length > 0 ? (
-                        <div className="pt-3 border-t border-slate-800">
-                            <div className="flex items-center gap-1.5 mb-2">
-                                <FontAwesomeIcon icon={faMapMarkerAlt} className="text-indigo-400 text-[10px]" />
-                                <span className="text-[10px] font-bold text-slate-500 uppercase">담당 현장</span>
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {sites.slice(0, 2).map((site: string, idx: number) => (
-                                    <span key={idx} className="inline-flex items-center px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-[10px] font-medium truncate max-w-full">
-                                        {site}
-                                    </span>
-                                ))}
-                                {sites.length > 2 && (
-                                    <span className="inline-flex items-center px-2 py-1 rounded bg-slate-800 text-slate-500 text-[10px] font-medium">
-                                        +{sites.length - 2}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="pt-3 border-t border-slate-800 min-h-[50px] flex items-center text-xs text-slate-600 italic">
-                            배정된 현장 없음
-                        </div>
-                    )}
-                </div>
-            </div>
+            {body}
         </motion.div>
     );
 };
 
-const TeamDetailOverlay: React.FC<{ team: OrgNode, onClose: () => void }> = ({ team, onClose }) => {
-    const leader = team.children.find(w => w.data?.role === '팀장' || w.data?.role === '소장' || w.name === team.data?.leaderName);
-    const members = team.children.filter(w => w.id !== leader?.id && w.type === 'worker');
-    const [selectedMember, setSelectedMember] = useState<OrgNode | null>(null);
-    const [memberReports, setMemberReports] = useState<MemberReportRow[]>([]);
-    const [loadingMemberReports, setLoadingMemberReports] = useState(false);
+const SmallStat = ({ label, value }: { label: string; value: string }) => (
+    <div className="rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-2">
+        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</div>
+        <div className="mt-1 truncate text-sm font-semibold text-white">{value}</div>
+    </div>
+);
 
-    const sites = team.data?.siteNames && team.data.siteNames.length > 0
-        ? team.data.siteNames
-        : (team.data?.assignedSiteName ? [team.data.assignedSiteName] : []);
+const DetailMetric = ({
+    icon,
+    label,
+    value,
+}: {
+    icon: IconDefinition;
+    label: string;
+    value: string;
+}) => (
+    <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-3">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+            <FontAwesomeIcon icon={icon} />
+            {label}
+        </div>
+        <div className="mt-3 text-sm font-semibold text-white">{value}</div>
+    </div>
+);
 
-    useEffect(() => {
-        const loadMemberReports = async () => {
-            if (!selectedMember) {
-                setMemberReports([]);
-                return;
-            }
-
-            setLoadingMemberReports(true);
-            try {
-                const teamReports = await dailyReportService.getReports({ teamId: team.id });
-                const selectedWorkerId = String(selectedMember.id || '').trim();
-                const selectedWorkerName = String(selectedMember.name || '').trim();
-
-                const rows: MemberReportRow[] = [];
-                teamReports.forEach((report: DailyReport) => {
-                    const matchingWorkers = (report.workers || []).filter((worker) => {
-                        const workerId = String(worker.workerId || '').trim();
-                        const workerName = String(worker.name || '').trim();
-                        return (selectedWorkerId && workerId === selectedWorkerId)
-                            || (selectedWorkerName && workerName === selectedWorkerName);
-                    });
-
-                    const workContents = matchingWorkers
-                        .map((worker) => String(worker.workContent || '').trim())
-                        .filter(Boolean);
-
-                    if (matchingWorkers.length > 0) {
-                        rows.push({
-                            reportId: String(report.id || `${report.date}-${report.siteId || report.siteName || 'unknown'}`),
-                            date: String(report.date || ''),
-                            siteName: String(report.siteName || '현장 미기록'),
-                            manDay: matchingWorkers.reduce((sum, worker) => sum + (typeof worker.manDay === 'number' ? worker.manDay : 0), 0),
-                            workContent: workContents.length > 0 ? Array.from(new Set(workContents)).join(' / ') : String(report.workContent || '-').trim() || '-',
-                        });
-                    }
-                });
-
-                rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-                setMemberReports(rows);
-            } catch (error) {
-                console.error('Failed to load member reports:', error);
-                setMemberReports([]);
-            } finally {
-                setLoadingMemberReports(false);
-            }
-        };
-
-        loadMemberReports();
-    }, [selectedMember, team.id]);
+const LeaderAvatar = ({
+    imageUrl,
+    name,
+    size,
+}: {
+    imageUrl?: string;
+    name: string;
+    size: 'sm' | 'lg';
+}) => {
+    const dimensions = size === 'lg' ? 'h-16 w-16 rounded-2xl' : 'h-11 w-11 rounded-xl';
+    const labelSize = size === 'lg' ? 'text-lg' : 'text-sm';
+    const resolvedImageUrl = String(imageUrl ?? '').trim();
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-            className="bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl overflow-hidden min-h-[80vh] flex flex-col md:flex-row relative"
-        >
-            {/* Close Button */}
-            <button
-                onClick={onClose}
-                className="absolute top-6 right-6 z-20 w-10 h-10 bg-black/20 backdrop-blur-sm rounded-full flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-all border border-white/10"
-            >
-                <FontAwesomeIcon icon={faTimes} />
-            </button>
-
-            {/* Left Panel: Info & Leader (35%) */}
-            <div className="w-full md:w-[350px] lg:w-[400px] bg-gradient-to-b from-indigo-900 via-slate-900 to-slate-900 p-8 flex flex-col relative shrink-0">
-                {/* Decoration */}
-                <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-indigo-600/20 to-transparent pointer-events-none" />
-
-                <div className="relative z-10">
-                    <div className="mb-10">
-                        <span className="inline-block px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold mb-4">
-                            TEAM PROFILE
-                        </span>
-                        <h2 className="text-4xl font-extrabold text-white mb-2 tracking-tight">{team.name}</h2>
-                        <div className="flex items-center gap-3 text-indigo-200/60 font-mono text-sm">
-                            <span>{team.data?.code || 'NO CODE'}</span>
-                            <span className="w-1 h-1 bg-indigo-500 rounded-full" />
-                            <span>{team.children.length} Members</span>
-                        </div>
-                    </div>
-
-                    {/* Leader Profile */}
-                    <div className="mb-10">
-                        <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <FontAwesomeIcon icon={faCrown} /> Team Leader
-                        </h3>
-                        {leader ? (
-                            <div className="bg-white/5 backdrop-blur-md rounded-2xl p-4 border border-white/10 hover:bg-white/10 transition-colors group">
-                                <div className="relative mb-4 rounded-2xl overflow-hidden border border-amber-400/25 bg-slate-900/70">
-                                    <div className="w-full h-52 md:h-60">
-                                        {leader.data?.profileImageUrl ? (
-                                            <img
-                                                src={leader.data.profileImageUrl}
-                                                alt={`${leader.name} 프로필`}
-                                                className="w-full h-full object-cover"
-                                                loading="lazy"
-                                            />
-                                        ) : (
-                                            <div className="w-full h-full bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center text-white text-5xl">
-                                                <FontAwesomeIcon icon={faUserTie} />
-                                            </div>
-                                        )}
-                                    </div>
-                                    <div className="absolute inset-x-0 bottom-0 px-4 py-3 bg-gradient-to-t from-black/80 to-transparent">
-                                        <h4 className="text-2xl font-bold text-white group-hover:text-amber-300 transition-colors">{leader.name}</h4>
-                                        <p className="text-slate-200 text-sm">{leader.data?.role || '팀장/소장'}</p>
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-3 text-sm text-slate-400 bg-black/20 p-2 rounded-lg">
-                                        <FontAwesomeIcon icon={faPhone} className="text-slate-600 w-4" />
-                                        <span>{leader.data?.phone || '연락처 정보 없음'}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="p-6 rounded-2xl border border-dashed border-slate-700 text-slate-500 text-center">
-                                <FontAwesomeIcon icon={faUserTie} className="text-2xl mb-2 opacity-50" />
-                                <p className="text-sm">팀장이 배정되지 않았습니다.</p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Assigned Sites */}
-                    <div>
-                        <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                            <FontAwesomeIcon icon={faMapMarkerAlt} /> Assigned Sites
-                        </h3>
-                        {sites.length > 0 ? (
-                            <div className="space-y-2">
-                                {sites.map((site: string, idx: number) => (
-                                    <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-indigo-500/30 transition-colors">
-                                        <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400 text-sm">
-                                            <FontAwesomeIcon icon={faBuilding} />
-                                        </div>
-                                        <span className="text-slate-200 text-sm font-medium">{site}</span>
-                                        <FontAwesomeIcon icon={faChevronRight} className="ml-auto text-slate-600 text-xs" />
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="text-slate-500 text-sm italic pl-2">배정된 현장이 없습니다.</p>
-                        )}
-                    </div>
+        <div className={`overflow-hidden border border-white/10 bg-slate-900/80 ${dimensions}`}>
+            {resolvedImageUrl ? (
+                <img
+                    src={resolvedImageUrl}
+                    alt={name}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                />
+            ) : (
+                <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/30 to-blue-500/20 font-black text-white ${labelSize}`}>
+                    {name ? name.charAt(0) : '팀'}
                 </div>
-            </div>
-
-            {/* Right Panel: Members Grid (Rest) */}
-            <div className="flex-1 bg-slate-950 p-8 md:p-12 overflow-y-auto custom-scrollbar">
-                <div className="flex items-center justify-between mb-8">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-3">
-                        <span className="w-2 h-2 bg-cyan-500 rounded-full" />
-                        Team Members
-                    </h3>
-                    <div className="text-sm text-slate-500">
-                        총 <span className="text-white font-bold">{members.length}</span>명
-                    </div>
-                </div>
-
-                {members.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {members.map((member, idx) => (
-                            <motion.div
-                                key={member.id}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: idx * 0.05 }}
-                                onClick={() => setSelectedMember(member)}
-                                className={`bg-slate-900 p-4 rounded-xl border flex items-center gap-4 transition-all group cursor-pointer ${selectedMember?.id === member.id ? 'border-cyan-500/60 bg-cyan-500/10' : 'border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
-                            >
-                                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 text-lg group-hover:bg-cyan-500/20 group-hover:text-cyan-400 transition-colors">
-                                    <FontAwesomeIcon icon={faHardHat} />
-                                </div>
-                                <div className="min-w-0">
-                                    <h4 className="font-bold text-slate-200 group-hover:text-white transition-colors">{member.name}</h4>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <span className="text-xs text-slate-500 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">
-                                            {member.data?.role || '팀원'}
-                                        </span>
-                                        <span className="text-xs text-slate-600 font-mono">
-                                            {member.data?.type || '일용직'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </motion.div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="h-64 flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-3xl">
-                        <FontAwesomeIcon icon={faUsers} className="text-4xl mb-4 opacity-30" />
-                        <p>등록된 팀원이 없습니다.</p>
-                    </div>
-                )}
-
-                {selectedMember && (
-                    <div className="mt-8 rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
-                        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
-                            <h4 className="text-sm font-bold text-cyan-300">
-                                {selectedMember.name} 출력일보 이력
-                            </h4>
-                            <span className="text-xs text-slate-500">총 {memberReports.length}건</span>
-                        </div>
-
-                        {loadingMemberReports ? (
-                            <div className="px-5 py-8 text-sm text-slate-500">출력일보 불러오는 중...</div>
-                        ) : memberReports.length === 0 ? (
-                            <div className="px-5 py-8 text-sm text-slate-500">해당 팀원의 출력일보 기록이 없습니다.</div>
-                        ) : (
-                            <div className="overflow-auto max-h-80">
-                                <table className="w-full text-sm text-left text-slate-300">
-                                    <thead className="sticky top-0 bg-slate-950/95 text-xs text-slate-500 uppercase">
-                                        <tr>
-                                            <th className="px-5 py-3 whitespace-nowrap">날짜</th>
-                                            <th className="px-5 py-3 whitespace-nowrap">현장</th>
-                                            <th className="px-5 py-3 whitespace-nowrap text-right">공수</th>
-                                            <th className="px-5 py-3">작업내용</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {memberReports.map((row) => (
-                                            <tr key={row.reportId} className="border-t border-slate-800 hover:bg-slate-800/40">
-                                                <td className="px-5 py-3 whitespace-nowrap text-slate-300">{row.date || '-'}</td>
-                                                <td className="px-5 py-3 whitespace-nowrap text-slate-300">{row.siteName || '-'}</td>
-                                                <td className="px-5 py-3 whitespace-nowrap text-right text-cyan-300 font-semibold">{row.manDay.toFixed(1)}</td>
-                                                <td className="px-5 py-3 text-slate-400">{row.workContent || '-'}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        </motion.div>
+            )}
+        </div>
     );
 };
 

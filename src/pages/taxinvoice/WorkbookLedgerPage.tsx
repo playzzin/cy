@@ -77,6 +77,7 @@ interface SummaryFilter {
 interface LedgerRow {
     id: string;
     date: string;
+    partnerName: string;
     description: string;
     transactionAmount: number;
     paymentAmount: number;
@@ -569,6 +570,12 @@ const matchesFilter = (source: string | undefined, keyword: string) => {
     return (source ?? '').toLowerCase().includes(keyword.trim().toLowerCase());
 };
 
+const isDateWithinRange = (date: string | undefined, startDate: string, endDate: string) => {
+    const normalizedDate = normalizeDate(date);
+    if (!normalizedDate) return false;
+    return normalizedDate >= startDate && normalizedDate <= endDate;
+};
+
 const getWorkbookEntryKey = (entry: Pick<WorkbookLedgerEntry, 'id' | 'date' | 'partnerName' | 'description'>) => (
     entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`
 );
@@ -644,6 +651,14 @@ const getSettlementLabels = (transactionType: WorkbookTransactionType | undefine
     };
 };
 
+const getSummaryDisplayedSettledAmount = (row: SummaryRow) => {
+    if (row.outstandingAmount < 0) {
+        return row.outstandingAmount;
+    }
+
+    return row.settledAmount;
+};
+
 const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): LedgerRow[] => {
     const scopedEntries = entries
         .filter((entry) => entry.transactionType === filter.transactionType)
@@ -663,6 +678,7 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
         return {
             id: entry.id ?? `${entry.date}-${entry.partnerName}-${entry.description}`,
             date: entry.date,
+            partnerName: entry.partnerName ?? '',
             description: entry.description,
             transactionAmount,
             paymentAmount,
@@ -690,7 +706,6 @@ const buildReceiptHistorySettlementEntries = (
     const candidates: LegacyMatchCandidate[] = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter(isInvoiceEntry)
-        .filter((entry) => entry.date >= startDate && entry.date <= endDate)
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
@@ -718,13 +733,13 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
     const startDate = normalizeDate(filter.startDate);
     const endDate = normalizeDate(filter.endDate);
+    const isSettlementMode = filter.mode === '미수금' || filter.mode === '미지급금';
 
     if (!startDate || !endDate) return [];
 
     const summaryInvoiceEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter((entry) => (entry.totalAmount ?? 0) !== 0)
-        .filter((entry) => entry.date >= startDate && entry.date <= endDate)
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
@@ -804,17 +819,21 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         paymentDate: string,
         options?: { recordDate?: boolean }
     ) => {
-        if (paymentAmount <= 0 || invoice.remainingAmount <= 0) return paymentAmount;
+        if (paymentAmount <= 0) return paymentAmount;
 
-        const appliedAmount = Math.min(invoice.remainingAmount, paymentAmount);
-        invoice.settledAmount += appliedAmount;
-        invoice.remainingAmount -= appliedAmount;
+        const appliedAmount = invoice.remainingAmount > 0
+            ? Math.min(invoice.remainingAmount, paymentAmount)
+            : 0;
+        const overpaidAmount = paymentAmount - appliedAmount;
+
+        invoice.settledAmount += appliedAmount + overpaidAmount;
+        invoice.remainingAmount -= appliedAmount + overpaidAmount;
         invoice.outstandingAmount = invoice.remainingAmount;
         if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDates.includes(paymentDate)) {
             invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
         }
 
-        return paymentAmount - appliedAmount;
+        return 0;
     };
 
     const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry) => {
@@ -856,74 +875,6 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         return null;
     };
 
-    const applyLegacyPartnerFifo = (paymentEntry: WorkbookLedgerEntry, paymentAmount: number) => {
-        const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
-        if (!partnerKey || paymentAmount <= 0) return false;
-
-        const paymentDate = normalizeDate(paymentEntry.date);
-        const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
-        const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
-        const appliedYear = paymentEntry.appliedYear ?? null;
-        const appliedMonth = paymentEntry.appliedMonth ?? null;
-        const partnerInvoices = invoicesByPartner.get(partnerKey) ?? [];
-
-        const eligibleInvoices = partnerInvoices.filter((invoice) => {
-            if (invoice.remainingAmount <= 0) return false;
-            if (paymentDate && invoice.issueDate > paymentDate) return false;
-            return true;
-        });
-
-        if (!eligibleInvoices.length) return false;
-
-        const filterInvoices = (
-            source: WorkingSummaryRow[],
-            predicate: (invoice: WorkingSummaryRow) => boolean
-        ) => source.filter(predicate);
-
-        const matchesSite = (invoice: WorkingSummaryRow) => (
-            !normalizedSiteName || normalizeText(invoice.siteName).toLowerCase() === normalizedSiteName
-        );
-        const matchesTeam = (invoice: WorkingSummaryRow) => (
-            !normalizedTeamName || normalizeText(invoice.teamName).toLowerCase() === normalizedTeamName
-        );
-        const matchesPeriod = (invoice: WorkingSummaryRow) => (
-            (appliedYear === null || invoice.appliedYear === appliedYear) &&
-            (appliedMonth === null || invoice.appliedMonth === appliedMonth)
-        );
-
-        const buckets: WorkingSummaryRow[][] = [
-            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesTeam(invoice) && matchesPeriod(invoice)),
-            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesTeam(invoice)),
-            filterInvoices(eligibleInvoices, (invoice) => matchesSite(invoice) && matchesPeriod(invoice)),
-            filterInvoices(eligibleInvoices, (invoice) => matchesTeam(invoice) && matchesPeriod(invoice)),
-            filterInvoices(eligibleInvoices, matchesSite),
-            filterInvoices(eligibleInvoices, matchesTeam),
-            filterInvoices(eligibleInvoices, matchesPeriod),
-            eligibleInvoices
-        ];
-
-        let remainingAmount = paymentAmount;
-        let applied = false;
-        const visitedInvoiceIds = new Set<string>();
-
-        for (const bucket of buckets) {
-            for (const invoice of bucket) {
-                if (remainingAmount <= 0) break;
-                if (visitedInvoiceIds.has(invoice.id)) continue;
-                visitedInvoiceIds.add(invoice.id);
-                const nextRemaining = applyPaymentToInvoice(invoice, remainingAmount, paymentEntry.date, { recordDate: false });
-                if (nextRemaining !== remainingAmount) {
-                    applied = true;
-                    remainingAmount = nextRemaining;
-                }
-            }
-
-            if (remainingAmount <= 0) break;
-        }
-
-        return applied;
-    };
-
     paymentEntries.forEach((paymentEntry) => {
         const paymentAmount = paymentEntry.paymentAmount ?? 0;
         if (paymentAmount <= 0) return;
@@ -950,7 +901,8 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return;
         }
 
-        applyLegacyPartnerFifo(paymentEntry, paymentAmount);
+        // Leave ambiguous legacy payments unmatched so summary rows do not show
+        // settled amounts without a concrete linked payment history.
     });
 
     adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
@@ -971,7 +923,8 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return;
         }
 
-        applyLegacyPartnerFifo(adjustmentEntry, adjustmentAmount);
+        // Same rule for negative adjustments: only apply when the target invoice
+        // can be identified uniquely from the legacy data.
     });
 
     const finalizedPositiveRowsById = new Map<string, SummaryRow>();
@@ -992,13 +945,25 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         })
         .filter((row): row is SummaryRow => Boolean(row));
 
-    if (filter.mode === '미수금' || filter.mode === '미지급금') {
-        return finalizedRows
-            .filter((row) => row.outstandingAmount > 0)
+    const scopedRows = finalizedRows.filter((row) => {
+        if (!isSettlementMode) {
+            return isDateWithinRange(row.issueDate, startDate, endDate);
+        }
+
+        if (row.paymentDates.length > 0) {
+            return row.paymentDates.some((paymentDate) => isDateWithinRange(paymentDate, startDate, endDate));
+        }
+
+        return isDateWithinRange(row.issueDate, startDate, endDate);
+    });
+
+    if (isSettlementMode) {
+        return scopedRows
+            .filter((row) => row.outstandingAmount !== 0)
             .sort(sortSummaryRowsByDate);
     }
 
-    return finalizedRows.sort(sortSummaryRowsByDate);
+    return scopedRows.sort(sortSummaryRowsByDate);
 };
 
 const WorkbookLedgerPage: React.FC = () => {
@@ -1072,6 +1037,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const [dbFilter, setDbFilter] = useState<DbFilterState>(emptyDbFilter);
     const [dbSort, setDbSort] = useState<DbSortState>({ field: 'date', direction: 'asc' });
     const [dbPage, setDbPage] = useState(1);
+    const [selectedDbEntryIds, setSelectedDbEntryIds] = useState<string[]>([]);
     const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
     const [expandedDbEntryIds, setExpandedDbEntryIds] = useState<string[]>([]);
     const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
@@ -1799,6 +1765,143 @@ const WorkbookLedgerPage: React.FC = () => {
         }
     }, [currentUser?.uid, entries, refreshPageData]);
 
+    const handleResetDatabase = useCallback(async () => {
+        if (entries.length === 0) {
+            Swal.fire('안내', '초기화할 DB 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        const result = await Swal.fire({
+            title: 'DB 초기화',
+            html: `현재 저장된 <strong>${entries.length.toLocaleString()}건</strong>을 모두 초기화합니다.<br />계속하려면 <strong>초기화</strong>를 입력하세요.`,
+            input: 'text',
+            inputPlaceholder: '초기화',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '초기화',
+            cancelButtonText: '취소',
+            focusConfirm: false,
+            preConfirm: (value) => {
+                if (normalizeText(value) !== '초기화') {
+                    Swal.showValidationMessage("'초기화'를 입력하세요.");
+                    return false;
+                }
+
+                return true;
+            }
+        });
+
+        if (!result.isConfirmed) return;
+
+        setDbActionLoading(true);
+        try {
+            const deletedCount = await workbookLedgerService.softDeleteAllEntries(currentUser?.uid ?? '');
+            await refreshPageData({ forceEntries: true });
+            setEditingDbDraft(null);
+            setExpandedDbEntryIds([]);
+            setDbPage(1);
+            Swal.fire('초기화 완료', `${deletedCount.toLocaleString()}건의 DB 데이터를 초기화했습니다.`, 'success');
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', 'DB 초기화에 실패했습니다.', 'error');
+        } finally {
+            setDbActionLoading(false);
+        }
+    }, [currentUser?.uid, entries.length, refreshPageData]);
+
+    const handleBulkDeleteDbEntries = useCallback(async () => {
+        if (selectedDbEntryIds.length === 0) {
+            Swal.fire('안내', '삭제할 DB 행을 먼저 선택하세요.', 'info');
+            return;
+        }
+
+        const selectedIdSet = new Set(selectedDbEntryIds);
+        const selectedEntries = entries.filter((entry) => entry.id && selectedIdSet.has(entry.id));
+
+        if (selectedEntries.length === 0) {
+            Swal.fire('안내', '선택한 DB 행을 다시 불러와 주세요.', 'info');
+            return;
+        }
+
+        const blockedInvoiceEntries = selectedEntries.filter((entry) => (
+            Boolean(entry.id) &&
+            isInvoiceEntry(entry) &&
+            entries.some((item) => (
+                Boolean(item.id) &&
+                isPaymentEntry(item) &&
+                item.matchedEntryId === entry.id &&
+                !selectedIdSet.has(item.id!)
+            ))
+        ));
+
+        const blockedInvoiceIdSet = new Set(
+            blockedInvoiceEntries
+                .map((entry) => entry.id)
+                .filter((id): id is string => Boolean(id))
+        );
+        const deletableEntryIds = selectedEntries.reduce<string[]>((accumulator, entry) => {
+            if (!entry.id || blockedInvoiceIdSet.has(entry.id)) return accumulator;
+            accumulator.push(entry.id);
+            return accumulator;
+        }, []);
+
+        if (deletableEntryIds.length === 0) {
+            const blockedPreview = blockedInvoiceEntries
+                .slice(0, 5)
+                .map((entry) => `${escapeHtml(entry.date)} / ${escapeHtml(entry.partnerName)} / ${escapeHtml(entry.description || '-')}`)
+                .join('<br />');
+            Swal.fire(
+                '삭제 불가',
+                `선택한 원본 행에 연결된 입금내역이 남아 있습니다.<br />연결 행까지 함께 선택한 뒤 다시 시도하세요.${blockedPreview ? `<br /><br />${blockedPreview}` : ''}`,
+                'warning'
+            );
+            return;
+        }
+
+        const blockedCount = blockedInvoiceEntries.length;
+        const blockedPreview = blockedInvoiceEntries
+            .slice(0, 5)
+            .map((entry) => `${escapeHtml(entry.date)} / ${escapeHtml(entry.partnerName)} / ${escapeHtml(entry.description || '-')}`)
+            .join('<br />');
+
+        const result = await Swal.fire({
+            title: '선택 행 일괄삭제',
+            html: [
+                `선택한 <strong>${selectedEntries.length.toLocaleString()}건</strong> 중 <strong>${deletableEntryIds.length.toLocaleString()}건</strong>을 삭제합니다.`,
+                blockedCount > 0
+                    ? `연결된 입금내역이 남아 있는 <strong>${blockedCount.toLocaleString()}건</strong>은 제외됩니다.${blockedPreview ? `<br /><br />${blockedPreview}${blockedCount > 5 ? '<br />...' : ''}` : ''}`
+                    : ''
+            ].filter(Boolean).join('<br />'),
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: blockedCount > 0 ? '가능한 항목만 삭제' : '선택삭제',
+            cancelButtonText: '취소'
+        });
+
+        if (!result.isConfirmed) return;
+
+        setDbActionLoading(true);
+        try {
+            const deletedCount = await workbookLedgerService.softDeleteEntries(deletableEntryIds, currentUser?.uid ?? '');
+            await refreshPageData({ forceEntries: true });
+            setSelectedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
+            setEditingDbDraft((prev) => (prev && deletableEntryIds.includes(prev.id) ? null : prev));
+            setExpandedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
+            Swal.fire(
+                blockedCount > 0 ? '부분 삭제 완료' : '삭제 완료',
+                blockedCount > 0
+                    ? `${deletedCount.toLocaleString()}건을 삭제했고 ${blockedCount.toLocaleString()}건은 제외했습니다.`
+                    : `${deletedCount.toLocaleString()}건을 삭제했습니다.`,
+                'success'
+            );
+        } catch (error) {
+            console.error(error);
+            Swal.fire('오류', '선택 행 일괄삭제에 실패했습니다.', 'error');
+        } finally {
+            setDbActionLoading(false);
+        }
+    }, [currentUser?.uid, entries, refreshPageData, selectedDbEntryIds]);
+
     const handleRegisterReceipt = useCallback(async (row: SummaryRow) => {
         const labels = getSettlementLabels(row.transactionType);
 
@@ -2160,7 +2263,7 @@ const WorkbookLedgerPage: React.FC = () => {
             supplyAmount: accumulator.supplyAmount + row.supplyAmount,
             taxAmount: accumulator.taxAmount + row.taxAmount,
             totalAmount: accumulator.totalAmount + row.totalAmount,
-            settledAmount: accumulator.settledAmount + row.settledAmount,
+            settledAmount: accumulator.settledAmount + getSummaryDisplayedSettledAmount(row),
             outstandingAmount: accumulator.outstandingAmount + row.outstandingAmount
         }), { supplyAmount: 0, taxAmount: 0, totalAmount: 0, settledAmount: 0, outstandingAmount: 0 });
     }, [summaryRows]);
@@ -2197,7 +2300,7 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const receiptHistoryOutstanding = useMemo(() => {
         if (!receiptHistoryInvoice) return 0;
-        return Math.max((receiptHistoryInvoice.totalAmount ?? 0) - receiptHistoryTotal, 0);
+        return (receiptHistoryInvoice.totalAmount ?? 0) - receiptHistoryTotal;
     }, [receiptHistoryInvoice, receiptHistoryTotal]);
 
     const legacyMatchedGap = useMemo(() => {
@@ -2220,8 +2323,11 @@ const WorkbookLedgerPage: React.FC = () => {
         const settledAmountLabel = summarySettlementLabels.amount;
         const outstandingLabel = summarySettlementLabels.outstanding;
         const countText = `${summaryRows.length.toLocaleString()}건`;
+        const dateRangeLabel = summaryFilter.mode === '매출' || summaryFilter.mode === '매입'
+            ? '발행일 기간'
+            : `${paymentDateLabel} 기간`;
         const filterItems = [
-            ['검색기간', `${summaryFilter.startDate} ~ ${summaryFilter.endDate}`],
+            [dateRangeLabel, `${summaryFilter.startDate} ~ ${summaryFilter.endDate}`],
             ['구분', summaryFilter.mode],
             ['팀명', summaryFilter.teamName || '전체'],
             ['거래처', summaryFilter.partnerName || '전체'],
@@ -2240,7 +2346,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     <td class="align-right">${formatNumber(row.taxAmount)}</td>
                     <td class="align-right">${formatNumber(row.totalAmount)}</td>
                     <td>${row.paymentDates.length > 0 ? row.paymentDates.map((paymentDate) => escapeHtml(paymentDate)).join('<br />') : '-'}</td>
-                    <td class="align-right">${formatNumber(row.settledAmount)}</td>
+                    <td class="align-right">${formatNumber(getSummaryDisplayedSettledAmount(row))}</td>
                     <td class="align-right">${formatNumber(row.outstandingAmount)}</td>
                     <td>${escapeHtml(row.note || '-')}</td>
                     <td>${escapeHtml(row.teamName || '-')}</td>
@@ -2637,6 +2743,23 @@ const WorkbookLedgerPage: React.FC = () => {
         return databaseDisplayRows.slice(startIndex, startIndex + DB_PAGE_SIZE);
     }, [databaseDisplayRows, dbPage]);
 
+    const selectedDbEntryIdSet = useMemo(
+        () => new Set(selectedDbEntryIds),
+        [selectedDbEntryIds]
+    );
+
+    const visibleSelectableDbEntryIds = useMemo(
+        () => pagedDatabaseDisplayRows
+            .map((row) => row.entry.id)
+            .filter((id): id is string => Boolean(id)),
+        [pagedDatabaseDisplayRows]
+    );
+
+    const areAllVisibleDbEntriesSelected = useMemo(
+        () => visibleSelectableDbEntryIds.length > 0 && visibleSelectableDbEntryIds.every((id) => selectedDbEntryIdSet.has(id)),
+        [selectedDbEntryIdSet, visibleSelectableDbEntryIds]
+    );
+
     useEffect(() => {
         setDbPage(1);
     }, [dbFilter, dbSort]);
@@ -2645,6 +2768,11 @@ const WorkbookLedgerPage: React.FC = () => {
         if (dbPage <= totalDbPages) return;
         setDbPage(totalDbPages);
     }, [dbPage, totalDbPages]);
+
+    useEffect(() => {
+        const validEntryIds = new Set(entries.map((entry) => entry.id).filter((id): id is string => Boolean(id)));
+        setSelectedDbEntryIds((prev) => prev.filter((id) => validEntryIds.has(id)));
+    }, [entries]);
 
     const handleToggleDbEntryDetails = useCallback((entryId: string) => {
         setExpandedDbEntryIds((prev) => (
@@ -2683,6 +2811,33 @@ const WorkbookLedgerPage: React.FC = () => {
     const handleResetDbFilter = useCallback(() => {
         setDbFilter(emptyDbFilter());
     }, []);
+
+    const handleToggleDbEntrySelection = useCallback((entryId: string) => {
+        setSelectedDbEntryIds((prev) => (
+            prev.includes(entryId)
+                ? prev.filter((id) => id !== entryId)
+                : [...prev, entryId]
+        ));
+    }, []);
+
+    const handleToggleVisibleDbEntrySelection = useCallback(() => {
+        if (visibleSelectableDbEntryIds.length === 0) return;
+
+        setSelectedDbEntryIds((prev) => {
+            const nextSet = new Set(prev);
+            const shouldSelectAll = visibleSelectableDbEntryIds.some((id) => !nextSet.has(id));
+
+            visibleSelectableDbEntryIds.forEach((id) => {
+                if (shouldSelectAll) {
+                    nextSet.add(id);
+                } else {
+                    nextSet.delete(id);
+                }
+            });
+
+            return Array.from(nextSet);
+        });
+    }, [visibleSelectableDbEntryIds]);
 
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
@@ -2832,7 +2987,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     <tr>
                         <th className="sheet-label-green">저장건수</th>
                         <td className="sheet-value-light">{entries.length.toLocaleString()}건</td>
-                        <td className="sheet-spacer workbook-db-sort-cell" colSpan={6}>
+                        <td className="sheet-spacer workbook-db-sort-cell" colSpan={4}>
                             <div className="workbook-db-sort-actions">
                                 <button
                                     type="button"
@@ -2872,7 +3027,6 @@ const WorkbookLedgerPage: React.FC = () => {
                                 </button>
                             </div>
                         </td>
-                        <td className="sheet-spacer" colSpan={2} />
                         <td className="sheet-button-wrap" colSpan={2}>
                             <button
                                 type="button"
@@ -2906,6 +3060,28 @@ const WorkbookLedgerPage: React.FC = () => {
                                 DB 다운로드
                             </button>
                         </td>
+                        <td className="sheet-button-wrap" colSpan={2}>
+                            <button
+                                type="button"
+                                className="excel-button excel-button-red"
+                                onClick={handleBulkDeleteDbEntries}
+                                disabled={uploadingDb || downloadingDb || dbActionLoading || selectedDbEntryIds.length === 0}
+                            >
+                                <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
+                                {`선택삭제${selectedDbEntryIds.length > 0 ? ` (${selectedDbEntryIds.length})` : ''}`}
+                            </button>
+                        </td>
+                        <td className="sheet-button-wrap" colSpan={2}>
+                            <button
+                                type="button"
+                                className="excel-button excel-button-red"
+                                onClick={handleResetDatabase}
+                                disabled={uploadingDb || downloadingDb || dbActionLoading || entries.length === 0}
+                            >
+                                <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
+                                DB 초기화
+                            </button>
+                        </td>
                     </tr>
                 </tbody>
             </table>
@@ -2918,6 +3094,14 @@ const WorkbookLedgerPage: React.FC = () => {
                 <table className="sheet-table">
                     <thead>
                         <tr className="workbook-filter-row">
+                            <th className="workbook-filter-spacer">
+                                <input
+                                    type="checkbox"
+                                    checked={areAllVisibleDbEntriesSelected}
+                                    onChange={handleToggleVisibleDbEntrySelection}
+                                    disabled={visibleSelectableDbEntryIds.length === 0 || dbActionLoading}
+                                />
+                            </th>
                             <th className="workbook-filter-spacer" />
                             <th>
                                 <select
@@ -3045,11 +3229,12 @@ const WorkbookLedgerPage: React.FC = () => {
                     <tbody>
                         {databaseDisplayRows.length === 0 && (
                             <tr>
-                                <td colSpan={16} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
+                                <td colSpan={17} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
                             </tr>
                         )}
                         {pagedDatabaseDisplayRows.map((row) => {
                             const { entry, indexLabel, nested } = row;
+                            const entryId = entry.id ?? null;
                             const isEditing = editingDbDraft?.id === entry.id;
                             const dbDraft = isEditing ? editingDbDraft : null;
                             const editSupplyAmount = isEditing ? (toNumberOrNull(editingDbDraft?.supplyAmount) ?? 0) : 0;
@@ -3064,12 +3249,22 @@ const WorkbookLedgerPage: React.FC = () => {
 
                             return (
                                 <tr
-                                    key={entry.id ?? `${entry.date}-${entry.partnerName}-${indexLabel}`}
+                                    key={entryId ?? `${entry.date}-${entry.partnerName}-${indexLabel}`}
                                     className={[
                                         isEditing ? 'workbook-inline-edit-row' : '',
                                         nested ? 'workbook-linked-row' : ''
                                     ].filter(Boolean).join(' ') || undefined}
                                 >
+                                    <td>
+                                        {entryId ? (
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedDbEntryIdSet.has(entryId)}
+                                                onChange={() => handleToggleDbEntrySelection(entryId)}
+                                                disabled={dbActionLoading}
+                                            />
+                                        ) : null}
+                                    </td>
                                     <td>{indexLabel}</td>
                                     <td>
                                         {isEditing ? (
@@ -3428,6 +3623,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     <table className="sheet-table workbook-ledger-table" ref={ledgerCaptureRef}>
                         <colgroup>
                             <col className="workbook-ledger-col-date" />
+                            <col className="workbook-ledger-col-partner" />
                             <col className="workbook-ledger-col-description" />
                             <col className="workbook-ledger-col-transaction" />
                             <col className="workbook-ledger-col-payment" />
@@ -3439,6 +3635,7 @@ const WorkbookLedgerPage: React.FC = () => {
                         <thead>
                             <tr>
                                 <th>날짜</th>
+                                <th>거래처명</th>
                                 <th>내용</th>
                                 <th>{ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액'}</th>
                                 <th>{ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액'}</th>
@@ -3451,12 +3648,13 @@ const WorkbookLedgerPage: React.FC = () => {
                         <tbody>
                             {ledgerRows.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                    <td colSpan={9} className="sheet-empty-state">조회 결과가 없습니다.</td>
                                 </tr>
                             )}
                             {ledgerRows.map((row) => (
                                 <tr key={row.id}>
                                     <td>{row.date}</td>
+                                    <td>{row.partnerName || '-'}</td>
                                     <td>{row.description}</td>
                                     <td className="align-right">{row.transactionAmount !== 0 ? formatNumber(row.transactionAmount) : '-'}</td>
                                     <td className="align-right">{row.paymentAmount !== 0 ? formatNumber(row.paymentAmount) : '-'}</td>
@@ -3469,6 +3667,7 @@ const WorkbookLedgerPage: React.FC = () => {
                         </tbody>
                         <tfoot>
                             <tr>
+                                <td />
                                 <td />
                                 <td>합계</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
@@ -3648,7 +3847,7 @@ const WorkbookLedgerPage: React.FC = () => {
                                             </div>
                                         ) : '-'}
                                     </td>
-                                    <td className="align-right">{formatNumber(row.settledAmount)}</td>
+                                    <td className="align-right">{formatNumber(getSummaryDisplayedSettledAmount(row))}</td>
                                     <td className="align-right">{formatNumber(row.outstandingAmount)}</td>
                                     <td>{row.note || '-'}</td>
                                     <td>{row.teamName || '-'}</td>

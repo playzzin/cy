@@ -1788,6 +1788,11 @@ const AdvancePaymentPage: React.FC = () => {
 
     const renderDeductionInput = (workerId: string, deductionId: string, rowNum: 0 | 1) => {
         const isAutoImported = Boolean(autoImportedCellMap[buildAutoImportedCellKey(workerId, deductionId)]);
+        // 윗칸/아랫칸 색상 구분
+        let rowBg = '';
+        if (!isAutoImported) {
+            rowBg = rowNum === 0 ? 'bg-blue-100 focus:bg-blue-200' : 'bg-emerald-100 focus:bg-emerald-200';
+        }
         return (
             <input
                 type="text"
@@ -1798,21 +1803,23 @@ const AdvancePaymentPage: React.FC = () => {
                 ref={setInputRef(workerId, deductionId, rowNum)}
                 className={`w-full text-right outline-none rounded px-1 transition-colors ${isAutoImported
                     ? 'bg-emerald-50 text-emerald-800 font-bold ring-1 ring-emerald-200 focus:bg-emerald-100 focus:ring-2 focus:ring-emerald-300'
-                    : 'bg-transparent focus:bg-blue-50 focus:ring-2 focus:ring-blue-500'
+                    : `${rowBg} focus:ring-2 focus:ring-blue-500` 
                     }`}
                 onFocus={(e) => e.target.select()}
             />
         );
     };
 
-    const renderAdvanceItemInput = (workerId: string, itemKey: string) => {
+    // rowNum: 0(윗칸), 1(아랫칸)
+    const renderAdvanceItemInput = (workerId: string, itemKey: string, rowNum: 0 | 1) => {
+        let rowBg = rowNum === 0 ? 'bg-blue-100 focus:bg-blue-200' : 'bg-emerald-100 focus:bg-emerald-200';
         return (
             <input
                 type="text"
                 inputMode="numeric"
                 value={formatNumberForInput(getDeductionValue(advances[workerId], itemKey) || 0)}
                 onChange={(e) => handleAdvanceItemChange(workerId, itemKey, e.target.value)}
-                className="w-full text-right outline-none rounded px-1 transition-colors bg-yellow-50/70 focus:bg-yellow-100 focus:ring-2 focus:ring-amber-400"
+                className={`w-full text-right outline-none rounded px-1 transition-colors ${rowBg} focus:ring-2 focus:ring-amber-400`}
                 onFocus={(e) => e.target.select()}
             />
         );
@@ -2194,8 +2201,8 @@ const AdvancePaymentPage: React.FC = () => {
                                                 ))}
 
                                                 {corporateAdvanceItems.map((item) => (
-                                                    <td key={item.key} className="p-1 border-r border-slate-200 bg-yellow-50/40">
-                                                        {renderAdvanceItemInput(worker.id!, item.key)}
+                                                    <td key={item.key} className="p-1 border-r border-slate-200">
+                                                        {renderAdvanceItemInput(worker.id!, item.key, 0)}
                                                     </td>
                                                 ))}
 
@@ -2226,8 +2233,8 @@ const AdvancePaymentPage: React.FC = () => {
                                                 ))}
 
                                                 {laborAdvanceItems.map((item) => (
-                                                    <td key={item.key} className="p-1 border-r border-slate-200 bg-yellow-50/30">
-                                                        {renderAdvanceItemInput(worker.id!, item.key)}
+                                                    <td key={item.key} className="p-1 border-r border-slate-200">
+                                                        {renderAdvanceItemInput(worker.id!, item.key, 1)}
                                                     </td>
                                                 ))}
                                             </tr>

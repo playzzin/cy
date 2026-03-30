@@ -225,6 +225,56 @@ export const workbookLedgerService = {
         }
     },
 
+    async softDeleteEntries(ids: string[], deletedBy?: string): Promise<number> {
+        const normalizedIds = Array.from(new Set(
+            ids
+                .map((id) => normalizeText(id))
+                .filter((id) => id.length > 0)
+        ));
+
+        if (normalizedIds.length === 0) return 0;
+
+        const now = new Date().toISOString();
+        for (let index = 0; index < normalizedIds.length; index += BATCH_SIZE) {
+            const batch = writeBatch(db);
+            const chunk = normalizedIds.slice(index, index + BATCH_SIZE);
+
+            chunk.forEach((id) => {
+                batch.update(doc(collection(db, COLLECTION_NAME), id), {
+                    deletedAt: now,
+                    deletedBy: normalizeText(deletedBy) || null,
+                    updatedAt: now
+                });
+            });
+
+            await batch.commit();
+        }
+
+        if (cachedEntries) {
+            const deletedIdSet = new Set(normalizedIds);
+            setCachedEntries(cachedEntries.filter((entry) => !entry.id || !deletedIdSet.has(entry.id)));
+        }
+
+        return normalizedIds.length;
+    },
+
+    async softDeleteAllEntries(deletedBy?: string): Promise<number> {
+        const snapshot = await getDocs(collection(db, COLLECTION_NAME));
+        const activeEntryIds = snapshot.docs
+            .filter((entryDoc) => {
+                const data = entryDoc.data() as Record<string, unknown>;
+                return !normalizeText(data.deletedAt);
+            })
+            .map((entryDoc) => entryDoc.id);
+
+        if (activeEntryIds.length === 0) {
+            setCachedEntries([]);
+            return 0;
+        }
+
+        return workbookLedgerService.softDeleteEntries(activeEntryIds, deletedBy);
+    },
+
     invalidateCache(): void {
         cachedEntries = null;
     }

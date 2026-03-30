@@ -283,45 +283,32 @@ const LedgerInputCell: React.FC<{
     className?: string;
     placeholder?: string;
 }> = ({ value, onChange, assignment, onAssignmentChange, className = '', placeholder = '-' }) => {
-    // 콤마 포맷팅을 위한 로컬 상태 및 핸들러
-    const [inputValue, setInputValue] = useState(value === 0 ? '' : value.toLocaleString('ko-KR'));
-
-    useEffect(() => {
-        setInputValue(value === 0 ? '' : value.toLocaleString('ko-KR'));
-    }, [value]);
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const raw = e.target.value.replace(/,/g, '');
-        if (raw === '') {
-            setInputValue('');
-            onChange(0);
-            return;
-        }
-        const num = parseInt(raw, 10);
-        if (!isNaN(num)) {
-            setInputValue(num.toLocaleString('ko-KR'));
-            onChange(num);
-        }
-    };
+    // 부모 td의 색상에 맞춰 input 배경색을 동적으로 지정
+    let inputBg = '';
+    if (className.includes('bg-blue-100')) inputBg = 'bg-blue-100';
+    else if (className.includes('bg-emerald-100')) inputBg = 'bg-emerald-100';
+    else inputBg = '';
 
     return (
         <div className="flex flex-col gap-0.5 group">
             <div className="flex items-center gap-1">
                 <input
-                    type="text"
-                    value={inputValue}
-                    onChange={handleChange}
-                    className={`w-full bg-white/30 border border-slate-200 hover:border-slate-400 focus:border-blue-500 focus:bg-white rounded px-1.5 py-1 text-right text-[13px] font-mono outline-none shadow-sm transition-all ${className}`}
+                    type="number"
+                    min={0}
+                    step={1000}
+                    value={value === 0 ? '' : String(value)}
+                    onChange={(e) => onChange(toSafeAmount(e.target.value))}
+                    className={`w-full ${inputBg} border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
                     placeholder={placeholder}
                 />
                 {onAssignmentChange && (
                     <button
                         type="button"
                         onClick={() => onAssignmentChange(assignment === 'corporate' ? 'labor' : 'corporate')}
-                        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-[10px] font-bold shadow-sm transition-all ${
+                        className={`shrink-0 w-4 h-4 flex items-center justify-center rounded-[2px] text-[9px] font-bold transition-colors ${
                             assignment === 'corporate'
-                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-200'
-                                : 'bg-rose-100 text-rose-700 hover:bg-rose-200 border border-rose-200'
+                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
                         }`}
                         title={assignment === 'corporate' ? '법인 분류 (클릭 시 노무로 변경)' : '노무 분류 (클릭 시 법인으로 변경)'}
                     >
@@ -1100,7 +1087,6 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 acc.businessTotal += row.businessTotal;
                 acc.corporateNet += row.corporateNet;
                 acc.personalNet += row.personalNet;
-                acc.netTotal += (row.corporateNet + row.personalNet);
                 return acc;
             },
             {
@@ -1134,7 +1120,6 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 businessTotal: 0,
                 corporateNet: 0,
                 personalNet: 0,
-                netTotal: 0,
             }
         );
     }, [computedRows]);
@@ -1554,17 +1539,9 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 numFmt: '#,##0.0#',
                 border,
             };
-            const headerFillBySection = (section: ColSection, title?: string) => {
-                const headerTitle = title || '';
+            const headerFillBySection = (section: ColSection) => {
                 if (section === 'utilities') return { fgColor: { rgb: '475569' }, patternType: 'solid' as const };
-                if (section === 'advances') {
-                    // 법인가불은 emerald-600 (059669), 노무가불은 amber-600 (D97706) 테마 색상으로 진하게 처리 (헤더용)
-                    // 웹 UI와 달리 엑셀은 가독성을 위해 테마 색상을 사용하거나, 연한 배경색 부여 가능
-                    // 현재 웹 UI 헤더는 흰색 텍스트에 어두운 배경이므로 일관성 유지
-                    if (headerTitle.includes('노무')) return { fgColor: { rgb: 'A16207' }, patternType: 'solid' as const }; // amber-700
-                    if (headerTitle.includes('법인')) return { fgColor: { rgb: '047857' }, patternType: 'solid' as const }; // emerald-700
-                    return { fgColor: { rgb: 'A16207' }, patternType: 'solid' as const };
-                }
+                if (section === 'advances') return { fgColor: { rgb: 'A16207' }, patternType: 'solid' as const };
                 if (section === 'taxes') return { fgColor: { rgb: '92400E' }, patternType: 'solid' as const };
                 if (section === 'final') return { fgColor: { rgb: '166534' }, patternType: 'solid' as const };
                 return { fgColor: { rgb: '1E3A5F' }, patternType: 'solid' as const };
@@ -1628,55 +1605,16 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     if (rowKind === 'header') {
                         cell.s = {
                             ...headerStyleBase,
-                            fill: headerFillBySection(colSection, headers[c]),
+                            fill: headerFillBySection(colSection),
                         };
                     } else if (rowKind === 'team') {
                         cell.s = teamStyle;
                     } else if (rowKind === 'teamSubtotal') {
-                        let fill = { fgColor: { rgb: 'E0F2FE' }, patternType: 'solid' as const }; // sky-100 (소계)
-                        
-                        // 소계 행에서도 가불 섹션 색상 틴트 추가
-                        if (colSection === 'advances') {
-                            const title = headers[c] || '';
-                            const isLabor = title.includes('노무');
-                            fill = isLabor 
-                                ? { fgColor: { rgb: 'FEF3C7' }, patternType: 'solid' as const } // amber-100
-                                : { fgColor: { rgb: 'D1FAE5' }, patternType: 'solid' as const }; // emerald-100
-                        }
-                        
-                        cell.s = makeSummaryStyle(colKind, fill);
+                        cell.s = makeSummaryStyle(colKind, subtotalFill);
                     } else if (rowKind === 'grandTotal') {
-                        let fill = grandFill; // sky-200 (합계)
-                        
-                        // 합계 행에서도 가불 섹션 색상 틴트 추가
-                        if (colSection === 'advances') {
-                            const title = headers[c] || '';
-                            const isLabor = title.includes('노무');
-                            fill = isLabor 
-                                ? { fgColor: { rgb: 'FDE68A' }, patternType: 'solid' as const } // amber-200
-                                : { fgColor: { rgb: 'A7F3D0' }, patternType: 'solid' as const }; // emerald-200
-                        }
-                        
-                        cell.s = makeSummaryStyle(colKind, fill);
+                        cell.s = makeSummaryStyle(colKind, grandFill);
                     } else {
-                        // 데이터 행 색상 구분
-                        let customFill = dataFillBySection(colSection);
-                        
-                        // 기본 구역(No, 팀, 이름, 구분 등) 회색 처리
-                        if (colSection === 'base') {
-                            customFill = { fgColor: { rgb: 'F8FAFC' }, patternType: 'solid' as const };
-                        }
-
-                        // 개별 가불 항목 색상 세분화 (법인가불: Emerald, 노무가불: Amber)
-                        if (colSection.includes('adv')) {
-                            const title = headers[c] || '';
-                            const isLabor = title.includes('노무');
-                            customFill = isLabor 
-                                ? { fgColor: { rgb: 'FFFBEB' }, patternType: 'solid' as const } // amber-50
-                                : { fgColor: { rgb: 'ECFDF5' }, patternType: 'solid' as const }; // emerald-50
-                        }
-
-                        cell.s = customFill ? { ...pickDataStyle(colKind, colSection), fill: customFill } : pickDataStyle(colKind, colSection);
+                        cell.s = pickDataStyle(colKind, colSection);
                     }
 
                     if (typeof cell.v === 'number') {
@@ -1797,84 +1735,31 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                             )}
                             {showAdvances && (
                                 <>
-                                    <th className="border border-slate-400 px-1 py-1 w-[112px] bg-slate-50">
-                                        <div className="flex flex-col gap-1">
-                                            <span className="block text-[11px] font-bold text-emerald-800 bg-emerald-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.corporateAdvance1}
-                                            </span>
-                                            <span className="block text-[11px] font-bold text-amber-800 bg-amber-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.laborAdvance1}
-                                            </span>
-                                        </div>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance1}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance1}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1 w-[112px] bg-slate-50">
-                                        <div className="flex flex-col gap-1">
-                                            <span className="block text-[11px] font-bold text-emerald-800 bg-emerald-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.corporateAdvance2}
-                                            </span>
-                                            <span className="block text-[11px] font-bold text-amber-800 bg-amber-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.laborAdvance2}
-                                            </span>
-                                        </div>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance2}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance2}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1 w-[112px] bg-slate-50">
-                                        <div className="flex flex-col gap-1">
-                                            <span className="block text-[11px] font-bold text-emerald-800 bg-emerald-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.corporateAdvance3}
-                                            </span>
-                                            <span className="block text-[11px] font-bold text-amber-800 bg-amber-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.laborAdvance3}
-                                            </span>
-                                        </div>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance3}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance3}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1 w-[112px] bg-slate-50">
-                                        <div className="flex flex-col gap-1">
-                                            <span className="block text-[11px] font-bold text-emerald-800 bg-emerald-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.corporateAdvance4}
-                                            </span>
-                                            <span className="block text-[11px] font-bold text-amber-800 bg-amber-100/80 rounded px-1 py-0.5 leading-tight">
-                                                {resolvedAdvanceItemLabels.laborAdvance4}
-                                            </span>
-                                        </div>
+                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance4}</span>
+                                        <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance4}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] bg-sky-200">
-                                        <div className="flex flex-col items-center">
-                                            <span className="text-[10px] text-sky-800 opacity-70">가불</span>
-                                            <span className="text-[14px]">합 계</span>
-                                        </div>
-                                    </th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] bg-emerald-200">가불 합계</th>
                                 </>
                             )}
                             {showTaxes && (
                                 <>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                            <span className="text-[12px] text-emerald-800 font-bold leading-none">국민연금</span>
-                                            <div className="w-full border-t border-yellow-200/50 my-0.5" />
-                                            <span className="text-[12px] text-amber-800 font-bold leading-none">장기요양</span>
-                                        </div>
-                                    </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                            <span className="text-[12px] text-emerald-800 font-bold leading-none">건강보험</span>
-                                            <div className="w-full border-t border-yellow-200/50 my-0.5" />
-                                            <span className="text-[12px] text-amber-800 font-bold leading-none">+고용보험</span>
-                                        </div>
-                                    </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] bg-amber-100">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                            <span className="text-[12px] text-emerald-800 font-bold leading-none">갑근세</span>
-                                            <div className="w-full border-t border-amber-200/50 my-0.5" />
-                                            <span className="text-[12px] text-amber-800 font-bold leading-none">지방세</span>
-                                        </div>
-                                    </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] bg-green-100">
-                                        <div className="flex flex-col items-center gap-0.5">
-                                            <span className="text-[12px] text-emerald-800 font-bold leading-none">사업소득세</span>
-                                            <div className="w-full border-t border-green-200/50 my-0.5" />
-                                            <span className="text-[12px] text-amber-800 font-bold leading-none">지방소득세</span>
-                                        </div>
-                                    </th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">국민연금/장기요양</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">건강보험/+고용보험</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] bg-amber-100">갑근세/지방세</th>
+                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] bg-green-100">사업소득세/지방소득세</th>
                                     <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[94px] bg-fuchsia-100">일급제 수수료</th>
                                     <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[106px] bg-yellow-200">4대 보험 합계</th>
                                     <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-green-200">3.3% 합계</th>
@@ -1912,123 +1797,102 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                     };
                                     return (
                                         <React.Fragment key={row.rowKey}>
-                                            <tr className="odd:bg-white even:bg-slate-50/60 hover:bg-slate-100 transition-colors">
-                                                <td rowSpan={2} className="border border-slate-300 px-1 text-center font-semibold bg-slate-50 text-slate-600">{runningNo}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-center font-bold bg-slate-50 text-slate-800">{row.workerName}</td>
-                                                <td rowSpan={2} className={`border border-slate-300 px-1 text-center font-semibold bg-slate-50 ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
-                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-emerald-50/50">
+                                            {/* 윗칸(법인) 행: 파란색 계열 배경 */}
+                                            <tr className="bg-blue-50/40">
+                                                <td rowSpan={2} className="border border-slate-300 px-1 text-center font-semibold">{runningNo}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-center font-semibold">{row.workerName}</td>
+                                                <td rowSpan={2} className={`border border-slate-300 px-1 text-center font-semibold ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
+                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-blue-50/20">
                                                     <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
                                                         <input 
                                                             type="radio" 
                                                             name={`assign-${row.rowKey}`}
                                                             checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'corporate'}
                                                             onChange={() => updateAssignmentType(row.rowKey, 'corporate')}
-                                                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                                            className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                                         />
-                                                        <span className="text-[14px] font-bold text-emerald-800 tracking-wide">법인</span>
+                                                        <span className="text-[14px] font-bold text-blue-800 tracking-wide">법인</span>
                                                     </label>
                                                 </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-emerald-100 font-bold text-emerald-900">{formatManDay(row.invoiceManDay)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right font-mono font-bold bg-slate-50">{formatAmount(row.unitPrice)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-emerald-50 font-bold text-emerald-800">{formatAmount(row.invoiceGrossAmount)}</td>
+                                                <td className="border border-slate-300 px-2 text-right bg-lime-300 font-bold">{formatManDay(row.invoiceManDay)}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right font-mono">{formatAmount(row.unitPrice)}</td>
+                                                <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.invoiceGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.lodging}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'lodging', v)}
                                                                 assignment={row.manual.itemAssignments?.lodging ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'lodging', v)}
                                                                 placeholder="숙소"
-                                                                className="bg-emerald-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.electricity}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'electricity', v)}
                                                                 assignment={row.manual.itemAssignments?.electricity ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'electricity', v)}
                                                                 placeholder="전기"
-                                                                className="bg-emerald-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.gas}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'gas', v)}
                                                                 assignment={row.manual.itemAssignments?.gas ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'gas', v)}
                                                                 placeholder="가스"
-                                                                className="bg-emerald-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-emerald-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.invoice.water}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'invoice', 'water', v)}
                                                                 assignment={row.manual.itemAssignments?.water ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'water', v)}
                                                                 placeholder="수도"
-                                                                className="bg-emerald-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-100 font-bold text-emerald-900">{formatAmount(row.invoiceDeductionTotal)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.invoiceDeductionTotal)}</td>
                                                     </>
                                                 )}
                                                 {showAdvances && (
                                                     <>
-                                                        <td className="border border-slate-300 p-0 align-middle bg-emerald-50">
-                                                            <LedgerInputCell
-                                                                value={row.manual.invoice.carry}
-                                                                onChange={(val) => updateSideField(row.rowKey, 'invoice', 'carry', val)}
-                                                                className="bg-emerald-100/50 text-emerald-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                            <LedgerInputCell value={row.manual.invoice.carry} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carry', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 p-0 align-middle bg-emerald-50">
-                                                            <LedgerInputCell
-                                                                value={row.manual.invoice.carrySecond}
-                                                                onChange={(val) => updateSideField(row.rowKey, 'invoice', 'carrySecond', val)}
-                                                                className="bg-emerald-100/50 text-emerald-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                            <LedgerInputCell value={row.manual.invoice.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'carrySecond', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 p-0 align-middle bg-emerald-50">
-                                                            <LedgerInputCell
-                                                                value={row.manual.invoice.currentAdvance}
-                                                                onChange={(val) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', val)}
-                                                                className="bg-emerald-100/50 text-emerald-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                            <LedgerInputCell value={row.manual.invoice.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvance', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 p-0 align-middle bg-emerald-50">
-                                                            <LedgerInputCell
-                                                                value={row.manual.invoice.currentAdvanceSecond}
-                                                                onChange={(val) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', val)}
-                                                                className="bg-emerald-100/50 text-emerald-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-blue-100">
+                                                            <LedgerInputCell value={row.manual.invoice.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'invoice', 'currentAdvanceSecond', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-100 font-black text-emerald-900 align-middle">
-                                                            {formatAmount(row.invoiceAdvanceTotal)}
-                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-200 text-yellow-900 font-semibold">{formatAmount(row.invoiceAdvanceTotal)}</td>
                                                     </>
                                                 )}
                                                 {showTaxes && (
                                                     <>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-50 text-[13px] text-emerald-950 font-medium">{formatAmount(row.pension)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-50 text-[13px] text-emerald-950 font-medium">{formatAmount(row.health)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-50 text-[13px] text-emerald-950 font-medium">{formatAmount(row.incomeTax)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-emerald-50 text-[13px] text-emerald-950 font-medium">{formatAmount(row.businessIncomeTax)}</td>
-                                                        <td rowSpan={2} className="border border-slate-300 px-1 text-right bg-fuchsia-100 font-bold align-middle">
-                                                            <div className="flex flex-col items-center justify-center gap-1.5 h-full">
-                                                                <span className="text-[14px]">{formatAmount(row.dailyFee)}</span>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.pension)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.health)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.incomeTax)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessIncomeTax)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-1 text-right bg-fuchsia-100 font-bold">
+                                                            <div className="flex flex-col items-end gap-0.5">
+                                                                <span>{formatAmount(row.dailyFee)}</span>
                                                                 {row.dailyFee > 0 && (
                                                                     <button
                                                                         onClick={() => updateItemAssignment(row.rowKey, 'dailyFee',
                                                                             (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? 'labor' : 'corporate'
                                                                         )}
-                                                                        className={`text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm transition-all ${
+                                                                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
                                                                             (row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate'
-                                                                                ? 'bg-blue-500 text-white'
-                                                                                : 'bg-emerald-500 text-white'
+                                                                                ? 'bg-blue-200 text-blue-800'
+                                                                                : 'bg-emerald-200 text-emerald-800'
                                                                         }`}
                                                                     >
                                                                         {(row.manual.itemAssignments?.['dailyFee'] ?? 'labor') === 'corporate' ? '법인' : '노무'}
@@ -2036,124 +1900,103 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-yellow-200 font-black align-middle text-[14px]">{formatAmount(row.insuranceTotal)}</td>
-                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-black align-middle text-[14px]">{formatAmount(row.businessTotal)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-yellow-200 font-bold">{formatAmount(row.insuranceTotal)}</td>
+                                                        <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-bold">{formatAmount(row.businessTotal)}</td>
                                                     </>
                                                 )}
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-emerald-200 font-black text-emerald-900 text-[14px] align-middle">{formatAmount(row.corporateNet)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-lime-200 font-black text-lime-900 text-[14px] align-middle">{formatAmount(row.personalNet)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 bg-slate-50 align-middle">
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-emerald-200 font-bold align-top">{formatAmount(row.corporateNet)}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-lime-200 font-bold align-top">{formatAmount(row.personalNet)}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 bg-lime-100 align-top">
                                                     <input
                                                         type="text"
                                                         value={row.manual.personalMemo}
                                                         onChange={(e) => updatePersonalMemo(row.rowKey, e.target.value)}
-                                                        placeholder="메모 입력..."
-                                                        className="w-full border border-slate-200 rounded px-2 py-2 text-[13px] bg-white text-slate-700 outline-none focus:border-blue-400 shadow-sm"
+                                                        placeholder="메모"
+                                                        className="w-full border border-lime-300 rounded px-2 py-1.5 text-[13px] bg-white/90 text-slate-700 outline-none focus:border-lime-500"
                                                         maxLength={120}
                                                     />
                                                 </td>
                                             </tr>
-                                            <tr className="odd:bg-white even:bg-slate-50/60 hover:bg-slate-100 transition-colors">
-                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-amber-50/50">
+                                            <tr className="odd:bg-white even:bg-slate-50/60">
+                                                {/* 아랫칸(노무) 행: 초록색 계열 배경 */}
+                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-emerald-50/20">
                                                     <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
                                                         <input 
                                                             type="radio" 
                                                             name={`assign-${row.rowKey}`}
                                                             checked={(row.manual.assignmentType ?? row.assignmentType ?? 'corporate') === 'labor'}
                                                             onChange={() => updateAssignmentType(row.rowKey, 'labor')}
-                                                            className="w-4 h-4 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                                                            className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                                                         />
-                                                        <span className="text-[14px] font-bold text-amber-800 tracking-wide">노무</span>
+                                                        <span className="text-[14px] font-bold text-emerald-800 tracking-wide">노무</span>
                                                     </label>
                                                 </td>
-                                                <td className="border border-slate-300 px-2 text-right bg-amber-100 font-bold text-amber-900">{formatManDay(row.laborManDay)}</td>
-                                                <td className="border border-slate-300 px-2 text-right bg-amber-50 font-bold text-amber-800">{formatAmount(row.laborGrossAmount)}</td>
+                                                <td className="border border-slate-300 px-2 text-right bg-yellow-300 font-bold">{formatManDay(row.laborManDay)}</td>
+                                                <td className="border border-slate-300 px-2 text-right bg-yellow-100 font-bold">{formatAmount(row.laborGrossAmount)}</td>
                                                 {showUtilities && (
                                                     <>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.internet}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'internet', v)}
                                                                 assignment={row.manual.itemAssignments?.internet ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'internet', v)}
                                                                 placeholder="인터넷"
-                                                                className="bg-amber-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.management}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'management', v)}
                                                                 assignment={row.manual.itemAssignments?.management ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'management', v)}
                                                                 placeholder="관리비"
-                                                                className="bg-amber-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.fine}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'fine', v)}
                                                                 assignment={row.manual.itemAssignments?.fine ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'fine', v)}
                                                                 placeholder="과태료"
-                                                                className="bg-amber-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50/30">
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
                                                             <LedgerInputCell
                                                                 value={row.manual.labor.other}
                                                                 onChange={(v) => updateSideField(row.rowKey, 'labor', 'other', v)}
                                                                 assignment={row.manual.itemAssignments?.other ?? row.manual.assignmentType ?? row.assignmentType ?? 'corporate'}
                                                                 onAssignmentChange={(v) => updateItemAssignment(row.rowKey, 'other', v)}
                                                                 placeholder="기타"
-                                                                className="bg-amber-100/50"
                                                             />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-100 font-bold text-amber-900">{formatAmount(row.laborDeductionTotal)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-slate-200 font-semibold">{formatAmount(row.laborDeductionTotal)}</td>
                                                     </>
                                                 )}
                                                 {showAdvances && (
                                                     <>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50">
-                                                            <LedgerInputCell 
-                                                                value={row.manual.labor.carry} 
-                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} 
-                                                                className="bg-amber-100/50 text-amber-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                            <LedgerInputCell value={row.manual.labor.carry} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carry', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50">
-                                                            <LedgerInputCell 
-                                                                value={row.manual.labor.carrySecond} 
-                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} 
-                                                                className="bg-amber-100/50 text-amber-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                            <LedgerInputCell value={row.manual.labor.carrySecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'carrySecond', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50">
-                                                            <LedgerInputCell 
-                                                                value={row.manual.labor.currentAdvance} 
-                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} 
-                                                                className="bg-amber-100/50 text-amber-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                            <LedgerInputCell value={row.manual.labor.currentAdvance} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvance', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 px-1 bg-amber-50">
-                                                            <LedgerInputCell 
-                                                                value={row.manual.labor.currentAdvanceSecond} 
-                                                                onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} 
-                                                                className="bg-amber-100/50 text-amber-950 font-bold"
-                                                            />
+                                                        <td className="border border-slate-300 px-1 bg-emerald-100">
+                                                            <LedgerInputCell value={row.manual.labor.currentAdvanceSecond} onChange={(v) => updateSideField(row.rowKey, 'labor', 'currentAdvanceSecond', v)} />
                                                         </td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-200 text-amber-900 font-black align-middle">
-                                                            {formatAmount(row.laborAdvanceTotal)}
-                                                        </td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-200 font-semibold">{formatAmount(row.laborAdvanceTotal)}</td>
                                                     </>
                                                 )}
                                                 {showTaxes && (
                                                     <>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-50 text-[13px] text-amber-950 font-medium">{formatAmount(row.care)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-50 text-[13px] text-amber-950 font-medium">{formatAmount(row.employment)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-50 text-[13px] text-amber-950 font-medium">{formatAmount(row.residentTax)}</td>
-                                                        <td className="border border-slate-300 px-2 text-right bg-amber-50 text-[13px] text-amber-950 font-medium">{formatAmount(row.businessResidentTax)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.care)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-yellow-100">{formatAmount(row.employment)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-amber-100">{formatAmount(row.residentTax)}</td>
+                                                        <td className="border border-slate-300 px-2 text-right bg-green-100">{formatAmount(row.businessResidentTax)}</td>
                                                     </>
                                                 )}
                                             </tr>
@@ -2185,102 +2028,82 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         ))}
                     </tbody>
                     <tfoot>
-                        <tr className="bg-sky-100 font-bold text-slate-900 shadow-[0_-2px_4px_rgba(0,0,0,0.05)]">
-                            <td colSpan={4} className="border border-slate-400 px-2 py-3 text-center text-lg font-black bg-sky-200">합 계</td>
-                            <td className="border border-slate-400 px-2 py-3 text-right align-middle">
-                                <div className="text-sky-800 text-[14px] font-black">{totals.invoiceManDay.toFixed(1)}</div>
-                                <div className="text-amber-800 text-[14px] font-black">{totals.laborManDay.toFixed(1)}</div>
+                        <tr className="bg-blue-100 font-bold text-slate-900">
+                            <td colSpan={4} className="border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
+                            <td className="border border-slate-400 px-2 py-2 text-right">
+                                <div className="text-sky-700">{totals.invoiceManDay.toFixed(1)}</div>
+                                <div className="text-amber-700">{totals.laborManDay.toFixed(1)}</div>
                             </td>
-                            <td className="border border-slate-400 px-2 py-3 text-right font-mono font-black text-slate-900 text-[14px] align-middle">
+                            <td className="border border-slate-400 px-2 py-2 text-right font-mono">
                                 {totals.workerCount > 0
                                     ? formatAmount(Math.round((totals.invoiceGrossAmount + totals.laborGrossAmount) / Math.max(1, totals.invoiceManDay + totals.laborManDay)))
                                     : '-'}
                             </td>
-                            <td className="border border-slate-400 px-2 py-3 text-right text-rose-700 font-black text-[15px] align-middle">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
+                            <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.invoiceGrossAmount + totals.laborGrossAmount)}</td>
                             {showUtilities && (
                                 <>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle">
-                                        <div className="font-black text-slate-900">{formatAmount(totals.invoiceDeductionTotal)}</div>
-                                        <div className="text-slate-500 font-bold">{formatAmount(totals.laborDeductionTotal)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.invoiceDeductionTotal)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.laborDeductionTotal)}</div>
                                     </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle text-slate-400">-</td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle text-slate-400">-</td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle text-slate-400">-</td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle">
-                                        <div className="font-black text-slate-900 text-[14px]">{formatAmount(totals.invoiceDeductionTotal + totals.laborDeductionTotal)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">-</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.invoiceDeductionTotal + totals.laborDeductionTotal)}</div>
                                     </td>
                                 </>
                             )}
                             {showAdvances && (
                                 <>
-                                    {[1, 2, 3, 4].map((advIdx) => (
-                                        <td key={advIdx} className="border border-slate-400 px-1 py-1 bg-emerald-50/30">
-                                            <div className="flex flex-col gap-1 min-h-[50px] justify-center">
-                                                <div className="text-[11px] text-emerald-800 font-black bg-emerald-100/60 rounded px-1.5 py-0.5 text-right border border-emerald-200/50">
-                                                    {formatAmount(totals[`invoiceAdvance${advIdx === 1 ? 'Carry' : advIdx === 2 ? 'CarrySecond' : advIdx === 3 ? 'Current' : 'CurrentSecond'}`])}
-                                                </div>
-                                                <div className="text-[11px] text-amber-800 font-black bg-amber-100/60 rounded px-1.5 py-0.5 text-right border border-amber-200/50">
-                                                    {formatAmount(totals[`laborAdvance${advIdx === 1 ? 'Carry' : advIdx === 2 ? 'CarrySecond' : advIdx === 3 ? 'Current' : 'CurrentSecond'}`])}
-                                                </div>
-                                            </div>
-                                        </td>
-                                    ))}
-                                    <td className="border border-slate-400 px-1 py-1 bg-sky-100">
-                                        <div className="flex flex-col gap-1 min-h-[50px] justify-center text-right h-full">
-                                            <div className={`text-[12px] font-black bg-emerald-200/50 rounded px-1.5 py-0.5 border border-emerald-300/30 ${totals.invoiceAdvanceTotal < 0 ? 'text-red-600' : 'text-emerald-900'}`}>
-                                                {formatAmount(totals.invoiceAdvanceTotal)}
-                                            </div>
-                                            <div className={`text-[12px] font-black bg-amber-200/50 rounded px-1.5 py-0.5 border border-amber-300/30 ${totals.laborAdvanceTotal < 0 ? 'text-red-600' : 'text-amber-900'}`}>
-                                                {formatAmount(totals.laborAdvanceTotal)}
-                                            </div>
-                                        </div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarry)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarry)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCarrySecond)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCarrySecond)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrent)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrent)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-50">
+                                        <div className="text-cyan-700">{formatAmount(totals.invoiceAdvanceCurrentSecond)}</div>
+                                        <div className="text-lime-700">{formatAmount(totals.laborAdvanceCurrentSecond)}</div>
+                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-yellow-100 font-semibold">
+                                        <div className="text-cyan-800">{formatAmount(totals.invoiceAdvanceTotal)}</div>
+                                        <div className="text-lime-800">{formatAmount(totals.laborAdvanceTotal)}</div>
                                     </td>
                                 </>
                             )}
                             {showTaxes && (
                                 <>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-slate-50/30">
-                                        <div className="font-black text-emerald-800 text-[13px]">{formatAmount(totals.pension)}</div>
-                                        <div className="text-amber-800 font-black text-[13px] mt-1">{formatAmount(totals.care)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.pension)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.care)}</div>
                                     </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-slate-50/30">
-                                        <div className="font-black text-emerald-800 text-[13px]">{formatAmount(totals.health)}</div>
-                                        <div className="text-amber-800 font-black text-[13px] mt-1">{formatAmount(totals.employment)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.health)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.employment)}</div>
                                     </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-slate-50/30">
-                                        <div className="font-black text-emerald-800 text-[13px]">{formatAmount(totals.incomeTax)}</div>
-                                        <div className="text-amber-800 font-black text-[13px] mt-1">{formatAmount(totals.residentTax)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.incomeTax)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.residentTax)}</div>
                                     </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-slate-50/30">
-                                        <div className="font-black text-emerald-800 text-[13px]">{formatAmount(totals.businessIncomeTax)}</div>
-                                        <div className="text-amber-800 font-black text-[13px] mt-1">{formatAmount(totals.businessResidentTax)}</div>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">
+                                        <div>{formatAmount(totals.businessIncomeTax)}</div>
+                                        <div className="text-slate-500">{formatAmount(totals.businessResidentTax)}</div>
                                     </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-fuchsia-100/50">
-                                        <div className="flex flex-col justify-center h-full min-h-[40px] font-black text-rose-800">{formatAmount(totals.dailyFee)}</div>
-                                    </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle">
-                                        <div className="flex flex-col justify-center h-full min-h-[40px] font-black text-[15px]">{formatAmount(totals.insuranceTotal)}</div>
-                                    </td>
-                                    <td className="border border-slate-400 px-2 py-3 text-right align-middle">
-                                        <div className="flex flex-col justify-center h-full min-h-[40px] font-black text-[15px] text-rose-700">{formatAmount(totals.businessTotal)}</div>
-                                    </td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right bg-fuchsia-50">{formatAmount(totals.dailyFee)}</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right">{formatAmount(totals.insuranceTotal)}</td>
+                                    <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.businessTotal)}</td>
                                 </>
                             )}
-                            <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-emerald-100 h-[60px]">
-                                <div className={`flex flex-col justify-center h-full min-h-[40px] font-black text-lg ${totals.corporateNet < 0 ? 'text-red-500 bg-red-50 px-2 rounded border border-red-200' : 'text-emerald-800'}`}>
-                                    {formatAmount(totals.corporateNet)}
-                                </div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-lime-100 h-[60px]">
-                                <div className={`flex flex-col justify-center h-full min-h-[40px] font-black text-lg ${totals.personalNet < 0 ? 'text-red-500 bg-red-50 px-2 rounded border border-red-200' : 'text-lime-800'}`}>
-                                    {formatAmount(totals.personalNet)}
-                                </div>
-                            </td>
-                            <td className="border border-slate-400 px-2 py-3 text-right align-middle bg-sky-100">
-                                <div className={`flex flex-col justify-center h-full min-h-[40px] font-black text-lg ${totals.netTotal < 0 ? 'text-red-500' : 'text-sky-900'}`}>
-                                    {formatAmount(totals.netTotal)}
-                                </div>
-                            </td>
+                            <td className="border border-slate-400 px-2 py-2 text-right text-emerald-700">{formatAmount(totals.corporateNet)}</td>
+                            <td className="border border-slate-400 px-2 py-2 text-right text-lime-700">{formatAmount(totals.personalNet)}</td>
+                            <td className="border border-slate-400 px-2 py-2 text-center text-slate-500">-</td>
                         </tr>
                     </tfoot>
                 </table>
