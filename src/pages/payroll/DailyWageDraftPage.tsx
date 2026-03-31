@@ -54,9 +54,18 @@ const DailyWageDraftPage: React.FC = () => {
     const [selectedDate, setSelectedDate] = useState<string>(today);
     const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
     const [viewMode, setViewMode] = useState<ViewMode>('daily');
+
+    // 팀(현장) 검색어 상태 추가
+    const [teamSearch, setTeamSearch] = useState<string>('');
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
 
     const [teams, setTeams] = useState<TeamWithId[]>([]);
+        // 팀(현장) 검색어로 필터링된 팀 목록
+        const filteredTeams = useMemo(() => {
+            if (!teamSearch.trim()) return teams;
+            const keyword = teamSearch.trim().toLowerCase();
+            return teams.filter((t) => (t.name ?? '').toLowerCase().includes(keyword));
+        }, [teams, teamSearch]);
     const [allTeams, setAllTeams] = useState<Team[]>([]);
     const [filtersReady, setFiltersReady] = useState<boolean>(false);
 
@@ -590,6 +599,15 @@ const DailyWageDraftPage: React.FC = () => {
                         </div>
                     )}
 
+                    {/* 현장명(팀명) 검색 입력창 */}
+                    <input
+                        type="text"
+                        value={teamSearch}
+                        onChange={e => setTeamSearch(e.target.value)}
+                        className="w-32 border border-slate-300 rounded-lg px-2 py-1 text-xs mr-2"
+                        placeholder="현장명 검색 (예: 김포)"
+                        style={{ minWidth: 100 }}
+                    />
                     <select
                         value={selectedTeamId}
                         onChange={(e) => setSelectedTeamId(e.target.value)}
@@ -597,7 +615,7 @@ const DailyWageDraftPage: React.FC = () => {
                         disabled={!filtersReady}
                     >
                         <option value="">팀전체</option>
-                        {teams.map((team) => (
+                        {filteredTeams.map((team) => (
                             <option key={team.id} value={team.id}>
                                 {team.name}
                             </option>

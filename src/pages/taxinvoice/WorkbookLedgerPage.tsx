@@ -3387,7 +3387,7 @@ const WorkbookLedgerPage: React.FC = () => {
                 잔액은 선택한 종료일 기준으로 계산됩니다. 종료일 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
             </div>
 
-            <div className="sheet-table-wrapper">
+            <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
                 <table className="sheet-table">
                     <thead>
                         <tr className="workbook-filter-row">
@@ -3927,7 +3927,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     {ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`}
                 </div>
 
-                <div className="sheet-table-wrapper">
+                <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
                     <table className="sheet-table workbook-ledger-table" ref={ledgerCaptureRef}>
                         <colgroup>
                             <col className="workbook-ledger-col-date" />
@@ -4097,7 +4097,7 @@ const WorkbookLedgerPage: React.FC = () => {
                     </tbody>
                 </table>
 
-                <div className="sheet-table-wrapper">
+                <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
                     <table className="sheet-table workbook-summary-table" ref={summaryCaptureRef}>
                         <colgroup>
                             <col className="workbook-summary-col-no" />

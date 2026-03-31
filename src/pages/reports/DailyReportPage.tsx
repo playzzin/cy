@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import SiteAutoComplete from '../../components/common/SiteAutoComplete';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 
@@ -70,14 +71,10 @@ const DailyReportPage: React.FC = () => {
         
         <FormGroup>
           <label htmlFor="site">현장명</label>
-          <input 
-            type="text" 
-            id="site" 
-            name="site" 
+          <SiteAutoComplete
             value={formData.site}
-            onChange={handleChange}
-            required 
-            placeholder="현장명을 입력하세요"
+            onChange={site => setFormData(prev => ({ ...prev, site }))}
+            placeholder="현장명을 입력/검색하세요"
           />
         </FormGroup>
         

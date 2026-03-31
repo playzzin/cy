@@ -26,6 +26,8 @@ const compareKo = (a: string, b: string): number => {
     return a.localeCompare(b, 'ko');
 };
 
+const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지원팀', '용역팀', '도급', '팀기성'];
+
 type RowDraft = {
     workerId?: string; // New Worker ID if changed
     workerName?: string;
@@ -59,7 +61,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc'>('asc');
     const [siteSortOrder, setSiteSortOrder] = useState<'asc' | 'desc'>('asc');
 
-    const [isEditMode, setIsEditMode] = useState(false);
+    const [isEditMode, setIsEditMode] = useState(true);
     const [isFixed, setIsFixed] = useState(false); // 가로 틀고정 상태
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
@@ -119,7 +121,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, [fetchRows]);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
-        return `${String(r.reportId)}::${String(r.workerId)} `;
+        return `${String(r.reportId)}::${String(r.workerId)}`;
     }, []);
 
     const rowByKey = useMemo(() => {
@@ -930,10 +932,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                     <button
                         onClick={handleToggleEditMode}
-                        className={`flex items - center gap - 2 px - 4 py - 2 rounded - lg text - sm font - bold shadow - sm whitespace - nowrap border transition - colors ${isEditMode
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isEditMode
                             ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            } `}
+                            }`}
                     >
                         <FontAwesomeIcon icon={faPenToSquare} />
                         {isEditMode ? '수정 종료' : '수정모드'}
@@ -955,10 +957,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             <button
                                 onClick={() => setIsBulkEditOpen(true)}
                                 disabled={selectedRowKeys.size === 0}
-                                className={`px - 4 py - 2 rounded - lg text - sm font - bold shadow - sm whitespace - nowrap border transition - colors ${selectedRowKeys.size > 0
+                                className={`px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${selectedRowKeys.size > 0
                                     ? 'bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200'
                                     : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    } `}
+                                    }`}
                                 title="선택 항목 일괄 수정"
                             >
                                 일괄수정 ({selectedRowKeys.size})
@@ -967,10 +969,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             <button
                                 onClick={handleBulkDelete}
                                 disabled={selectedRowKeys.size === 0}
-                                className={`flex items - center gap - 2 px - 4 py - 2 rounded - lg text - sm font - bold shadow - sm whitespace - nowrap border transition - colors ${selectedRowKeys.size > 0
+                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${selectedRowKeys.size > 0
                                     ? 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
                                     : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    } `}
+                                    }`}
                                 title="선택 항목 삭제"
                             >
                                 <FontAwesomeIcon icon={faTrash} />
@@ -1008,6 +1010,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <span className="text-xs">원</span>
                     </div>
                 </div>
+                {isEditMode && (
+                    <div className="w-full flex items-center gap-2 text-xs text-slate-500">
+                        <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 font-semibold">수정중</span>
+                        <span>급여방식, 공수, 단가, 비고를 수정한 뒤 각 행 오른쪽 저장 또는 상단 전체 저장을 사용하세요.</span>
+                    </div>
+                )}
             </div>
 
             {isEditMode && isBulkEditOpen && (
@@ -1040,6 +1048,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <label className="text-[11px] text-slate-500">급여방식</label>
                         <input
                             type="text"
+                            list="daily-report-v2-salary-model-options"
                             value={bulkSalaryModel}
                             onChange={(e) => setBulkSalaryModel(e.target.value)}
                             placeholder="(미입력=변경없음)"
@@ -1120,6 +1129,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 className="flex-1 min-h-0 overflow-auto bg-white rounded-xl shadow-sm border border-slate-200"
                 style={{ maxHeight: 'calc(100vh - 260px)' }}
             >
+                <datalist id="daily-report-v2-salary-model-options">
+                    {SALARY_MODEL_OPTIONS.map((option) => (
+                        <option key={option} value={option} />
+                    ))}
+                </datalist>
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-2"></div>
@@ -1157,6 +1171,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 <th className="px-4 py-3 whitespace-nowrap text-right">단가</th>
                                 <th className="px-4 py-3 whitespace-nowrap text-right">금액</th>
                                 <th className="px-4 py-3 whitespace-nowrap">비고</th>
+                                {isEditMode && (
+                                    <th className="px-4 py-3 whitespace-nowrap text-center sticky right-0 z-40 bg-slate-50 border-l border-slate-200">
+                                        관리
+                                    </th>
+                                )}
                             </tr>
                         </thead>
                         <tbody>
@@ -1175,6 +1194,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                                     const effectiveSalaryModel = draft ? draft.salaryModel : String(r.salaryModel ?? r.payType ?? '');
                                     const effectiveWorkContent = draft ? draft.workContent : String(r.workContent ?? '');
+                                    const stickyActionCellBg = selectedRowKeys.has(rowKey) ? 'bg-indigo-50' : 'bg-white';
 
                                     return (
                                         <tr
@@ -1267,10 +1287,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 {isEditMode ? (
                                                     <input
                                                         type="text"
+                                                        list="daily-report-v2-salary-model-options"
                                                         value={effectiveSalaryModel}
                                                         onChange={(e) => setRowDraft(r, { salaryModel: e.target.value })}
                                                         disabled={saving}
                                                         className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[140px] bg-white"
+                                                        placeholder="급여방식"
                                                     />
                                                 ) : (
                                                     (r.salaryModel ?? r.payType ?? '')
@@ -1315,28 +1337,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                             className="px-2 py-1.5 border border-slate-300 rounded text-sm w-full bg-white min-h-[60px] resize-y"
                                                             placeholder="작업 내용 입력"
                                                         />
-                                                        <div className="flex gap-2 justify-end">
-                                                            <button
-                                                                onClick={() => handleSaveRow(r)}
-                                                                disabled={!dirty || saving}
-                                                                className={`px-3 py-1.5 rounded text-xs font-bold border ${(!dirty || saving)
-                                                                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                                                    : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
-                                                                    }`}
-                                                            >
-                                                                저장
-                                                            </button>
-                                                            <button
-                                                                onClick={() => clearRowDraft(rowKey)}
-                                                                disabled={saving}
-                                                                className={`px-3 py-1.5 rounded text-xs font-bold border ${saving
-                                                                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                                                                    }`}
-                                                            >
-                                                                취소
-                                                            </button>
-                                                        </div>
                                                     </div>
                                                 ) : (
                                                     <div className="max-h-[60px] overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed scrollbar-thin scrollbar-thumb-slate-200">
@@ -1344,6 +1344,32 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     </div>
                                                 )}
                                             </td>
+                                            {isEditMode && (
+                                                <td className={`px-4 py-3 whitespace-nowrap sticky right-0 z-20 border-l border-slate-100 ${stickyActionCellBg}`}>
+                                                    <div className="flex flex-col gap-2 min-w-[88px]">
+                                                        <button
+                                                            onClick={() => handleSaveRow(r)}
+                                                            disabled={!dirty || saving}
+                                                            className={`px-3 py-1.5 rounded text-xs font-bold border ${(!dirty || saving)
+                                                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                                                : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
+                                                                }`}
+                                                        >
+                                                            {saving ? '저장중' : '저장'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => clearRowDraft(rowKey)}
+                                                            disabled={saving || !draft}
+                                                            className={`px-3 py-1.5 rounded text-xs font-bold border ${(saving || !draft)
+                                                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                                                }`}
+                                                        >
+                                                            취소
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })()

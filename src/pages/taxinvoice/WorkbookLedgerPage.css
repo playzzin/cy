@@ -542,6 +542,13 @@
     overflow: auto;
 }
 
+.sheet-table-wrapper.workbook-frozen-table-wrapper {
+    max-height: min(68vh, 640px);
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable both-edges;
+    background: #ffffff;
+}
+
 .sheet-table-wrapper.compact {
     max-height: 520px;
 }

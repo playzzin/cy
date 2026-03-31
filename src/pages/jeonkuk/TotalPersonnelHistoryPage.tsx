@@ -85,7 +85,10 @@ const formatResidentNumberForDisplay = (rawValue: string): string => {
 
 const TotalPersonnelHistoryPage: React.FC = () => {
     return (
-        <div className="h-full flex flex-col overflow-hidden">
+        <div
+            className="flex flex-col overflow-hidden"
+            style={{ height: 'calc(100vh - var(--header-height) - 60px)' }}
+        >
             <TotalPersonnelHistoryInner />
         </div>
     );
@@ -844,7 +847,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 </div>
 
                 {/* Table Area */}
-                <div className="flex-1 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+                <div className="flex-1 min-h-0 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
                     <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between bg-white">
                         <h3 className="font-bold text-slate-800 flex items-center gap-2">
                             <span className="w-1.5 h-5 bg-blue-600 rounded-sm"></span>
@@ -853,7 +856,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         </h3>
                     </div>
 
-                    <div className="flex-1 overflow-auto">
+                    <div className="flex-1 min-h-0 overflow-auto overscroll-contain">
                         <table className="w-full text-sm text-left border-separate border-spacing-0">
                             <thead className="bg-slate-50 text-slate-500 font-semibold sticky top-0 z-40">
                                 <tr className="text-xs uppercase tracking-wider">

@@ -5,6 +5,7 @@ import 'handsontable/dist/handsontable.full.min.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faSave, faCalendarAlt, faTimes, faMinus, faComment, faExclamationTriangle, faCheckCircle, faSpinner, faClipboardCheck, faEraser, faFloppyDisk } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
+import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
@@ -331,16 +332,14 @@ const DailyReportTable: React.FC<{
                 <div className="flex justify-between items-center w-full">
                     <div className="flex items-center gap-2 flex-1">
                         <span className="font-bold text-xs whitespace-nowrap">장부{ledgerIndex}</span>
-                        <select
-                            value={ledger.siteId}
-                            onChange={(e) => onUpdate(ledger.id, { siteId: e.target.value })}
-                            className={`text-slate-900 border-none rounded px-2 py-1 text-xs font-bold focus:ring-2 flex-1 ${isSiteMissing ? 'bg-red-50 focus:ring-red-300' : 'bg-white focus:ring-blue-500'}`}
-                        >
-                            <option value="" disabled>⚠️ 현장 필수 선택</option>
-                            {sites.map(site => (
-                                <option key={site.id} value={site.id}>{site.name}</option>
-                            ))}
-                        </select>
+                                                <div style={{ minWidth: 180, flex: 1 }}>
+                                                    <SingleSelectPopover
+                                                        options={sites.map(site => ({ id: site.id, name: site.name }))}
+                                                        selectedId={ledger.siteId || null}
+                                                        onSelect={siteId => onUpdate(ledger.id, { siteId })}
+                                                        placeholder="현장명을 검색/선택하세요"
+                                                    />
+                                                </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="bg-white/20 text-white text-[10px] px-1.5 py-0.5 rounded font-bold" title="총 공수">

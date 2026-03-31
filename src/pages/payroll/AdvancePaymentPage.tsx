@@ -530,6 +530,8 @@ const AdvancePaymentPage: React.FC = () => {
 
     // Filters
     const [selectedCompany, setSelectedCompany] = useState('');
+    // 팀(현장) 검색어 상태 추가
+    const [teamSearch, setTeamSearch] = useState('');
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
 
@@ -933,9 +935,13 @@ const AdvancePaymentPage: React.FC = () => {
         }
     };
 
-    // Filter Teams by Company and sort by name
+    // 팀명 normalize 함수 (공백제거, 소문자)
+    const normalizeTeamName = (name: string = '') => name.replace(/\s+/g, '').toLowerCase();
+
+    // Filter Teams by Company, 팀명 검색어, 그리고 이름순 정렬
     const filteredTeams = teams
         .filter(team => team.companyName === selectedCompany)
+        .filter(team => !teamSearch.trim() || normalizeTeamName(team.name).includes(normalizeTeamName(teamSearch)))
         .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 
     // Auto-select first team
@@ -1895,6 +1901,7 @@ const AdvancePaymentPage: React.FC = () => {
                         onChange={(e) => {
                             setSelectedCompany(e.target.value);
                             setSelectedTeamId('');
+                            setTeamSearch(''); // 회사 변경 시 검색어 초기화
                         }}
                         className="border border-slate-300 rounded px-2 py-1.5 text-sm min-w-[120px]"
                         disabled={loading && !autoSearchRequested}
@@ -1907,7 +1914,16 @@ const AdvancePaymentPage: React.FC = () => {
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">팀 선택</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">현장명 검색</label>
+                    <input
+                        type="text"
+                        value={teamSearch}
+                        onChange={e => setTeamSearch(e.target.value)}
+                        className="w-32 border border-slate-300 rounded px-2 py-1 text-xs mb-1"
+                        placeholder="현장명 검색 (예: 김포)"
+                        style={{ minWidth: 100 }}
+                    />
+                    <label className="block text-xs font-bold text-slate-500 mb-1 mt-2">팀 선택</label>
                     <select
                         value={selectedTeamId}
                         onChange={(e) => setSelectedTeamId(e.target.value)}
