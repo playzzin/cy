@@ -903,18 +903,18 @@ const FreelancerPage: React.FC = () => {
                             if (headerText.includes('신고 가능 금액')) TH.classList.add('header-orange');
                         }}
                         afterRenderer={(TD, row, col, prop, value, cellProperties) => {
+
                             if (cellProperties?.isFooter) {
                                 TD.classList.add('ht-footer-row');
                                 return;
                             }
 
-                            if (prop !== 'name') return;
+                            if (typeof prop !== 'string' || !/^m\d{2}$/.test(prop)) return;
 
                             const rowData = displayData[row];
-                            const salaryModel = normalizeSalaryModel(rowData?.salaryModel);
+                            const salaryModel = normalizeSalaryModel(rowData?.[`${prop}_salaryModel`]);
 
                             TD.classList.remove('freelancer-salary-daily-cell', 'freelancer-salary-monthly-cell');
-                            TD.classList.add('freelancer-name-cell');
                             TD.removeAttribute('data-salary-model');
 
                             if (salaryModel === '일급제' || salaryModel === '월급제') {

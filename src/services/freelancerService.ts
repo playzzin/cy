@@ -195,6 +195,27 @@ export const freelancerService = {
             return raw;
         };
 
+        const resolveSalaryModel = (...values: unknown[]): string => {
+            for (const value of values) {
+                const normalized = normalizeSalaryModel(value);
+                if (normalized) return normalized;
+            }
+            return '';
+        };
+
+        const getLatestMonthlySalaryModel = (
+            salaryModels: { [m: number]: string } | undefined,
+            fallback: string
+        ): string => {
+            if (salaryModels) {
+                for (let i = 12; i >= 1; i--) {
+                    const normalized = normalizeSalaryModel(salaryModels[i]);
+                    if (normalized) return normalized;
+                }
+            }
+            return fallback;
+        };
+
         // ── Step 1: FreelancerPayment → 월별 금액 맵 ──────────────────────
         const paymentMap = new Map<string, {
             amounts: { [m: number]: number };
@@ -225,7 +246,7 @@ export const freelancerService = {
         // ── Step 2: 일보 작업자 행 → 월별 금액 맵 ───────────────────────
         const reportMap = new Map<string, {
             amounts: { [m: number]: number };
-            meta: { name: string; teamId: string; teamName: string; salaryModel: string };
+            meta: { name: string; teamId: string; teamName: string; salaryModel: string; salaryModels: { [m: number]: string } };
         }>();
 
         const workerMasterById = new Map<string, any>();
@@ -253,12 +274,20 @@ export const freelancerService = {
                         name: row.workerName || '',
                         teamId: row.workerTeamId || row.teamId || '',
                         teamName: row.workerTeamName || row.teamName || '',
-                        salaryModel: normalizeSalaryModel(row.salaryModel || row.payType)
+                        salaryModel: normalizeSalaryModel(row.salaryModel || row.payType),
+                        salaryModels: {}
                     }
                 });
             }
             const entry = reportMap.get(workerId)!;
             const amt = toNum(row.amount) > 0 ? toNum(row.amount) : (toNum(row.manDay) * toNum(row.unitPrice));
+            const rowSalaryModel = resolveSalaryModel(row.salaryModel, row.payType);
+            if (rowSalaryModel) {
+                entry.meta.salaryModels[month] = rowSalaryModel;
+                if (!entry.meta.salaryModel) {
+                    entry.meta.salaryModel = rowSalaryModel;
+                }
+            }
             entry.amounts[month] = (entry.amounts[month] || 0) + amt;
         });
 
@@ -286,13 +315,14 @@ export const freelancerService = {
 
             const team = teamById.get(String(f.teamId || ''));
             const workerMaster = workerMasterById.get(fId) || workerMasterById.get(fLegacyId);
-            const salaryModel = normalizeSalaryModel(
+            const baseSalaryModel = resolveSalaryModel(
                 (f as any).salaryModel
                 || (f as any).payType
                 || workerMaster?.salaryModel
                 || workerMaster?.payType
                 || reportData?.meta.salaryModel
             );
+            const salaryModel = getLatestMonthlySalaryModel(reportData?.meta.salaryModels, baseSalaryModel);
 
             const monthlyPayments: any = {};
             let monthlyTotal = 0;
@@ -304,6 +334,9 @@ export const freelancerService = {
                 const finalAmt = Math.max(payAmt, reportAmt); // 두 소스 중 큰 값
                 monthlyPayments[mk] = finalAmt;
                 monthlyPayments[`${mk}_id`] = payData?.ids[i] || null;
+                monthlyPayments[`${mk}_salaryModel`] = finalAmt > 0
+                    ? resolveSalaryModel(reportData?.meta.salaryModels[i], baseSalaryModel)
+                    : '';
                 monthlyTotal += finalAmt;
             }
 
@@ -344,6 +377,9 @@ export const freelancerService = {
                 const amt = data.amounts[i] || 0;
                 monthlyPayments[mk] = amt;
                 monthlyPayments[`${mk}_id`] = null;
+                monthlyPayments[`${mk}_salaryModel`] = amt > 0
+                    ? resolveSalaryModel(data.meta.salaryModels[i], data.meta.salaryModel)
+                    : '';
                 monthlyTotal += amt;
             }
 
@@ -356,7 +392,7 @@ export const freelancerService = {
                     companyName: (team as any)?.companyName || '업체 미지정',
                     ...monthlyPayments,
                     total: monthlyTotal,
-                    salaryModel: normalizeSalaryModel(data.meta.salaryModel),
+                    salaryModel: getLatestMonthlySalaryModel(data.meta.salaryModels, normalizeSalaryModel(data.meta.salaryModel)),
                     performanceBonus: 0,
                     reportingBalance: 0,
                     reportableAmount: 0,
