@@ -839,7 +839,42 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         return 0;
     };
 
-    const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry) => {
+    const findDirectOffsetInvoice = (adjustmentEntry: WorkbookLedgerEntry) => {
+        const exactAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
+        if (exactAmount <= 0) return null;
+
+        const partnerKey = normalizeText(adjustmentEntry.partnerName).toLowerCase();
+        if (!partnerKey) return null;
+
+        const adjustmentDate = normalizeDate(adjustmentEntry.date);
+        const normalizedSiteName = normalizeText(adjustmentEntry.siteName).toLowerCase();
+        const normalizedDescription = normalizeText(adjustmentEntry.description).toLowerCase();
+        const normalizedTeamName = normalizeText(adjustmentEntry.teamName).toLowerCase();
+        const appliedYear = adjustmentEntry.appliedYear ?? null;
+        const appliedMonth = adjustmentEntry.appliedMonth ?? null;
+
+        const directCandidates = positiveInvoiceEntries.filter((invoiceEntry) => {
+            if (normalizeText(invoiceEntry.partnerName).toLowerCase() !== partnerKey) return false;
+            if (Math.abs((invoiceEntry.totalAmount ?? 0) - exactAmount) >= 0.5) return false;
+            if (adjustmentDate && normalizeDate(invoiceEntry.date) !== adjustmentDate) return false;
+            if (normalizedSiteName && normalizeText(invoiceEntry.siteName).toLowerCase() !== normalizedSiteName) return false;
+            if (normalizedDescription && normalizeText(invoiceEntry.description).toLowerCase() !== normalizedDescription) return false;
+            if (normalizedTeamName && normalizeText(invoiceEntry.teamName).toLowerCase() !== normalizedTeamName) return false;
+
+            const invoiceAppliedYear = invoiceEntry.appliedYear ?? getYearFromDate(invoiceEntry.date);
+            const invoiceAppliedMonth = invoiceEntry.appliedMonth ?? getMonthFromDate(invoiceEntry.date);
+            if (appliedYear !== null && invoiceAppliedYear !== appliedYear) return false;
+            if (appliedMonth !== null && invoiceAppliedMonth !== appliedMonth) return false;
+
+            return true;
+        });
+
+        if (directCandidates.length !== 1) return null;
+
+        return invoiceById.get(getWorkbookEntryKey(directCandidates[0])) ?? null;
+    };
+
+    const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry, exactAmount?: number) => {
         const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
         if (!partnerKey) return null;
 
@@ -859,6 +894,17 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return true;
         };
 
+        const resolveExactAmountCandidate = (candidates: WorkingSummaryRow[]) => {
+            if (!(exactAmount && exactAmount > 0)) return null;
+
+            const exactMatches = candidates.filter((invoice) => Math.abs((invoice.totalAmount ?? 0) - exactAmount) < 0.5);
+            if (exactMatches.length === 1) {
+                return exactMatches[0];
+            }
+
+            return null;
+        };
+
         const strictCandidates = partnerInvoices.filter((invoice) => {
             if (!matchesBaseConditions(invoice)) return false;
             if (appliedYear !== null && invoice.appliedYear !== appliedYear) return false;
@@ -870,9 +916,19 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return strictCandidates[0];
         }
 
+        const strictExactAmountMatch = resolveExactAmountCandidate(strictCandidates);
+        if (strictExactAmountMatch) {
+            return strictExactAmountMatch;
+        }
+
         const relaxedCandidates = partnerInvoices.filter(matchesBaseConditions);
         if (relaxedCandidates.length === 1) {
             return relaxedCandidates[0];
+        }
+
+        const relaxedExactAmountMatch = resolveExactAmountCandidate(relaxedCandidates);
+        if (relaxedExactAmountMatch) {
+            return relaxedExactAmountMatch;
         }
 
         return null;
@@ -920,7 +976,13 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return;
         }
 
-        const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry);
+        const directOffsetInvoice = findDirectOffsetInvoice(adjustmentEntry);
+        if (directOffsetInvoice) {
+            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date);
+            return;
+        }
+
+        const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry, adjustmentAmount);
         if (legacyMatchedInvoice) {
             applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date);
             return;
@@ -986,6 +1048,7 @@ const WorkbookLedgerPage: React.FC = () => {
     const [downloadingDb, setDownloadingDb] = useState(false);
     const [dbActionLoading, setDbActionLoading] = useState(false);
     const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
+    const [printingLedger, setPrintingLedger] = useState(false);
     const [printingSummary, setPrintingSummary] = useState(false);
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
@@ -2314,6 +2377,239 @@ const WorkbookLedgerPage: React.FC = () => {
         [receiptHistoryInvoice?.transactionType, receiptHistorySummaryRow?.transactionType]
     );
 
+    const handlePrintLedger = useCallback(() => {
+        if (ledgerRows.length === 0) {
+            Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
+            return;
+        }
+
+        const transactionAmountLabel = ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액';
+        const paymentAmountLabel = ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액';
+        const title = ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`;
+        const filterItems = [
+            ['조회 기간', `${ledgerFilter.startDate} ~ ${ledgerFilter.endDate}`],
+            ['구분', ledgerFilter.transactionType],
+            ['팀명', ledgerFilter.teamName || '전체'],
+            ['거래처', ledgerFilter.partnerName || '전체'],
+            ['현장명', ledgerFilter.siteName || '전체'],
+            ['건수', `${ledgerRows.length.toLocaleString()}건`]
+        ];
+
+        const rowsHtml = ledgerRows
+            .map((row) => `
+                <tr>
+                    <td>${escapeHtml(row.date || '-')}</td>
+                    <td>${escapeHtml(row.partnerName || '-')}</td>
+                    <td>${escapeHtml(row.description || '-')}</td>
+                    <td class="align-right">${row.transactionAmount !== 0 ? formatNumber(row.transactionAmount) : '-'}</td>
+                    <td class="align-right">${row.paymentAmount !== 0 ? formatNumber(row.paymentAmount) : '-'}</td>
+                    <td class="align-right">${formatNumber(row.balance)}</td>
+                    <td>${escapeHtml(row.siteName || '-')}</td>
+                    <td>${escapeHtml(row.note || '-')}</td>
+                    <td>${escapeHtml(row.teamName || '-')}</td>
+                </tr>
+            `)
+            .join('');
+
+        const totalRowHtml = `
+            <tr class="summary-total-row">
+                <td></td>
+                <td></td>
+                <td>합계</td>
+                <td class="align-right">${formatNumber(ledgerTotals.transactionAmount)}</td>
+                <td class="align-right">${formatNumber(ledgerTotals.paymentAmount)}</td>
+                <td class="align-right">${formatNumber(ledgerTotals.balance)}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+            </tr>
+        `;
+
+        setPrintingLedger(true);
+
+        const iframe = document.createElement('iframe');
+        iframe.setAttribute('aria-hidden', 'true');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        iframe.style.visibility = 'hidden';
+        document.body.appendChild(iframe);
+
+        const cleanup = () => {
+            setPrintingLedger(false);
+            if (iframe.parentNode) {
+                iframe.parentNode.removeChild(iframe);
+            }
+        };
+
+        const printWindow = iframe.contentWindow;
+        if (!printWindow) {
+            cleanup();
+            Swal.fire('오류', '인쇄 미리보기를 열 수 없습니다.', 'error');
+            return;
+        }
+
+        const printableHtml = `
+            <!DOCTYPE html>
+            <html lang="ko">
+                <head>
+                    <meta charset="utf-8" />
+                    <title>${escapeHtml(title)} 인쇄</title>
+                    <style>
+                        @page {
+                            size: A4 landscape;
+                            margin: 12mm;
+                        }
+
+                        * {
+                            box-sizing: border-box;
+                        }
+
+                        body {
+                            margin: 0;
+                            font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+                            color: #111827;
+                            background: #ffffff;
+                        }
+
+                        .print-shell {
+                            padding: 20px 24px 28px;
+                        }
+
+                        .print-header {
+                            margin-bottom: 16px;
+                        }
+
+                        .print-header h1 {
+                            margin: 0;
+                            font-size: 26px;
+                        }
+
+                        .print-header p {
+                            margin: 6px 0 0;
+                            color: #475569;
+                            font-size: 12px;
+                        }
+
+                        .print-filter-grid {
+                            display: grid;
+                            grid-template-columns: repeat(3, minmax(0, 1fr));
+                            gap: 8px;
+                            margin-bottom: 16px;
+                        }
+
+                        .print-filter-item {
+                            padding: 8px 10px;
+                            border: 1px solid #d7dde7;
+                            border-radius: 10px;
+                            background: #f8fafc;
+                            font-size: 12px;
+                        }
+
+                        .print-filter-item strong {
+                            display: inline-block;
+                            margin-right: 6px;
+                            color: #334155;
+                        }
+
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            table-layout: fixed;
+                        }
+
+                        th,
+                        td {
+                            border: 1px solid #cbd5e1;
+                            padding: 7px 8px;
+                            font-size: 11px;
+                            vertical-align: top;
+                            word-break: break-word;
+                        }
+
+                        th {
+                            background: #2e75b6;
+                            color: #ffffff;
+                            font-weight: 700;
+                        }
+
+                        td {
+                            background: #ffffff;
+                        }
+
+                        .align-right {
+                            text-align: right;
+                        }
+
+                        .summary-total-row td {
+                            background: #eff6ff;
+                            font-weight: 700;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="print-shell">
+                        <div class="print-header">
+                            <h1>${escapeHtml(title)}</h1>
+                            <p>${escapeHtml(new Date().toLocaleString('ko-KR'))}</p>
+                        </div>
+                        <div class="print-filter-grid">
+                            ${filterItems.map(([label, value]) => `
+                                <div class="print-filter-item">
+                                    <strong>${escapeHtml(label)}</strong>${escapeHtml(value)}
+                                </div>
+                            `).join('')}
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>날짜</th>
+                                    <th>거래처명</th>
+                                    <th>내용</th>
+                                    <th>${escapeHtml(transactionAmountLabel)}</th>
+                                    <th>${escapeHtml(paymentAmountLabel)}</th>
+                                    <th>잔액</th>
+                                    <th>현장명</th>
+                                    <th>비고</th>
+                                    <th>팀명</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rowsHtml}
+                                ${totalRowHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </body>
+            </html>
+        `;
+
+        printWindow.document.open();
+        printWindow.document.write(printableHtml);
+        printWindow.document.close();
+
+        const handleAfterPrint = () => {
+            printWindow.removeEventListener('afterprint', handleAfterPrint);
+            cleanup();
+        };
+
+        printWindow.addEventListener('afterprint', handleAfterPrint);
+
+        window.setTimeout(() => {
+            try {
+                printWindow.focus();
+                printWindow.print();
+            } catch (error) {
+                console.error(error);
+                cleanup();
+                Swal.fire('오류', '인쇄 실행 중 오류가 발생했습니다.', 'error');
+            }
+        }, 150);
+    }, [ledgerFilter, ledgerRows, ledgerTotals]);
+
     const handlePrintSummary = useCallback(() => {
         if (summaryRows.length === 0) {
             Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
@@ -3555,6 +3851,17 @@ const WorkbookLedgerPage: React.FC = () => {
                                 >
                                     <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
                                     화면 복사
+                                </button>
+                            </td>
+                            <td className="sheet-button-wrap" colSpan={2}>
+                                <button
+                                    type="button"
+                                    className="excel-button excel-button-gray"
+                                    onClick={handlePrintLedger}
+                                    disabled={printingLedger}
+                                >
+                                    <FontAwesomeIcon icon={printingLedger ? faSpinner : faPrint} spin={printingLedger} />
+                                    인쇄
                                 </button>
                             </td>
                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>

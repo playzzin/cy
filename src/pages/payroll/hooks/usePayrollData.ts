@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
 import { siteService, Site } from '../../../services/siteService';
@@ -281,6 +281,16 @@ export const usePayrollData = (
   const [basePaymentData, setBasePaymentData] = useState<PaymentData[]>([]);
   const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
   const [errorCount, setErrorCount] = useState(0);
+  const isMountedRef = useRef(true);
+  const fetchRunSeqRef = useRef(0);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      fetchRunSeqRef.current += 1;
+    };
+  }, []);
 
   const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: Record<string, boolean> } => {
     const errors: Record<string, boolean> = {};
@@ -314,6 +324,8 @@ export const usePayrollData = (
     const months = buildMonthRange(startMonth, endMonth);
     if (months.length === 0) return;
 
+    const runSeq = fetchRunSeqRef.current + 1;
+    fetchRunSeqRef.current = runSeq;
     setLoading(true);
     try {
       // 1. 기초 데이터 페칭
@@ -619,6 +631,8 @@ export const usePayrollData = (
         };
       });
 
+      if (!isMountedRef.current || fetchRunSeqRef.current !== runSeq) return;
+
       setPaymentData(processedPaymentData);
       setBasePaymentData(processedPaymentData);
       setLedgerRowsData(processedLedgerRows);
@@ -627,7 +641,9 @@ export const usePayrollData = (
     } catch (error) {
       console.error('Error fetching payroll data:', error);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current && fetchRunSeqRef.current === runSeq) {
+        setLoading(false);
+      }
     }
   }, [startMonth, endMonth, selectedTeamId, selectedWorkerId, validateItem]);
 

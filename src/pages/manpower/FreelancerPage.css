@@ -86,6 +86,87 @@
 	letter-spacing: -0.02em;
 }
 
+.freelancer-salary-legend {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 16px;
+	border-bottom: 1px solid #dbe4f0;
+	background: #ffffff;
+}
+
+.freelancer-salary-legend-label {
+	font-size: 12px;
+	font-weight: 800;
+	color: #475569;
+}
+
+.freelancer-salary-legend-chip {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 10px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 800;
+	border: 1px solid transparent;
+}
+
+.freelancer-salary-legend-chip.is-daily {
+	background: #ecfdf5;
+	color: #047857;
+	border-color: #a7f3d0;
+}
+
+.freelancer-salary-legend-chip.is-monthly {
+	background: #fff7ed;
+	color: #c2410c;
+	border-color: #fdba74;
+}
+
+.freelancer-name-cell {
+	position: relative;
+	padding-bottom: 20px !important;
+	font-weight: 700;
+}
+
+.freelancer-name-cell::after {
+	content: attr(data-salary-model);
+	position: absolute;
+	left: 50%;
+	bottom: 4px;
+	transform: translateX(-50%);
+	padding: 2px 8px;
+	border-radius: 999px;
+	font-size: 10px;
+	font-weight: 800;
+	line-height: 1;
+	white-space: nowrap;
+	opacity: 0;
+}
+
+.freelancer-salary-daily-cell {
+	background: #f0fdf4 !important;
+	color: #166534;
+}
+
+.freelancer-salary-daily-cell::after {
+	background: #dcfce7;
+	color: #166534;
+	opacity: 1;
+}
+
+.freelancer-salary-monthly-cell {
+	background: #fff7ed !important;
+	color: #c2410c;
+}
+
+.freelancer-salary-monthly-cell::after {
+	background: #ffedd5;
+	color: #c2410c;
+	opacity: 1;
+}
+
 @media (max-width: 768px) {
 	.team-tab-navigation {
 		padding: 10px 10px 4px;
@@ -102,5 +183,11 @@
 		min-height: 64px;
 		padding: 14px 16px;
 		font-size: 22px;
+	}
+
+	.freelancer-salary-legend {
+		flex-wrap: wrap;
+		gap: 8px;
+		padding: 8px 10px;
 	}
 }

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, useLocation, type NavigateOptions } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { MessageManager } from '../../constants/messages';
 // ROLE_SITE_MAP removed - now fully dynamic
@@ -77,6 +77,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+    const navigateSync = useCallback((to: string, options?: NavigateOptions) => {
+        navigate(to, {
+            ...options,
+            flushSync: true,
+        });
+    }, [navigate]);
 
     // Fetch Menu Config
     useEffect(() => {
@@ -124,9 +130,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     // 청연사이트 모드일 때 /dashboard 접근 시 /dashboard2로 리다이렉트
     useEffect(() => {
         if (currentSite === 'test' && location.pathname === '/dashboard') {
-            navigate('/dashboard2', { replace: true });
+            navigateSync('/dashboard2', { replace: true });
         }
-    }, [currentSite, location.pathname, navigate]);
+    }, [currentSite, location.pathname, navigateSync]);
 
     useEffect(() => {
         const setupAdminListener = async () => {
@@ -298,7 +304,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const handleLogoClick = () => {
         setActiveMenuItems({});
         // 청연사이트 모드이면 /dashboard2로, 아니면 /dashboard로 이동
-        navigate(currentSite === 'test' ? '/dashboard2' : '/dashboard');
+        navigateSync(currentSite === 'test' ? '/dashboard2' : '/dashboard');
     };
 
     // Position to Site mapping - 직책별로 전용 메뉴 사용
@@ -344,7 +350,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
         // 1. Direct Path (Priority)
         if (item.path) {
-            navigate(item.path);
+            navigateSync(item.path);
             if (isMobile) {
                 closeAll();
                 setActiveMenuItems({});
@@ -397,10 +403,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
         // 청연사이트(test)로 전환 시 /dashboard2로 이동
         if (siteKey === 'test') {
-            navigate('/dashboard2');
+            navigateSync('/dashboard2');
         } else if (location.pathname === '/dashboard2') {
             // 다른 사이트로 전환 시 /dashboard2에 있으면 /dashboard로 이동
-            navigate('/dashboard');
+            navigateSync('/dashboard');
         }
     };
 
@@ -429,7 +435,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 if (isMobile) closeAll();
                 return;
             }
-            navigate(path);
+            navigateSync(path);
             if (isMobile) closeAll();
         }
     };

@@ -207,7 +207,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             if (isMobile) closeAll();
             return;
         }
-        navigate(path);
+        navigate(path, { flushSync: true });
         if (isMobile) closeAll();
     };
 

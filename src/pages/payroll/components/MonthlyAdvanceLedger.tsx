@@ -423,7 +423,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     && (existing.assignmentType ?? row.assignmentType ?? 'corporate') === normalized.assignmentType
                     && isSameAssignments;
 
-                if (!isSame || shouldAdoptInitial) {
+                if (!isSame) {
                     changed = true;
                     next[row.rowKey] = normalized;
                     return;
@@ -1797,8 +1797,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                     };
                                     return (
                                         <React.Fragment key={row.rowKey}>
-                                            {/* 윗칸(법인) 행: 파란색 계열 배경 */}
-                                            <tr className="bg-blue-50/40">
+                                            {/* 윗칸(법인) 행: 파란색 계열 배경 + 상단/좌/우 굵은 검정 테두리 */}
+                                            <tr className="bg-blue-50/40 border-t-2 border-l-2 border-r-2 border-black">
                                                 <td rowSpan={2} className="border border-slate-300 px-1 text-center font-semibold">{runningNo}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 text-center font-semibold">{row.workerName}</td>
                                                 <td rowSpan={2} className={`border border-slate-300 px-1 text-center font-semibold ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
@@ -1917,8 +1917,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                     />
                                                 </td>
                                             </tr>
-                                            <tr className="odd:bg-white even:bg-slate-50/60">
-                                                {/* 아랫칸(노무) 행: 초록색 계열 배경 */}
+                                            {/* 아랫칸(노무) 행: 초록색 계열 배경 + 하단/좌/우 굵은 검정 테두리 */}
+                                            <tr className="odd:bg-white even:bg-slate-50/60 border-b-2 border-l-2 border-r-2 border-black">
                                                 <td className="border border-slate-300 px-1.5 py-1 text-center bg-emerald-50/20">
                                                     <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
                                                         <input 

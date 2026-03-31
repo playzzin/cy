@@ -164,12 +164,14 @@ export const freelancerService = {
     }> {
         const { dailyReportService } = await import('./dailyReportService');
         const { teamService } = await import('./teamService');
+        const { manpowerService } = await import('./manpowerService');
 
         // 모든 데이터 병렬 로드 (단일 진실의 원천)
-        const [freelancersRaw, paymentsRaw, allTeams, reportRows] = await Promise.all([
+        const [freelancersRaw, paymentsRaw, allTeams, workersRaw, reportRows] = await Promise.all([
             this.getFreelancers(),
             this.getPayments(undefined, year),
             teamService.getTeams(),
+            manpowerService.getWorkers(true),
             dailyReportService.getReportWorkerRowsByRange({
                 startDate: `${year}-01-01`,
                 endDate: `${year}-12-31`
@@ -183,6 +185,14 @@ export const freelancerService = {
                 return Number.isFinite(n) ? n : 0;
             }
             return 0;
+        };
+
+        const normalizeSalaryModel = (value: unknown): string => {
+            const raw = typeof value === 'string' ? value.trim() : '';
+            if (!raw) return '';
+            if (raw.includes('월급')) return '월급제';
+            if (raw.includes('일급')) return '일급제';
+            return raw;
         };
 
         // ── Step 1: FreelancerPayment → 월별 금액 맵 ──────────────────────
@@ -215,8 +225,18 @@ export const freelancerService = {
         // ── Step 2: 일보 작업자 행 → 월별 금액 맵 ───────────────────────
         const reportMap = new Map<string, {
             amounts: { [m: number]: number };
-            meta: { name: string; teamId: string; teamName: string };
+            meta: { name: string; teamId: string; teamName: string; salaryModel: string };
         }>();
+
+        const workerMasterById = new Map<string, any>();
+        const addWorkerMaster = (worker: any) => {
+            if (!worker) return;
+            if (worker.id) workerMasterById.set(String(worker.id), worker);
+            if (worker.legacyId) workerMasterById.set(String(worker.legacyId), worker);
+        };
+
+        workersRaw.forEach(addWorkerMaster);
+        freelancersRaw.forEach(addWorkerMaster);
 
         (reportRows as DailyReportWorkerRow[]).forEach(row => {
             const date = String(row.date || '');
@@ -232,7 +252,8 @@ export const freelancerService = {
                     meta: {
                         name: row.workerName || '',
                         teamId: row.workerTeamId || row.teamId || '',
-                        teamName: row.workerTeamName || row.teamName || ''
+                        teamName: row.workerTeamName || row.teamName || '',
+                        salaryModel: normalizeSalaryModel(row.salaryModel || row.payType)
                     }
                 });
             }
@@ -264,6 +285,14 @@ export const freelancerService = {
             const reportData = reportMap.get(fId) || reportMap.get(fLegacyId);
 
             const team = teamById.get(String(f.teamId || ''));
+            const workerMaster = workerMasterById.get(fId) || workerMasterById.get(fLegacyId);
+            const salaryModel = normalizeSalaryModel(
+                (f as any).salaryModel
+                || (f as any).payType
+                || workerMaster?.salaryModel
+                || workerMaster?.payType
+                || reportData?.meta.salaryModel
+            );
 
             const monthlyPayments: any = {};
             let monthlyTotal = 0;
@@ -292,6 +321,7 @@ export const freelancerService = {
                 total: monthlyTotal + toNum(src?.performanceBonus),
                 monthlyRate: toNum(src?.dailyRate) || toNum(f.unitPrice),
                 performanceBonus: toNum(src?.performanceBonus),
+                salaryModel,
                 reportingBalance: toNum(src?.reportingBalance),
                 reportableAmount: toNum(src?.reportableAmount),
                 depositDate: src?.depositDate || null,
@@ -326,6 +356,7 @@ export const freelancerService = {
                     companyName: (team as any)?.companyName || '업체 미지정',
                     ...monthlyPayments,
                     total: monthlyTotal,
+                    salaryModel: normalizeSalaryModel(data.meta.salaryModel),
                     performanceBonus: 0,
                     reportingBalance: 0,
                     reportableAmount: 0,

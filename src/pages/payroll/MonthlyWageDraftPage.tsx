@@ -27,7 +27,7 @@ import Swal from 'sweetalert2';
 import { PayrollToolbar } from './components/PayrollToolbar';
 
 import { usePayrollData } from './hooks/usePayrollData';
-import { PaymentData, MonthlyAdvanceLedgerRow, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
+import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 
 // --- Premium UI Styled Components ---
@@ -2337,6 +2337,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, [filteredPaymentData, selectedPayslipRowKey]);
 
     useEffect(() => {
+        let mounted = true;
         const fetchInitialData = async () => {
             try {
                 const [fetchedTeams, fetchedWorkers, fetchedCompanies, fetchedSites] = await Promise.all([
@@ -2345,20 +2346,26 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     companyService.getCompanies(),
                     siteService.getSites(),
                 ]);
-
+                if (!mounted) return;
                 setAllTeams(fetchedTeams);
                 setAllWorkers(fetchedWorkers);
                 setCompanies(fetchedCompanies);
                 setAllSites(fetchedSites);
             } catch (error) {
+                if (!mounted) return;
                 console.error('Failed to load initial data:', error);
                 alert('초기 데이터를 불러오는 중 오류가 발생했습니다.');
             } finally {
-                setFiltersReady(true);
+                if (mounted) {
+                    setFiltersReady(true);
+                }
             }
         };
 
         void fetchInitialData();
+        return () => {
+            mounted = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -2971,6 +2978,34 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setTeamDropdownOpen(false);
         setExpandedRows(new Set());
     }, [filterMode]);
+
+    const isLedgerInsuranceEligibleEntry = useCallback(
+        (
+            entry: MonthlyAdvanceLedgerWorkEntry,
+            ledgerRow: Pick<MonthlyAdvanceLedgerRow, 'workerId' | 'teamId' | 'teamName' | 'month'>
+        ): boolean => {
+            const workerTeam = workerTeamByWorkerId.get(String(ledgerRow.workerId ?? '').trim());
+            const workerTeamIdForMatch = workerTeam?.teamId || ledgerRow.teamId;
+            const workerTeamNameForMatch = workerTeam?.teamName || ledgerRow.teamName;
+            const normalizedEntry: WorkerWorkEntry = {
+                date: String(entry.date ?? ledgerRow.month ?? '').trim() || ledgerRow.month,
+                siteId: entry.siteId,
+                siteName: String(entry.siteName ?? '').trim(),
+                clientCompanyId: entry.clientCompanyId,
+                isLaborSite: Boolean(entry.isLaborSite),
+                paymentMethod: entry.paymentMethod,
+                manDay: toNumber(entry.manDay),
+                unitPrice: toNumber(entry.unitPrice),
+                amount:
+                    toNumber(entry.amount) > 0
+                        ? toNumber(entry.amount)
+                        : floorWon(toNumber(entry.manDay) * toNumber(entry.unitPrice)),
+            };
+
+            return isEntryInWorkerTeamSite(normalizedEntry, workerTeamIdForMatch, workerTeamNameForMatch);
+        },
+        [isEntryInWorkerTeamSite, workerTeamByWorkerId]
+    );
 
     const allowedTeamIdsForWorkerFilter = useMemo(() => {
         if (!selectedTeamId) return null;
@@ -4537,26 +4572,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     applyBusinessIncome={businessIncomeApplied}
                     applyDailyFee={dailyFeeApplied}
                     insuranceTeamSiteOnly={insuranceTeamSiteOnly}
-                    isInsuranceEligibleEntry={(entry, ledgerRow) => {
-                        const workerTeam = workerTeamByWorkerId.get(String(ledgerRow.workerId ?? '').trim());
-                        const workerTeamIdForMatch = workerTeam?.teamId || ledgerRow.teamId;
-                        const workerTeamNameForMatch = workerTeam?.teamName || ledgerRow.teamName;
-                        const normalizedEntry: WorkerWorkEntry = {
-                            date: String(entry.date ?? ledgerRow.month ?? '').trim() || ledgerRow.month,
-                            siteId: entry.siteId,
-                            siteName: String(entry.siteName ?? '').trim(),
-                            clientCompanyId: entry.clientCompanyId,
-                            isLaborSite: Boolean(entry.isLaborSite),
-                            paymentMethod: entry.paymentMethod,
-                            manDay: toNumber(entry.manDay),
-                            unitPrice: toNumber(entry.unitPrice),
-                            amount:
-                                toNumber(entry.amount) > 0
-                                    ? toNumber(entry.amount)
-                                    : floorWon(toNumber(entry.manDay) * toNumber(entry.unitPrice)),
-                        };
-                        return isEntryInWorkerTeamSite(normalizedEntry, workerTeamIdForMatch, workerTeamNameForMatch);
-                    }}
+                    isInsuranceEligibleEntry={isLedgerInsuranceEligibleEntry}
                     clientCompanyNameById={companyNameById}
                     onInputsChange={setLedgerInputs}
                     initialInputs={ledgerInputs}

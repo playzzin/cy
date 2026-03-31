@@ -8,7 +8,7 @@ import { freelancerService } from '../../services/freelancerService';
 
 import { addYears, subYears } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faSave } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faFileExcel, faSave, faSpinner } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import './FreelancerPage.css';
 
@@ -30,6 +30,7 @@ const FreelancerPage: React.FC = () => {
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reportTeams, setReportTeams] = useState<Array<{ id: string; name: string }>>([]);
     const [loading, setLoading] = useState(true);
+    const [downloadingExcel, setDownloadingExcel] = useState(false);
     const [tableHeight, setTableHeight] = useState<number>(480);
     const hotRef = useRef<any>(null);
     const tableWrapRef = useRef<HTMLDivElement>(null);
@@ -98,6 +99,38 @@ const FreelancerPage: React.FC = () => {
         }
         return td;
     }, []);
+
+    const normalizeSalaryModel = useCallback((value: unknown) => {
+        const raw = typeof value === 'string' ? value.trim() : '';
+        if (!raw) return '';
+        if (raw.includes('월급')) return '월급제';
+        if (raw.includes('일급')) return '일급제';
+        return raw;
+    }, []);
+
+    const getSalaryModelPriority = useCallback((value: unknown) => {
+        const salaryModel = normalizeSalaryModel(value);
+        if (salaryModel === '월급제') return 0;
+        if (salaryModel === '일급제') return 1;
+        return 2;
+    }, [normalizeSalaryModel]);
+
+    const sortFreelancers = useCallback((left: any, right: any) => {
+        const salaryPriorityCompare = getSalaryModelPriority(left?.salaryModel) - getSalaryModelPriority(right?.salaryModel);
+        if (salaryPriorityCompare !== 0) return salaryPriorityCompare;
+
+        const leftGridNo = Number(left?.gridNo) || 0;
+        const rightGridNo = Number(right?.gridNo) || 0;
+
+        if (leftGridNo > 0 && rightGridNo > 0 && leftGridNo !== rightGridNo) {
+            return leftGridNo - rightGridNo;
+        }
+
+        if (leftGridNo > 0 && rightGridNo <= 0) return -1;
+        if (leftGridNo <= 0 && rightGridNo > 0) return 1;
+
+        return String(left?.name || '').localeCompare(String(right?.name || ''), 'ko');
+    }, [getSalaryModelPriority]);
 
     // --- Data Fetching ---
 
@@ -257,6 +290,7 @@ const FreelancerPage: React.FC = () => {
         if (selectedTeamId) {
             filtered = allFreelancers.filter(f => normalizeTeamId(f.teamId) === selectedTeamId);
         }
+        filtered = [...filtered].sort(sortFreelancers);
 
         // 1. 현재 페이지용 30개 빈 슬롯 기반 데이터 배치 (Excel 방식)
         const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -335,7 +369,7 @@ const FreelancerPage: React.FC = () => {
         formatted.push(footer);
 
         setDisplayData(formatted);
-    }, [allFreelancers, selectedTeamId, currentPage, normalizeTeamId, toFiniteAmount]);
+    }, [allFreelancers, selectedTeamId, currentPage, normalizeTeamId, sortFreelancers, toFiniteAmount]);
 
     const totalPages = Math.ceil((selectedTeamId ? allFreelancers.filter(f => normalizeTeamId(f.teamId) === selectedTeamId).length : allFreelancers.length) / PAGE_SIZE);
 
@@ -636,6 +670,135 @@ const FreelancerPage: React.FC = () => {
         setCurrentPage(1);
     };
 
+    const handleDownloadExcel = useCallback(async () => {
+        const monthlyKeys = ['m01', 'm02', 'm03', 'm04', 'm05', 'm06', 'm07', 'm08', 'm09', 'm10', 'm11', 'm12'] as const;
+        const filtered = allFreelancers
+            .filter((freelancer) => !selectedTeamId || normalizeTeamId(freelancer.teamId) === selectedTeamId)
+            .sort(sortFreelancers);
+
+        if (filtered.length === 0) {
+            Swal.fire('안내', '다운로드할 프리랜서 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        setDownloadingExcel(true);
+
+        try {
+            const XLSX = await import('xlsx');
+            const teamName = selectedTeamId
+                ? visibleTeams.find((team: any) => team.id === selectedTeamId)?.name || '전체'
+                : '전체';
+
+            const rows = filtered.map((item, index) => {
+                const monthlyAmounts = monthlyKeys.reduce((sum, key) => sum + toFiniteAmount(item[key]), 0);
+                const performanceBonus = toFiniteAmount(item.performanceBonus);
+                const reportableAmount = toFiniteAmount(item.reportableAmount);
+                const reportingBalance = reportableAmount - monthlyAmounts;
+                const total = monthlyAmounts + performanceBonus;
+
+                return {
+                    No: index + 1,
+                    팀명: item.teamName || teamName,
+                    이름: item.name || '',
+                    총액: total || 0,
+                    '01월': toFiniteAmount(item.m01),
+                    '02월': toFiniteAmount(item.m02),
+                    '03월': toFiniteAmount(item.m03),
+                    '04월': toFiniteAmount(item.m04),
+                    '05월': toFiniteAmount(item.m05),
+                    '06월': toFiniteAmount(item.m06),
+                    '07월': toFiniteAmount(item.m07),
+                    '08월': toFiniteAmount(item.m08),
+                    '09월': toFiniteAmount(item.m09),
+                    '10월': toFiniteAmount(item.m10),
+                    '11월': toFiniteAmount(item.m11),
+                    '12월': toFiniteAmount(item.m12),
+                    성과금: performanceBonus,
+                    신고잔액: reportingBalance || 0,
+                    신고가능금액: reportableAmount || 0,
+                    입금일: item.depositDate || '',
+                    비고: item.paymentMemo || ''
+                };
+            });
+
+            const summaryRow = rows.reduce<Record<string, string | number>>((accumulator, row) => ({
+                ...accumulator,
+                총액: Number(accumulator['총액'] || 0) + Number(row['총액'] || 0),
+                '01월': Number(accumulator['01월'] || 0) + Number(row['01월'] || 0),
+                '02월': Number(accumulator['02월'] || 0) + Number(row['02월'] || 0),
+                '03월': Number(accumulator['03월'] || 0) + Number(row['03월'] || 0),
+                '04월': Number(accumulator['04월'] || 0) + Number(row['04월'] || 0),
+                '05월': Number(accumulator['05월'] || 0) + Number(row['05월'] || 0),
+                '06월': Number(accumulator['06월'] || 0) + Number(row['06월'] || 0),
+                '07월': Number(accumulator['07월'] || 0) + Number(row['07월'] || 0),
+                '08월': Number(accumulator['08월'] || 0) + Number(row['08월'] || 0),
+                '09월': Number(accumulator['09월'] || 0) + Number(row['09월'] || 0),
+                '10월': Number(accumulator['10월'] || 0) + Number(row['10월'] || 0),
+                '11월': Number(accumulator['11월'] || 0) + Number(row['11월'] || 0),
+                '12월': Number(accumulator['12월'] || 0) + Number(row['12월'] || 0),
+                성과금: Number(accumulator['성과금'] || 0) + Number(row['성과금'] || 0),
+                신고잔액: Number(accumulator['신고잔액'] || 0) + Number(row['신고잔액'] || 0),
+                신고가능금액: Number(accumulator['신고가능금액'] || 0) + Number(row['신고가능금액'] || 0)
+            }), {
+                No: '',
+                팀명: '',
+                이름: '합계',
+                총액: 0,
+                '01월': 0,
+                '02월': 0,
+                '03월': 0,
+                '04월': 0,
+                '05월': 0,
+                '06월': 0,
+                '07월': 0,
+                '08월': 0,
+                '09월': 0,
+                '10월': 0,
+                '11월': 0,
+                '12월': 0,
+                성과금: 0,
+                신고잔액: 0,
+                신고가능금액: 0,
+                입금일: '',
+                비고: ''
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet([...rows, summaryRow]);
+            worksheet['!cols'] = [
+                { wch: 6 },
+                { wch: 14 },
+                { wch: 14 },
+                { wch: 14 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 10 },
+                { wch: 12 },
+                { wch: 12 },
+                { wch: 14 },
+                { wch: 12 },
+                { wch: 28 }
+            ];
+
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, '프리랜서관리');
+            XLSX.writeFile(workbook, `프리랜서관리_${teamName}_${year}.xlsx`);
+        } catch (error) {
+            console.error('Excel download failed:', error);
+            Swal.fire('오류', '엑셀 다운로드 중 오류가 발생했습니다.', 'error');
+        } finally {
+            setDownloadingExcel(false);
+        }
+    }, [allFreelancers, normalizeTeamId, selectedTeamId, sortFreelancers, toFiniteAmount, visibleTeams, year]);
+
     return (
         <div className="freelancer-page-container">
             {/* 상단 팀 내비게이션 */}
@@ -702,6 +865,12 @@ const FreelancerPage: React.FC = () => {
                 {selectedTeamId ? visibleTeams.find((t: any) => t.id === selectedTeamId)?.name : '청연팀 전체'} 사업소득세 신고
             </div>
 
+            <div className="freelancer-salary-legend">
+                <span className="freelancer-salary-legend-label">급여형태 표시</span>
+                <span className="freelancer-salary-legend-chip is-daily">일급제</span>
+                <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
+            </div>
+
             <main className="excel-main">
                 <div className="relative" ref={tableWrapRef}>
                     {loading && (
@@ -736,6 +905,21 @@ const FreelancerPage: React.FC = () => {
                         afterRenderer={(TD, row, col, prop, value, cellProperties) => {
                             if (cellProperties?.isFooter) {
                                 TD.classList.add('ht-footer-row');
+                                return;
+                            }
+
+                            if (prop !== 'name') return;
+
+                            const rowData = displayData[row];
+                            const salaryModel = normalizeSalaryModel(rowData?.salaryModel);
+
+                            TD.classList.remove('freelancer-salary-daily-cell', 'freelancer-salary-monthly-cell');
+                            TD.classList.add('freelancer-name-cell');
+                            TD.removeAttribute('data-salary-model');
+
+                            if (salaryModel === '일급제' || salaryModel === '월급제') {
+                                TD.dataset.salaryModel = salaryModel;
+                                TD.classList.add(salaryModel === '월급제' ? 'freelancer-salary-monthly-cell' : 'freelancer-salary-daily-cell');
                             }
                         }}
                         height={tableHeight}
@@ -763,7 +947,15 @@ const FreelancerPage: React.FC = () => {
                     />
                 </div>
 
-                <div className="flex justify-end mt-4">
+                <div className="flex justify-end gap-3 mt-4">
+                    <button
+                        onClick={handleDownloadExcel}
+                        disabled={loading || downloadingExcel}
+                        className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded font-black shadow-lg hover:bg-emerald-700 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        <FontAwesomeIcon icon={downloadingExcel ? faSpinner : faFileExcel} spin={downloadingExcel} />
+                        엑셀 다운로드
+                    </button>
                     <button
                         onClick={handleSave}
                         disabled={loading}
