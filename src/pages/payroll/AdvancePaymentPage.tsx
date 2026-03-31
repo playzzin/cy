@@ -2171,10 +2171,10 @@ const AdvancePaymentPage: React.FC = () => {
 
                                     return (
                                         <React.Fragment key={worker.id}>
-                                            {/* Top Row */}
+                                            {/* Top Row: 상단/좌/우 굵은 검정 테두리 */}
                                             <tr
                                                 ref={isHighlighted ? highlightedRowRef : null}
-                                                className={`transition-colors h-10 border-b-0 ${rowClass}`}
+                                                className={`transition-colors h-10 border-b-0 border-t-2 border-l-2 border-r-2 border-black ${rowClass}`}
                                             >
                                                 <td rowSpan={2} className="p-2 text-center border-r border-slate-200 sticky left-0 z-20 bg-white">{index + 1}</td>
                                                 <td rowSpan={2} className="p-2 text-center border-r border-slate-200 font-medium sticky left-12 z-20 bg-white shadow-[1px_0_2px_rgba(0,0,0,0.05)]">
@@ -2221,7 +2221,8 @@ const AdvancePaymentPage: React.FC = () => {
                                             </tr>
 
                                             {/* Bottom Row */}
-                                            <tr className={`transition-colors h-10 border-b border-slate-300 ${rowClass}`}>
+                                            {/* Bottom Row: 하단/좌/우 굵은 검정 테두리 */}
+                                            <tr className={`transition-colors h-10 border-b border-slate-300 border-b-2 border-l-2 border-r-2 border-black ${rowClass}`}>
                                                 {bottomDeductionItems.map((item) => (
                                                     <td key={item.id} className={getDeductionCellClassName(item.id)}>
                                                         {renderDeductionInput(worker.id!, item.id, 1)}
