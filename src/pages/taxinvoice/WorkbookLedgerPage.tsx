@@ -807,7 +807,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     const paymentEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter(isPaymentEntry)
-        .filter((entry) => entry.date <= endDate)
+        .filter((entry) => {
+            if (!isSettlementMode) return true;
+            return entry.date <= endDate;
+        })
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
@@ -950,9 +953,9 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return isDateWithinRange(row.issueDate, startDate, endDate);
         }
 
-        // Receivable/payable mode is a cutoff-date view: show items that are still
-        // open as of the search end date, regardless of when interim settlements happened.
-        return normalizeDate(row.issueDate) <= endDate;
+        // Receivable/payable mode is still scoped by issue-date range, but the
+        // open balance itself is calculated as of the search end date.
+        return isDateWithinRange(row.issueDate, startDate, endDate);
     });
 
     if (isSettlementMode) {
