@@ -46,7 +46,7 @@ import WagePaymentPage from './pages/payroll/WagePaymentPage';
 import DailyWageDraftPage from './pages/payroll/DailyWageDraftPage';
 import DailyWageStatementPage from './pages/payroll/DailyWageStatementPage';
 import MonthlyWageDraftPage from './pages/payroll/MonthlyWageDraftPage';
-import SupportTeamPaymentPage from './pages/payroll/SupportTeamPaymentPage';
+import SupportTeamPage from './pages/payroll/SupportTeamPage';
 import SupportClaimPage from './pages/payroll/SupportClaimPage';
 import PayrollRateManagementPage from './pages/payroll/PayrollRateManagementPage';
 import AdvancePaymentPage from './pages/payroll/AdvancePaymentPage';
@@ -303,7 +303,7 @@ const App: React.FC = () => {
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
-              <Route path="support-team" element={<SupportTeamPaymentPage />} />
+              <Route path="support-team" element={<SupportTeamPage />} />
               <Route path="support-claim" element={<SupportClaimPage />} />
               <Route path="rate-management" element={<PayrollRateManagementPage />} />
               <Route path="advance-payment" element={<AdvancePaymentPage />} />

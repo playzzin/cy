@@ -92,6 +92,88 @@ const SupportClaimPage: React.FC = () => {
         () => teams.filter((team) => (team.type ?? '').includes('지원')), [teams]
     );
 
+    const claimContractorOptions = useMemo(() => {
+        const optionMap = new Map<string, string>();
+
+        result?.sheets.forEach((sheet) => {
+            if (!sheet.contractorId) return;
+            optionMap.set(sheet.contractorId, sheet.contractorName);
+        });
+
+        if (optionMap.size === 0) {
+            companies
+                .filter((company) => !company.isMyCompany)
+                .forEach((company) => {
+                    const optionId = company.id || company.name;
+                    if (!optionId) return;
+                    optionMap.set(optionId, company.name);
+                });
+        }
+
+        return Array.from(optionMap.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+    }, [companies, result?.sheets]);
+
+    const claimTeamOptions = useMemo(() => {
+        const optionMap = new Map<string, string>();
+
+        result?.sheets.forEach((sheet) => {
+            const optionId = sheet.teamId || sheet.teamName;
+            if (!optionId) return;
+            optionMap.set(optionId, sheet.teamName);
+        });
+
+        if (optionMap.size === 0) {
+            teams.forEach((team) => {
+                const optionId = team.id || team.name;
+                if (!optionId) return;
+                optionMap.set(optionId, team.name);
+            });
+        }
+
+        return Array.from(optionMap.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+    }, [result?.sheets, teams]);
+
+    const claimSiteOptions = useMemo(() => {
+        const optionMap = new Map<string, string>();
+
+        result?.sheets.forEach((sheet) => {
+            const optionId = sheet.siteId || sheet.siteName;
+            if (!optionId) return;
+            optionMap.set(optionId, sheet.siteName);
+        });
+
+        if (optionMap.size === 0) {
+            sites.forEach((site) => {
+                const optionId = site.id || site.name;
+                if (!optionId) return;
+                optionMap.set(optionId, site.name);
+            });
+        }
+
+        return Array.from(optionMap.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+    }, [result?.sheets, sites]);
+
+    const claimRules = [
+        {
+            title: '지원 현장',
+            description: '현장구분이 지원이면 출력일보 기준 외부 지원팀/외부 소속 투입을 청구 대상으로 집계합니다.'
+        },
+        {
+            title: '도급 · 직영 현장',
+            description: '도급/직영 현장은 청연 내부 소속을 제외하고 다른 소속 팀이 출력한 인원만 청구 대상으로 집계합니다.'
+        },
+        {
+            title: '검증 항목',
+            description: '주민등록번호, 주소, 단가, 청구 대상 팀/회사 매핑 누락은 보완 목록으로 바로 표시합니다.'
+        }
+    ] as const;
+
     const monthDays = result?.period.daysInMonth ?? 31;
     const dayColumns = useMemo(() => Array.from({ length: monthDays }, (_, index) => index + 1), [monthDays]);
 
@@ -100,6 +182,24 @@ const SupportClaimPage: React.FC = () => {
         (sheetId: string | null) => result?.sheets.find((sheet) => sheet.sheetId === sheetId),
         [result?.sheets]
     );
+
+    useEffect(() => {
+        if (selectedContractorId && !claimContractorOptions.some((option) => option.id === selectedContractorId)) {
+            setSelectedContractorId('');
+        }
+    }, [claimContractorOptions, selectedContractorId]);
+
+    useEffect(() => {
+        if (selectedTeamId && !claimTeamOptions.some((option) => option.id === selectedTeamId)) {
+            setSelectedTeamId('');
+        }
+    }, [claimTeamOptions, selectedTeamId]);
+
+    useEffect(() => {
+        if (selectedSiteId && !claimSiteOptions.some((option) => option.id === selectedSiteId)) {
+            setSelectedSiteId('');
+        }
+    }, [claimSiteOptions, selectedSiteId]);
 
     const handleRequestDownload = (sheetId: string) => {
         setPendingSheetId(sheetId);
@@ -149,6 +249,18 @@ const SupportClaimPage: React.FC = () => {
                 </button>
             </div>
 
+            <section className="grid gap-4 md:grid-cols-3">
+                {claimRules.map((rule) => (
+                    <div key={rule.title} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                            <FontAwesomeIcon icon={faTriangleExclamation} />
+                            {rule.title}
+                        </div>
+                        <p className="text-sm leading-6 text-slate-600">{rule.description}</p>
+                    </div>
+                ))}
+            </section>
+
             <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
                 <div className="grid gap-4 lg:grid-cols-4">
                     <label className="text-sm font-medium text-gray-600">
@@ -171,7 +283,7 @@ const SupportClaimPage: React.FC = () => {
                             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-indigo-500 focus:outline-none"
                         >
                             <option value="">전체 시공사</option>
-                            {contractorOptions.map((company) => (
+                            {claimContractorOptions.map((company) => (
                                 <option key={company.id} value={company.id}>{company.name}</option>
                             ))}
                         </select>
@@ -184,7 +296,7 @@ const SupportClaimPage: React.FC = () => {
                             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-indigo-500 focus:outline-none"
                         >
                             <option value="">전체 지원팀</option>
-                            {supportTeams.map((team) => (
+                            {claimTeamOptions.map((team) => (
                                 <option key={team.id} value={team.id}>{team.name}</option>
                             ))}
                         </select>
@@ -197,7 +309,7 @@ const SupportClaimPage: React.FC = () => {
                             className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-gray-900 focus:border-indigo-500 focus:outline-none"
                         >
                             <option value="">전체 현장</option>
-                            {sites.map((site) => (
+                            {claimSiteOptions.map((site) => (
                                 <option key={site.id} value={site.id}>{site.name}</option>
                             ))}
                         </select>
@@ -274,6 +386,14 @@ const SupportClaimPage: React.FC = () => {
                     <div key={sheet.sheetId} className="rounded-2xl border border-gray-200 bg-white shadow-sm">
                         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-100 p-4">
                             <div>
+                                <div className="mb-2 flex flex-wrap gap-2">
+                                    <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                                        {sheet.claimCategoryLabel}
+                                    </span>
+                                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                        현장구분 {sheet.siteType}
+                                    </span>
+                                </div>
                                 <h2 className="text-lg font-semibold text-gray-900">
                                     {sheet.contractorName} · {sheet.siteName} · {sheet.teamName}
                                 </h2>

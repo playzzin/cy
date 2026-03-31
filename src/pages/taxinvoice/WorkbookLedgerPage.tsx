@@ -950,11 +950,9 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return isDateWithinRange(row.issueDate, startDate, endDate);
         }
 
-        if (row.paymentDates.length > 0) {
-            return row.paymentDates.some((paymentDate) => isDateWithinRange(paymentDate, startDate, endDate));
-        }
-
-        return isDateWithinRange(row.issueDate, startDate, endDate);
+        // Receivable/payable mode is a cutoff-date view: show items that are still
+        // open as of the search end date, regardless of when interim settlements happened.
+        return normalizeDate(row.issueDate) <= endDate;
     });
 
     if (isSettlementMode) {
