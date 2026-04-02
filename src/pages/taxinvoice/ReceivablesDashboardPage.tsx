@@ -34,7 +34,7 @@ const ReceivablesDashboardPage: React.FC = () => {
     });
     const [recentReceivables, setRecentReceivables] = useState<Receivable[]>([]);
     const [loading, setLoading] = useState(true);
-    const [isFixed, setIsFixed] = useState(false);
+    const [isFixed, setIsFixed] = useState(true);
 
     // Lock parent scroll for internal scrolling
     useEffect(() => {

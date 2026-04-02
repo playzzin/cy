@@ -186,6 +186,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud1b5\ud569 \ub370\uc774\ud130 \ucf58\uc194": "/manpower/refine-sites", // Alias
     "\uc815\uc0b0 \uc2dc\uc2a4\ud15c \uc124\uacc4\ub3c4": "/design/settlement-architecture",
     "\uc2a4\ub9c8\ud2b8 \uba54\ubaa8": "/memos", // Smart Memo System
+
     "Smart Memo": "/memos",
     "\ud604\uc7a5 \uac24\ub7ec\ub9ac": "/gallery/projects",
     "\ud504\ub85c\uc81d\ud2b8": "/gallery/projects", // Alias
@@ -194,4 +195,5 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud604\uc7a5 \uad00\ub9ac \uc2dc\uc2a4\ud15c": "/site/management",
     "\ud68c\uc0ac \ub79c\ub529 \ud398\uc774\uc9c0": "/company/landing",
     "\ud68c\uc0ac\uc18c\uac1c \ub79c\ub529": "/company/landing",
+    "\uacac\uc801\ubb38\uc758": "/estimate/request",
 };

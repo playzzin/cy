@@ -34,6 +34,11 @@ export const RefineWrapper: React.FC = () => {
                     name: "smart-select",
                     list: "/manpower/refine-smart-select",
                     meta: { label: "데모: Smart Select" }
+                },
+                {
+                    name: "estimate_requests",
+                    list: "/estimate/request",
+                    meta: { label: "견적 문의" }
                 }
             ]}
             options={{

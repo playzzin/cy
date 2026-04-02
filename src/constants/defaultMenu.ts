@@ -95,6 +95,13 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 text: "할일",
                 icon: "fa-check-square",
                 path: "/todo"
+            },
+            {
+                text: "홈페이지 관리",
+                icon: "fa-globe",
+                sub: [
+                    { text: "견적문의", path: "/estimate/request" }
+                ]
             }
         ],
         positionConfig: [
@@ -148,7 +155,8 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { text: "회사소개", icon: "fa-building" },
             { text: "대표 인사말", icon: "fa-user-tie" },
             { text: "프로젝트", icon: "fa-project-diagram", path: "/gallery/projects" },
-            { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" }
+            { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" },
+            { text: "견적문의", icon: "fa-file-invoice-dollar", path: "/estimate/request" }
         ]
     },
     // === 직책별 메뉴 (Position Mode) ===

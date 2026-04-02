@@ -1,15 +1,15 @@
 ﻿import { db } from '../config/firebase';
-import { onSnapshot, doc } from 'firebase/firestore';
 import { createSystemConfig, listSystemConfigs, listAllSystemConfigs, updateSystemConfig } from './firestoreCrudCompat';
 import { UserRole, PermissionConfig, DEFAULT_PERMISSIONS } from '../types/roles';
 import { Position, positionService } from './positionService';
+import { menuServiceV11 } from './menuServiceV11';
 
 const PERMISSION_DOC_ID = 'permissions';
 
 class RolePermissionService {
     private permissions: PermissionConfig = {};
     private listeners: ((permissions: PermissionConfig) => void)[] = [];
-    private pollHandle: number | null = null;
+    private menuUnsubscribe: (() => void) | null = null;
 
     constructor() {
         void this.initialize();
@@ -18,9 +18,9 @@ class RolePermissionService {
     private async initialize() {
         await this.refreshPermissions();
 
-        if (typeof window !== 'undefined' && this.pollHandle == null) {
-            // Add real-time listener for critical changes (Removed redundant polling)
-            onSnapshot(doc(db, 'settings', 'menus_v11'), () => {
+        if (typeof window !== 'undefined' && this.menuUnsubscribe == null) {
+            // Follow the active menu document instead of the legacy hardcoded menus_v11 doc.
+            this.menuUnsubscribe = menuServiceV11.subscribe(() => {
                 console.log("[rolePermissionService] Menu settings updated, refreshing permissions...");
                 void this.refreshPermissions();
             });

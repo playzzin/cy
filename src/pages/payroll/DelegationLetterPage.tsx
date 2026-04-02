@@ -34,6 +34,7 @@ const DelegationLetterPage: React.FC = () => {
 
     // --- State: Document Settings ---
     const [delegationText, setDelegationText] = useState<string>('노무비 청구 및 수령에 대한 권한 일체');
+    const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
     const [workersPerPage, setWorkersPerPage] = useState<number>(15);
 
@@ -270,8 +271,15 @@ const DelegationLetterPage: React.FC = () => {
         }
     };
 
-    const formatDate = (date: Date) => {
-        return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()}`;
+    const formatDate = (dateText: string) => {
+        const [yearText, monthText, dayText] = dateText.split('-');
+        const year = Number(yearText);
+        const month = Number(monthText);
+        const day = Number(dayText);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+            return '';
+        }
+        return `${year}. ${month}. ${day}`;
     };
 
     const chunkArray = <T,>(items: T[], chunkSize: number) => {
@@ -865,6 +873,19 @@ const DelegationLetterPage: React.FC = () => {
                                 </p>
                             </div>
 
+                            <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    <FontAwesomeIcon icon={faCalendarAlt} className="mr-2 text-purple-400" />
+                                    작성날자
+                                </label>
+                                <input
+                                    type="date"
+                                    value={documentDate}
+                                    onChange={(e) => setDocumentDate(e.target.value)}
+                                    className="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-3 text-white focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
+                                />
+                            </div>
+
                             {/* Show ManDays Toggle */}
                             <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
                                 <div className="flex items-center justify-between">
@@ -1192,7 +1213,7 @@ const DelegationLetterPage: React.FC = () => {
                                 </table>
 
                                 <div className="text-center font-bold text-base mb-6">
-                                    {formatDate(new Date())}
+                                    {formatDate(documentDate)}
                                 </div>
 
                                 <p className="text-center font-bold text-sm mb-2">- 아 래 -</p>
@@ -1326,7 +1347,7 @@ const DelegationLetterPage: React.FC = () => {
                         </table>
 
                         <div className="text-center font-bold text-base mb-6">
-                            {formatDate(new Date())}
+                            {formatDate(documentDate)}
                         </div>
 
                         <p className="text-center font-bold text-sm mb-2">- 아 래 -</p>

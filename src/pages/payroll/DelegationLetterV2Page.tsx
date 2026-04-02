@@ -33,6 +33,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
     // --- State: Document Settings ---
     const [delegationText, setDelegationText] = useState<string>('노무비 청구 및 수령에 대한 권한 일체');
+    const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
     const [workersPerPage, setWorkersPerPage] = useState<number>(15);
 
@@ -268,8 +269,15 @@ const DelegationLetterV2Page: React.FC = () => {
         }
     };
 
-    const formatDate = (date: Date) => {
-        return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()}`;
+    const formatDate = (dateText: string) => {
+        const [yearText, monthText, dayText] = dateText.split('-');
+        const year = Number(yearText);
+        const month = Number(monthText);
+        const day = Number(dayText);
+        if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+            return '';
+        }
+        return `${year}. ${month}. ${day}`;
     };
 
     const chunkArray = <T,>(items: T[], chunkSize: number) => {
@@ -863,6 +871,19 @@ const DelegationLetterV2Page: React.FC = () => {
                                 </p>
                             </div>
 
+                            <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                                <label className="block text-sm font-medium text-slate-300 mb-2">
+                                    <FontAwesomeIcon icon={faCalendarAlt} className="mr-2 text-purple-400" />
+                                    작성날자
+                                </label>
+                                <input
+                                    type="date"
+                                    value={documentDate}
+                                    onChange={(e) => setDocumentDate(e.target.value)}
+                                    className="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-3 text-white focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
+                                />
+                            </div>
+
                             {/* Show ManDays Toggle */}
                             <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
                                 <div className="flex items-center justify-between">
@@ -1248,7 +1269,7 @@ const DelegationLetterV2Page: React.FC = () => {
                         </table>
 
                         <div className="text-center font-bold text-sm tracking-widest mt-8 flex flex-col items-center">
-                            <span>{formatDate(new Date())}</span>
+                            <span>{formatDate(documentDate)}</span>
                             <div className="flex gap-4 mt-8 items-center text-sm font-bold tracking-widest">
                                 <span>대표 위임자 :</span>
                                 <span className="underline underline-offset-4 px-2">{mandataryInfo?.name}</span>
@@ -1405,7 +1426,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                                     {isLastPage && (
                                         <div className="text-center mt-auto pt-[6mm]">
-                                            <span className="font-bold text-[13px] tracking-[0.2em]">{formatDate(new Date())}</span>
+                                            <span className="font-bold text-[13px] tracking-[0.2em]">{formatDate(documentDate)}</span>
                                             <div className="flex justify-center items-end mt-[5mm] text-[13px] font-bold tracking-[0.1em]">
                                                 <span className="text-gray-600 mr-2">대표 위임자 :</span>
                                                 <span className="border-b border-black px-4 pb-0.5 min-w-[80px] inline-block">{mandataryInfo?.name}</span>

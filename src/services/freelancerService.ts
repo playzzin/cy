@@ -2,6 +2,19 @@ import { freelancerFirestoreService } from './freelancerFirestoreService';
 import { Freelancer, FreelancerPayment } from '../types/freelancer';
 import { DailyReportWorkerRow } from './dailyReportService';
 
+const normalizeKoreanToken = (value: unknown): string =>
+    String(value ?? '').trim().replace(/\s+/g, '');
+
+const isCorporateInvoiceSiteRow = (row: Partial<DailyReportWorkerRow>): boolean => {
+    const paymentType = normalizeKoreanToken(row.paymentType);
+    const siteType = normalizeKoreanToken(row.siteType);
+
+    const isInvoicePayment = paymentType.includes('계산서');
+    const isSiteWork = siteType.includes('현장');
+
+    return isInvoicePayment && isSiteWork;
+};
+
 /**
  * FreelancerService - Firestore 통합 버전
  * 모든 요청을 freelancerFirestoreService로 위임합니다.
@@ -260,6 +273,9 @@ export const freelancerService = {
         freelancersRaw.forEach(addWorkerMaster);
 
         (reportRows as DailyReportWorkerRow[]).forEach(row => {
+            // 세무 프리랜서 집계는 "법인 계산서 현장" 금액만 반영한다.
+            if (!isCorporateInvoiceSiteRow(row)) return;
+
             const date = String(row.date || '');
             if (date.length < 7) return;
             const month = Number(date.slice(5, 7));
@@ -485,6 +501,9 @@ export const freelancerService = {
             freelancersMaster.forEach(addWorkerToMap);
 
             rows.forEach((row: DailyReportWorkerRow) => {
+                // 세무 프리랜서 집계는 "법인 계산서 현장" 금액만 반영한다.
+                if (!isCorporateInvoiceSiteRow(row)) return;
+
                 const date = row.date ? String(row.date) : '';
                 if (!date || date.length < 7) return;
                 const month = Number(date.slice(5, 7));

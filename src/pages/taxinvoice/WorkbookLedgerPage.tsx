@@ -278,12 +278,59 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const normalizePartnerMatchKey = (value: unknown) => normalizeText(value)
+    .toLowerCase()
+    .replace(/\(주\)|㈜|주식회사/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[^0-9a-z가-힣]/g, '');
 const escapeHtml = (value: string) => value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+
+interface PrintColumnSpec {
+    className: string;
+    width: string;
+}
+
+const LEDGER_PRINT_COLUMNS: PrintColumnSpec[] = [
+    { className: 'print-ledger-col-date', width: '78px' },
+    { className: 'print-ledger-col-partner', width: '170px' },
+    { className: 'print-ledger-col-description', width: '200px' },
+    { className: 'print-ledger-col-transaction', width: '92px' },
+    { className: 'print-ledger-col-payment', width: '92px' },
+    { className: 'print-ledger-col-balance', width: '92px' },
+    { className: 'print-ledger-col-site', width: '220px' },
+    { className: 'print-ledger-col-note', width: '72px' },
+    { className: 'print-ledger-col-team', width: '56px' }
+];
+
+const SUMMARY_PRINT_COLUMNS: PrintColumnSpec[] = [
+    { className: 'print-summary-col-no', width: '36px' },
+    { className: 'print-summary-col-partner', width: '160px' },
+    { className: 'print-summary-col-site', width: '260px' },
+    { className: 'print-summary-col-issue-date', width: '72px' },
+    { className: 'print-summary-col-amount', width: '78px' },
+    { className: 'print-summary-col-tax', width: '72px' },
+    { className: 'print-summary-col-total', width: '78px' },
+    { className: 'print-summary-col-payment-date', width: '72px' },
+    { className: 'print-summary-col-settled', width: '78px' },
+    { className: 'print-summary-col-outstanding', width: '78px' },
+    { className: 'print-summary-col-note', width: '60px' },
+    { className: 'print-summary-col-team', width: '48px' }
+];
+
+const buildPrintColGroup = (columns: PrintColumnSpec[]) => `
+                            <colgroup>
+                                ${columns.map((column) => `<col class="${column.className}" />`).join('')}
+                            </colgroup>
+                        `;
+
+const buildPrintColumnStyles = (columns: PrintColumnSpec[]) => columns
+    .map((column) => `.${column.className} { width: ${column.width}; }`)
+    .join('\n');
 
 const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
     const text = normalizeText(value);
@@ -584,7 +631,7 @@ const getLegacyMatchKey = (
     entry: Pick<WorkbookLedgerEntry, 'partnerName' | 'siteName' | 'teamName' | 'appliedYear' | 'appliedMonth'>,
     includePeriod: boolean
 ) => [
-    normalizeText(entry.partnerName).toLowerCase(),
+    normalizePartnerMatchKey(entry.partnerName),
     normalizeText(entry.siteName).toLowerCase(),
     normalizeText(entry.teamName).toLowerCase(),
     includePeriod ? String(entry.appliedYear ?? '') : '',
@@ -599,10 +646,10 @@ const findLegacyMatchedCandidateId = (
     paymentEntry: Pick<WorkbookLedgerEntry, 'date' | 'partnerName' | 'siteName' | 'teamName' | 'appliedYear' | 'appliedMonth'>,
     candidates: LegacyMatchCandidate[]
 ) => {
-    const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
+    const partnerKey = normalizePartnerMatchKey(paymentEntry.partnerName);
     if (!partnerKey) return null;
 
-    const partnerCandidates = candidates.filter((candidate) => normalizeText(candidate.partnerName).toLowerCase() === partnerKey);
+    const partnerCandidates = candidates.filter((candidate) => normalizePartnerMatchKey(candidate.partnerName) === partnerKey);
     if (!partnerCandidates.length) return null;
 
     const paymentDate = normalizeDate(paymentEntry.date);
@@ -796,7 +843,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     invoices.forEach((invoice) => {
         invoiceById.set(invoice.id, invoice);
 
-        const partnerKey = normalizeText(invoice.partnerName).toLowerCase();
+        const partnerKey = normalizePartnerMatchKey(invoice.partnerName);
         if (!partnerKey) return;
 
         const bucket = invoicesByPartner.get(partnerKey) ?? [];
@@ -843,7 +890,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const exactAmount = Math.abs(adjustmentEntry.totalAmount ?? 0);
         if (exactAmount <= 0) return null;
 
-        const partnerKey = normalizeText(adjustmentEntry.partnerName).toLowerCase();
+        const partnerKey = normalizePartnerMatchKey(adjustmentEntry.partnerName);
         if (!partnerKey) return null;
 
         const adjustmentDate = normalizeDate(adjustmentEntry.date);
@@ -854,7 +901,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const appliedMonth = adjustmentEntry.appliedMonth ?? null;
 
         const directCandidates = positiveInvoiceEntries.filter((invoiceEntry) => {
-            if (normalizeText(invoiceEntry.partnerName).toLowerCase() !== partnerKey) return false;
+            if (normalizePartnerMatchKey(invoiceEntry.partnerName) !== partnerKey) return false;
             if (Math.abs((invoiceEntry.totalAmount ?? 0) - exactAmount) >= 0.5) return false;
             if (adjustmentDate && normalizeDate(invoiceEntry.date) !== adjustmentDate) return false;
             if (normalizedSiteName && normalizeText(invoiceEntry.siteName).toLowerCase() !== normalizedSiteName) return false;
@@ -875,7 +922,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     };
 
     const findLegacyMatchedInvoice = (paymentEntry: WorkbookLedgerEntry, exactAmount?: number) => {
-        const partnerKey = normalizeText(paymentEntry.partnerName).toLowerCase();
+        const partnerKey = normalizePartnerMatchKey(paymentEntry.partnerName);
         if (!partnerKey) return null;
 
         const partnerInvoices = invoicesByPartner.get(partnerKey) ?? [];
@@ -897,11 +944,22 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const resolveExactAmountCandidate = (candidates: WorkingSummaryRow[]) => {
             if (!(exactAmount && exactAmount > 0)) return null;
 
-            const exactMatches = candidates.filter((invoice) => Math.abs((invoice.totalAmount ?? 0) - exactAmount) < 0.5);
+            const exactMatches = candidates.filter((invoice) => (
+                Math.abs((invoice.totalAmount ?? 0) - exactAmount) < 0.5 ||
+                Math.abs((invoice.remainingAmount ?? 0) - exactAmount) < 0.5
+            ));
             if (exactMatches.length === 1) {
                 return exactMatches[0];
             }
 
+            return null;
+        };
+
+        const resolveUniqueOutstandingCandidate = (candidates: WorkingSummaryRow[]) => {
+            const outstandingCandidates = candidates.filter((invoice) => (invoice.remainingAmount ?? 0) > 0);
+            if (outstandingCandidates.length === 1) {
+                return outstandingCandidates[0];
+            }
             return null;
         };
 
@@ -916,6 +974,11 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return strictCandidates[0];
         }
 
+        const strictOutstandingCandidate = resolveUniqueOutstandingCandidate(strictCandidates);
+        if (strictOutstandingCandidate) {
+            return strictOutstandingCandidate;
+        }
+
         const strictExactAmountMatch = resolveExactAmountCandidate(strictCandidates);
         if (strictExactAmountMatch) {
             return strictExactAmountMatch;
@@ -924,6 +987,11 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const relaxedCandidates = partnerInvoices.filter(matchesBaseConditions);
         if (relaxedCandidates.length === 1) {
             return relaxedCandidates[0];
+        }
+
+        const relaxedOutstandingCandidate = resolveUniqueOutstandingCandidate(relaxedCandidates);
+        if (relaxedOutstandingCandidate) {
+            return relaxedOutstandingCandidate;
         }
 
         const relaxedExactAmountMatch = resolveExactAmountCandidate(relaxedCandidates);
@@ -954,7 +1022,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
             return;
         }
 
-        const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry);
+        const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry, paymentAmount);
         if (legacyMatchedInvoice) {
             applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date);
             return;
@@ -1032,8 +1100,8 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
 const WorkbookLedgerPage: React.FC = () => {
     const hotRef = useRef<any>(null);
     const dbUploadInputRef = useRef<HTMLInputElement | null>(null);
-    const ledgerCaptureRef = useRef<HTMLTableElement | null>(null);
-    const summaryCaptureRef = useRef<HTMLTableElement | null>(null);
+    const ledgerCaptureRef = useRef<HTMLDivElement | null>(null);
+    const summaryCaptureRef = useRef<HTMLDivElement | null>(null);
     const { currentUser } = useAuth();
 
     const today = useMemo(() => new Date(), []);
@@ -2425,6 +2493,9 @@ const WorkbookLedgerPage: React.FC = () => {
             </tr>
         `;
 
+        const ledgerPrintColGroup = buildPrintColGroup(LEDGER_PRINT_COLUMNS);
+        const ledgerPrintColumnStyles = buildPrintColumnStyles(LEDGER_PRINT_COLUMNS);
+
         setPrintingLedger(true);
 
         const iframe = document.createElement('iframe');
@@ -2521,19 +2592,25 @@ const WorkbookLedgerPage: React.FC = () => {
                             table-layout: fixed;
                         }
 
+                        ${ledgerPrintColumnStyles}
+
                         th,
                         td {
                             border: 1px solid #cbd5e1;
-                            padding: 7px 8px;
+                            padding: 5px 7px;
                             font-size: 11px;
+                            line-height: 1.25;
                             vertical-align: top;
-                            word-break: break-word;
+                            white-space: normal;
+                            word-break: keep-all;
+                            overflow-wrap: anywhere;
                         }
 
                         th {
                             background: #2e75b6;
                             color: #ffffff;
                             font-weight: 700;
+                            white-space: nowrap;
                         }
 
                         td {
@@ -2564,6 +2641,7 @@ const WorkbookLedgerPage: React.FC = () => {
                             `).join('')}
                         </div>
                         <table>
+                            ${ledgerPrintColGroup}
                             <thead>
                                 <tr>
                                     <th>날짜</th>
@@ -2668,6 +2746,9 @@ const WorkbookLedgerPage: React.FC = () => {
             </tr>
         `;
 
+        const summaryPrintColGroup = buildPrintColGroup(SUMMARY_PRINT_COLUMNS);
+        const summaryPrintColumnStyles = buildPrintColumnStyles(SUMMARY_PRINT_COLUMNS);
+
         setPrintingSummary(true);
 
         const iframe = document.createElement('iframe');
@@ -2765,19 +2846,25 @@ const WorkbookLedgerPage: React.FC = () => {
                             table-layout: fixed;
                         }
 
+                        ${summaryPrintColumnStyles}
+
                         th,
                         td {
                             border: 1px solid #cbd5e1;
-                            padding: 7px 8px;
+                            padding: 5px 7px;
                             font-size: 11px;
+                            line-height: 1.25;
                             vertical-align: top;
-                            word-break: break-word;
+                            white-space: normal;
+                            word-break: keep-all;
+                            overflow-wrap: anywhere;
                         }
 
                         thead th {
                             background: #ffd966;
                             color: #111827;
                             font-weight: 700;
+                            white-space: nowrap;
                         }
 
                         .summary-total-row td {
@@ -2804,6 +2891,7 @@ const WorkbookLedgerPage: React.FC = () => {
                             `).join('')}
                         </div>
                         <table>
+                            ${summaryPrintColGroup}
                             <thead>
                                 <tr>
                                     <th>No</th>
@@ -3816,7 +3904,7 @@ const WorkbookLedgerPage: React.FC = () => {
 
     const renderLedgerTab = () => (
         <section className="workbook-sheet">
-            <div>
+            <div ref={ledgerCaptureRef}>
                 <table className="sheet-control-table query-sheet-table workbook-summary-filter-table">
                     <tbody>
                         <tr>
@@ -3928,7 +4016,7 @@ const WorkbookLedgerPage: React.FC = () => {
                 </div>
 
                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
-                    <table className="sheet-table workbook-ledger-table" ref={ledgerCaptureRef}>
+                    <table className="sheet-table workbook-ledger-table">
                         <colgroup>
                             <col className="workbook-ledger-col-date" />
                             <col className="workbook-ledger-col-partner" />
@@ -3991,7 +4079,7 @@ const WorkbookLedgerPage: React.FC = () => {
     );
     const renderSummaryTab = () => (
         <section className="workbook-sheet">
-            <div>
+            <div ref={summaryCaptureRef}>
                 <table className="sheet-control-table query-sheet-table">
                     <tbody>
                         <tr>
@@ -4098,7 +4186,7 @@ const WorkbookLedgerPage: React.FC = () => {
                 </table>
 
                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
-                    <table className="sheet-table workbook-summary-table" ref={summaryCaptureRef}>
+                    <table className="sheet-table workbook-summary-table">
                         <colgroup>
                             <col className="workbook-summary-col-no" />
                             <col className="workbook-summary-col-partner" />

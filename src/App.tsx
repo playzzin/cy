@@ -165,6 +165,7 @@ import { AiImageGalleryPage } from './pages/gallery/AiImageGalleryPage';
 import SiteManagementPage from './pages/site/SiteManagementPage';
 import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
+
 import RefineCompanyList from './pages/refine/RefineCompanyList';
 import { MemoPage } from './features/smart-memo/pages/MemoPage'; // New Feature Import
 import BarobillKakaoConnectionPage from './pages/admin/settings/BarobillKakaoConnectionPage';
@@ -173,6 +174,7 @@ import TodoPage from './pages/helper/TodoPage';
 import TaxAffairsPage from './pages/tax/TaxAffairsPage';
 import KakaoMessageCenterPage from './pages/kakao/KakaoMessageCenterPage';
 import FreelancerPage from './pages/manpower/FreelancerPage';
+import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 
 // 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -273,6 +275,7 @@ const App: React.FC = () => {
               <Route path="/manpower/refine-teams" element={<RefineTeamList />} />
               <Route path="/manpower/refine-companies" element={<RefineCompanyList />} />
               <Route path="/manpower/refine-smart-select" element={<RefineSmartSelectDemo />} />
+              <Route path="/estimate/request" element={<EstimateRequestPage />} />
             </Route>
 
             {/* Database Management */}
@@ -352,8 +355,6 @@ const App: React.FC = () => {
               element={<Navigate to="/payroll/advance-payment?tab=register" replace />}
             />
 
-
-
             {/* Homepage Request Management (Internal) */}
             <Route path="/homepage">
               <Route path="requests" element={<HomepageRequestListPage />} />
@@ -361,7 +362,7 @@ const App: React.FC = () => {
               <Route path="requests/:requestId" element={<HomepageRequestDetailPage />} />
             </Route>
 
-
+            {/* Homepage Request Management (Internal) */}
 
             {/* User Manual */}
             <Route path="/manual" element={<ManualPage />} />

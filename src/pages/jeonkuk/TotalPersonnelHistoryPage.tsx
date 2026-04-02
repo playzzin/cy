@@ -340,12 +340,25 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             });
 
             const eligibleWorkerIds = new Set<string>();
-            workerOptions.forEach((w) => {
-                const id = String(w.id ?? '').trim();
-                const legacyId = String((w as any).legacyId ?? '').trim();
-                if (id) eligibleWorkerIds.add(id);
-                if (legacyId) eligibleWorkerIds.add(legacyId);
-            });
+            allWorkers
+                .filter((worker) => {
+                    const teamId = String(worker.teamId ?? '').trim();
+                    if (!teamId) return false;
+                    if (!allowedTeamIds.has(teamId)) return false;
+                    if (selectedTeamId && teamId !== selectedTeamId) return false;
+
+                    const search = workerSearchTerm.trim();
+                    if (!search) return true;
+                    const nameMatch = String(worker.name ?? '').includes(search);
+                    const idMatch = String(worker.idNumber ?? '').includes(search);
+                    return nameMatch || idMatch;
+                })
+                .forEach((worker) => {
+                    const id = String(worker.id ?? '').trim();
+                    const legacyId = String((worker as any).legacyId ?? '').trim();
+                    if (id) eligibleWorkerIds.add(id);
+                    if (legacyId) eligibleWorkerIds.add(legacyId);
+                });
 
             if (selectedWorkerId) {
                 eligibleWorkerIds.clear();
