@@ -13,13 +13,9 @@ import {
 import { format, parseISO, isValid } from 'date-fns';
 
 import { siteService, Site } from '../../services/siteService';
-import { teamService, Team } from '../../services/teamService';
-import { companyService, Company } from '../../services/companyService';
 import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
 import materialService from '../../services/materialService';
-import { userService } from '../../services/userService';
-import { useAuth } from '../../contexts/AuthContext';
 import { InboundTransaction, OutboundTransaction } from '../../types/materials';
 
 // ----------------------------------------------------------------------
@@ -64,45 +60,19 @@ interface MaterialTransactionSummary {
     unit: string;
 }
 
+const getContractorDisplayName = (site: Site): string => {
+    const candidates = [site.companyName, site.constructorCompanyName, site.partnerName]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+    return candidates[0] || '청연';
+};
+
 const getReportSiteKey = (siteId?: string | null, siteName?: string | null): string => {
     const id = String(siteId || '').trim();
     if (id) return `id:${id}`;
     const name = String(siteName || '').trim();
     if (name) return `name:${name}`;
     return '';
-};
-
-const includesCheongyeonKeyword = (value: string | null | undefined) => (
-    String(value || '').trim().toLowerCase().includes('청연')
-);
-
-const findResponsibleTeam = (site: Site, teams: Team[]) => {
-    const normalize = (value: string | null | undefined) => String(value || '').trim().toLowerCase();
-    const responsibleTeamId = String(site.responsibleTeamId || '').trim();
-    const responsibleTeamName = normalize(site.responsibleTeamName);
-
-    return teams.find((team) => {
-        const teamId = String(team.id || '').trim();
-        const teamLegacyId = String(team.legacyId || '').trim();
-        const teamName = normalize(team.name);
-        return (responsibleTeamId && (teamId === responsibleTeamId || teamLegacyId === responsibleTeamId))
-            || (responsibleTeamName && teamName === responsibleTeamName);
-    });
-};
-
-const resolveTeamCompanyName = (team: Team | undefined, companies: Company[]) => {
-    if (!team) return '';
-    const rawCompanyId = String(team.companyId || '').trim();
-    const linkedCompany = rawCompanyId
-        ? companies.find((company) => company.id === rawCompanyId || company.legacyId === rawCompanyId)
-        : null;
-
-    return String(linkedCompany?.name || team.companyName || '').trim();
-};
-
-const hasCheongyeonResponsibleTeam = (site: Site, teams: Team[], companies: Company[]) => {
-    const responsibleTeam = findResponsibleTeam(site, teams);
-    return includesCheongyeonKeyword(resolveTeamCompanyName(responsibleTeam, companies));
 };
 
 // ----------------------------------------------------------------------
@@ -569,6 +539,8 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
                                             <dd className="text-sm font-medium text-indigo-300">{totalOutputManDay.toFixed(1)}</dd>
                                             <dt className="text-sm text-slate-500">담당 팀</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.responsibleTeamName || '-'}</dd>
+                                            <dt className="text-sm text-slate-500">시공사</dt>
+                                            <dd className="text-sm font-medium text-slate-300">{getContractorDisplayName(site)}</dd>
                                             <dt className="text-sm text-slate-500">발주사</dt>
                                             <dd className="text-sm font-medium text-slate-300">{site.clientCompanyName || '-'}</dd>
                                         </dl>
@@ -601,71 +573,25 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 // ----------------------------------------------------------------------
 
 export const SiteManagementPage: React.FC = () => {
-    const { currentUser } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const [sites, setSites] = useState<Site[]>([]);
-    const [teams, setTeams] = useState<Team[]>([]);
-    const [companies, setCompanies] = useState<Company[]>([]);
     const [filteredSites, setFilteredSites] = useState<Site[]>([]);
     const [keyword, setKeyword] = useState('');
     const [loading, setLoading] = useState(true);
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
     const [siteReportSummaryMap, setSiteReportSummaryMap] = useState<Record<string, SiteReportSummary>>({});
 
-    // Permission States
-    const [userTeams, setUserTeams] = useState<any[]>([]);
-    const [isRestricted, setIsRestricted] = useState(false);
-
     // Initial Load & Query Param Handling
     useEffect(() => {
         const init = async () => {
             setLoading(true);
             try {
-                // 1. Fetch User Data & Team Affiliation
-                if (currentUser) {
-                    const userData = await userService.getUser(currentUser.uid);
-                    if (userData && userData.role !== 'admin' && userData.role !== '사장') {
-                        const { teamService } = await import('../../services/teamService');
-                        const { manpowerService } = await import('../../services/manpowerService');
-                        
-                        const linkedWorkerIds = userData.linkedWorkerIds || [];
-                        const userWorkers = await Promise.all(
-                            linkedWorkerIds.map(id => manpowerService.getWorker(id))
-                        );
-                        
-                        const teamIds = Array.from(new Set(userWorkers.map(w => w?.teamId).filter(Boolean)));
-                        const fetchedTeams = await Promise.all(
-                            teamIds.map(id => teamService.getTeam(id as string))
-                        );
-                        
-                        const validTeams = fetchedTeams.filter(Boolean);
-                        setUserTeams(validTeams);
-                        
-                        // Check if any team belongs to '청연'
-                        const allCompanies = await companyService.getCompanies();
-                        const cheongyeonAffiliation = validTeams.some(t => 
-                            includesCheongyeonKeyword(resolveTeamCompanyName(t as Team, allCompanies)) ||
-                            includesCheongyeonKeyword(t?.name) ||
-                            includesCheongyeonKeyword(userData.department)
-                        );
-                        
-                        if (cheongyeonAffiliation) {
-                            setIsRestricted(true);
-                        }
-                    }
-                }
-
-                // 2. Fetch Sites & Reports
-                const [data, allReports, allTeams, allCompanies] = await Promise.all([
+                const [data, allReports] = await Promise.all([
                     siteService.getSites(),
                     dailyReportService.getReports(),
-                    teamService.getTeams(),
-                    companyService.getCompanies(),
                 ]);
                 setSites(data);
-                setTeams(allTeams);
-                setCompanies(allCompanies);
                 setFilteredSites(data);
 
                 const summaryMap: Record<string, SiteReportSummary> = {};
@@ -691,9 +617,7 @@ export const SiteManagementPage: React.FC = () => {
                 // Auto-open modal if siteId is present in URL
                 const targetSiteId = searchParams.get('siteId');
                 if (targetSiteId) {
-                    const targetSite = data.find(
-                        (site) => site.id === targetSiteId && hasCheongyeonResponsibleTeam(site, allTeams, allCompanies)
-                    );
+                    const targetSite = data.find(s => s.id === targetSiteId);
                     if (targetSite) {
                         setSelectedSite(targetSite);
                     }
@@ -705,7 +629,7 @@ export const SiteManagementPage: React.FC = () => {
             }
         };
         init();
-    }, [searchParams, currentUser]);
+    }, [searchParams]);
 
     const getSiteSummary = useCallback((site: Site): SiteReportSummary | null => {
         const keyById = getReportSiteKey(site.id, null);
@@ -717,21 +641,12 @@ export const SiteManagementPage: React.FC = () => {
 
     // Filter Logic
     useEffect(() => {
-        let baseSites = sites.filter((site) => hasCheongyeonResponsibleTeam(site, teams, companies));
-
-        // Apply Restriction Filter
-        if (isRestricted) {
-            const allowedTeamIds = userTeams.map(t => t.id);
-            baseSites = baseSites.filter(s => allowedTeamIds.includes(s.responsibleTeamId));
-        }
-
-        const lower = keyword.toLowerCase().trim();
-        if (!lower) {
-            setFilteredSites(baseSites);
+        if (!keyword.trim()) {
+            setFilteredSites(sites);
             return;
         }
-
-        setFilteredSites(baseSites.filter(s =>
+        const lower = keyword.toLowerCase();
+        setFilteredSites(sites.filter(s =>
             s.name.toLowerCase().includes(lower) ||
             s.code.toLowerCase().includes(lower) ||
             (s.address && s.address.toLowerCase().includes(lower)) ||
@@ -740,7 +655,7 @@ export const SiteManagementPage: React.FC = () => {
             (s.constructorCompanyName && s.constructorCompanyName.toLowerCase().includes(lower)) ||
             (s.partnerName && s.partnerName.toLowerCase().includes(lower))
         ));
-    }, [companies, keyword, sites, isRestricted, teams, userTeams]);
+    }, [keyword, sites]);
 
     return (
         <div className="min-h-screen bg-slate-900 p-6 md:p-10 flex flex-col">
@@ -752,9 +667,7 @@ export const SiteManagementPage: React.FC = () => {
                         통합 현장 관리 시스템
                     </h1>
                     <p className="text-slate-400 mt-2">
-                        {isRestricted 
-                            ? "본인 담당 팀의 현장 현황을 조회할 수 있습니다."
-                            : "모든 현장의 자재, 인력, 공정 현황을 한눈에 관리하세요."}
+                        모든 현장의 자재, 인력, 공정 현황을 한눈에 관리하세요.
                     </p>
                 </div>
 
@@ -779,86 +692,80 @@ export const SiteManagementPage: React.FC = () => {
                     현장 목록을 불러오는 중...
                 </div>
             ) : (
-                <>
-                    {filteredSites.length === 0 ? (
-                        <div className="flex-1 flex flex-col items-center justify-center text-slate-500 py-20">
-                            <div className="text-4xl mb-4">🔍</div>
-                            <p>검색 결과가 없거나 접근 가능한 현장이 없습니다.</p>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {filteredSites.map(site => (
-                                (() => {
-                                    const siteSummary = getSiteSummary(site);
-                                    const periodText = siteSummary ? `${siteSummary.firstDate} ~ ${siteSummary.lastDate}` : '- ~ -';
-                                    const totalManDayText = siteSummary ? siteSummary.totalManDay.toFixed(1) : '0.0';
-                                    return (
-                                <motion.div
-                                    key={site.id}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    whileHover={{ y: -5, transition: { duration: 0.2 } }}
-                                    onClick={() => setSelectedSite(site)}
-                                    className="bg-slate-800 rounded-2xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
-                                >
-                                    <div className="aspect-square w-full bg-slate-700 relative overflow-hidden">
-                                        {site.imageUrl ? (
-                                            <img src={site.imageUrl} alt={site.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
-                                                <FontAwesomeIcon icon={faBuilding} size="3x" />
-                                            </div>
-                                        )}
-                                        <div className="absolute top-3 right-3">
-                                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold shadow-sm backdrop-blur-sm ${site.status === 'active'
-                                                ? 'bg-green-500/80 text-white'
-                                                : 'bg-slate-600/80 text-slate-200'
-                                                }`}>
-                                                {site.status === 'active' ? '진행중' : '완료/예정'}
-                                            </span>
-                                        </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {filteredSites.map(site => (
+                        (() => {
+                            const siteSummary = getSiteSummary(site);
+                            const periodText = siteSummary ? `${siteSummary.firstDate} ~ ${siteSummary.lastDate}` : '- ~ -';
+                            const totalManDayText = siteSummary ? siteSummary.totalManDay.toFixed(1) : '0.0';
+                            return (
+                        <motion.div
+                            key={site.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            whileHover={{ y: -5, transition: { duration: 0.2 } }}
+                            onClick={() => setSelectedSite(site)}
+                            className="bg-slate-800 rounded-2xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
+                        >
+                            <div className="aspect-square w-full bg-slate-700 relative overflow-hidden">
+                                {site.imageUrl ? (
+                                    <img src={site.imageUrl} alt={site.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
+                                        <FontAwesomeIcon icon={faBuilding} size="3x" />
                                     </div>
+                                )}
+                                <div className="absolute top-3 right-3">
+                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold shadow-sm backdrop-blur-sm ${site.status === 'active'
+                                        ? 'bg-green-500/80 text-white'
+                                        : 'bg-slate-600/80 text-slate-200'
+                                        }`}>
+                                        {site.status === 'active' ? '진행중' : '완료/예정'}
+                                    </span>
+                                </div>
+                            </div>
 
-                                    <div className="p-5 flex-1 flex flex-col">
-                                        <div className="flex items-center justify-between gap-2 mb-1">
-                                            <h3 className="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
-                                                {site.name}
-                                            </h3>
-                                            <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold whitespace-nowrap">
-                                                총공수 {totalManDayText}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs text-slate-500 mb-4 font-mono bg-slate-900 inline-block px-1.5 py-0.5 rounded self-start border border-slate-700">
-                                            {site.code}
-                                        </p>
+                            <div className="p-5 flex-1 flex flex-col">
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                    <h3 className="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                                        {site.name}
+                                    </h3>
+                                    <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold whitespace-nowrap">
+                                        총공수 {totalManDayText}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-slate-500 mb-4 font-mono bg-slate-900 inline-block px-1.5 py-0.5 rounded self-start border border-slate-700">
+                                    {site.code}
+                                </p>
 
-                                        <div className="space-y-2 mt-auto">
-                                            <div className="flex items-center gap-2 text-sm text-slate-400">
-                                                <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
-                                                <span>담당팀: {site.responsibleTeamName || '미지정'}</span>
-                                            </div>
-                                            <div className="flex items-start gap-2 text-sm text-slate-400">
-                                                <div className="w-4 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>
-                                                <span className="line-clamp-2">{site.address || '주소 없음'}</span>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-sm text-slate-400">
-                                                <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faCalendarAlt} /></div>
-                                                <span>{periodText}</span>
-                                            </div>
-                                        </div>
+                                <div className="space-y-2 mt-auto">
+                                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                                        <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
+                                        <span>
+                                            담당팀: {site.responsibleTeamName || '미지정'}
+                                            {' '}| 시공사: {getContractorDisplayName(site)}
+                                        </span>
                                     </div>
-
-                                    <div className="bg-slate-800 px-5 py-3 border-t border-slate-700 flex justify-between items-center text-xs text-slate-500">
-                                        <span>클릭하여 상세 정보 보기</span>
-                                        <FontAwesomeIcon icon={faChartPie} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
+                                    <div className="flex items-start gap-2 text-sm text-slate-400">
+                                        <div className="w-4 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>
+                                        <span className="line-clamp-2">{site.address || '주소 없음'}</span>
                                     </div>
-                                </motion.div>
-                                    );
-                                })()
-                            ))}
-                        </div>
-                    )}
-                </>
+                                    <div className="flex items-center gap-2 text-sm text-slate-400">
+                                        <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faCalendarAlt} /></div>
+                                        <span>{periodText}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-slate-800 px-5 py-3 border-t border-slate-700 flex justify-between items-center text-xs text-slate-500">
+                                <span>클릭하여 상세 정보 보기</span>
+                                <FontAwesomeIcon icon={faChartPie} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
+                            </div>
+                        </motion.div>
+                            );
+                        })()
+                    ))}
+                </div>
             )}
 
             {/* Modal */}

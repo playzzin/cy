@@ -15,10 +15,13 @@ import { useMasterData } from '../../contexts/MasterDataContext';
 import CompanyForm from '../../components/company/CompanyForm';
 
 const COMPANY_COLUMNS = [
-    { key: 'name', label: '시공사/협력사' },
+    { key: 'name', label: '회사명' },
     { key: 'ceoName', label: '대표자' },
     { key: 'phone', label: '연락처' },
     { key: 'businessNumber', label: '사업자등록번호' },
+    { key: 'bankName', label: '은행' },
+    { key: 'accountNumber', label: '계좌번호' },
+    { key: 'accountHolder', label: '예금주' },
     { key: 'siteCount', label: '현장배정' },
     { key: 'status', label: '상태' },
     { key: 'manage', label: '관리' }
@@ -216,6 +219,10 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
         if (key === 'siteCount') {
             const count = sites.filter(s => s.companyId === company.id).length;
             return <span className={`font-bold ${count > 0 ? 'text-indigo-600' : 'text-slate-400'}`}>{count}개 현장</span>;
+        }
+        if (key === 'bankName' || key === 'accountNumber' || key === 'accountHolder') {
+            const value = company[key as keyof Company];
+            return value ? String(value) : '-';
         }
         if (key === 'manage') {
             return (
@@ -448,7 +455,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                                         <div className="text-slate-500">연락처</div><div>{company.phone || '-'}</div>
                                                                         <div className="text-slate-500">이메일</div><div>{company.email || '-'}</div>
                                                                         <div className="text-slate-500">주소</div><div className="col-span-1">{company.address || '-'}</div>
-                                                                        <div className="text-slate-500">계좌정보</div><div className="col-span-1">{company.bankName} {company.accountNumber} {company.accountHolder ? `(${company.accountHolder})` : ''}</div>
+                                                                        <div className="text-slate-500">계좌정보</div><div className="col-span-1">{[company.bankName, company.accountNumber, company.accountHolder ? `(${company.accountHolder})` : ''].filter(Boolean).join(' ') || '-'}</div>
                                                                         <div className="text-slate-500">색상</div><div className="col-span-1 flex items-center gap-2">{company.color ? <span className="w-4 h-4 rounded-full" style={{ backgroundColor: company.color }}></span> : '-'} {company.color || ''}</div>
                                                                     </div>
                                                                 </div>
@@ -516,7 +523,7 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                             defaultType={(() => {
                                 if (defaultType) return defaultType as Company['type'];
                                 const map: Record<string, string> = { 'company': '시공사', 'partner': '협력사', 'client': '건설사' };
-                                return (map[activeTab] || '협력사') as Company['type'];
+                                return (map[activeTab] || '미지정') as Company['type'];
                             })()}
                         />
                     </div>

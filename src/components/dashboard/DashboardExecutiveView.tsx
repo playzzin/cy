@@ -243,7 +243,7 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                 <div
                     onClick={() => {
                         const todayStr = new Date().toISOString().split('T')[0];
-                        navigate(`/reports/daily?tab=list&date=${todayStr}`);
+                        navigate(`/reports/daily?tab=list-v2&date=${todayStr}`);
                     }}
                     className="bg-white rounded-xl shadow-sm p-6 border border-slate-200 hover:shadow-md transition-all cursor-pointer group hover:border-orange-200"
                 >

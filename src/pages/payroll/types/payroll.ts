@@ -33,8 +33,6 @@ export interface WorkerWorkEntry {
     isLaborSite?: boolean;
     assignmentType?: 'corporate' | 'labor';
     paymentMethod?: string;
-    siteType?: string;
-    salaryModel?: string;
     manDay: number;
     unitPrice: number;
     amount: number;
@@ -190,8 +188,6 @@ export interface MonthlyAdvanceLedgerWorkEntry {
     clientCompanyId?: string;
     isLaborSite?: boolean;
     paymentMethod?: string;
-    siteType?: string;
-    salaryModel?: string;
     manDay: number;
     unitPrice: number;
     amount?: number;

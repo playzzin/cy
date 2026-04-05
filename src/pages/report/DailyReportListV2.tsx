@@ -1,11 +1,32 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+﻿import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCalendarAlt, faSearch, faSortAmountDown, faSortAmountUp, faPenToSquare, faTrash, faSave, faThumbtack } from '@fortawesome/free-solid-svg-icons';
+import Swal from 'sweetalert2';
+import {
+    faCalendarAlt,
+    faSearch,
+    faSortAmountDown,
+    faSortAmountUp,
+    faPenToSquare,
+    faTrash,
+    faSave,
+    faThumbtack,
+    faFilter,
+    faDatabase,
+    faDownload,
+    faUpload,
+    faFileExcel,
+    faSpinner,
+    faTrashCan,
+} from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService, DailyReportWorker, DailyReportWorkerRow } from '../../services/dailyReportService';
+import { dailyReportTransferService } from '../../services/dailyReportTransferService';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { confirm, toast } from '../../utils/swal';
+import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
+import '../taxinvoice/WorkbookLedgerPage.css';
+import './DailyReportListV2.css';
 
 interface DailyReportListV2Props {
     initialDate?: string;
@@ -29,6 +50,7 @@ const compareKo = (a: string, b: string): number => {
 const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지원팀', '용역팀', '도급', '팀기성'];
 
 type RowDraft = {
+    siteId: string;
     workerId?: string; // New Worker ID if changed
     workerName?: string;
     workerTeamName?: string;
@@ -38,6 +60,35 @@ type RowDraft = {
     workContent: string;
     siteType: string;
     paymentType: string;
+};
+
+type ColumnFilterKey =
+    | 'date'
+    | 'siteName'
+    | 'siteType'
+    | 'paymentType'
+    | 'teamName'
+    | 'workerName'
+    | 'workerTeamName'
+    | 'salaryModel'
+    | 'manDay'
+    | 'unitPrice'
+    | 'amount';
+
+type ColumnFilterState = Partial<Record<ColumnFilterKey, string[]>>;
+
+const EMPTY_COLUMN_FILTER_VALUE = '__EMPTY__';
+
+const formatManDay = (value: number): string => {
+    return (Number.isFinite(value) ? value : 0).toFixed(1);
+};
+
+const toColumnFilterValue = (value: string): string => {
+    return value === '' ? EMPTY_COLUMN_FILTER_VALUE : value;
+};
+
+const fromColumnFilterValue = (value: string): string => {
+    return value === EMPTY_COLUMN_FILTER_VALUE ? '(빈값)' : value;
 };
 
 const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) => {
@@ -51,6 +102,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
     const [startDate, setStartDate] = useState(initialDate || todayStr);
     const [endDate, setEndDate] = useState(initialDate || todayStr);
+    const [startDateInput, setStartDateInput] = useState(initialDate || todayStr);
+    const [endDateInput, setEndDateInput] = useState(initialDate || todayStr);
     const [selectedTeamId, setSelectedTeamId] = useState(''); // 해당팀 (Report Team)
     const [selectedWorkerTeamId, setSelectedWorkerTeamId] = useState(''); // 소속팀 (Worker Team)
     const [selectedSiteId, setSelectedSiteId] = useState('');
@@ -77,6 +130,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [bulkSiteType, setBulkSiteType] = useState('');
     const [bulkPaymentType, setBulkPaymentType] = useState('');
     const [bulkWorkerTeamName, setBulkWorkerTeamName] = useState('');
+    const [columnFilters, setColumnFilters] = useState<ColumnFilterState>({});
+    const [openColumnFilter, setOpenColumnFilter] = useState<ColumnFilterKey | null>(null);
+    const [columnFilterSearch, setColumnFilterSearch] = useState('');
+    const [pendingColumnFilterValues, setPendingColumnFilterValues] = useState<string[] | null>(null);
+    const filterMenuRef = React.useRef<HTMLDivElement | null>(null);
+    const dbUploadInputRef = React.useRef<HTMLInputElement | null>(null);
+    const excelUploadInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [isUploadingDb, setIsUploadingDb] = useState(false);
+    const [isDownloadingDb, setIsDownloadingDb] = useState(false);
+    const [isResettingDb, setIsResettingDb] = useState(false);
+    const [isUploadingExcel, setIsUploadingExcel] = useState(false);
+    const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
 
     useEffect(() => {
         (async () => {
@@ -95,19 +160,21 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         })();
     }, []);
 
+    useEffect(() => {
+        setStartDateInput(startDate);
+    }, [startDate]);
+
+    useEffect(() => {
+        setEndDateInput(endDate);
+    }, [endDate]);
+
     const fetchRows = useCallback(async (): Promise<void> => {
         setIsLoading(true);
         try {
-            // Client-side filtering strategy: Fetch ALL for range
             const data = await dailyReportService.getReportWorkerRowsByRange({
                 startDate,
                 endDate
             });
-            console.log('[DailyReportListV2] Fetched rows count:', data.length);
-            if (data.length > 0) {
-                console.log('[DailyReportListV2] Sample row:', data[0]);
-                console.log('[DailyReportListV2] siteType check:', data.map(r => r.siteType).filter(Boolean).slice(0, 3));
-            }
             setRows(data);
         } catch (error) {
             console.error('[DailyReportListV2] Failed to fetch rows', error);
@@ -119,6 +186,67 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     useEffect(() => {
         fetchRows();
     }, [fetchRows]);
+
+    useEffect(() => {
+        if (!openColumnFilter) return;
+
+        const handlePointerDown = (event: MouseEvent) => {
+            if (!filterMenuRef.current?.contains(event.target as Node)) {
+                setOpenColumnFilter(null);
+            }
+        };
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setOpenColumnFilter(null);
+            }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('keydown', handleEscape);
+
+        return () => {
+            document.removeEventListener('mousedown', handlePointerDown);
+            document.removeEventListener('keydown', handleEscape);
+        };
+    }, [openColumnFilter]);
+
+    const commitDateInput = useCallback((field: 'start' | 'end') => {
+        const currentValue = field === 'start' ? startDate : endDate;
+        const draftValue = field === 'start' ? startDateInput : endDateInput;
+        const normalizedValue = normalizeTypedDateInput(draftValue) ?? currentValue;
+
+        if (field === 'start') {
+            setStartDateInput(normalizedValue);
+            if (normalizedValue !== startDate) {
+                setStartDate(normalizedValue);
+                return true;
+            }
+            return false;
+        }
+
+        setEndDateInput(normalizedValue);
+        if (normalizedValue !== endDate) {
+            setEndDate(normalizedValue);
+            return true;
+        }
+        return false;
+    }, [endDate, endDateInput, startDate, startDateInput]);
+
+    const applyDateRange = useCallback((nextStartDate: string, nextEndDate: string) => {
+        setStartDateInput(nextStartDate);
+        setEndDateInput(nextEndDate);
+        setStartDate(nextStartDate);
+        setEndDate(nextEndDate);
+    }, []);
+
+    const handleSearch = useCallback(() => {
+        const startChanged = commitDateInput('start');
+        const endChanged = commitDateInput('end');
+        if (!startChanged && !endChanged) {
+            fetchRows();
+        }
+    }, [commitDateInput, fetchRows]);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         return `${String(r.reportId)}::${String(r.workerId)}`;
@@ -168,6 +296,35 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return siteCanonicalIdMap.get(raw) ?? raw;
     }, [siteCanonicalIdMap]);
 
+    const getColumnFilterValue = useCallback((row: DailyReportWorkerRow, key: ColumnFilterKey): string => {
+        switch (key) {
+            case 'date':
+                return row.date ?? '';
+            case 'siteName':
+                return row.siteName ?? '';
+            case 'siteType':
+                return row.siteType ?? '';
+            case 'paymentType':
+                return row.paymentType ?? '';
+            case 'teamName':
+                return row.teamName ?? '';
+            case 'workerName':
+                return row.workerName ?? '';
+            case 'workerTeamName':
+                return row.workerTeamName ?? '';
+            case 'salaryModel':
+                return String(row.salaryModel ?? row.payType ?? '');
+            case 'manDay':
+                return formatManDay(row.manDay);
+            case 'unitPrice':
+                return formatNumber(Math.round(Number.isFinite(row.unitPrice) ? row.unitPrice : 0));
+            case 'amount':
+                return formatNumber(Math.round(Number.isFinite(row.amount) ? row.amount : 0));
+            default:
+                return '';
+        }
+    }, []);
+
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
         const wantSite = criteria.siteId ? normalizeSiteId(criteria.siteId) : '';
@@ -211,8 +368,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [getFiltered, teams, selectedSiteId, selectedTeamId]);
 
-    // 4. Final Display Rows (Filtered by ALL selection + Search)
-    const filteredRows = useMemo(() => {
+    // 4. Base Display Rows (Filtered by ALL selection + Search)
+    const baseFilteredRows = useMemo(() => {
         let result = getFiltered({
             siteId: selectedSiteId,
             teamId: selectedTeamId,
@@ -230,6 +387,24 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         return result;
     }, [getFiltered, selectedSiteId, selectedTeamId, selectedWorkerTeamId, workerSearch]);
+
+    const filteredRows = useMemo(() => {
+        const activeKeys = Object.keys(columnFilters) as ColumnFilterKey[];
+        if (activeKeys.length === 0) {
+            return baseFilteredRows;
+        }
+
+        return baseFilteredRows.filter((row) => {
+            return activeKeys.every((key) => {
+                const selectedValues = columnFilters[key] ?? [];
+                return selectedValues.includes(toColumnFilterValue(getColumnFilterValue(row, key)));
+            });
+        });
+    }, [baseFilteredRows, columnFilters, getColumnFilterValue]);
+
+    const activeColumnFilterCount = useMemo(() => {
+        return Object.keys(columnFilters).length;
+    }, [columnFilters]);
 
     const sortedRows = useMemo(() => {
         const copied = [...filteredRows];
@@ -274,6 +449,337 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
         return copied;
     }, [filteredRows, dateSortOrder, sortMode, nameSortOrder, siteSortOrder]);
+
+    const workerNameOptions = useMemo(() => {
+        return allWorkers.map((worker, index) => ({
+            id: String(worker.id ?? worker.legacyId ?? `${worker.name ?? 'worker'}-${index}`),
+            name: worker.name ?? '',
+            teamName: worker.teamName ?? '',
+        }));
+    }, [allWorkers]);
+
+    const siteOptions = useMemo(() => {
+        return sites
+            .filter((site) => Boolean(site.id))
+            .slice()
+            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [sites]);
+
+    const openColumnFilterOptions = useMemo(() => {
+        if (!openColumnFilter) return [];
+
+        const candidateRows = baseFilteredRows.filter((row) => {
+            return (Object.keys(columnFilters) as ColumnFilterKey[]).every((key) => {
+                if (key === openColumnFilter) return true;
+                const selectedValues = columnFilters[key] ?? [];
+                return selectedValues.includes(toColumnFilterValue(getColumnFilterValue(row, key)));
+            });
+        });
+
+        const values = Array.from(new Set(
+            candidateRows.map((row) => toColumnFilterValue(getColumnFilterValue(row, openColumnFilter)))
+        ));
+
+        values.sort((a, b) => compareKo(fromColumnFilterValue(a), fromColumnFilterValue(b)));
+        return values;
+    }, [baseFilteredRows, columnFilters, getColumnFilterValue, openColumnFilter]);
+
+    const visibleOpenColumnFilterOptions = useMemo(() => {
+        const keyword = columnFilterSearch.trim().toLowerCase();
+        if (!keyword) return openColumnFilterOptions;
+
+        return openColumnFilterOptions.filter((value) => {
+            return fromColumnFilterValue(value).toLowerCase().includes(keyword);
+        });
+    }, [columnFilterSearch, openColumnFilterOptions]);
+
+    useEffect(() => {
+        if (!openColumnFilter) {
+            setPendingColumnFilterValues(null);
+            return;
+        }
+
+        const appliedValues = Object.prototype.hasOwnProperty.call(columnFilters, openColumnFilter)
+            ? (columnFilters[openColumnFilter] ?? [])
+            : openColumnFilterOptions;
+
+        setPendingColumnFilterValues(appliedValues);
+    }, [columnFilters, openColumnFilter, openColumnFilterOptions]);
+
+    const hasColumnFilter = useCallback((key: ColumnFilterKey) => {
+        return Object.prototype.hasOwnProperty.call(columnFilters, key);
+    }, [columnFilters]);
+
+    const handleToggleColumnFilterMenu = useCallback((key: ColumnFilterKey) => {
+        setColumnFilterSearch('');
+        setOpenColumnFilter((prev) => prev === key ? null : key);
+    }, []);
+
+    const handleResetColumnFilter = useCallback((key: ColumnFilterKey) => {
+        if (openColumnFilter === key) {
+            setPendingColumnFilterValues(openColumnFilterOptions);
+            return;
+        }
+
+        setColumnFilters((prev) => {
+            if (!Object.prototype.hasOwnProperty.call(prev, key)) return prev;
+            const { [key]: _, ...rest } = prev;
+            return rest;
+        });
+    }, [openColumnFilter, openColumnFilterOptions]);
+
+    const handleResetAllColumnFilters = useCallback(() => {
+        setColumnFilters({});
+        setOpenColumnFilter(null);
+        setColumnFilterSearch('');
+    }, []);
+
+    const isColumnFilterValueChecked = useCallback((_key: ColumnFilterKey, value: string, options: string[]) => {
+        const values = pendingColumnFilterValues ?? options;
+        return values.includes(value);
+    }, [pendingColumnFilterValues]);
+
+    const handleToggleColumnFilterValue = useCallback((_key: ColumnFilterKey, value: string, options: string[]) => {
+        setPendingColumnFilterValues((prev) => {
+            const baseValues = prev ?? options;
+            const hasValue = baseValues.includes(value);
+            const nextValues = hasValue
+                ? baseValues.filter((item) => item !== value)
+                : [...baseValues, value];
+            return options.filter((item) => nextValues.includes(item));
+        });
+    }, []);
+
+    const handleSelectAllColumnFilterValues = useCallback((_key: ColumnFilterKey) => {
+        setPendingColumnFilterValues(openColumnFilterOptions);
+    }, [openColumnFilterOptions]);
+
+    const handleApplyColumnFilter = useCallback((key: ColumnFilterKey, options: string[]) => {
+        const sourceValues = pendingColumnFilterValues ?? options;
+        const orderedValues = options.filter((item) => sourceValues.includes(item));
+
+        setColumnFilters((prev) => {
+            if (orderedValues.length === options.length) {
+                const { [key]: _, ...rest } = prev;
+                return rest;
+            }
+
+            return {
+                ...prev,
+                [key]: orderedValues
+            };
+        });
+
+        setOpenColumnFilter(null);
+        setColumnFilterSearch('');
+    }, [pendingColumnFilterValues]);
+
+    const handleCloseColumnFilterMenu = useCallback(() => {
+        setOpenColumnFilter(null);
+        setColumnFilterSearch('');
+    }, []);
+
+    const handleClearColumnFilterValues = useCallback((key: ColumnFilterKey) => {
+        if (openColumnFilter === key) {
+            setPendingColumnFilterValues([]);
+            return;
+        }
+
+        setColumnFilters((prev) => ({
+            ...prev,
+            [key]: []
+        }));
+    }, [openColumnFilter]);
+
+    const renderFilterHeader = useCallback((
+        key: ColumnFilterKey,
+        label: string,
+        className: string,
+        menuAlign: 'left' | 'right' = 'left'
+    ) => {
+        const isOpen = openColumnFilter === key;
+        const isActive = hasColumnFilter(key);
+        const stagedValues = isOpen
+            ? (pendingColumnFilterValues ?? openColumnFilterOptions)
+            : (isActive ? (columnFilters[key] ?? []) : openColumnFilterOptions);
+        const checkedCount = isOpen
+            ? stagedValues.length
+            : (isActive ? (columnFilters[key] ?? []).length : openColumnFilterOptions.length);
+        const allCount = openColumnFilter === key ? openColumnFilterOptions.length : undefined;
+        const previewValues = stagedValues.slice(0, 4);
+        const isAllSelected = typeof allCount === 'number' && checkedCount === allCount;
+        const isSelectionEmpty = checkedCount === 0;
+
+        return (
+            <th className={`${className} relative`}>
+                <div className={`flex items-center gap-1 ${menuAlign === 'right' ? 'justify-end' : 'justify-between'}`}>
+                    <span>{label}</span>
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            handleToggleColumnFilterMenu(key);
+                        }}
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-colors ${
+                            isActive || isOpen
+                                ? 'border-white/50 bg-white/15 text-white'
+                                : 'border-transparent text-white/80 hover:border-white/35 hover:bg-white/10 hover:text-white'
+                        }`}
+                        title={`${label} 필터`}
+                    >
+                        <FontAwesomeIcon icon={faFilter} className="text-[11px]" />
+                    </button>
+                </div>
+                {isOpen && (
+                    <div
+                        ref={filterMenuRef}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`absolute top-full mt-2 w-[240px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl ${
+                            menuAlign === 'right' ? 'right-0' : 'left-0'
+                        } z-50`}
+                    >
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold text-slate-700">{label} 필터</div>
+                            <button
+                                type="button"
+                                onClick={() => handleResetColumnFilter(key)}
+                                className="text-[11px] text-slate-500 hover:text-slate-700"
+                            >
+                                초기화
+                            </button>
+                        </div>
+                        <input
+                            type="text"
+                            value={columnFilterSearch}
+                            onChange={(event) => setColumnFilterSearch(event.target.value)}
+                            placeholder="값 검색"
+                            className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-xs"
+                        />
+                        <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500">
+                            <span>
+                                {isAllSelected
+                                    ? '전체 선택 상태'
+                                    : (isSelectionEmpty ? '선택 없음' : `${checkedCount}개 선택`)}
+                            </span>
+                            {typeof allCount === 'number' && (
+                                <span>전체 {allCount}개</span>
+                            )}
+                        </div>
+                        <div className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+                            <div className="mb-1 text-[11px] font-medium text-slate-500">현재 선택</div>
+                            {isAllSelected ? (
+                                <div className="text-xs font-semibold text-sky-700">전체 선택</div>
+                            ) : (isSelectionEmpty ? (
+                                <div className="text-xs font-semibold text-rose-600">선택된 값이 없습니다.</div>
+                            ) : (
+                                <div className="flex flex-wrap gap-1">
+                                    {previewValues.map((value) => (
+                                        <span
+                                            key={`${key}-preview-${value}`}
+                                            className="inline-flex max-w-full items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700"
+                                        >
+                                            <span className="truncate">{fromColumnFilterValue(value)}</span>
+                                        </span>
+                                    ))}
+                                    {checkedCount > previewValues.length && (
+                                        <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                                            +{checkedCount - previewValues.length}
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mb-2 flex gap-2">
+                            <button
+                                type="button"
+                                onClick={() => handleSelectAllColumnFilterValues(key)}
+                                className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+                            >
+                                전체선택
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleClearColumnFilterValues(key)}
+                                className="rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+                            >
+                                전체해제
+                            </button>
+                        </div>
+                        <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+                            {visibleOpenColumnFilterOptions.length === 0 ? (
+                                <div className="px-3 py-6 text-center text-xs text-slate-400">선택 가능한 값이 없습니다.</div>
+                            ) : (
+                                visibleOpenColumnFilterOptions.map((value) => {
+                                    const isChecked = isColumnFilterValueChecked(key, value, openColumnFilterOptions);
+
+                                    return (
+                                        <label
+                                            key={`${key}-${value}`}
+                                            className={`flex cursor-pointer items-center gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0 ${
+                                                isChecked
+                                                    ? 'bg-sky-50 text-slate-900'
+                                                    : 'text-slate-600 hover:bg-slate-50'
+                                            }`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={isChecked}
+                                                onChange={() => handleToggleColumnFilterValue(key, value, openColumnFilterOptions)}
+                                                className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-sky-600 focus:ring-2 focus:ring-sky-500"
+                                                style={{ accentColor: '#0284c7' }}
+                                            />
+                                            <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                                <span className={`truncate ${isChecked ? 'font-semibold text-slate-900' : ''}`}>
+                                                    {fromColumnFilterValue(value)}
+                                                </span>
+                                                {isChecked && (
+                                                    <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+                                                        선택
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </label>
+                                    );
+                                })
+                            )}
+                        </div>
+                        <div className="mt-3 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={handleCloseColumnFilterMenu}
+                                className="rounded border border-slate-200 px-3 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50"
+                            >
+                                닫기
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleApplyColumnFilter(key, openColumnFilterOptions)}
+                                className="rounded border border-indigo-600 bg-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                            >
+                                적용
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </th>
+        );
+    }, [
+        columnFilters,
+        columnFilterSearch,
+        handleApplyColumnFilter,
+        handleClearColumnFilterValues,
+        handleCloseColumnFilterMenu,
+        handleResetColumnFilter,
+        handleSelectAllColumnFilterValues,
+        handleToggleColumnFilterMenu,
+        handleToggleColumnFilterValue,
+        hasColumnFilter,
+        isColumnFilterValueChecked,
+        openColumnFilter,
+        openColumnFilterOptions,
+        pendingColumnFilterValues,
+        visibleOpenColumnFilterOptions
+    ]);
 
     const visibleRowKeys = useMemo(() => {
         return sortedRows.map(getRowKey);
@@ -333,6 +839,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         const baseManDay = Number.isFinite(r.manDay) ? String(r.manDay) : '0';
         const baseUnitPrice = Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0';
         return {
+            siteId: normalizeSiteId(r.siteId),
             workerName: r.workerName ?? '',
             workerTeamName: r.workerTeamName ?? '',
             salaryModel: String(r.salaryModel ?? r.payType ?? ''),
@@ -342,7 +849,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             siteType: String(r.siteType ?? ''),
             paymentType: String(r.paymentType ?? '')
         };
-    }, []);
+    }, [normalizeSiteId]);
 
     const isRowDirty = useCallback((original: DailyReportWorkerRow, draft?: RowDraft) => {
         if (!draft) return false;
@@ -353,6 +860,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         // 2. Check Name Change (Typo fix)
         if (draft.workerName !== undefined && draft.workerName !== original.workerName) return true;
 
+        if (draft.siteId !== normalizeSiteId(original.siteId)) return true;
         if (draft.salaryModel !== String(original.salaryModel ?? original.payType ?? '')) return true;
         if (Number(draft.manDay) !== (Number.isFinite(original.manDay) ? original.manDay : 0)) return true;
         if (Number(draft.unitPrice) !== (Number.isFinite(original.unitPrice) ? original.unitPrice : 0)) return true;
@@ -364,12 +872,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         if (draft.workerTeamName !== undefined && draft.workerTeamName !== (original.workerTeamName ?? '')) return true;
 
         return false;
-    }, []);
+    }, [normalizeSiteId]);
 
     const setRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>) => {
         const key = getRowKey(r);
         setRowDrafts(prev => {
             const current = prev[key] || {
+                siteId: normalizeSiteId(r.siteId),
                 workerName: r.workerName ?? '',
                 workerTeamName: r.workerTeamName ?? '',
                 salaryModel: String(r.salaryModel ?? r.payType ?? ''),
@@ -384,7 +893,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 [key]: { ...current, ...changes }
             };
         });
-    }, [getRowKey]);
+    }, [getRowKey, normalizeSiteId]);
 
     const clearRowDraft = useCallback((rowKey: string) => {
         setRowDrafts((prev) => {
@@ -393,6 +902,30 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             return rest;
         });
     }, []);
+
+    const buildReportLevelUpdates = useCallback((original: DailyReportWorkerRow, draft: RowDraft) => {
+        const reportLevelUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
+
+        if (draft.siteId !== normalizeSiteId(original.siteId)) {
+            const matchedSite = siteOptions.find((site) => String(site.id ?? '') === draft.siteId)
+                ?? siteOptions.find((site) => String(site.legacyId ?? '') === draft.siteId);
+
+            if (matchedSite?.id) {
+                reportLevelUpdates.siteId = String(matchedSite.id);
+                reportLevelUpdates.siteName = matchedSite.name ?? '';
+            }
+        }
+
+        if (draft.siteType !== (original.siteType ?? '')) {
+            reportLevelUpdates.siteType = draft.siteType;
+        }
+
+        if (draft.paymentType !== (original.paymentType ?? '')) {
+            reportLevelUpdates.paymentType = draft.paymentType;
+        }
+
+        return reportLevelUpdates;
+    }, [normalizeSiteId, siteOptions]);
 
     // Worker Change Logic
     // Worker Change Logic
@@ -447,13 +980,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             const resolvedTeamName = team?.name ?? matched.teamName ?? '';
 
-            console.log('[DEBUG] Team lookup:', {
-                teamId: matched.teamId,
-                teamNameFromWorker: matched.teamName,
-                teamFromArray: team ? { id: team.id, legacyId: team.legacyId, name: team.name } : null,
-                resolvedTeamName
-            });
-
             // Worker Found -> Auto-fill (단가, 급여방식, 작업팀 모두 채움)
             const draftUpdate = {
                 workerName: newName,
@@ -463,7 +989,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 unitPrice: String(matched.unitPrice ?? 0),
                 salaryModel: matched.payType || matched.salaryModel || '일급'
             };
-            console.log('[DEBUG] Setting draft with:', draftUpdate);
             setRowDraft(r, draftUpdate);
         } else {
             // Worker Not Found -> Just update name only (타이핑 중에는 다른 필드 초기화하지 않음)
@@ -510,11 +1035,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             updates.manDay = Number(draft.manDay);
             updates.unitPrice = Number(draft.unitPrice);
             updates.workContent = draft.workContent;
+            updates.workerTeamName = draft.workerTeamName ?? '';
             updates.siteType = draft.siteType;
             updates.paymentType = draft.paymentType;
             updates.amount = updates.manDay * updates.unitPrice;
+            const reportLevelUpdates = buildReportLevelUpdates(r, draft);
 
             await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+            if (Object.keys(reportLevelUpdates).length > 0) {
+                await dailyReportService.updateReport(r.reportId, reportLevelUpdates as any);
+            }
             toast.success('저장되었습니다.');
             clearRowDraft(key);
 
@@ -524,15 +1054,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 const isSameWorker = row.workerId === r.workerId;
 
                 if (isSameWorker) {
-                    return { ...row, ...updates };
+                    return { ...row, ...updates, ...reportLevelUpdates };
                 }
 
-                // Propagate Report-Level Fields (siteType, paymentType)
                 if (isSameReport) {
-                    const reportLevelUpdates: any = {};
-                    if (updates.siteType !== undefined) reportLevelUpdates.siteType = updates.siteType;
-                    if (updates.paymentType !== undefined) reportLevelUpdates.paymentType = updates.paymentType;
-                    
                     if (Object.keys(reportLevelUpdates).length > 0) {
                         return { ...row, ...reportLevelUpdates };
                     }
@@ -550,7 +1075,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return next;
             });
         }
-    }, [allWorkers, clearRowDraft, fetchRows, getRowKey, rowDrafts, confirm, toast]);
+    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, getRowKey, rowDrafts, confirm, toast]);
 
     const handleBulkApply = async () => {
         const selected = Array.from(selectedRowKeys)
@@ -692,50 +1217,46 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return original && isRowDirty(original, rowDrafts[key]);
             });
 
-            const tasks = dirtyKeys.map(key => {
-                const r = rowByKey.get(key)!;
-                const draft = rowDrafts[key];
-
-                const updates: any = {};
-                if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
-                if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
-                // Resolve teamId from worker master when worker is changed
-                if (draft.workerId) {
-                    const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
-                    if (matchedWorker?.teamId) {
-                        updates.teamId = matchedWorker.teamId;
-                    }
-                }
-
-                updates.salaryModel = draft.salaryModel;
-                updates.payType = draft.salaryModel;
-                updates.manDay = Number(draft.manDay);
-                updates.unitPrice = Number(draft.unitPrice);
-                updates.workContent = draft.workContent;
-                updates.siteType = draft.siteType;
-                updates.paymentType = draft.paymentType;
-                updates.amount = updates.manDay * updates.unitPrice;
-
-                return dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
-            });
-
-            // Execute in batches to avoid overwhelming the server
-            // Use Promise.allSettled to ensure some successes even if others fail
             let successCount = 0;
             let failCount = 0;
 
-            const batchSize = 5;
-            for (let i = 0; i < tasks.length; i += batchSize) {
-                const batch = tasks.slice(i, i + batchSize);
-                const results = await Promise.allSettled(batch);
+            for (const key of dirtyKeys) {
+                const r = rowByKey.get(key)!;
+                const draft = rowDrafts[key];
 
-                results.forEach(res => {
-                    if (res.status === 'fulfilled') successCount++;
-                    else {
-                        failCount++;
-                        console.error('[SaveAll] Row save failed:', res.reason);
+                try {
+                    const updates: any = {};
+                    if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
+                    if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
+                    if (draft.workerId) {
+                        const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
+                        if (matchedWorker?.teamId) {
+                            updates.teamId = matchedWorker.teamId;
+                        }
                     }
-                });
+
+                    updates.salaryModel = draft.salaryModel;
+                    updates.payType = draft.salaryModel;
+                    updates.manDay = Number(draft.manDay);
+                    updates.unitPrice = Number(draft.unitPrice);
+                    updates.workContent = draft.workContent;
+                    updates.workerTeamName = draft.workerTeamName ?? '';
+                    updates.siteType = draft.siteType;
+                    updates.paymentType = draft.paymentType;
+                    updates.amount = updates.manDay * updates.unitPrice;
+
+                    const reportLevelUpdates = buildReportLevelUpdates(r, draft);
+
+                    await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+                    if (Object.keys(reportLevelUpdates).length > 0) {
+                        await dailyReportService.updateReport(r.reportId, reportLevelUpdates as any);
+                    }
+
+                    successCount++;
+                } catch (error) {
+                    failCount++;
+                    console.error('[SaveAll] Row save failed:', error);
+                }
             }
 
             if (failCount === 0) {
@@ -754,64 +1275,233 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     };
 
+    const isTransferBusy = isLoading || isUploadingDb || isDownloadingDb || isResettingDb || isUploadingExcel || isDownloadingExcel;
 
+    const handleOpenDbUpload = useCallback(() => {
+        dbUploadInputRef.current?.click();
+    }, []);
 
-    const handleSetPrevMonth = () => {
-        const d = new Date();
-        d.setMonth(d.getMonth() - 1);
-        d.setDate(1);
-        const start = formatYmd(d);
+    const handleOpenExcelUpload = useCallback(() => {
+        excelUploadInputRef.current?.click();
+    }, []);
 
-        const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-        const end = formatYmd(endD);
+    const handleDownloadDb = useCallback(async () => {
+        setIsDownloadingDb(true);
+        try {
+            await dailyReportTransferService.exportDbToExcel();
+            toast.success('일보 DB 다운로드 완료');
+        } catch (error) {
+            console.error('[DailyReportListV2] DB download failed', error);
+            toast.error('일보 DB 다운로드에 실패했습니다.');
+        } finally {
+            setIsDownloadingDb(false);
+        }
+    }, []);
 
-        setStartDate(start);
-        setEndDate(end);
-    };
+    const handleDbUploadFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
 
-    const handleSetThisMonth = () => {
-        const d = new Date();
-        d.setDate(1);
-        const start = formatYmd(d);
+        const confirmed = await Swal.fire({
+            icon: 'question',
+            title: '일보 DB 업로드',
+            html: '<div class="text-sm text-slate-600">DB다운로드 파일을 기준으로 같은 ID는 덮어쓰고, 없는 ID는 새로 복원합니다.</div>',
+            showCancelButton: true,
+            confirmButtonText: '업로드',
+            cancelButtonText: '취소',
+            confirmButtonColor: '#2563eb',
+        });
+        if (!confirmed.isConfirmed) return;
 
-        const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-        const end = formatYmd(endD);
+        setIsUploadingDb(true);
+        try {
+            const result = await dailyReportTransferService.importDbFromExcel(file);
+            await fetchRows();
+            toast.success(`DB 업로드 완료 (신규 ${result.created} / 갱신 ${result.updated} / 건너뜀 ${result.skipped})`);
+        } catch (error) {
+            console.error('[DailyReportListV2] DB upload failed', error);
+            toast.error(error instanceof Error ? error.message : '일보 DB 업로드에 실패했습니다.');
+        } finally {
+            setIsUploadingDb(false);
+        }
+    }, [fetchRows]);
 
-        setStartDate(start);
-        setEndDate(end);
-    };
+    const handleResetDb = useCallback(async () => {
+        const confirmed = await Swal.fire({
+            icon: 'warning',
+            title: '일보 DB 초기화',
+            html: '<div class="text-sm text-slate-600">`daily_reports`와 `daily_report_workers`를 모두 비웁니다.<br />계속하려면 <strong>일보DB초기화</strong>를 입력하세요.</div>',
+            input: 'text',
+            inputPlaceholder: '일보DB초기화',
+            showCancelButton: true,
+            confirmButtonText: '초기화',
+            cancelButtonText: '취소',
+            confirmButtonColor: '#dc2626',
+            preConfirm: (value) => {
+                if (String(value ?? '').trim() !== '일보DB초기화') {
+                    Swal.showValidationMessage('확인 문구가 일치하지 않습니다.');
+                }
+                return value;
+            },
+        });
+        if (!confirmed.isConfirmed) return;
+
+        setIsResettingDb(true);
+        try {
+            const result = await dailyReportTransferService.resetDb();
+            setSelectedRowKeys(new Set());
+            setRowDrafts({});
+            await fetchRows();
+            toast.success(`DB 초기화 완료 (일보 ${result.reports} / 상세 ${result.legacyRows})`);
+        } catch (error) {
+            console.error('[DailyReportListV2] DB reset failed', error);
+            toast.error('일보 DB 초기화에 실패했습니다.');
+        } finally {
+            setIsResettingDb(false);
+        }
+    }, [fetchRows]);
+
+    const handleDownloadExcel = useCallback(async () => {
+        if (sortedRows.length === 0) {
+            toast.info('다운로드할 행이 없습니다.');
+            return;
+        }
+
+        setIsDownloadingExcel(true);
+        try {
+            await dailyReportTransferService.exportRowsToExcel(sortedRows, `${startDate}_${endDate}`);
+            toast.success('엑셀 다운로드 완료');
+        } catch (error) {
+            console.error('[DailyReportListV2] Excel download failed', error);
+            toast.error('엑셀 다운로드에 실패했습니다.');
+        } finally {
+            setIsDownloadingExcel(false);
+        }
+    }, [endDate, sortedRows, startDate]);
+
+    const handleExcelUploadFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        const confirmed = await Swal.fire({
+            icon: 'question',
+            title: '일보 엑셀 업로드',
+            html: '<div class="text-sm text-slate-600">같은 일보/작업자가 있으면 해당 행만 갱신하고, 없으면 새로 추가합니다.</div>',
+            showCancelButton: true,
+            confirmButtonText: '업로드',
+            cancelButtonText: '취소',
+            confirmButtonColor: '#2563eb',
+        });
+        if (!confirmed.isConfirmed) return;
+
+        setIsUploadingExcel(true);
+        try {
+            const result = await dailyReportTransferService.importRowsFromExcel(file, {
+                teams,
+                sites,
+                workers: allWorkers,
+            });
+            await fetchRows();
+
+            const summary = `엑셀 업로드 완료 (신규 ${result.created} / 갱신 ${result.updated} / 건너뜀 ${result.skipped})`;
+            if (result.warnings.length > 0) {
+                await Swal.fire({
+                    icon: 'warning',
+                    title: '엑셀 업로드 완료',
+                    html: `<div class="text-sm text-left"><div class="mb-2 font-semibold">${summary}</div><div>${result.warnings.slice(0, 8).join('<br />')}</div>${result.warnings.length > 8 ? `<div class="mt-2 text-slate-500">외 ${result.warnings.length - 8}건</div>` : ''}</div>`,
+                    confirmButtonText: '확인',
+                });
+            } else {
+                toast.success(summary);
+            }
+        } catch (error) {
+            console.error('[DailyReportListV2] Excel upload failed', error);
+            toast.error(error instanceof Error ? error.message : '엑셀 업로드에 실패했습니다.');
+        } finally {
+            setIsUploadingExcel(false);
+        }
+    }, [allWorkers, fetchRows, sites, teams]);
 
     return (
         <div className="flex h-full flex-col flex-1 min-h-0 gap-4 p-1">
+            <input
+                ref={dbUploadInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(event) => { void handleDbUploadFile(event); }}
+            />
+            <input
+                ref={excelUploadInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(event) => { void handleExcelUploadFile(event); }}
+            />
             <div className="flex-shrink-0 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-end">
                 <div className="flex items-center gap-2 flex-wrap w-full">
                     <div className="flex items-center gap-2">
                         <div className="relative">
                             <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
+                                type="text"
+                                inputMode="numeric"
+                                value={startDateInput}
+                                onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onBlur={() => { commitDateInput('start'); }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        commitDateInput('start');
+                                    }
+                                }}
+                                placeholder="YYYY-MM-DD"
                                 className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
                             />
                         </div>
                         <span className="text-slate-400">~</span>
                         <input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
+                            type="text"
+                            inputMode="numeric"
+                            value={endDateInput}
+                            onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
+                            onBlur={() => { commitDateInput('end'); }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    commitDateInput('end');
+                                }
+                            }}
+                            placeholder="YYYY-MM-DD"
                             className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
-                        />
+                            />
 
                         <div className="flex gap-1">
                             <button
-                                onClick={handleSetPrevMonth}
+                                onClick={() => {
+                                    const d = new Date();
+                                    d.setMonth(d.getMonth() - 1);
+                                    d.setDate(1);
+                                    const start = formatYmd(d);
+
+                                    const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+                                    const end = formatYmd(endD);
+                                    applyDateRange(start, end);
+                                }}
                                 className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
                             >
                                 전달
                             </button>
                             <button
-                                onClick={handleSetThisMonth}
+                                onClick={() => {
+                                    const d = new Date();
+                                    d.setDate(1);
+                                    const start = formatYmd(d);
+
+                                    const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+                                    const end = formatYmd(endD);
+                                    applyDateRange(start, end);
+                                }}
                                 className="px-2 py-1.5 text-xs bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100 transition-colors border border-blue-100"
                             >
                                 이달
@@ -821,8 +1511,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                     const y = new Date();
                                     y.setDate(y.getDate() - 1);
                                     const yStr = formatYmd(y);
-                                    setStartDate(yStr);
-                                    setEndDate(yStr);
+                                    applyDateRange(yStr, yStr);
                                 }}
                                 className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
                             >
@@ -830,8 +1519,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             </button>
                             <button
                                 onClick={() => {
-                                    setStartDate(todayStr);
-                                    setEndDate(todayStr);
+                                    applyDateRange(todayStr, todayStr);
                                 }}
                                 className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
                             >
@@ -982,11 +1670,71 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     )}
 
                     <button
-                        onClick={fetchRows}
+                        onClick={handleSearch}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-auto"
                     >
                         <FontAwesomeIcon icon={faSearch} />
                         조회
+                    </button>
+
+                    <button
+                        onClick={() => { void handleDownloadDb(); }}
+                        disabled={isTransferBusy}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={isDownloadingDb ? faSpinner : faDatabase} spin={isDownloadingDb} />
+                        DB다운로드
+                    </button>
+
+                    <button
+                        onClick={handleOpenDbUpload}
+                        disabled={isTransferBusy}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={isUploadingDb ? faSpinner : faUpload} spin={isUploadingDb} />
+                        DB업로드
+                    </button>
+
+                    <button
+                        onClick={() => { void handleResetDb(); }}
+                        disabled={isTransferBusy}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={isResettingDb ? faSpinner : faTrashCan} spin={isResettingDb} />
+                        DB초기화
+                    </button>
+
+                    <button
+                        onClick={() => { void handleDownloadExcel(); }}
+                        disabled={isTransferBusy}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={isDownloadingExcel ? faSpinner : faDownload} spin={isDownloadingExcel} />
+                        엑셀다운로드
+                    </button>
+
+                    <button
+                        onClick={handleOpenExcelUpload}
+                        disabled={isTransferBusy}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={isUploadingExcel ? faSpinner : faFileExcel} spin={isUploadingExcel} />
+                        엑셀업로드
                     </button>
 
                     {dirtyRowCount > 0 && (
@@ -1125,13 +1873,30 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 </div>
             )}
 
-            <div
-                className="flex-1 min-h-0 overflow-auto bg-white rounded-xl shadow-sm border border-slate-200"
-                style={{ maxHeight: 'calc(100vh - 260px)' }}
-            >
+            {activeColumnFilterCount > 0 && (
+                <div className="mb-3 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-2 text-xs text-indigo-700">
+                    <span>열 필터 {activeColumnFilterCount}개 적용 중</span>
+                    <button
+                        type="button"
+                        onClick={handleResetAllColumnFilters}
+                        className="font-semibold text-indigo-700 hover:text-indigo-900"
+                    >
+                        열 필터 초기화
+                    </button>
+                </div>
+            )}
+
+            <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <datalist id="daily-report-v2-salary-model-options">
                     {SALARY_MODEL_OPTIONS.map((option) => (
                         <option key={option} value={option} />
+                    ))}
+                </datalist>
+                <datalist id="worker-list-v2">
+                    {workerNameOptions.map((worker) => (
+                        <option key={worker.id} value={worker.name}>
+                            {worker.teamName ? `(${worker.teamName})` : ''}
+                        </option>
                     ))}
                 </datalist>
                 {isLoading ? (
@@ -1140,16 +1905,43 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <span className="text-sm font-medium">불러오는 중...</span>
                     </div>
                 ) : sortedRows.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                        <FontAwesomeIcon icon={faSearch} className="text-4xl mb-3 opacity-20" />
-                        <span className="text-sm">조건에 맞는 작업자 내역이 없습니다.</span>
+                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+                        <table className="sheet-table daily-report-workbook-table">
+                            <tbody>
+                                <tr>
+                                    <td
+                                        colSpan={isEditMode ? 14 : 12}
+                                        className="sheet-empty-state"
+                                    >
+                                        조건에 맞는 작업자 내역이 없습니다.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 ) : (
-                    <table className="min-w-[1050px] w-full text-sm text-left text-slate-700">
-                        <thead className="bg-slate-50 sticky top-0 z-30 border-b border-slate-200">
+                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+                    <table className="sheet-table daily-report-workbook-table min-w-[1310px] text-left text-slate-700">
+                        <colgroup>
+                            {isEditMode && <col className="daily-report-col-select" />}
+                            <col className="daily-report-col-date" />
+                            <col className="daily-report-col-site" />
+                            <col className="daily-report-col-site-type" />
+                            <col className="daily-report-col-payment-type" />
+                            <col className="daily-report-col-team" />
+                            <col className="daily-report-col-name" />
+                            <col className="daily-report-col-worker-team" />
+                            <col className="daily-report-col-salary" />
+                            <col className="daily-report-col-man-day" />
+                            <col className="daily-report-col-unit-price" />
+                            <col className="daily-report-col-amount" />
+                            <col className="daily-report-col-note" />
+                            {isEditMode && <col className="daily-report-col-action" />}
+                        </colgroup>
+                        <thead className="border-b border-[#255e94]">
                             <tr>
                                 {isEditMode && (
-                                    <th className={`px-4 py-3 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-40 bg-slate-50 border-r border-slate-200' : ''}`}>
+                                    <th className={`px-2.5 py-2 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-40 bg-[#2e75b6] border-r border-[#255e94]' : ''}`}>
                                         <input
                                             type="checkbox"
                                             className="w-4 h-4 text-brand-600 bg-gray-100 border-gray-300 rounded focus:ring-brand-500"
@@ -1159,27 +1951,39 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                         />
                                     </th>
                                 )}
-                                <th className={`px-4 py-3 whitespace-nowrap w-[100px] ${isFixed ? `sticky z-40 bg-slate-50 border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>날짜</th>
-                                <th className={`px-4 py-3 whitespace-nowrap w-[180px] ${isFixed ? `sticky z-40 bg-slate-50 border-r border-slate-200 ${isEditMode ? 'left-[148px]' : 'left-[100px]'}` : ''}`}>현장</th>
-                                <th className="px-4 py-3 whitespace-nowrap">현장구분</th>
-                                <th className="px-4 py-3 whitespace-nowrap">결제구분</th>
-                                <th className="px-4 py-3 whitespace-nowrap">담당팀</th>
-                                <th className={`px-4 py-3 whitespace-nowrap w-[120px] ${isFixed ? `sticky z-40 bg-slate-50 border-r-2 border-slate-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[328px]' : 'left-[280px]'}` : ''}`}>이름</th>
-                                <th className="px-4 py-3 whitespace-nowrap">작업팀</th>
-                                <th className="px-4 py-3 whitespace-nowrap">급여방식</th>
-                                <th className="px-4 py-3 whitespace-nowrap text-right">공수</th>
-                                <th className="px-4 py-3 whitespace-nowrap text-right">단가</th>
-                                <th className="px-4 py-3 whitespace-nowrap text-right">금액</th>
-                                <th className="px-4 py-3 whitespace-nowrap">비고</th>
+                                {renderFilterHeader(
+                                    'date',
+                                    '날짜',
+                                    `px-2.5 py-2 whitespace-nowrap w-[86px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r border-[#255e94] ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`
+                                )}
+                                {renderFilterHeader(
+                                    'siteName',
+                                    '현장',
+                                    `px-2.5 py-2 whitespace-nowrap w-[168px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r border-[#255e94] ${isEditMode ? 'left-[134px]' : 'left-[86px]'}` : ''}`
+                                )}
+                                {renderFilterHeader('siteType', '현장구분', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('paymentType', '결제구분', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('teamName', '담당팀', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader(
+                                    'workerName',
+                                    '이름',
+                                    `px-2.5 py-2 whitespace-nowrap w-[112px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r-2 border-[#255e94] shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`
+                                )}
+                                {renderFilterHeader('workerTeamName', '작업팀', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('salaryModel', '급여방식', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('manDay', '공수', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
+                                {renderFilterHeader('unitPrice', '단가', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
+                                {renderFilterHeader('amount', '금액', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
+                                <th className="px-2.5 py-2 whitespace-nowrap">비고</th>
                                 {isEditMode && (
-                                    <th className="px-4 py-3 whitespace-nowrap text-center sticky right-0 z-40 bg-slate-50 border-l border-slate-200">
+                                    <th className="px-2.5 py-2 whitespace-nowrap text-center sticky right-0 z-40 bg-[#2e75b6] border-l border-[#255e94]">
                                         관리
                                     </th>
                                 )}
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedRows.map((r, idx) => (
+                            {sortedRows.map((r) => (
                                 (() => {
                                     const rowKey = getRowKey(r);
                                     const draft = rowDrafts[rowKey];
@@ -1194,15 +1998,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                                     const effectiveSalaryModel = draft ? draft.salaryModel : String(r.salaryModel ?? r.payType ?? '');
                                     const effectiveWorkContent = draft ? draft.workContent : String(r.workContent ?? '');
+                                    const effectiveSiteId = draft ? draft.siteId : normalizeSiteId(r.siteId);
                                     const stickyActionCellBg = selectedRowKeys.has(rowKey) ? 'bg-indigo-50' : 'bg-white';
 
                                     return (
                                         <tr
-                                            key={`${r.reportId}_${r.workerId}_${idx}`}
+                                            key={rowKey}
                                             className={`border-b border-slate-100 hover:bg-slate-50 ${selectedRowKeys.has(rowKey) ? 'bg-indigo-50/50' : ''} ${dirty ? 'ring-1 ring-indigo-200' : ''} transition-colors`}
                                         >
                                             {isEditMode && (
-                                                <td className={`px-4 py-3 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-20 bg-white border-r border-slate-100' : ''}`}>
+                                                <td className={`px-2.5 py-2 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-20 bg-white border-r border-slate-100' : ''}`}>
                                                     <input
                                                         type="checkbox"
                                                         className="w-4 h-4 text-brand-600 bg-gray-100 border-gray-300 rounded focus:ring-brand-500"
@@ -1212,15 +2017,33 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     />
                                                 </td>
                                             )}
-                                            <td className={`px-4 py-3 whitespace-nowrap text-slate-500 w-[100px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-100 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>{r.date ?? ''}</td>
-                                            <td className={`px-4 py-3 whitespace-nowrap w-[180px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-100 ${isEditMode ? 'left-[148px]' : 'left-[100px]'}` : ''}`}>{r.siteName ?? ''}</td>
-                                            <td className="px-4 py-3 whitespace-nowrap">
+                                            <td className={`px-2.5 py-2 whitespace-nowrap text-slate-500 w-[86px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-100 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>{r.date ?? ''}</td>
+                                            <td className={`px-2.5 py-2 whitespace-nowrap w-[168px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-100 ${isEditMode ? 'left-[134px]' : 'left-[86px]'}` : ''}`}>
+                                                {isEditMode ? (
+                                                    <select
+                                                        value={effectiveSiteId}
+                                                        onChange={(e) => setRowDraft(r, { siteId: e.target.value })}
+                                                        disabled={saving}
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[146px] bg-white"
+                                                    >
+                                                        <option value="">-</option>
+                                                        {siteOptions.map((site) => (
+                                                            <option key={String(site.id)} value={String(site.id)}>
+                                                                {site.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    (r.siteName ?? '')
+                                                )}
+                                            </td>
+                                            <td className="px-2.5 py-2 whitespace-nowrap">
                                                 {isEditMode ? (
                                                     <select
                                                         value={draft ? draft.siteType : (r.siteType ?? '')}
                                                         onChange={(e) => setRowDraft(r, { siteType: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[80px] bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
                                                     >
                                                         <option value="">-</option>
                                                         <option value="도급">도급</option>
@@ -1231,13 +2054,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     (r.siteType ?? '')
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap">
+                                            <td className="px-2.5 py-2 whitespace-nowrap">
                                                 {isEditMode ? (
                                                     <select
                                                         value={draft ? draft.paymentType : (r.paymentType ?? '')}
                                                         onChange={(e) => setRowDraft(r, { paymentType: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[80px] bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
                                                     >
                                                         <option value="">-</option>
                                                         <option value="노무">노무</option>
@@ -1247,8 +2070,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     (r.paymentType ?? '')
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap">{r.teamName ?? ''}</td>
-                                            <td className={`px-4 py-3 whitespace-nowrap font-semibold w-[120px] ${isFixed ? `sticky z-20 bg-white border-r-2 border-slate-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[328px]' : 'left-[280px]'}` : ''}`}>
+                                            <td className="px-2.5 py-2 whitespace-nowrap">{r.teamName ?? ''}</td>
+                                            <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r-2 border-slate-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
                                                 {isEditMode ? (
                                                     <>
                                                         <input
@@ -1257,33 +2080,28 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                             value={draft ? (draft.workerName ?? r.workerName) : r.workerName}
                                                             onChange={(e) => handleWorkerNameChange(r, e.target.value)}
                                                             disabled={saving}
-                                                            className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[100px] bg-white"
+                                                            className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
                                                         />
-                                                        <datalist id="worker-list-v2">
-                                                            {allWorkers.map((w) => (
-                                                                <option key={w.id} value={w.name}>{w.teamName ? `(${w.teamName})` : ''}</option>
-                                                            ))}
-                                                        </datalist>
                                                     </>
                                                 ) : (
                                                     r.workerName
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap">
+                                            <td className="px-2.5 py-2 whitespace-nowrap">
                                                 {isEditMode ? (
                                                     <input
                                                         type="text"
                                                         value={draft ? (draft.workerTeamName ?? r.workerTeamName ?? '') : (r.workerTeamName ?? '')}
                                                         onChange={(e) => setRowDraft(r, { workerTeamName: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[120px] bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[104px] bg-white"
                                                         placeholder="작업팀"
                                                     />
                                                 ) : (
                                                     (r.workerTeamName ?? '')
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap">
+                                            <td className="px-2.5 py-2 whitespace-nowrap">
                                                 {isEditMode ? (
                                                     <input
                                                         type="text"
@@ -1291,50 +2109,50 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         value={effectiveSalaryModel}
                                                         onChange={(e) => setRowDraft(r, { salaryModel: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[140px] bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[112px] bg-white"
                                                         placeholder="급여방식"
                                                     />
                                                 ) : (
                                                     (r.salaryModel ?? r.payType ?? '')
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap text-right">
+                                            <td className="px-2.5 py-2 whitespace-nowrap text-right">
                                                 {isEditMode ? (
                                                     <input
                                                         type="number"
                                                         value={draft ? draft.manDay : (Number.isFinite(r.manDay) ? String(r.manDay) : '0')}
                                                         onChange={(e) => setRowDraft(r, { manDay: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[90px] text-right bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[72px] text-right bg-white"
                                                     />
                                                 ) : (
                                                     (Number.isFinite(r.manDay) ? r.manDay : 0).toFixed(1)
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap text-right">
+                                            <td className="px-2.5 py-2 whitespace-nowrap text-right">
                                                 {isEditMode ? (
                                                     <input
                                                         type="number"
                                                         value={draft ? draft.unitPrice : (Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0')}
                                                         onChange={(e) => setRowDraft(r, { unitPrice: e.target.value })}
                                                         disabled={saving}
-                                                        className="px-2 py-1.5 border border-slate-300 rounded text-sm w-[120px] text-right bg-white"
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[92px] text-right bg-white"
                                                     />
                                                 ) : (
                                                     formatNumber(Math.round(Number.isFinite(r.unitPrice) ? r.unitPrice : 0))
                                                 )}
                                             </td>
-                                            <td className="px-4 py-3 whitespace-nowrap text-right font-bold">
+                                            <td className="px-2.5 py-2 whitespace-nowrap text-right font-bold">
                                                 {formatNumber(Math.round(previewAmount))}
                                             </td>
-                                            <td className="px-4 py-3 min-w-[300px]">
+                                            <td className="px-2.5 py-2 min-w-[240px]">
                                                 {isEditMode ? (
                                                     <div className="flex flex-col gap-2">
                                                         <textarea
                                                             value={effectiveWorkContent}
                                                             onChange={(e) => setRowDraft(r, { workContent: e.target.value })}
                                                             disabled={saving}
-                                                            className="px-2 py-1.5 border border-slate-300 rounded text-sm w-full bg-white min-h-[60px] resize-y"
+                                                            className="px-2 py-1 border border-slate-300 rounded text-sm w-full bg-white min-h-[54px] resize-y"
                                                             placeholder="작업 내용 입력"
                                                         />
                                                     </div>
@@ -1345,12 +2163,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 )}
                                             </td>
                                             {isEditMode && (
-                                                <td className={`px-4 py-3 whitespace-nowrap sticky right-0 z-20 border-l border-slate-100 ${stickyActionCellBg}`}>
-                                                    <div className="flex flex-col gap-2 min-w-[88px]">
+                                                <td className={`px-2.5 py-2 whitespace-nowrap sticky right-0 z-20 border-l border-slate-100 ${stickyActionCellBg}`}>
+                                                    <div className="flex items-center gap-1.5 min-w-[82px]">
                                                         <button
                                                             onClick={() => handleSaveRow(r)}
                                                             disabled={!dirty || saving}
-                                                            className={`px-3 py-1.5 rounded text-xs font-bold border ${(!dirty || saving)
+                                                            className={`flex-1 px-2 py-1 rounded text-[11px] font-bold border ${(!dirty || saving)
                                                                 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                                                                 : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
                                                                 }`}
@@ -1360,7 +2178,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         <button
                                                             onClick={() => clearRowDraft(rowKey)}
                                                             disabled={saving || !draft}
-                                                            className={`px-3 py-1.5 rounded text-xs font-bold border ${(saving || !draft)
+                                                            className={`flex-1 px-2 py-1 rounded text-[11px] font-bold border ${(saving || !draft)
                                                                 ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                                                                 : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                                                                 }`}
@@ -1375,7 +2193,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 })()
                             ))}
                         </tbody>
+                        <tfoot>
+                            <tr>
+                                {isEditMode && <td />}
+                                <td colSpan={8}>합계</td>
+                                <td className="align-right">{totals.totalManDay.toFixed(1)}</td>
+                                <td />
+                                <td className="align-right">{formatNumber(Math.round(totals.totalAmount))}</td>
+                                <td />
+                                {isEditMode && <td />}
+                            </tr>
+                        </tfoot>
                     </table>
+                    </div>
                 )}
             </div>
         </div>

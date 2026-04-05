@@ -17,7 +17,7 @@ import WorkerDatabase from './WorkerDatabase';
 import TeamDatabase from './TeamDatabase';
 import SiteDatabase from './SiteDatabase';
 import CompanyDatabase from './CompanyDatabase';
-import ConstructionCompanyDatabase from './ConstructionCompanyDatabase';
+import AccountManagementPage from './AccountManagementPage';
 
 interface DatabaseStats {
     workers: {
@@ -42,6 +42,11 @@ interface DatabaseStats {
         partner: number;
         builder: number; // 건설사
     };
+    accounts: {
+        workerMissing: number;
+        teamMissing: number;
+        companyMissing: number;
+    };
     reports: {
         total: number;
         thisMonth: number;
@@ -65,7 +70,7 @@ interface IssueStats {
 
 function IntegratedDatabase() {
     const [loading, setLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'teams' | 'sites' | 'companies' | 'partner-companies' | 'construction-companies' | 'reports'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports'>('overview');
 
     // Stats State
     const [stats, setStats] = useState<DatabaseStats>({
@@ -73,6 +78,7 @@ function IntegratedDatabase() {
         teams: { total: 0, active: 0, inactive: 0 },
         sites: { total: 0, active: 0, completed: 0 },
         companies: { total: 0, contractor: 0, partner: 0, builder: 0 },
+        accounts: { workerMissing: 0, teamMissing: 0, companyMissing: 0 },
         reports: { total: 0, thisMonth: 0, today: 0 }
     });
 
@@ -157,6 +163,11 @@ function IntegratedDatabase() {
                 contractor: companies.filter(c => c.type === '시공사').length,
                 partner: companies.filter(c => c.type === '협력사').length,
                 builder: companies.filter(c => c.type === '건설사').length
+            },
+            accounts: {
+                workerMissing: workers.filter(w => !w.accountNumber).length,
+                teamMissing: teams.filter(t => !t.accountNumber).length,
+                companyMissing: companies.filter(c => !c.accountNumber).length,
             },
             reports: reportStats // Use pre-calculated stats directly
         });
@@ -384,6 +395,22 @@ function IntegratedDatabase() {
                             </div>
                         </div>
 
+                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('accounts')}>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-slate-500 font-medium text-sm">계좌 관리</span>
+                                <div className="p-1.5 bg-rose-50 text-rose-600 rounded-lg text-xs">
+                                    <FontAwesomeIcon icon={faCreditCard} />
+                                </div>
+                            </div>
+                            <div className="flex items-end gap-2">
+                                <h3 className="text-2xl font-bold text-slate-800">{stats.accounts.workerMissing + stats.accounts.teamMissing + stats.accounts.companyMissing}</h3>
+                                <span className="text-xs text-slate-500 mb-1">건 누락</span>
+                            </div>
+                            <div className="mt-2 text-xs text-slate-400">
+                                <span>작업자 {stats.accounts.workerMissing} · 팀 {stats.accounts.teamMissing} · 회사 {stats.accounts.companyMissing}</span>
+                            </div>
+                        </div>
+
                         <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                             <div className="flex items-center justify-between mb-2">
                                 <span className="text-slate-500 font-medium text-sm">일일 보고서</span>
@@ -434,16 +461,10 @@ function IntegratedDatabase() {
                             회사 목록
                         </button>
                         <button
-                            onClick={() => setActiveTab('partner-companies')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'partner-companies' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                            onClick={() => setActiveTab('accounts')}
+                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'accounts' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
                         >
-                            협력사 목록
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('construction-companies')}
-                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'construction-companies' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
-                        >
-                            건설사 목록
+                            계좌 관리
                         </button>
                     </div>
                 </div>
@@ -540,7 +561,7 @@ function IntegratedDatabase() {
                                                                 <div className="font-bold text-slate-800">{comp.name}</div>
                                                                 <div className="text-xs text-slate-500">{comp.ceoName}</div>
                                                             </div>
-                                                            <button onClick={() => { setActiveTab('construction-companies'); setHighlightedId(comp.id || null); }} className="text-xs text-indigo-600 hover:underline">관리</button>
+                                                            <button onClick={() => { setActiveTab('companies'); setHighlightedId(comp.id || null); }} className="text-xs text-indigo-600 hover:underline">관리</button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -596,24 +617,14 @@ function IntegratedDatabase() {
                     )}
                     {activeTab === 'companies' && (
                         <CompanyDatabase
-                            hideHeader={true}
+                            hideHeader={false}
                             highlightedId={highlightedId}
-                            excludeTypes={['협력사', '건설사']}
                             entityLabel="회사"
-                            defaultType="시공사"
+                            defaultType="미지정"
                         />
                     )}
-                    {activeTab === 'partner-companies' && (
-                        <CompanyDatabase
-                            hideHeader={true}
-                            highlightedId={highlightedId}
-                            includeTypes={['협력사']}
-                            entityLabel="협력사"
-                            defaultType="협력사"
-                        />
-                    )}
-                    {activeTab === 'construction-companies' && (
-                        <ConstructionCompanyDatabase hideHeader={true} highlightedId={highlightedId} />
+                    {activeTab === 'accounts' && (
+                        <AccountManagementPage embedded={true} />
                     )}
                 </div>
             </div>

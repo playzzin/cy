@@ -872,7 +872,7 @@ const FreelancerPage: React.FC = () => {
             </div>
 
             <main className="excel-main">
-                <div className="relative" ref={tableWrapRef}>
+                <div className="relative freelancer-table-shell" ref={tableWrapRef}>
                     {loading && (
                         <div className="absolute inset-0 bg-white/40 backdrop-blur-sm z-[100] flex items-center justify-center">
                             <div className="text-blue-900 font-black text-xl">데이터 로딩 중...</div>

@@ -118,7 +118,7 @@ export const QuickActionsWidget: React.FC = () => {
         {
             label: '오늘 현황',
             icon: faClipboardList,
-            path: '/reports/daily?tab=list',
+            path: '/reports/daily?tab=list-v2',
             color: '#f97316', // orange-500
             bg: '#fff7ed'     // orange-50
         },

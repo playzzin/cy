@@ -50,6 +50,9 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\uc11c\uba85\uc704\uc784\uc7a5": "/payroll/delegation-letter",
     "\uc704\uc784\uc7a5v2": "/payroll/delegation-letter-v2",
     "\uacc4\uc88c\uc870\ud68c": "/payroll/taxinvoice/account-inquiry",
+    "\uacc4\uc88c\ubc88\ud638 \uad00\ub9ac": "/database/account-management",
+    "\uacc4\uc88c\uad00\ub9ac": "/database/account-management",
+    "\ud1b5\ud569 \uacc4\uc88c\uad00\ub9ac": "/database/account-management",
     "\ub9e4\uc785\ub9e4\ucd9c \uad00\ub9ac": "/payroll/workbook-ledger",
     "\uc0ac\ubb34\uc2e4 \uad00\ub9ac": "/office/management",
     "\uc77c\ubcf4 \ud1b5\uacc4": "/reports/statistics",
@@ -186,7 +189,6 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud1b5\ud569 \ub370\uc774\ud130 \ucf58\uc194": "/manpower/refine-sites", // Alias
     "\uc815\uc0b0 \uc2dc\uc2a4\ud15c \uc124\uacc4\ub3c4": "/design/settlement-architecture",
     "\uc2a4\ub9c8\ud2b8 \uba54\ubaa8": "/memos", // Smart Memo System
-
     "Smart Memo": "/memos",
     "\ud604\uc7a5 \uac24\ub7ec\ub9ac": "/gallery/projects",
     "\ud504\ub85c\uc81d\ud2b8": "/gallery/projects", // Alias
@@ -195,5 +197,4 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud604\uc7a5 \uad00\ub9ac \uc2dc\uc2a4\ud15c": "/site/management",
     "\ud68c\uc0ac \ub79c\ub529 \ud398\uc774\uc9c0": "/company/landing",
     "\ud68c\uc0ac\uc18c\uac1c \ub79c\ub529": "/company/landing",
-    "\uacac\uc801\ubb38\uc758": "/estimate/request",
 };

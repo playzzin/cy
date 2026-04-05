@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { dailyReportService } from '../../../services/dailyReportService';
 import { manpowerService, Worker } from '../../../services/manpowerService';
 import { siteService, Site } from '../../../services/siteService';
@@ -281,16 +281,6 @@ export const usePayrollData = (
   const [basePaymentData, setBasePaymentData] = useState<PaymentData[]>([]);
   const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
   const [errorCount, setErrorCount] = useState(0);
-  const isMountedRef = useRef(true);
-  const fetchRunSeqRef = useRef(0);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      fetchRunSeqRef.current += 1;
-    };
-  }, []);
 
   const validateItem = useCallback((item: Partial<PaymentData>): { isValid: boolean, errors: Record<string, boolean> } => {
     const errors: Record<string, boolean> = {};
@@ -324,8 +314,6 @@ export const usePayrollData = (
     const months = buildMonthRange(startMonth, endMonth);
     if (months.length === 0) return;
 
-    const runSeq = fetchRunSeqRef.current + 1;
-    fetchRunSeqRef.current = runSeq;
     setLoading(true);
     try {
       // 1. 기초 데이터 페칭
@@ -463,7 +451,6 @@ export const usePayrollData = (
         if (!months.includes(reportYM)) return;
 
         const reportSite = siteMap.get(report.siteId);
-        const reportPaymentMethod = String(report.paymentType ?? '').trim();
         const reportTeamId = report.teamId || allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(report.teamName))?.id || '';
         const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
 
@@ -486,9 +473,7 @@ export const usePayrollData = (
           const resolvedTeamName = (w.teamName ?? '').trim() || reportTeamName || '';
           const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
           const unitPrice = rw.unitPrice ?? w.unitPrice ?? 0;
-          const entryPaymentMethod = String(rw.paymentType ?? '').trim()
-            || reportPaymentMethod;
-          const entryIsLabor = entryPaymentMethod === '노무';
+          const isLabor = reportSite?.paymentMethod === '노무';
 
           const baseParams = {
             workerId: rw.workerId,
@@ -499,12 +484,12 @@ export const usePayrollData = (
             month: reportYM,
             manDay: rw.manDay,
             unitPrice,
-            isLabor: entryIsLabor,
+            isLabor,
             reportDate: report.date,
             siteName: report.siteName || reportSite?.name || '-',
             siteId: report.siteId,
             clientCompanyId: reportSite?.clientCompanyId || '',
-            paymentMethod: entryPaymentMethod || '-'
+            paymentMethod: reportSite?.paymentMethod || '-'
           };
 
           const paymentKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
@@ -631,8 +616,6 @@ export const usePayrollData = (
         };
       });
 
-      if (!isMountedRef.current || fetchRunSeqRef.current !== runSeq) return;
-
       setPaymentData(processedPaymentData);
       setBasePaymentData(processedPaymentData);
       setLedgerRowsData(processedLedgerRows);
@@ -641,9 +624,7 @@ export const usePayrollData = (
     } catch (error) {
       console.error('Error fetching payroll data:', error);
     } finally {
-      if (isMountedRef.current && fetchRunSeqRef.current === runSeq) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [startMonth, endMonth, selectedTeamId, selectedWorkerId, validateItem]);
 

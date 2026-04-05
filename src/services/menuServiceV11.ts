@@ -219,15 +219,6 @@ const ensureMenuChild = (config: SiteDataType, parentText: string, childText: st
     return changed;
 };
 
-const ensureWorkbookLedgerMenus = (config: SiteDataType): boolean => {
-    let changed = false;
-
-    changed = ensureMenuChild(config, '세무 관리', '매입매출 관리') || changed;
-    changed = ensureMenuChild(config, '세금관리', '매입매출 관리') || changed;
-
-    return changed;
-};
-
 // Removed: mergeSubItems, fillMissingPaths, mergeMenuItemsWithDefaults, ensureMenuWithDefaults
 
 // This is the new "Init" logic: normalize inputs, prune illegal items, fix structure.
@@ -249,8 +240,6 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
             final['admin'].positionConfig = JSON.parse(JSON.stringify(DEFAULT_MENU_CONFIG.admin.positionConfig));
         }
     }
-
-    ensureWorkbookLedgerMenus(final);
 
     return final;
 };
@@ -656,16 +645,10 @@ export const menuServiceV11 = {
     getMenuConfigRaw: async (): Promise<any> => menuServiceV11.getMenuConfig(),
     runOneTimeMigrations: async (): Promise<void> => {
         try {
-            const baseConfig = currentRawConfig
-                ? deepClone(currentRawConfig)
-                : await menuServiceV11.getMenuConfig();
-            if (!baseConfig) return;
+            const config = await menuServiceV11.getMenuConfig();
+            if (!config) return;
 
-            const config = normalizeSiteDataType(baseConfig);
-            let changed = false;
-
-            changed = ensureWorkbookLedgerMenus(config) || changed;
-
+            const changed = ensureMenuChild(config, '현황관리', '전국페이지');
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

@@ -82,7 +82,6 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
     '시스템 설정': 'system-config',
     '스마트 메모': 'smart-memo',
     'Smart Memo': 'smart-memo',
-    '현장 등록/수정': 'site-registration',
     // Add mappings for parent menus if needed, or handle logic to show parent if any child is visible
 };
 
@@ -108,7 +107,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [userRole, setUserRole] = useState<string>('user');
-    const [userDept, setUserDept] = useState<string>('');
     const [permissions, setPermissions] = useState<any>(null);
 
     useEffect(() => {
@@ -121,11 +119,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                     const data = docSnap.data();
                     if (data?.role) {
                         setUserRole(data.role);
+                        console.log("Sidebar: User role updated to", data.role);
                     }
-                    if (data?.department) {
-                        setUserDept(data.department);
-                    }
-                    console.log("Sidebar: User data updated", { role: data?.role, dept: data?.department });
                 }
             });
         }
@@ -144,13 +139,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     }, [currentUser]);
 
     const hasPermission = (itemText: string, itemRoles?: string[]): boolean => {
-        // [Custom Logic] '청연' 소속 직원은 '현장 등록/수정' 메뉴 접근 불가 (관리자/사장 제외)
-        if (itemText === '현장 등록/수정' || itemText === '현장 등록') {
-            const isCheongyeon = userDept?.includes('청연');
-            const isAdmin = userRole === 'admin' || userRole === '사장';
-            if (isCheongyeon && !isAdmin) return false;
-        }
-
         // 1. Dynamic Check (Priority 1)
         if (itemRoles && itemRoles.length > 0) {
             // Admin bypass (optional)
@@ -207,7 +195,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             if (isMobile) closeAll();
             return;
         }
-        navigate(path, { flushSync: true });
+        navigate(path);
         if (isMobile) closeAll();
     };
 

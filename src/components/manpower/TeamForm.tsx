@@ -15,7 +15,12 @@ interface TeamFormProps {
 }
 
 const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, companies, onSave, onCancel }) => {
-    const [currentTeam, setCurrentTeam] = useState<Partial<Team>>(initialData || { type: '시공팀' });
+    const [currentTeam, setCurrentTeam] = useState<Partial<Team>>(initialData || {
+        type: '시공팀',
+        bankName: '',
+        accountNumber: '',
+        accountHolder: ''
+    });
     const [isSaving, setIsSaving] = useState(false);
     const [companyOptions, setCompanyOptions] = useState<Company[]>(companies);
     const [showInlinePartnerForm, setShowInlinePartnerForm] = useState(false);
@@ -401,6 +406,38 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                                         </option>
                                     ))}
                                 </select>
+                            </div>
+                        </div>
+
+                        {/* Row 4: Bank Account */}
+                        <div className="col-span-12 grid grid-cols-12">
+                            <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
+                                계좌정보
+                            </div>
+                            <div className="col-span-9 md:col-span-10 p-2">
+                                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                    <input
+                                        type="text"
+                                        value={currentTeam.bankName || ''}
+                                        onChange={(e) => setCurrentTeam({ ...currentTeam, bankName: e.target.value })}
+                                        placeholder="은행명"
+                                        className="w-full border-slate-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={currentTeam.accountNumber || ''}
+                                        onChange={(e) => setCurrentTeam({ ...currentTeam, accountNumber: e.target.value })}
+                                        placeholder="계좌번호"
+                                        className="w-full border-slate-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={currentTeam.accountHolder || ''}
+                                        onChange={(e) => setCurrentTeam({ ...currentTeam, accountHolder: e.target.value })}
+                                        placeholder="예금주"
+                                        className="w-full border-slate-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 shadow-sm"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>

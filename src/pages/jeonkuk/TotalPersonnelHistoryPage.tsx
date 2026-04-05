@@ -6,8 +6,8 @@ import * as XLSX from 'xlsx-js-style';
 import { dailyReportService } from '../../services/dailyReportService';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
-import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
+import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀';
@@ -108,6 +108,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
     const [startDate, setStartDate] = useState(formatDate(firstDay));
     const [endDate, setEndDate] = useState(formatDate(lastDay));
+    const [startDateInput, setStartDateInput] = useState(formatDate(firstDay));
+    const [endDateInput, setEndDateInput] = useState(formatDate(lastDay));
 
     const [companyType, setCompanyType] = useState<CompanyTypeFilter>('construction');
     const [salaryModel, setSalaryModel] = useState<SalaryModelFilter>('전체');
@@ -121,7 +123,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [historyData, setHistoryData] = useState<PersonnelHistoryRow[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
-    const [allSites, setAllSites] = useState<Site[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [loading, setLoading] = useState(false);
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -141,15 +142,13 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
     const fetchInitialData = async () => {
         try {
-            const [fetchedTeams, fetchedCompanies, fetchedSites, fetchedWorkers] = await Promise.all([
+            const [fetchedTeams, fetchedCompanies, fetchedWorkers] = await Promise.all([
                 teamService.getTeams(),
                 companyService.getCompanies(),
-                siteService.getSites(),
                 manpowerService.getWorkers()
             ]);
             setTeams(fetchedTeams);
             setCompanies(fetchedCompanies);
-            setAllSites(fetchedSites);
             setAllWorkers(fetchedWorkers);
         } catch (error) {
             console.error('Error fetching initial data:', error);
@@ -159,6 +158,14 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     useEffect(() => {
         void fetchInitialData();
     }, []);
+
+    useEffect(() => {
+        setStartDateInput(startDate);
+    }, [startDate]);
+
+    useEffect(() => {
+        setEndDateInput(endDate);
+    }, [endDate]);
 
     useEffect(() => {
         if (companyType === 'partner') {
@@ -179,15 +186,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         });
         return map;
     }, [companies]);
-
-    const siteById = useMemo(() => {
-        const map = new Map<string, Site>();
-        allSites.forEach((site) => {
-            if (site.id) map.set(String(site.id).trim(), site);
-            if (site.legacyId) map.set(String(site.legacyId).trim(), site);
-        });
-        return map;
-    }, [allSites]);
 
     const teamById = useMemo(() => {
         const map = new Map<string, Team>();
@@ -327,10 +325,31 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         }
     }, [allowedTeamIds, selectedTeamId, selectedWorkerId, workerOptions]);
 
-    const fetchData = async () => {
+    const commitDateDrafts = () => {
+        const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
+        const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
+
+        setStartDateInput(nextStartDate);
+        setEndDateInput(nextEndDate);
+
+        if (nextStartDate !== startDate) setStartDate(nextStartDate);
+        if (nextEndDate !== endDate) setEndDate(nextEndDate);
+
+        return {
+            startDate: nextStartDate,
+            endDate: nextEndDate,
+        };
+    };
+
+    const fetchData = async (dateOverride?: { startDate: string; endDate: string }) => {
         setLoading(true);
         try {
-            const workers = await manpowerService.getWorkers();
+            const effectiveStartDate = dateOverride?.startDate ?? startDate;
+            const effectiveEndDate = dateOverride?.endDate ?? endDate;
+            const [workers, reportRows] = await Promise.all([
+                manpowerService.getWorkers(),
+                dailyReportService.getReportWorkerRowsByRange({ startDate: effectiveStartDate, endDate: effectiveEndDate })
+            ]);
             const workerById = new Map<string, Worker>();
             workers.forEach((w) => {
                 const id = String(w.id ?? '').trim();
@@ -339,73 +358,80 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 if (legacyId) workerById.set(legacyId, w);
             });
 
-            const eligibleWorkerIds = new Set<string>();
-            allWorkers
-                .filter((worker) => {
-                    const teamId = String(worker.teamId ?? '').trim();
-                    if (!teamId) return false;
-                    if (!allowedTeamIds.has(teamId)) return false;
-                    if (selectedTeamId && teamId !== selectedTeamId) return false;
+            const normalizeTeamId = (value?: string | null): string => {
+                const raw = String(value ?? '').trim();
+                if (!raw) return '';
+                return String(teamById.get(raw)?.id ?? raw).trim();
+            };
 
-                    const search = workerSearchTerm.trim();
-                    if (!search) return true;
-                    const nameMatch = String(worker.name ?? '').includes(search);
-                    const idMatch = String(worker.idNumber ?? '').includes(search);
-                    return nameMatch || idMatch;
-                })
-                .forEach((worker) => {
-                    const id = String(worker.id ?? '').trim();
-                    const legacyId = String((worker as any).legacyId ?? '').trim();
-                    if (id) eligibleWorkerIds.add(id);
-                    if (legacyId) eligibleWorkerIds.add(legacyId);
-                });
+            const normalizeWorkerId = (value?: string | null): string => {
+                const raw = String(value ?? '').trim();
+                if (!raw) return '';
+                return String(workerById.get(raw)?.id ?? raw).trim();
+            };
 
+            const selectedNormalizedTeamId = normalizeTeamId(selectedTeamId);
+            const selectedWorkerIds = new Set<string>();
             if (selectedWorkerId) {
-                eligibleWorkerIds.clear();
-                const selectedId = String(selectedWorkerId).trim();
-                if (selectedId) eligibleWorkerIds.add(selectedId);
-                const selectedWorker = allWorkers.find((w) => String(w.id ?? '').trim() === selectedId);
+                const normalizedSelectedWorkerId = normalizeWorkerId(selectedWorkerId);
+                if (normalizedSelectedWorkerId) selectedWorkerIds.add(normalizedSelectedWorkerId);
+
+                const selectedWorker =
+                    workerById.get(String(selectedWorkerId).trim())
+                    ?? allWorkers.find((worker) => String(worker.id ?? '').trim() === String(selectedWorkerId).trim());
                 const selectedLegacyId = String((selectedWorker as any)?.legacyId ?? '').trim();
-                if (selectedLegacyId) eligibleWorkerIds.add(selectedLegacyId);
-            } else if (workerSearchTerm.trim()) {
-                eligibleWorkerIds.clear();
-                workerOptions.forEach(w => {
-                    const id = String(w.id ?? '').trim();
-                    const legacyId = String((w as any).legacyId ?? '').trim();
-                    if (id) eligibleWorkerIds.add(id);
-                    if (legacyId) eligibleWorkerIds.add(legacyId);
-                });
+                const normalizedLegacyId = normalizeWorkerId(selectedLegacyId);
+                if (normalizedLegacyId) selectedWorkerIds.add(normalizedLegacyId);
             }
 
-            const reports = await dailyReportService.getReportsByRange(startDate, endDate);
+            const search = workerSearchTerm.trim();
 
             const statsByWorker = new Map<string, {
+                workerId: string;
+                name: string;
+                idNumber: string;
+                salaryModel: SalaryModelFilter;
+                teamId: string;
+                teamName: string;
                 laborManDay: number;
                 invoiceManDay: number;
                 laborAmount: number;
                 invoiceAmount: number;
             }>();
             const salaryByWorker = new Map<string, SalaryModelFilter>();
+            const siteById = new Map<string, { siteType?: unknown; paymentMethod?: unknown }>();
 
-            reports.forEach((report) => {
-                report.workers.forEach((rw) => {
-                    const workerId = String(rw.workerId ?? '').trim();
-                    if (!workerId) return;
-                    if (!eligibleWorkerIds.has(workerId)) return;
+            reportRows.forEach((row) => {
+                const rawWorkerId = String(row.workerId ?? '').trim();
+                if (!rawWorkerId) return;
 
-                    const worker = workerById.get(workerId);
-                    if (!worker) return;
+                const normalizedWorkerId = normalizeWorkerId(rawWorkerId);
+                if (!normalizedWorkerId) return;
+                if (selectedWorkerIds.size > 0 && !selectedWorkerIds.has(normalizedWorkerId)) return;
 
-                    const workerTeamId = String(worker.teamId ?? '').trim();
-                    if (!workerTeamId) return;
-                    if (!allowedTeamIds.has(workerTeamId)) return;
-                    if (selectedTeamId && workerTeamId !== selectedTeamId) return;
+                const worker = workerById.get(rawWorkerId) ?? workerById.get(normalizedWorkerId);
+                const workerName = String(row.workerName ?? worker?.name ?? '').trim();
+                const idNumber = String(worker?.idNumber ?? '').trim();
+                if (search && selectedWorkerIds.size === 0) {
+                    const matchesName = workerName.includes(search);
+                    const matchesIdNumber = idNumber.includes(search);
+                    if (!matchesName && !matchesIdNumber) return;
+                }
 
-                    const model = resolveSnapshotSalaryModel({
-                        worker,
-                        reportSalaryModel: rw.salaryModel,
-                        reportPayType: rw.payType
-                    });
+                const workerTeamId = normalizeTeamId(String(row.workerTeamId ?? worker?.teamId ?? '').trim());
+                if (!workerTeamId) return;
+                if (!allowedTeamIds.has(workerTeamId)) return;
+                if (selectedNormalizedTeamId && workerTeamId !== selectedNormalizedTeamId) return;
+
+                const workerId = normalizedWorkerId;
+                const rw = row;
+                const report = row as any;
+
+                const model = resolveSnapshotSalaryModel({
+                    worker: worker ?? ({ salaryModel: row.salaryModel, payType: row.payType } as Worker),
+                    reportSalaryModel: row.salaryModel,
+                    reportPayType: row.payType
+                });
 
                     if (companyType === 'partner') {
                         if (model !== '지원팀') return;
@@ -430,16 +456,28 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
                     const manDay = typeof rw.manDay === 'number' ? rw.manDay : 0;
                     const snapshotUnitPrice = typeof rw.unitPrice === 'number' ? rw.unitPrice : null;
-                    const fallbackUnitPrice = typeof worker.unitPrice === 'number' ? worker.unitPrice : 0;
+                    const fallbackUnitPrice = typeof worker?.unitPrice === 'number' ? worker.unitPrice : 0;
                     const unitPrice = snapshotUnitPrice ?? fallbackUnitPrice;
-                    const amount = manDay * unitPrice;
+                    const amount = typeof rw.amount === 'number' ? rw.amount : (manDay * unitPrice);
 
                     const current = statsByWorker.get(workerId) ?? {
+                        workerId,
+                        name: workerName,
+                        idNumber,
+                        salaryModel: model,
+                        teamId: workerTeamId,
+                        teamName: String(rw.workerTeamName ?? teamById.get(workerTeamId)?.name ?? worker?.teamName ?? '').trim(),
                         laborManDay: 0,
                         invoiceManDay: 0,
                         laborAmount: 0,
                         invoiceAmount: 0
                     };
+                    if (!current.name && workerName) current.name = workerName;
+                    if (!current.idNumber && idNumber) current.idNumber = idNumber;
+                    if (!current.teamId && workerTeamId) current.teamId = workerTeamId;
+                    if (!current.teamName) {
+                        current.teamName = String(rw.workerTeamName ?? teamById.get(workerTeamId)?.name ?? worker?.teamName ?? '').trim();
+                    }
                     // 2024-05-22 Separate Labor/Invoice based on siteType & paymentType
                     const site = siteById.get(String(report.siteId ?? '').trim());
                     const siteType = report.siteType ?? rw.siteType ?? site?.siteType;
@@ -459,18 +497,15 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     }
 
                     statsByWorker.set(workerId, current);
-                });
             });
 
             const result: PersonnelHistoryRow[] = [];
             statsByWorker.forEach((stats, workerId) => {
                 const worker = workerById.get(workerId);
-                if (!worker) return;
-
-                const teamId = String(worker.teamId ?? '').trim();
-                const teamName = teamById.get(teamId)?.name ?? String(worker.teamName ?? '');
-                const model = salaryByWorker.get(workerId) ?? resolveWorkerSalaryModel(worker);
-                const fallbackUnitPrice = typeof worker.unitPrice === 'number' ? worker.unitPrice : 0;
+                const teamId = stats.teamId || String(worker?.teamId ?? '').trim();
+                const teamName = stats.teamName || teamById.get(teamId)?.name || String(worker?.teamName ?? '');
+                const model = salaryByWorker.get(workerId) ?? stats.salaryModel ?? resolveWorkerSalaryModel(worker ?? ({ name: stats.name } as Worker));
+                const fallbackUnitPrice = typeof worker?.unitPrice === 'number' ? worker.unitPrice : 0;
 
                 const totalManDay = stats.laborManDay + stats.invoiceManDay;
                 const totalAmount = stats.laborAmount + stats.invoiceAmount;
@@ -478,8 +513,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
                 result.push({
                     workerId,
-                    name: String(worker.name ?? ''),
-                    idNumber: String(worker.idNumber ?? ''),
+                    name: stats.name || String(worker?.name ?? ''),
+                    idNumber: stats.idNumber || String(worker?.idNumber ?? ''),
                     salaryModel: model,
                     teamId,
                     teamName,
@@ -648,8 +683,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 <button
                                     onClick={() => {
                                         const t = new Date();
-                                        setStartDate(formatDate(new Date(t.getFullYear(), t.getMonth() - 1, 1)));
-                                        setEndDate(formatDate(new Date(t.getFullYear(), t.getMonth(), 0)));
+                                        const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth() - 1, 1));
+                                        const nextEndDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 0));
+                                        setStartDate(nextStartDate);
+                                        setEndDate(nextEndDate);
+                                        setStartDateInput(nextStartDate);
+                                        setEndDateInput(nextEndDate);
                                     }}
                                     className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
                                 >
@@ -658,8 +697,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 <button
                                     onClick={() => {
                                         const t = new Date();
-                                        setStartDate(formatDate(new Date(t.getFullYear(), t.getMonth(), 1)));
-                                        setEndDate(formatDate(t));
+                                        const nextStartDate = formatDate(new Date(t.getFullYear(), t.getMonth(), 1));
+                                        const nextEndDate = formatDate(t);
+                                        setStartDate(nextStartDate);
+                                        setEndDate(nextEndDate);
+                                        setStartDateInput(nextStartDate);
+                                        setEndDateInput(nextEndDate);
                                     }}
                                     className="px-1.5 py-0.5 text-[10px] bg-slate-100 hover:bg-slate-200 rounded"
                                 >
@@ -667,9 +710,23 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 </button>
                             </div>
                             <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
+                                type="text"
+                                inputMode="numeric"
+                                value={startDateInput}
+                                onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onBlur={() => {
+                                    const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
+                                    setStartDateInput(nextStartDate);
+                                    if (nextStartDate !== startDate) {
+                                        setStartDate(nextStartDate);
+                                    }
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.currentTarget.blur();
+                                    }
+                                }}
+                                placeholder="YYYY-MM-DD"
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
                             />
                         </div>
@@ -677,9 +734,23 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         <div className="flex flex-col gap-1">
                             <label className="text-xs font-medium text-slate-500">종료일</label>
                             <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
+                                type="text"
+                                inputMode="numeric"
+                                value={endDateInput}
+                                onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onBlur={() => {
+                                    const nextEndDate = normalizeTypedDateInput(endDateInput) ?? endDate;
+                                    setEndDateInput(nextEndDate);
+                                    if (nextEndDate !== endDate) {
+                                        setEndDate(nextEndDate);
+                                    }
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.currentTarget.blur();
+                                    }
+                                }}
+                                placeholder="YYYY-MM-DD"
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm w-36"
                             />
                         </div>
@@ -850,7 +921,10 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         </button>
 
                         <button
-                            onClick={fetchData}
+                            onClick={() => {
+                                const nextRange = commitDateDrafts();
+                                fetchData(nextRange);
+                            }}
                             className="px-4 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md font-bold flex items-center gap-2 text-sm"
                         >
                             <FontAwesomeIcon icon={faSearch} />

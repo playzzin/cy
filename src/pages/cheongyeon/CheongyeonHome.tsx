@@ -7,7 +7,6 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recha
 import { storage } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
-import { DashboardSlider } from './components/DashboardSlider';
 
 type SiteWorkerHighlight = {
     id: string;
@@ -42,7 +41,9 @@ const toKoreanDate = (date: string): string => {
 
 type DailyStatRow = { totalWorkers: number; totalManDay: number; siteCount: number; teamCount: number };
 type DashboardStats = {
+    yesterday: DailyStatRow;
     yearToDate: DailyStatRow;
+    yesterdayLabel: string;
     yearToDateLabel: string;
 };
 
@@ -285,16 +286,18 @@ const CheongyeonHome: React.FC = () => {
     const [loadingStats, setLoadingStats] = useState(true);
     const [monthlyTrend, setMonthlyTrend] = useState<MonthlyTrendRow[]>([]);
     const [dailyTrend, setDailyTrend] = useState<DailyTrendRow[]>([]);
+    const [activeYesterdayMetric, setActiveYesterdayMetric] = useState<keyof DailyStatRow>('totalManDay');
     const [activeYearMetric, setActiveYearMetric] = useState<keyof DailyStatRow>('totalManDay');
     const [manDayViewMode, setManDayViewMode] = useState<'daily' | 'monthly'>('daily');
     const [siteViewMode, setSiteViewMode] = useState<'daily' | 'monthly'>('daily');
-    const [workerListVisible, setWorkerListVisible] = useState(false);
-    const [yearToDateWorkerNames, setYearToDateWorkerNames] = useState<string[]>([]);
-    const [animatedStats, setAnimatedStats] = useState<DailyStatRow>({
-        totalWorkers: 0,
-        totalManDay: 0,
-        siteCount: 0,
-        teamCount: 0,
+    const [workerListScope, setWorkerListScope] = useState<'yesterday' | 'yearToDate' | null>(null);
+    const [workerNamesByScope, setWorkerNamesByScope] = useState<{ yesterday: string[]; yearToDate: string[] }>({
+        yesterday: [],
+        yearToDate: [],
+    });
+    const [animatedStats, setAnimatedStats] = useState<{ yesterday: DailyStatRow; yearToDate: DailyStatRow }>({
+        yesterday: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
+        yearToDate: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
     });
     const videoRef = useRef<HTMLVideoElement>(null);
     const navigate = useNavigate();
@@ -424,23 +427,32 @@ const CheongyeonHome: React.FC = () => {
         const loadStats = async () => {
             setLoadingStats(true);
             try {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = toDateString(yesterday);
                 const { start: ytdStart, end: ytdEnd, label: ytdLabel } = getCurrentYearRange();
                 const { start: trendStart, end: trendEnd, monthKeys } = getRecent12MonthWindow();
                 const { start: dailyStart, end: dailyEnd, dateKeys } = getRecent30DayWindow();
 
-                const [ytdReports, trendReports, dailyReports] = await Promise.all([
+                const [yReports, ytdReports, trendReports, dailyReports] = await Promise.all([
+                    dailyReportService.getReports({ startDate: yesterdayStr, endDate: yesterdayStr }),
                     dailyReportService.getReports({ startDate: ytdStart, endDate: ytdEnd }),
                     dailyReportService.getReports({ startDate: trendStart, endDate: trendEnd }),
                     dailyReportService.getReports({ startDate: dailyStart, endDate: dailyEnd }),
                 ]);
 
                 setDashboardStats({
+                    yesterday: computeStatRow(yReports),
                     yearToDate: computeStatRow(ytdReports),
+                    yesterdayLabel: yesterdayStr,
                     yearToDateLabel: ytdLabel,
                 });
                 setMonthlyTrend(buildMonthlyTrend(trendReports, monthKeys));
                 setDailyTrend(buildDailyTrend(dailyReports, dateKeys));
-                setYearToDateWorkerNames(extractWorkerNames(ytdReports));
+                setWorkerNamesByScope({
+                    yesterday: extractWorkerNames(yReports),
+                    yearToDate: extractWorkerNames(ytdReports),
+                });
             } catch (err) {
                 console.error('Failed to load dashboard stats:', err);
             } finally {
@@ -464,10 +476,18 @@ const CheongyeonHome: React.FC = () => {
             const lerp = (target: number) => target * eased;
 
             setAnimatedStats({
-                totalWorkers: Math.round(lerp(dashboardStats.yearToDate.totalWorkers)),
-                totalManDay: Math.round(lerp(dashboardStats.yearToDate.totalManDay) * 10) / 10,
-                siteCount: Math.round(lerp(dashboardStats.yearToDate.siteCount)),
-                teamCount: Math.round(lerp(dashboardStats.yearToDate.teamCount)),
+                yesterday: {
+                    totalWorkers: Math.round(lerp(dashboardStats.yesterday.totalWorkers)),
+                    totalManDay: Math.round(lerp(dashboardStats.yesterday.totalManDay) * 10) / 10,
+                    siteCount: Math.round(lerp(dashboardStats.yesterday.siteCount)),
+                    teamCount: Math.round(lerp(dashboardStats.yesterday.teamCount)),
+                },
+                yearToDate: {
+                    totalWorkers: Math.round(lerp(dashboardStats.yearToDate.totalWorkers)),
+                    totalManDay: Math.round(lerp(dashboardStats.yearToDate.totalManDay) * 10) / 10,
+                    siteCount: Math.round(lerp(dashboardStats.yearToDate.siteCount)),
+                    teamCount: Math.round(lerp(dashboardStats.yearToDate.teamCount)),
+                },
             });
 
             if (progress < 1) {
@@ -511,15 +531,28 @@ const CheongyeonHome: React.FC = () => {
         return Math.round(value).toLocaleString();
     };
 
+    const activeYesterdayMetricConfig = STAT_METRICS.find((metric) => metric.key === activeYesterdayMetric) || STAT_METRICS[1];
+
+    const handleYesterdayMetricClick = (metricKey: keyof DailyStatRow) => {
+        setActiveYesterdayMetric(metricKey);
+        if (metricKey === 'totalManDay') setManDayViewMode('daily');
+        if (metricKey === 'siteCount') setSiteViewMode('daily');
+        if (metricKey === 'totalWorkers') {
+            setWorkerListScope('yesterday');
+            return;
+        }
+        setWorkerListScope(null);
+    };
+
     const handleYearMetricClick = (metricKey: keyof DailyStatRow) => {
         setActiveYearMetric(metricKey);
         if (metricKey === 'totalManDay') setManDayViewMode('monthly');
         if (metricKey === 'siteCount') setSiteViewMode('monthly');
         if (metricKey === 'totalWorkers') {
-            setWorkerListVisible(true);
+            setWorkerListScope('yearToDate');
             return;
         }
-        setWorkerListVisible(false);
+        setWorkerListScope(null);
     };
 
     const manDayGraphData = manDayViewMode === 'daily'
@@ -552,13 +585,8 @@ const CheongyeonHome: React.FC = () => {
                 <div className={`absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-slate-900/80 transition-opacity duration-1000 ${isIntro ? 'opacity-0' : 'opacity-100'}`} />
             </div>
 
-            {/* 0. Premium Image Slider Section */}
-            <div className={`relative z-10 pt-24 px-8 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
-                <DashboardSlider />
-            </div>
-
             {/* 1. Recent Daily Report Highlights */}
-            <section className={`relative z-10 px-8 pt-10 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+            <section className={`relative z-10 px-8 pt-28 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
                 <div className="mb-10 max-w-5xl animate-slideUp">
                     <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 backdrop-blur-md border border-white/10 w-fit">
                         <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
@@ -697,6 +725,48 @@ const CheongyeonHome: React.FC = () => {
                     viewport={{ once: true, amount: 0.2 }}
                     className="flex items-center gap-3 mb-4"
                 >
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span className="text-amber-300 text-sm font-semibold tracking-widest uppercase">
+                        어제 출력 실적 {dashboardStats ? `(${dashboardStats.yesterdayLabel})` : ''}
+                    </span>
+                </motion.div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                    {loadingStats
+                        ? Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
+                        ))
+                        : STAT_METRICS.map((metric, idx) => (
+                            <motion.button
+                                key={`y-${metric.key}`}
+                                type="button"
+                                onClick={() => handleYesterdayMetricClick(metric.key)}
+                                variants={statSectionVariant}
+                                initial="hidden"
+                                whileInView="visible"
+                                viewport={{ once: true, amount: 0.2 }}
+                                className={`rounded-2xl bg-white/5 backdrop-blur-md border transition-all p-5 flex items-center gap-4 text-left ${activeYesterdayMetric === metric.key ? 'border-white/40 shadow-lg shadow-white/10' : 'border-white/10 hover:border-amber-500/40'}`}
+                            >
+                                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${metric.color} flex items-center justify-center text-white text-xl flex-shrink-0 shadow-lg`}>
+                                    <FontAwesomeIcon icon={metric.icon} />
+                                </div>
+                                <div>
+                                    <div className="text-2xl font-bold text-white">
+                                        {formatStatValue(animatedStats.yesterday[metric.key], metric.decimals || 0)}{metric.unit}
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
+                                </div>
+                            </motion.button>
+                        ))}
+                </div>
+
+                <motion.div
+                    variants={statSectionVariant}
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={{ once: true, amount: 0.2 }}
+                    className="flex items-center gap-3 mb-4"
+                >
                     <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
                     <span className="text-cyan-300 text-sm font-semibold tracking-widest uppercase">
                         올해 출력 실적 {dashboardStats ? `(${dashboardStats.yearToDateLabel} 누적)` : ''}
@@ -724,7 +794,7 @@ const CheongyeonHome: React.FC = () => {
                                 </div>
                                 <div>
                                     <div className="text-2xl font-bold text-white">
-                                        {formatStatValue(animatedStats[metric.key], metric.decimals || 0)}{metric.unit}
+                                        {formatStatValue(animatedStats.yearToDate[metric.key], metric.decimals || 0)}{metric.unit}
                                     </div>
                                     <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
                                 </div>
@@ -732,7 +802,7 @@ const CheongyeonHome: React.FC = () => {
                         ))}
                 </div>
 
-                {workerListVisible ? (
+                {workerListScope ? (
                     <motion.div
                         variants={statSectionVariant}
                         initial="hidden"
@@ -741,15 +811,15 @@ const CheongyeonHome: React.FC = () => {
                         className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
                     >
                         <h4 className="text-sm text-amber-200 font-semibold mb-3">
-                            올해 출력 인원 명단
+                            {workerListScope === 'yesterday' ? '어제 출력 인원 명단' : '올해 출력 인원 명단'}
                         </h4>
                         <div className="text-xs text-slate-400 mb-4">
-                            총 {yearToDateWorkerNames.length.toLocaleString()}명
+                            총 {workerNamesByScope[workerListScope].length.toLocaleString()}명
                         </div>
                         <div className="max-h-72 overflow-y-auto pr-1 flex flex-wrap gap-2">
-                            {yearToDateWorkerNames.length > 0 ? (
-                                yearToDateWorkerNames.map((name) => (
-                                    <span key={`yearToDate-${name}`} className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600 text-slate-100 text-sm">
+                            {workerNamesByScope[workerListScope].length > 0 ? (
+                                workerNamesByScope[workerListScope].map((name) => (
+                                    <span key={`${workerListScope}-${name}`} className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600 text-slate-100 text-sm">
                                         {name}
                                     </span>
                                 ))

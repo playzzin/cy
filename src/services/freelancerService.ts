@@ -10,9 +10,14 @@ const isCorporateInvoiceSiteRow = (row: Partial<DailyReportWorkerRow>): boolean 
     const siteType = normalizeKoreanToken(row.siteType);
 
     const isInvoicePayment = paymentType.includes('계산서');
-    const isSiteWork = siteType.includes('현장');
+    const isSupportSite = siteType.includes('지원');
+    const isSiteWork =
+        !siteType ||
+        siteType.includes('현장') ||
+        siteType.includes('도급') ||
+        siteType.includes('직영');
 
-    return isInvoicePayment && isSiteWork;
+    return isInvoicePayment && isSiteWork && !isSupportSite;
 };
 
 /**

@@ -22,7 +22,7 @@ exports.DEFAULT_MENU_CONFIG = {
             {
                 text: "출력 관리",
                 icon: "fa-clipboard-list",
-                sub: ["일보작성", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
+                sub: ["일보작성", "일보목록v2", "통합 일괄 등록", "일보 통계"]
             },
             {
                 text: "지원 관리",
@@ -159,7 +159,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -193,7 +193,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -207,7 +207,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -221,7 +221,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -235,7 +235,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -249,7 +249,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -263,7 +263,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -277,7 +277,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",

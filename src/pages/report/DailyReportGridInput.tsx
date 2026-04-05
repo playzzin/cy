@@ -334,7 +334,9 @@ const DailyReportTable: React.FC<{
                         <span className="font-bold text-xs whitespace-nowrap">장부{ledgerIndex}</span>
                                                 <div style={{ minWidth: 180, flex: 1 }}>
                                                     <SingleSelectPopover
-                                                        options={sites.map(site => ({ id: site.id, name: site.name }))}
+                                                        options={sites
+                                                            .filter((site) => Boolean(site.id))
+                                                            .map((site) => ({ id: String(site.id), name: site.name }))}
                                                         selectedId={ledger.siteId || null}
                                                         onSelect={siteId => onUpdate(ledger.id, { siteId })}
                                                         placeholder="현장명을 검색/선택하세요"

@@ -181,7 +181,7 @@ export const RecentReportsWidget: React.FC<RecentReportsWidgetProps> = ({ report
                     <FontAwesomeIcon icon={faFileLines} />
                     최근 일보 활동
                 </Title>
-                <ViewAllButton onClick={() => navigate('/reports/daily?tab=list')}>
+                <ViewAllButton onClick={() => navigate('/reports/daily?tab=list-v2')}>
                     전체보기 <FontAwesomeIcon icon={faArrowRight} />
                 </ViewAllButton>
             </Header>

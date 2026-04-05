@@ -8,6 +8,7 @@ import { siteService } from '../../services/siteService';
 import type { Site } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
 import type { Team } from '../../services/teamService';
+import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 
 interface Filters {
     startDate: string;
@@ -263,9 +264,20 @@ const TeamPersonnelStatusReportPage: React.FC = () => {
                     <label className="flex flex-col gap-1">
                         <span className="text-xs font-bold text-slate-600">검색시작일</span>
                         <input
-                            type="date"
+                            type="text"
+                            inputMode="numeric"
                             value={filters.startDate}
-                            onChange={(e) => setFilters(prev => ({ ...prev, startDate: e.target.value }))}
+                            onChange={(e) => setFilters(prev => ({ ...prev, startDate: sanitizeTypedDateInput(e.target.value) }))}
+                            onBlur={() => setFilters(prev => ({
+                                ...prev,
+                                startDate: normalizeTypedDateInput(prev.startDate) ?? prev.startDate,
+                            }))}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.currentTarget.blur();
+                                }
+                            }}
+                            placeholder="YYYY-MM-DD"
                             className="border border-slate-200 rounded px-3 py-2 text-sm"
                         />
                     </label>
@@ -273,9 +285,20 @@ const TeamPersonnelStatusReportPage: React.FC = () => {
                     <label className="flex flex-col gap-1">
                         <span className="text-xs font-bold text-slate-600">검색종료일</span>
                         <input
-                            type="date"
+                            type="text"
+                            inputMode="numeric"
                             value={filters.endDate}
-                            onChange={(e) => setFilters(prev => ({ ...prev, endDate: e.target.value }))}
+                            onChange={(e) => setFilters(prev => ({ ...prev, endDate: sanitizeTypedDateInput(e.target.value) }))}
+                            onBlur={() => setFilters(prev => ({
+                                ...prev,
+                                endDate: normalizeTypedDateInput(prev.endDate) ?? prev.endDate,
+                            }))}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.currentTarget.blur();
+                                }
+                            }}
+                            placeholder="YYYY-MM-DD"
                             className="border border-slate-200 rounded px-3 py-2 text-sm"
                         />
                     </label>
@@ -362,7 +385,13 @@ const TeamPersonnelStatusReportPage: React.FC = () => {
                         <button
                             type="button"
                             onClick={() => {
-                                fetchRows(filters).catch(e => console.error(e));
+                                const nextFilters = {
+                                    ...filters,
+                                    startDate: normalizeTypedDateInput(filters.startDate) ?? filters.startDate,
+                                    endDate: normalizeTypedDateInput(filters.endDate) ?? filters.endDate,
+                                };
+                                setFilters(nextFilters);
+                                fetchRows(nextFilters).catch(e => console.error(e));
                             }}
                             className="px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-bold"
                         >

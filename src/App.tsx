@@ -46,7 +46,7 @@ import WagePaymentPage from './pages/payroll/WagePaymentPage';
 import DailyWageDraftPage from './pages/payroll/DailyWageDraftPage';
 import DailyWageStatementPage from './pages/payroll/DailyWageStatementPage';
 import MonthlyWageDraftPage from './pages/payroll/MonthlyWageDraftPage';
-import SupportTeamPage from './pages/payroll/SupportTeamPage';
+import SupportTeamPaymentPage from './pages/payroll/SupportTeamPaymentPage';
 import SupportClaimPage from './pages/payroll/SupportClaimPage';
 import PayrollRateManagementPage from './pages/payroll/PayrollRateManagementPage';
 import AdvancePaymentPage from './pages/payroll/AdvancePaymentPage';
@@ -71,6 +71,7 @@ import OfficeManagementPage from './pages/office/OfficeManagementPage';
 
 import Login from './components/auth/Login';
 import IntegratedDatabase from './pages/database/ManpowerDatabase';
+import AccountManagementPage from './pages/database/AccountManagementPage';
 import ManualPage from './pages/manual';
 import ProfilePage from './pages/profile/ProfilePage';
 
@@ -148,11 +149,11 @@ import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPag
 import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
 import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
 import TaxInvoiceLedgerPage from './pages/taxinvoice/TaxInvoiceLedgerPage';
+import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import ReceivablesManagerPage from './pages/taxinvoice/ReceivablesManagerPage';
 
 import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
-import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 import AccountInquiryPage from './pages/taxinvoice/AccountInquiryPage';
 import { useWorkerTeamIdMigration } from './hooks/useWorkerTeamIdMigration';
@@ -165,7 +166,6 @@ import { AiImageGalleryPage } from './pages/gallery/AiImageGalleryPage';
 import SiteManagementPage from './pages/site/SiteManagementPage';
 import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
-
 import RefineCompanyList from './pages/refine/RefineCompanyList';
 import { MemoPage } from './features/smart-memo/pages/MemoPage'; // New Feature Import
 import BarobillKakaoConnectionPage from './pages/admin/settings/BarobillKakaoConnectionPage';
@@ -174,7 +174,6 @@ import TodoPage from './pages/helper/TodoPage';
 import TaxAffairsPage from './pages/tax/TaxAffairsPage';
 import KakaoMessageCenterPage from './pages/kakao/KakaoMessageCenterPage';
 import FreelancerPage from './pages/manpower/FreelancerPage';
-import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 
 // 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -211,7 +210,7 @@ const DashboardLayoutWrapper = () => (
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <Router future={{ v7_relativeSplatPath: true }}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
@@ -275,13 +274,13 @@ const App: React.FC = () => {
               <Route path="/manpower/refine-teams" element={<RefineTeamList />} />
               <Route path="/manpower/refine-companies" element={<RefineCompanyList />} />
               <Route path="/manpower/refine-smart-select" element={<RefineSmartSelectDemo />} />
-              <Route path="/estimate/request" element={<EstimateRequestPage />} />
             </Route>
 
             {/* Database Management */}
             <Route path="/database">
               <Route path="company-db" element={<CompanyDatabase />} />
               <Route path="manpower-db" element={<IntegratedDatabase />} />
+              <Route path="account-management" element={<AccountManagementPage />} />
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
             </Route>
 
@@ -306,7 +305,7 @@ const App: React.FC = () => {
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
-              <Route path="support-team" element={<SupportTeamPage />} />
+              <Route path="support-team" element={<SupportTeamPaymentPage />} />
               <Route path="support-claim" element={<SupportClaimPage />} />
               <Route path="rate-management" element={<PayrollRateManagementPage />} />
               <Route path="advance-payment" element={<AdvancePaymentPage />} />
@@ -318,6 +317,7 @@ const App: React.FC = () => {
               <Route path="labor-cost-statement-generator" element={<LaborCostStatementGeneratorPage />} />
               <Route path="tax-invoice" element={<TaxInvoicePage />} />
               <Route path="tax-invoice-ledger" element={<TaxInvoiceLedgerPage />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerPage />} />
               {/* Taxinvoice new routes */}
               <Route path="taxinvoice/issue" element={<TaxInvoicePage />} />
               <Route path="taxinvoice/ledger" element={<TaxInvoiceLedgerPage />} />
@@ -325,7 +325,6 @@ const App: React.FC = () => {
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
-              <Route path="workbook-ledger" element={<WorkbookLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />
               <Route path="kakao-test" element={<KakaoTestPage />} />
@@ -355,6 +354,8 @@ const App: React.FC = () => {
               element={<Navigate to="/payroll/advance-payment?tab=register" replace />}
             />
 
+
+
             {/* Homepage Request Management (Internal) */}
             <Route path="/homepage">
               <Route path="requests" element={<HomepageRequestListPage />} />
@@ -362,7 +363,7 @@ const App: React.FC = () => {
               <Route path="requests/:requestId" element={<HomepageRequestDetailPage />} />
             </Route>
 
-            {/* Homepage Request Management (Internal) */}
+
 
             {/* User Manual */}
             <Route path="/manual" element={<ManualPage />} />

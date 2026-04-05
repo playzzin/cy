@@ -13,7 +13,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "현황관리",
                 icon: "fa-chart-simple",
-                sub: ["통합 현황판", "인원전체내역조회"]
+                sub: ["통합 현황판", "전국페이지", "인원전체내역조회"]
             },
             {
                 text: "통합DB", icon: "fa-circle-info", path: "/database/manpower-db"
@@ -79,7 +79,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세무 관리",
                 icon: "fa-file-invoice-dollar",
-                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)", "매입매출 관리"]
+                sub: ["세무 대시보드", "세금계산서 발행", "수금 관리(원청)", "지급 관리(업체)"]
             },
             {
                 text: "노무비 지급명세서 생성기",
@@ -95,13 +95,6 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 text: "할일",
                 icon: "fa-check-square",
                 path: "/todo"
-            },
-            {
-                text: "홈페이지 관리",
-                icon: "fa-globe",
-                sub: [
-                    { text: "견적문의", path: "/estimate/request" }
-                ]
             }
         ],
         positionConfig: [
@@ -123,7 +116,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세금관리",
                 icon: "fa-file-invoice",
-                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 관리"]
+                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리"]
             },
             {
                 text: "숙소관리",
@@ -155,8 +148,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { text: "회사소개", icon: "fa-building" },
             { text: "대표 인사말", icon: "fa-user-tie" },
             { text: "프로젝트", icon: "fa-project-diagram", path: "/gallery/projects" },
-            { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" },
-            { text: "견적문의", icon: "fa-file-invoice-dollar", path: "/estimate/request" }
+            { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" }
         ]
     },
     // === 직책별 메뉴 (Position Mode) ===
@@ -164,7 +156,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "대표",
         icon: "fa-crown",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -175,7 +167,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "세금관리",
                 icon: "fa-file-invoice",
-                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리", "매입매출 관리"]
+                sub: ["세금계산서 발행", "세금계산서 거래장", "미수금 대시보드", "미수금 관리"]
             },
             {
                 text: "숙소관리",
@@ -198,7 +190,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저1",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -212,7 +204,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저2",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -226,7 +218,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "메니저3",
         icon: "fa-user-tie",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -240,7 +232,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "팀장",
         icon: "fa-user-gear",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -254,7 +246,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "반장",
         icon: "fa-users",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -268,7 +260,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "일반",
         icon: "fa-user",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {
@@ -282,7 +274,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         name: "신규",
         icon: "fa-user-plus",
         menu: [
-            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
+            { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "전국페이지", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
             { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
             {

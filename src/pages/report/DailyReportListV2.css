@@ -1,0 +1,54 @@
+.daily-report-workbook-table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+.daily-report-workbook-table .daily-report-col-select {
+    width: 48px;
+}
+
+.daily-report-workbook-table .daily-report-col-date {
+    width: 86px;
+}
+
+.daily-report-workbook-table .daily-report-col-site {
+    width: 168px;
+}
+
+.daily-report-workbook-table .daily-report-col-site-type,
+.daily-report-workbook-table .daily-report-col-payment-type {
+    width: 108px;
+}
+
+.daily-report-workbook-table .daily-report-col-team {
+    width: 96px;
+}
+
+.daily-report-workbook-table .daily-report-col-name {
+    width: 112px;
+}
+
+.daily-report-workbook-table .daily-report-col-worker-team {
+    width: 108px;
+}
+
+.daily-report-workbook-table .daily-report-col-salary {
+    width: 116px;
+}
+
+.daily-report-workbook-table .daily-report-col-man-day {
+    width: 82px;
+}
+
+.daily-report-workbook-table .daily-report-col-unit-price,
+.daily-report-workbook-table .daily-report-col-amount {
+    width: 102px;
+}
+
+.daily-report-workbook-table .daily-report-col-note {
+    width: 240px;
+}
+
+.daily-report-workbook-table .daily-report-col-action {
+    width: 90px;
+}

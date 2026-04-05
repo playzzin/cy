@@ -31,11 +31,30 @@ const getPositionIcon = (role: string | undefined, positions: Position[]) => {
     return faUser;
 };
 
+const TEAM_TYPE_OPTIONS = ['시공팀', '지원팀', '용역팀'] as const;
+
+const getTeamTypeBadgeClass = (type?: string) => {
+    switch (type) {
+        case '시공팀':
+            return 'bg-blue-100 text-blue-800 border border-blue-200';
+        case '지원팀':
+            return 'bg-amber-100 text-amber-800 border border-amber-200';
+        case '용역팀':
+            return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+        default:
+            return 'bg-slate-100 text-slate-700 border border-slate-200';
+    }
+};
+
 const TEAM_COLUMNS = [
     { key: 'name', label: '팀명' },
+    { key: 'type', label: '구분' },
     { key: 'status', label: '상태' },
     { key: 'leaderName', label: '팀장' },
     { key: 'companyName', label: '소속사' },
+    { key: 'bankName', label: '은행' },
+    { key: 'accountNumber', label: '계좌번호' },
+    { key: 'accountHolder', label: '예금주' },
     { key: 'siteCount', label: '배정 현장' },
     { key: 'memberCount', label: '팀원' },
     { key: 'totalManDay', label: '누적공수' }
@@ -115,6 +134,17 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                     {gongsu.toFixed(1)}공수
                 </span>
             );
+        }
+        if (column.key === 'type') {
+            return (
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getTeamTypeBadgeClass(team.type)}`}>
+                    {team.type || '미지정'}
+                </span>
+            );
+        }
+        if (column.key === 'bankName' || column.key === 'accountNumber' || column.key === 'accountHolder') {
+            const value = team[column.key as keyof Team];
+            return value ? String(value) : '-';
         }
 
         const value = team[column.key as keyof Team];
@@ -308,7 +338,8 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
             return (
                 team.name.toLowerCase().includes(searchLower) ||
                 team.leaderName?.toLowerCase().includes(searchLower) ||
-                team.companyName?.toLowerCase().includes(searchLower)
+                team.companyName?.toLowerCase().includes(searchLower) ||
+                team.type?.toLowerCase().includes(searchLower)
             );
         }
         return true;
@@ -453,6 +484,22 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 <span className="font-bold text-blue-600">
                                                                     {(teamStats[team.id!] || 0).toFixed(1)}공수
                                                                 </span>
+                                                            ) : col.key === 'type' ? (
+                                                                <select
+                                                                    value={team.type || TEAM_TYPE_OPTIONS[0]}
+                                                                    onChange={(e) => team.id && handleTeamChange(team.id, 'type', e.target.value)}
+                                                                    onBlur={(e) => team.id && handleTeamBlur(team.id, 'type', e.target.value)}
+                                                                    className="border rounded px-2 py-1 w-full text-sm"
+                                                                >
+                                                                    {[...new Set([
+                                                                        ...TEAM_TYPE_OPTIONS,
+                                                                        ...teams.map((item) => String(item.type || '').trim()).filter(Boolean)
+                                                                    ])].map((type) => (
+                                                                        <option key={type} value={type}>
+                                                                            {type}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
                                                             ) : col.key === 'status' ? (
                                                                 <select
                                                                     value={team.status || 'active'}
