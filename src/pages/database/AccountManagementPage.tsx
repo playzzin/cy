@@ -1,21 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
     faChevronDown,
     faChevronRight,
     faCreditCard,
+    faDownload,
     faFloppyDisk,
     faHardHat,
     faLayerGroup,
+    faPenToSquare,
     faPlus,
     faRotateRight,
     faSearch,
     faSitemap,
     faTrash,
     faTriangleExclamation,
+    faUpload,
     faUsers,
 } from '@fortawesome/free-solid-svg-icons';
+import * as XLSX from 'xlsx';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
@@ -23,6 +27,11 @@ import { accountDirectoryService, AccountDirectory } from '../../services/accoun
 
 type AccountTab = 'overview' | 'workers' | 'teams' | 'companies' | 'custom';
 type CustomCategory = AccountDirectory['category'];
+type AccountField = 'bankName' | 'accountNumber' | 'accountHolder';
+type CustomEditableField = keyof Pick<AccountDirectory, 'name' | 'bankName' | 'accountNumber' | 'accountHolder' | 'note' | 'status'>;
+type WorkerEmploymentFilter = 'active' | 'retired' | 'all';
+type WorkerSalaryFilter = 'all' | 'daily' | 'monthly' | 'other';
+type WorkerSalarySectionKey = Exclude<WorkerSalaryFilter, 'all'>;
 
 interface AccountManagementPageProps {
     embedded?: boolean;
@@ -43,6 +52,17 @@ interface WorkerTeamOption {
     teamType: string;
     companyName: string;
     workerCount: number;
+}
+
+interface WorkerSalarySection {
+    key: WorkerSalarySectionKey;
+    title: string;
+    description: string;
+    icon: any;
+    accentClass: string;
+    groups: WorkerGroup[];
+    workerCount: number;
+    missingCount: number;
 }
 
 interface EntityGroup<T> {
@@ -74,6 +94,11 @@ const toNullableText = (value: unknown) => {
     return normalized.length > 0 ? normalized : undefined;
 };
 const hasAccountNumber = (value: unknown) => normalizeText(value).length > 0;
+const ACTIVE_WORKER_LABEL = '\uC7AC\uC9C1';
+const RETIRED_WORKER_LABEL = '\uD1F4\uC0AC';
+const DAILY_WAGE_LABEL = '\uC77C\uAE09\uC81C';
+const MONTHLY_WAGE_LABEL = '\uC6D4\uAE09\uC81C';
+const OTHER_WAGE_LABEL = '\uBBF8\uBD84\uB958';
 const CHEONGYEON_KEYWORD = '청연';
 const isCheongyeonText = (value: unknown) => normalizeText(value).includes(CHEONGYEON_KEYWORD);
 
@@ -115,6 +140,35 @@ const getCompanyTypeBadgeClass = (type?: string | null) => {
     }
 };
 
+const getWorkerEmploymentStatus = (worker: Pick<Worker, 'status' | 'isActive'>): WorkerEmploymentFilter => {
+    const normalizedStatus = normalizeText(worker.status).toLowerCase();
+    if (worker.isActive === false) return 'retired';
+    if (normalizedStatus.includes('\uD1F4\uC0AC') || normalizedStatus === 'inactive') return 'retired';
+    return 'active';
+};
+
+const getWorkerEmploymentLabel = (worker: Pick<Worker, 'status' | 'isActive'>) =>
+    getWorkerEmploymentStatus(worker) === 'retired' ? RETIRED_WORKER_LABEL : ACTIVE_WORKER_LABEL;
+
+const getWorkerEmploymentBadgeClass = (worker: Pick<Worker, 'status' | 'isActive'>) =>
+    getWorkerEmploymentStatus(worker) === 'retired'
+        ? 'border border-rose-200 bg-rose-50 text-rose-700'
+        : 'border border-emerald-200 bg-emerald-50 text-emerald-700';
+
+const getWorkerSalarySectionKey = (worker: Pick<Worker, 'salaryModel' | 'payType'>): WorkerSalarySectionKey => {
+    const normalizedSalaryModel = normalizeText(worker.salaryModel || worker.payType);
+    if (normalizedSalaryModel === MONTHLY_WAGE_LABEL) return 'monthly';
+    if (normalizedSalaryModel === DAILY_WAGE_LABEL) return 'daily';
+    return 'other';
+};
+
+const getWorkerSalaryLabel = (worker: Pick<Worker, 'salaryModel' | 'payType'>) => {
+    const key = getWorkerSalarySectionKey(worker);
+    if (key === 'monthly') return MONTHLY_WAGE_LABEL;
+    if (key === 'daily') return DAILY_WAGE_LABEL;
+    return OTHER_WAGE_LABEL;
+};
+
 const createEmptyCustomDraft = (category: CustomCategory): Omit<AccountDirectory, 'id' | 'createdAt' | 'updatedAt'> => ({
     category,
     name: '',
@@ -125,6 +179,12 @@ const createEmptyCustomDraft = (category: CustomCategory): Omit<AccountDirectory
     status: 'active',
     sortOrder: 0,
 });
+
+const EMPTY_ACCOUNT_FIELDS = {
+    bankName: '',
+    accountNumber: '',
+    accountHolder: '',
+} as const;
 
 const SummaryCard = ({
     title,
@@ -165,14 +225,18 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const [searchTerm, setSearchTerm] = useState('');
     const [onlyMissing, setOnlyMissing] = useState(false);
     const [selectedWorkerTeamKey, setSelectedWorkerTeamKey] = useState('all');
+    const [workerEmploymentFilter, setWorkerEmploymentFilter] = useState<WorkerEmploymentFilter>('active');
+    const [workerSalaryFilter, setWorkerSalaryFilter] = useState<WorkerSalaryFilter>('all');
 
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [customAccounts, setCustomAccounts] = useState<AccountDirectory[]>([]);
 
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [savingKeys, setSavingKeys] = useState<Record<string, boolean>>({});
-    const [expandedWorkerGroups, setExpandedWorkerGroups] = useState<Record<string, boolean>>({});
+    const [editingKeys, setEditingKeys] = useState<Record<string, boolean>>({});
+    const [rowSnapshots, setRowSnapshots] = useState<Record<string, Worker | Team | Company | AccountDirectory>>({});
     const [expandedTeamGroups, setExpandedTeamGroups] = useState<Record<string, boolean>>({});
     const [expandedCompanyGroups, setExpandedCompanyGroups] = useState<Record<string, boolean>>({});
     const [expandedCustomGroups, setExpandedCustomGroups] = useState<Record<string, boolean>>({
@@ -186,6 +250,24 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const setSaving = useCallback((key: string, value: boolean) => {
         setSavingKeys((prev) => ({ ...prev, [key]: value }));
+    }, []);
+
+    const beginRowEdit = useCallback((key: string, snapshot: Worker | Team | Company | AccountDirectory) => {
+        setEditingKeys((prev) => ({ ...prev, [key]: true }));
+        setRowSnapshots((prev) => (prev[key] ? prev : { ...prev, [key]: snapshot }));
+    }, []);
+
+    const clearRowControl = useCallback((key: string) => {
+        setEditingKeys((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+        setRowSnapshots((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
     }, []);
 
     const sortCustomAccounts = useCallback((items: AccountDirectory[]) => {
@@ -212,6 +294,8 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             setTeams(teamRows);
             setCompanies(companyRows);
             setCustomAccounts(sortCustomAccounts(customRows));
+            setEditingKeys({});
+            setRowSnapshots({});
         } catch (error) {
             console.error('Failed to load account management data:', error);
         } finally {
@@ -279,28 +363,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
 
     const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
-    const filteredWorkers = useMemo(() => {
-        return cheongyeonWorkers.filter((worker) => {
-            if (onlyMissing && hasAccountNumber(worker.accountNumber)) return false;
-            const { teamName, teamType, companyName } = getWorkerTeamMeta(worker);
-            if (!normalizedSearchTerm) return true;
-
-            return [
-                worker.name,
-                teamName,
-                teamType,
-                companyName,
-                worker.accountHolder,
-                worker.accountNumber,
-                worker.bankName,
-            ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
-        });
-    }, [cheongyeonWorkers, getWorkerTeamMeta, normalizedSearchTerm, onlyMissing]);
-
-    const workerGroups = useMemo<WorkerGroup[]>(() => {
+    const groupWorkersByTeam = useCallback((items: Worker[]): WorkerGroup[] => {
         const grouped = new Map<string, WorkerGroup>();
 
-        filteredWorkers.forEach((worker) => {
+        items.forEach((worker) => {
             const { teamKey, teamName, teamType, companyName } = getWorkerTeamMeta(worker);
 
             if (!grouped.has(teamKey)) {
@@ -321,16 +387,114 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 if (typeCompare !== 0) return typeCompare;
                 return a.teamName.localeCompare(b.teamName, 'ko');
             });
-    }, [filteredWorkers, getWorkerTeamMeta]);
+    }, [getWorkerTeamMeta]);
 
-    const visibleWorkerGroups = useMemo(() => {
-        if (selectedWorkerTeamKey === 'all') return workerGroups;
-        return workerGroups.filter((group) => group.key === selectedWorkerTeamKey);
-    }, [selectedWorkerTeamKey, workerGroups]);
+    const workerScopedItems = useMemo(() => {
+        return cheongyeonWorkers.filter((worker) => {
+            const { teamKey, teamName, teamType, companyName } = getWorkerTeamMeta(worker);
+            if (selectedWorkerTeamKey !== 'all' && teamKey !== selectedWorkerTeamKey) return false;
+            if (onlyMissing && hasAccountNumber(worker.accountNumber)) return false;
+            if (!normalizedSearchTerm) return true;
+
+            return [
+                worker.name,
+                teamName,
+                teamType,
+                companyName,
+                worker.accountHolder,
+                worker.accountNumber,
+                worker.bankName,
+                worker.role,
+                getWorkerEmploymentLabel(worker),
+                getWorkerSalaryLabel(worker),
+            ].some((value) => normalizeText(value).toLowerCase().includes(normalizedSearchTerm));
+        });
+    }, [cheongyeonWorkers, getWorkerTeamMeta, normalizedSearchTerm, onlyMissing, selectedWorkerTeamKey]);
+
+    const workerStatusCounts = useMemo(
+        () =>
+            workerScopedItems.reduce(
+                (acc, worker) => {
+                    if (getWorkerEmploymentStatus(worker) === 'retired') acc.retired += 1;
+                    else acc.active += 1;
+                    return acc;
+                },
+                { active: 0, retired: 0 }
+            ),
+        [workerScopedItems]
+    );
+
+    const workerSalaryCounts = useMemo(
+        () =>
+            workerScopedItems.reduce(
+                (acc, worker) => {
+                    const salaryKey = getWorkerSalarySectionKey(worker);
+                    acc[salaryKey] += 1;
+                    return acc;
+                },
+                { daily: 0, monthly: 0, other: 0 }
+            ),
+        [workerScopedItems]
+    );
+
+    const filteredWorkers = useMemo(() => {
+        return workerScopedItems.filter((worker) => {
+            const employmentStatus = getWorkerEmploymentStatus(worker);
+            if (workerEmploymentFilter === 'active') return employmentStatus === 'active';
+            if (workerEmploymentFilter === 'retired') return employmentStatus === 'retired';
+            return true;
+        });
+    }, [workerEmploymentFilter, workerScopedItems]);
+
+    const workerGroups = useMemo<WorkerGroup[]>(() => groupWorkersByTeam(workerScopedItems), [groupWorkersByTeam, workerScopedItems]);
+
+    const workerSections = useMemo<WorkerSalarySection[]>(() => {
+        const sectionDefinitions: Array<Omit<WorkerSalarySection, 'groups' | 'workerCount' | 'missingCount'>> = [
+            {
+                key: 'daily',
+                title: DAILY_WAGE_LABEL,
+                description: '현장 일급제 작업자 계좌를 빠르게 수정하고 저장합니다.',
+                icon: faHardHat,
+                accentClass: 'border-blue-200 bg-blue-50 text-blue-700',
+            },
+            {
+                key: 'monthly',
+                title: MONTHLY_WAGE_LABEL,
+                description: '월급제 작업자를 별도 섹션으로 분리해 한눈에 확인합니다.',
+                icon: faUsers,
+                accentClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            },
+            {
+                key: 'other',
+                title: OTHER_WAGE_LABEL,
+                description: '급여 방식이 비어 있거나 다른 값으로 저장된 작업자입니다.',
+                icon: faLayerGroup,
+                accentClass: 'border-slate-200 bg-slate-100 text-slate-700',
+            },
+        ];
+
+        return sectionDefinitions
+            .filter((section) => workerSalaryFilter === 'all' || workerSalaryFilter === section.key)
+            .map((section) => {
+                const items = filteredWorkers.filter((worker) => getWorkerSalarySectionKey(worker) === section.key);
+                return {
+                    ...section,
+                    groups: groupWorkersByTeam(items),
+                    workerCount: items.length,
+                    missingCount: items.filter((worker) => !hasAccountNumber(worker.accountNumber)).length,
+                };
+            })
+            .filter((section) => section.workerCount > 0 || workerSalaryFilter === section.key);
+    }, [filteredWorkers, groupWorkersByTeam, workerSalaryFilter]);
+
+    const visibleWorkerRows = useMemo(
+        () => workerSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
+        [workerSections]
+    );
 
     const visibleWorkerCount = useMemo(
-        () => visibleWorkerGroups.reduce((sum, group) => sum + group.items.length, 0),
-        [visibleWorkerGroups]
+        () => filteredWorkers.length,
+        [filteredWorkers]
     );
 
     const filteredTeams = useMemo(() => {
@@ -426,16 +590,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     }, [filteredCustomAccounts]);
 
     useEffect(() => {
-        setExpandedWorkerGroups((prev) => {
-            const next = { ...prev };
-            workerGroups.forEach((group) => {
-                if (!(group.key in next)) next[group.key] = true;
-            });
-            return next;
-        });
-    }, [workerGroups]);
-
-    useEffect(() => {
         if (selectedWorkerTeamKey === 'all') return;
         const hasSelectedTeam = workerTeamOptions.some((option) => option.key === selectedWorkerTeamKey);
         if (!hasSelectedTeam) setSelectedWorkerTeamKey('all');
@@ -474,8 +628,17 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     const topTeamGaps = useMemo(() => teamGroups.filter((group) => group.missingCount > 0), [teamGroups]);
     const topCompanyGaps = useMemo(() => companyGroups.filter((group) => group.missingCount > 0), [companyGroups]);
 
-    const updateWorkerField = (workerId: string, field: 'bankName' | 'accountNumber' | 'accountHolder', value: string) => {
+    const updateWorkerField = (workerId: string, field: AccountField, value: string) => {
         setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, [field]: value } : worker)));
+    };
+
+    const cancelWorkerEdit = (workerId: string) => {
+        const key = `worker:${workerId}`;
+        const snapshot = rowSnapshots[key] as Worker | undefined;
+        if (snapshot) {
+            setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? snapshot : worker)));
+        }
+        clearRowControl(key);
     };
 
     const saveWorkerAccount = async (workerId: string) => {
@@ -490,6 +653,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountNumber: toNullableText(target.accountNumber),
                 accountHolder: toNullableText(target.accountHolder),
             });
+            clearRowControl(key);
         } catch (error) {
             console.error('Failed to update worker account:', error);
         } finally {
@@ -497,8 +661,39 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         }
     };
 
-    const updateTeamField = (teamId: string, field: 'bankName' | 'accountNumber' | 'accountHolder', value: string) => {
+    const clearWorkerAccount = async (workerId: string) => {
+        const target = workers.find((worker) => worker.id === workerId);
+        if (!target || !target.id) return;
+        if (!window.confirm(`"${target.name}" 작업자의 계좌정보를 삭제하시겠습니까? 작업자 자체는 삭제되지 않습니다.`)) return;
+
+        const key = `worker:${workerId}`;
+        setSaving(key, true);
+        try {
+            await manpowerService.updateWorker(workerId, {
+                bankName: undefined,
+                accountNumber: undefined,
+                accountHolder: undefined,
+            });
+            setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, ...EMPTY_ACCOUNT_FIELDS } : worker)));
+            clearRowControl(key);
+        } catch (error) {
+            console.error('Failed to clear worker account:', error);
+        } finally {
+            setSaving(key, false);
+        }
+    };
+
+    const updateTeamField = (teamId: string, field: AccountField, value: string) => {
         setTeams((prev) => prev.map((team) => (team.id === teamId ? { ...team, [field]: value } : team)));
+    };
+
+    const cancelTeamEdit = (teamId: string) => {
+        const key = `team:${teamId}`;
+        const snapshot = rowSnapshots[key] as Team | undefined;
+        if (snapshot) {
+            setTeams((prev) => prev.map((team) => (team.id === teamId ? snapshot : team)));
+        }
+        clearRowControl(key);
     };
 
     const saveTeamAccount = async (teamId: string) => {
@@ -513,6 +708,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountNumber: toNullableText(target.accountNumber),
                 accountHolder: toNullableText(target.accountHolder),
             });
+            clearRowControl(key);
         } catch (error) {
             console.error('Failed to update team account:', error);
         } finally {
@@ -520,8 +716,39 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         }
     };
 
-    const updateCompanyField = (companyId: string, field: 'bankName' | 'accountNumber' | 'accountHolder', value: string) => {
+    const clearTeamAccount = async (teamId: string) => {
+        const target = teams.find((team) => team.id === teamId);
+        if (!target || !target.id) return;
+        if (!window.confirm(`"${target.name}" 팀의 계좌정보를 삭제하시겠습니까? 팀 자체는 삭제되지 않습니다.`)) return;
+
+        const key = `team:${teamId}`;
+        setSaving(key, true);
+        try {
+            await teamService.updateTeam(teamId, {
+                bankName: undefined,
+                accountNumber: undefined,
+                accountHolder: undefined,
+            });
+            setTeams((prev) => prev.map((team) => (team.id === teamId ? { ...team, ...EMPTY_ACCOUNT_FIELDS } : team)));
+            clearRowControl(key);
+        } catch (error) {
+            console.error('Failed to clear team account:', error);
+        } finally {
+            setSaving(key, false);
+        }
+    };
+
+    const updateCompanyField = (companyId: string, field: AccountField, value: string) => {
         setCompanies((prev) => prev.map((company) => (company.id === companyId ? { ...company, [field]: value } : company)));
+    };
+
+    const cancelCompanyEdit = (companyId: string) => {
+        const key = `company:${companyId}`;
+        const snapshot = rowSnapshots[key] as Company | undefined;
+        if (snapshot) {
+            setCompanies((prev) => prev.map((company) => (company.id === companyId ? snapshot : company)));
+        }
+        clearRowControl(key);
     };
 
     const saveCompanyAccount = async (companyId: string) => {
@@ -536,6 +763,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountNumber: toNullableText(target.accountNumber),
                 accountHolder: toNullableText(target.accountHolder),
             });
+            clearRowControl(key);
         } catch (error) {
             console.error('Failed to update company account:', error);
         } finally {
@@ -543,8 +771,39 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         }
     };
 
-    const updateCustomField = (entryId: string, field: keyof Pick<AccountDirectory, 'name' | 'bankName' | 'accountNumber' | 'accountHolder' | 'note' | 'status'>, value: string) => {
+    const clearCompanyAccount = async (companyId: string) => {
+        const target = companies.find((company) => company.id === companyId);
+        if (!target || !target.id) return;
+        if (!window.confirm(`"${target.name}" 회사의 계좌정보를 삭제하시겠습니까? 회사 자체는 삭제되지 않습니다.`)) return;
+
+        const key = `company:${companyId}`;
+        setSaving(key, true);
+        try {
+            await companyService.updateCompany(companyId, {
+                bankName: undefined,
+                accountNumber: undefined,
+                accountHolder: undefined,
+            });
+            setCompanies((prev) => prev.map((company) => (company.id === companyId ? { ...company, ...EMPTY_ACCOUNT_FIELDS } : company)));
+            clearRowControl(key);
+        } catch (error) {
+            console.error('Failed to clear company account:', error);
+        } finally {
+            setSaving(key, false);
+        }
+    };
+
+    const updateCustomField = (entryId: string, field: CustomEditableField, value: string) => {
         setCustomAccounts((prev) => prev.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)));
+    };
+
+    const cancelCustomEdit = (entryId: string) => {
+        const key = `custom:${entryId}`;
+        const snapshot = rowSnapshots[key] as AccountDirectory | undefined;
+        if (snapshot) {
+            setCustomAccounts((prev) => prev.map((entry) => (entry.id === entryId ? snapshot : entry)));
+        }
+        clearRowControl(key);
     };
 
     const saveCustomEntry = async (entryId: string) => {
@@ -566,6 +825,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 note: toNullableText(target.note),
                 status: target.status === 'inactive' ? 'inactive' : 'active',
             });
+            clearRowControl(key);
         } catch (error) {
             console.error('Failed to update custom account entry:', error);
         } finally {
@@ -583,6 +843,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         try {
             await accountDirectoryService.deleteEntry(entryId);
             setCustomAccounts((prev) => prev.filter((entry) => entry.id !== entryId));
+            clearRowControl(key);
         } catch (error) {
             console.error('Failed to delete custom account entry:', error);
         } finally {
@@ -632,39 +893,353 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         }
     };
 
+    const getImportedCellText = (row: Record<string, unknown>, aliases: string[]) => {
+        for (const alias of aliases) {
+            const value = row[alias];
+            const normalized = normalizeText(value);
+            if (normalized) return normalized;
+        }
+        return '';
+    };
+
+    const normalizeImportedCustomCategory = (value: unknown): CustomCategory | null => {
+        const normalized = normalizeText(value).toLowerCase();
+        if (!normalized) return null;
+        if (normalized === 'purchase' || normalized.includes('매입')) return 'purchase';
+        if (normalized === 'other' || normalized.includes('기타')) return 'other';
+        return null;
+    };
+
+    const normalizeImportedCustomStatus = (value: unknown): AccountDirectory['status'] => {
+        const normalized = normalizeText(value).toLowerCase();
+        if (normalized === 'inactive' || normalized.includes('보관')) return 'inactive';
+        return 'active';
+    };
+
+    const handleDownloadTemplate = () => {
+        if (activeTab === 'overview') return;
+
+        const today = new Date().toISOString().slice(0, 10);
+        let rows: Record<string, unknown>[] = [];
+        let sheetName = '계좌관리';
+        let fileName = '계좌관리';
+
+        if (activeTab === 'workers') {
+            rows = visibleWorkerRows.map((worker) => {
+                const meta = getWorkerTeamMeta(worker);
+                return {
+                    id: worker.id || '',
+                    이름: worker.name || '',
+                    팀명: meta.teamName,
+                    팀유형: meta.teamType,
+                    회사명: meta.companyName,
+                    재직상태: getWorkerEmploymentLabel(worker),
+                    급여방식: getWorkerSalaryLabel(worker),
+                    은행: worker.bankName || '',
+                    계좌번호: worker.accountNumber || '',
+                    예금주: worker.accountHolder || '',
+                };
+            });
+            sheetName = '작업자계좌';
+            fileName = '작업자계좌_업로드양식';
+        } else if (activeTab === 'teams') {
+            rows = filteredTeams.map((team) => ({
+                id: team.id || '',
+                팀명: team.name || '',
+                팀유형: team.type || '',
+                소속사: team.companyName || '',
+                팀장: team.leaderName || '',
+                은행: team.bankName || '',
+                계좌번호: team.accountNumber || '',
+                예금주: team.accountHolder || '',
+            }));
+            sheetName = '팀계좌';
+            fileName = '팀계좌_업로드양식';
+        } else if (activeTab === 'companies') {
+            rows = filteredCompanies.map((company) => ({
+                id: company.id || '',
+                회사명: company.name || '',
+                회사유형: company.type || '',
+                대표자: company.ceoName || '',
+                사업자번호: company.businessNumber || '',
+                은행: company.bankName || '',
+                계좌번호: company.accountNumber || '',
+                예금주: company.accountHolder || '',
+            }));
+            sheetName = '회사계좌';
+            fileName = '회사계좌_업로드양식';
+        } else if (activeTab === 'custom') {
+            rows = filteredCustomAccounts.map((entry) => ({
+                id: entry.id || '',
+                구분코드: entry.category,
+                구분명: CUSTOM_CATEGORY_META[entry.category].title,
+                계좌명: entry.name || '',
+                은행: entry.bankName || '',
+                계좌번호: entry.accountNumber || '',
+                예금주: entry.accountHolder || '',
+                메모: entry.note || '',
+                상태: entry.status === 'inactive' ? '보관' : '사용중',
+            }));
+            sheetName = '매입기타계좌';
+            fileName = '매입기타계좌_업로드양식';
+        }
+
+        const worksheet = XLSX.utils.json_to_sheet(rows);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+        XLSX.writeFile(workbook, `${fileName}_${today}.xlsx`);
+    };
+
+    const handleUploadClick = () => {
+        if (activeTab === 'overview') return;
+        fileInputRef.current?.click();
+    };
+
+    const handleUploadFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        setLoading(true);
+        try {
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
+
+            if (rows.length === 0) {
+                alert('업로드할 데이터가 없습니다.');
+                return;
+            }
+
+            if (activeTab === 'workers') {
+                const updates: Array<{ id: string; updates: Partial<Worker> }> = [];
+
+                rows.forEach((row) => {
+                    const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
+                    const importedName = getImportedCellText(row, ['이름', '작업자명']);
+                    const importedTeamName = getImportedCellText(row, ['팀명']);
+                    const target =
+                        workers.find((worker) => worker.id === importedId) ||
+                        workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
+
+                    if (!target?.id) return;
+
+                    updates.push({
+                        id: target.id,
+                        updates: {
+                            bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                            accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                            accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                        },
+                    });
+                });
+
+                if (updates.length === 0) {
+                    alert('작업자 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
+                    return;
+                }
+
+                await manpowerService.updateWorkersBatch(updates);
+                await loadData();
+                alert(`작업자 계좌 ${updates.length}건을 반영했습니다.`);
+                return;
+            }
+
+            if (activeTab === 'teams') {
+                let updatedCount = 0;
+
+                for (const row of rows) {
+                    const importedId = getImportedCellText(row, ['id', 'ID', '팀ID']);
+                    const importedName = getImportedCellText(row, ['팀명']);
+                    const target = teams.find((team) => team.id === importedId) || teams.find((team) => normalizeText(team.name) === importedName);
+                    if (!target?.id) continue;
+
+                    await teamService.updateTeam(target.id, {
+                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                    });
+                    updatedCount += 1;
+                }
+
+                if (updatedCount === 0) {
+                    alert('팀 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
+                    return;
+                }
+
+                await loadData();
+                alert(`팀 계좌 ${updatedCount}건을 반영했습니다.`);
+                return;
+            }
+
+            if (activeTab === 'companies') {
+                let updatedCount = 0;
+
+                for (const row of rows) {
+                    const importedId = getImportedCellText(row, ['id', 'ID', '회사ID']);
+                    const importedName = getImportedCellText(row, ['회사명']);
+                    const target =
+                        companies.find((company) => company.id === importedId) ||
+                        companies.find((company) => normalizeText(company.name) === importedName);
+                    if (!target?.id) continue;
+
+                    await companyService.updateCompany(target.id, {
+                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                    });
+                    updatedCount += 1;
+                }
+
+                if (updatedCount === 0) {
+                    alert('회사 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
+                    return;
+                }
+
+                await loadData();
+                alert(`회사 계좌 ${updatedCount}건을 반영했습니다.`);
+                return;
+            }
+
+            if (activeTab === 'custom') {
+                let updatedCount = 0;
+                let createdCount = 0;
+                const createdCountByCategory: Record<CustomCategory, number> = {
+                    purchase: 0,
+                    other: 0,
+                };
+
+                for (const row of rows) {
+                    const importedId = getImportedCellText(row, ['id', 'ID', '계좌ID']);
+                    const importedName = getImportedCellText(row, ['계좌명', 'name']);
+                    const importedCategory =
+                        normalizeImportedCustomCategory(getImportedCellText(row, ['구분코드', 'category'])) ||
+                        normalizeImportedCustomCategory(getImportedCellText(row, ['구분명', 'categoryName']));
+
+                    if (!importedName || !importedCategory) continue;
+
+                    const target =
+                        customAccounts.find((entry) => entry.id === importedId) ||
+                        customAccounts.find((entry) => entry.category === importedCategory && normalizeText(entry.name) === importedName);
+
+                    const payload: Partial<AccountDirectory> = {
+                        category: importedCategory,
+                        name: importedName,
+                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                        note: toNullableText(getImportedCellText(row, ['메모', 'note'])),
+                        status: normalizeImportedCustomStatus(getImportedCellText(row, ['상태', 'status'])),
+                    };
+
+                    if (target?.id) {
+                        await accountDirectoryService.updateEntry(target.id, payload);
+                        updatedCount += 1;
+                    } else {
+                        await accountDirectoryService.addEntry({
+                            category: importedCategory,
+                            name: importedName,
+                            bankName: payload.bankName,
+                            accountNumber: payload.accountNumber,
+                            accountHolder: payload.accountHolder,
+                            note: payload.note,
+                            status: payload.status === 'inactive' ? 'inactive' : 'active',
+                            sortOrder: customAccounts.filter((entry) => entry.category === importedCategory).length + createdCountByCategory[importedCategory],
+                        });
+                        createdCountByCategory[importedCategory] += 1;
+                        createdCount += 1;
+                    }
+                }
+
+                if (updatedCount === 0 && createdCount === 0) {
+                    alert('매입/기타 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
+                    return;
+                }
+
+                await loadData();
+                alert(`매입/기타 계좌 업데이트 ${updatedCount}건, 신규 ${createdCount}건을 반영했습니다.`);
+            }
+        } catch (error) {
+            console.error('Failed to upload account workbook:', error);
+            alert('엑셀 업로드 중 오류가 발생했습니다. 양식과 컬럼명을 확인해주세요.');
+        } finally {
+            event.target.value = '';
+            setLoading(false);
+        }
+    };
+
     const renderToolbar = (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="relative w-full lg:max-w-md">
-                    <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                        value={searchTerm}
-                        onChange={(event) => setSearchTerm(event.target.value)}
-                        placeholder="작업자, 팀, 회사, 계좌번호, 예금주로 검색"
-                        className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                    />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+            <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="relative w-full lg:max-w-md">
+                        <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
-                            type="checkbox"
-                            checked={onlyMissing}
-                            onChange={(event) => setOnlyMissing(event.target.checked)}
-                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            value={searchTerm}
+                            onChange={(event) => setSearchTerm(event.target.value)}
+                            placeholder="작업자, 팀, 회사, 계좌번호, 예금주로 검색"
+                            className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                         />
-                        계좌 미등록만 보기
-                    </label>
+                    </div>
 
-                    <button
-                        type="button"
-                        onClick={loadData}
-                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                    >
-                        <FontAwesomeIcon icon={faRotateRight} />
-                        새로고침
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                            <input
+                                type="checkbox"
+                                checked={onlyMissing}
+                                onChange={(event) => setOnlyMissing(event.target.checked)}
+                                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            계좌 미등록만 보기
+                        </label>
+
+                        <button
+                            type="button"
+                            onClick={loadData}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                            <FontAwesomeIcon icon={faRotateRight} />
+                            새로고침
+                        </button>
+                    </div>
                 </div>
+
+                {activeTab !== 'overview' && (
+                    <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                            <div className="text-sm font-semibold text-slate-800">현재 탭 엑셀 업로드 / 다운로드</div>
+                            <div className="mt-1 text-xs text-slate-500">
+                                다운로드한 파일을 그대로 수정한 뒤 다시 업로드하면 일괄 반영됩니다.
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".xlsx,.xls,.csv"
+                                onChange={handleUploadFile}
+                                className="hidden"
+                            />
+                            <button
+                                type="button"
+                                onClick={handleDownloadTemplate}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                            >
+                                <FontAwesomeIcon icon={faDownload} />
+                                다운로드
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleUploadClick}
+                                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                            >
+                                <FontAwesomeIcon icon={faUpload} />
+                                업로드
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -674,6 +1249,38 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             {message}
         </div>
     );
+
+    const workerEmploymentOptions: Array<{ key: WorkerEmploymentFilter; label: string; count: number }> = [
+        { key: 'active', label: '현재 작업자', count: workerStatusCounts.active },
+        { key: 'retired', label: '퇴사자', count: workerStatusCounts.retired },
+        { key: 'all', label: '전체', count: workerScopedItems.length },
+    ];
+
+    const workerSalaryOptions: Array<{ key: WorkerSalaryFilter; label: string; count: number }> = [
+        { key: 'all', label: '전체 급여형태', count: workerScopedItems.length },
+        { key: 'daily', label: DAILY_WAGE_LABEL, count: workerSalaryCounts.daily },
+        { key: 'monthly', label: MONTHLY_WAGE_LABEL, count: workerSalaryCounts.monthly },
+        { key: 'other', label: OTHER_WAGE_LABEL, count: workerSalaryCounts.other },
+    ];
+
+    const getWorkerFilterButtonClass = (active: boolean) =>
+        `inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+            active
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+        }`;
+
+    const workerSheetInputClass =
+        'h-11 w-full rounded-md border border-slate-200 bg-white px-3 text-[15px] text-slate-800 shadow-sm outline-none transition placeholder:text-slate-300 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100';
+    const workerSheetNumberInputClass = `${workerSheetInputClass} font-semibold tracking-[0.08em]`;
+    const workerDigitsStyle: React.CSSProperties = {
+        fontVariantNumeric: 'tabular-nums slashed-zero',
+        fontFeatureSettings: '"tnum" 1, "zero" 1',
+    };
+    const rowActionButtonClass = 'inline-flex items-center justify-center gap-1 rounded-md border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50';
+    const rowActionPrimaryClass = `${rowActionButtonClass} border-slate-900 bg-slate-900 text-white hover:bg-slate-800`;
+    const rowActionSecondaryClass = `${rowActionButtonClass} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`;
+    const rowActionDangerClass = `${rowActionButtonClass} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`;
 
     return (
         <div className={`space-y-6 ${embedded ? '' : 'min-h-screen bg-slate-50 p-6'}`}>
@@ -810,7 +1417,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                 onClick={() => {
                                                     setSelectedWorkerTeamKey(group.key);
                                                     setActiveTab('workers');
-                                                    setExpandedWorkerGroups((prev) => ({ ...prev, [group.key]: true }));
                                                 }}
                                                 className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:bg-slate-100"
                                             >
@@ -887,117 +1493,245 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     {activeTab === 'workers' && (
                         <div className="space-y-4">
                             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                                    <div>
-                                        <div className="text-sm font-semibold text-slate-900">청연 소속 팀원만 작업자 계좌 목록에 표시됩니다.</div>
-                                        <div className="mt-1 text-sm text-slate-500">
-                                            청연 소속 전체 {cheongyeonWorkers.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                        <div>
+                                            <div className="text-sm font-semibold text-slate-900">청연 소속 팀 작업자 계좌만 표시합니다.</div>
+                                            <div className="mt-1 text-sm text-slate-500">
+                                                청연 소속 전체 {cheongyeonWorkers.length}명 중 현재 {visibleWorkerCount}명을 보고 있습니다.
+                                                기본값은 현재 작업자만 표시하며, 퇴사자는 필요할 때만 열어볼 수 있습니다.
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <label htmlFor="worker-team-filter" className="text-sm font-medium text-slate-600">
+                                                팀 선택
+                                            </label>
+                                            <select
+                                                id="worker-team-filter"
+                                                value={selectedWorkerTeamKey}
+                                                onChange={(event) => setSelectedWorkerTeamKey(event.target.value)}
+                                                className="min-w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                            >
+                                                <option value="all">청연 전체 팀</option>
+                                                {workerTeamOptions.map((option) => (
+                                                    <option key={option.key} value={option.key}>
+                                                        {`${option.label} · ${option.teamType} · ${option.workerCount}명`}
+                                                    </option>
+                                                ))}
+                                            </select>
                                         </div>
                                     </div>
-                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                                        <label htmlFor="worker-team-filter" className="text-sm font-medium text-slate-600">
-                                            팀 선택
-                                        </label>
-                                        <select
-                                            id="worker-team-filter"
-                                            value={selectedWorkerTeamKey}
-                                            onChange={(event) => setSelectedWorkerTeamKey(event.target.value)}
-                                            className="min-w-[260px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                        >
-                                            <option value="all">청연 전체 팀</option>
-                                            {workerTeamOptions.map((option) => (
-                                                <option key={option.key} value={option.key}>
-                                                    {`${option.label} · ${option.teamType} · ${option.workerCount}명`}
-                                                </option>
-                                            ))}
-                                        </select>
+
+                                    <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1.6fr)]">
+                                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                                            <div className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                                                재직 상태
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {workerEmploymentOptions.map((option) => (
+                                                    <button
+                                                        key={option.key}
+                                                        type="button"
+                                                        onClick={() => setWorkerEmploymentFilter(option.key)}
+                                                        className={getWorkerFilterButtonClass(workerEmploymentFilter === option.key)}
+                                                    >
+                                                        <span>{option.label}</span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs ${workerEmploymentFilter === option.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                                            {option.count}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                                            <div className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                                                급여 방식
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {workerSalaryOptions.map((option) => (
+                                                    <button
+                                                        key={option.key}
+                                                        type="button"
+                                                        onClick={() => setWorkerSalaryFilter(option.key)}
+                                                        className={getWorkerFilterButtonClass(workerSalaryFilter === option.key)}
+                                                    >
+                                                        <span>{option.label}</span>
+                                                        <span className={`rounded-full px-2 py-0.5 text-xs ${workerSalaryFilter === option.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                                            {option.count}
+                                                        </span>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
                             {workerTeamOptions.length === 0 && renderEmptyState('청연 소속 팀 작업자 데이터가 없습니다.')}
-                            {workerTeamOptions.length > 0 && visibleWorkerGroups.length === 0 && renderEmptyState('선택한 조건에 맞는 청연 소속 작업자 계좌 데이터가 없습니다.')}
-                            {visibleWorkerGroups.map((group) => (
-                                <div key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                                    <button
-                                        type="button"
-                                        onClick={() => setExpandedWorkerGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                                        className="flex w-full items-center justify-between gap-4 bg-slate-50 px-5 py-4 text-left"
-                                    >
-                                        <div className="min-w-0">
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <h2 className="text-lg font-bold text-slate-900">{group.teamName}</h2>
-                                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getTeamTypeBadgeClass(group.teamType)}`}>
-                                                    {group.teamType}
-                                                </span>
-                                                {group.companyName && <span className="text-sm text-slate-500">{group.companyName}</span>}
-                                            </div>
-                                            <div className="mt-2 text-sm text-slate-500">작업자 {group.items.length}명 · 미등록 {group.missingCount}명</div>
-                                        </div>
-                                        <FontAwesomeIcon icon={expandedWorkerGroups[group.key] ? faChevronDown : faChevronRight} className="text-slate-400" />
-                                    </button>
+                            {workerTeamOptions.length > 0 && workerSections.length === 0 && renderEmptyState('선택한 조건에 맞는 청연 소속 작업자 계좌 데이터가 없습니다.')}
 
-                                    {expandedWorkerGroups[group.key] && (
+                            {workerSections.map((section) => (
+                                <div key={section.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                    <div className="border-b border-slate-200 bg-gradient-to-r from-white via-slate-50 to-slate-100 px-5 py-4">
+                                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                            <div className="flex flex-wrap items-center gap-3">
+                                                <span className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${section.accentClass}`}>
+                                                    <FontAwesomeIcon icon={section.icon} />
+                                                </span>
+                                                <div>
+                                                    <h2 className="text-lg font-bold text-slate-900">{section.title}</h2>
+                                                    <p className="mt-1 text-sm text-slate-500">{section.description}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-2">
+                                                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                                                    인원 <span className="ml-2 text-base font-bold text-slate-900">{section.workerCount}</span>
+                                                </div>
+                                                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                                                    계좌 미입력 <span className="ml-2 text-base font-bold">{section.missingCount}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {section.groups.length === 0 ? (
+                                        renderEmptyState(`${section.title} 작업자 데이터가 없습니다.`)
+                                    ) : (
                                         <div className="overflow-x-auto">
-                                            <table className="min-w-full text-sm">
-                                                <thead className="bg-slate-900 text-xs uppercase text-white">
+                                            <table className="min-w-full table-fixed border-collapse text-[15px] leading-6 text-slate-700">
+                                                <thead className="sticky top-0 z-10 bg-slate-800 text-xs font-bold uppercase tracking-[0.12em] text-slate-100">
                                                     <tr>
-                                                        <th className="px-4 py-3 text-left">작업자</th>
-                                                        <th className="px-4 py-3 text-left">직책/상태</th>
-                                                        <th className="px-4 py-3 text-left">은행</th>
-                                                        <th className="px-4 py-3 text-left">계좌번호</th>
-                                                        <th className="px-4 py-3 text-left">예금주</th>
-                                                        <th className="px-4 py-3 text-left">저장</th>
+                                                        <th className="w-[220px] border-b border-slate-700 px-4 py-3 text-left">소속</th>
+                                                        <th className="w-[160px] border-b border-slate-700 px-4 py-3 text-left">작업자</th>
+                                                        <th className="w-[170px] border-b border-slate-700 px-4 py-3 text-left">직책 / 상태</th>
+                                                        <th className="w-[140px] border-b border-slate-700 px-4 py-3 text-left">은행</th>
+                                                        <th className="w-[240px] border-b border-slate-700 px-4 py-3 text-left">계좌번호</th>
+                                                        <th className="w-[150px] border-b border-slate-700 px-4 py-3 text-left">예금주</th>
+                                                        <th className="w-[228px] border-b border-slate-700 px-4 py-3 text-left">관리</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody className="divide-y divide-slate-100">
-                                                    {group.items.map((worker) => {
-                                                        const savingKey = `worker:${worker.id}`;
-                                                        return (
-                                                            <tr key={worker.id} className="align-top">
-                                                                <td className="px-4 py-3">
-                                                                    <div className="font-semibold text-slate-900">{worker.name}</div>
-                                                                    <div className="mt-1 text-xs text-slate-500">{worker.contact || '연락처 없음'}</div>
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <div className="text-slate-700">{worker.role || '작업자'}</div>
-                                                                    <div className="mt-1 text-xs text-slate-500">{worker.status || '재직'}</div>
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={worker.bankName || ''}
-                                                                        onChange={(event) => updateWorkerField(worker.id || '', 'bankName', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={worker.accountNumber || ''}
-                                                                        onChange={(event) => updateWorkerField(worker.id || '', 'accountNumber', event.target.value)}
-                                                                        className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={worker.accountHolder || ''}
-                                                                        onChange={(event) => updateWorkerField(worker.id || '', 'accountHolder', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
-                                                                </td>
-                                                                <td className="px-4 py-3">
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={!worker.id || !!savingKeys[savingKey]}
-                                                                        onClick={() => worker.id && saveWorkerAccount(worker.id)}
-                                                                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faFloppyDisk} />
-                                                                        {savingKeys[savingKey] ? '저장 중...' : '저장'}
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
+                                                <tbody className="divide-y divide-slate-200">
+                                                    {section.groups.map((group) =>
+                                                        group.items.map((worker) => {
+                                                            const rowKey = `worker:${worker.id}`;
+                                                            const savingKey = rowKey;
+                                                            const isEditing = !!editingKeys[rowKey];
+                                                            const accountMissing = !hasAccountNumber(worker.accountNumber);
+
+                                                            return (
+                                                                <tr
+                                                                    key={worker.id || `${section.key}-${group.key}-${worker.name}`}
+                                                                    className={accountMissing ? 'bg-amber-50/50' : 'bg-white'}
+                                                                >
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        <div className="font-semibold text-slate-900">{group.teamName}</div>
+                                                                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                                                                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 font-semibold ${getTeamTypeBadgeClass(group.teamType)}`}>
+                                                                                {group.teamType}
+                                                                            </span>
+                                                                            <span className="text-slate-500">{group.companyName || '소속 회사 없음'}</span>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        <div className="font-semibold text-slate-900">{worker.name}</div>
+                                                                        <div className="mt-1 text-xs text-slate-500">{worker.contact || '연락처 없음'}</div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        <div className="text-sm font-medium text-slate-700">{worker.role || '직책 미입력'}</div>
+                                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getWorkerEmploymentBadgeClass(worker)}`}>
+                                                                                {getWorkerEmploymentLabel(worker)}
+                                                                            </span>
+                                                                            {accountMissing && (
+                                                                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                                                                                    계좌 미입력
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                value={worker.bankName || ''}
+                                                                                onChange={(event) => updateWorkerField(worker.id || '', 'bankName', event.target.value)}
+                                                                                placeholder="은행명"
+                                                                                className={workerSheetInputClass}
+                                                                            />
+                                                                        ) : (
+                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                                                                                {worker.bankName || '-'}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                value={worker.accountNumber || ''}
+                                                                                onChange={(event) => updateWorkerField(worker.id || '', 'accountNumber', event.target.value)}
+                                                                                placeholder="계좌번호"
+                                                                                className={workerSheetNumberInputClass}
+                                                                                style={workerDigitsStyle}
+                                                                            />
+                                                                        ) : (
+                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700" style={workerDigitsStyle}>
+                                                                                {worker.accountNumber || '-'}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        {isEditing ? (
+                                                                            <input
+                                                                                value={worker.accountHolder || ''}
+                                                                                onChange={(event) => updateWorkerField(worker.id || '', 'accountHolder', event.target.value)}
+                                                                                placeholder="예금주"
+                                                                                className={workerSheetInputClass}
+                                                                            />
+                                                                        ) : (
+                                                                            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
+                                                                                {worker.accountHolder || '-'}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 align-top">
+                                                                        <div className="flex flex-wrap gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={!worker.id || !!savingKeys[savingKey]}
+                                                                                onClick={() => {
+                                                                                    if (!worker.id) return;
+                                                                                    if (isEditing) cancelWorkerEdit(worker.id);
+                                                                                    else beginRowEdit(rowKey, { ...worker });
+                                                                                }}
+                                                                                className={rowActionSecondaryClass}
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faPenToSquare} />
+                                                                                {isEditing ? '취소' : '수정'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={!worker.id || !isEditing || !!savingKeys[savingKey]}
+                                                                                onClick={() => worker.id && saveWorkerAccount(worker.id)}
+                                                                                className={rowActionPrimaryClass}
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faFloppyDisk} />
+                                                                                {savingKeys[savingKey] ? '저장중' : '저장'}
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                disabled={!worker.id || !!savingKeys[savingKey]}
+                                                                                onClick={() => worker.id && clearWorkerAccount(worker.id)}
+                                                                                className={rowActionDangerClass}
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faTrash} />
+                                                                                삭제
+                                                                            </button>
+                                                                        </div>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })
+                                                    )}
                                                 </tbody>
                                             </table>
                                         </div>
@@ -1038,12 +1772,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         <th className="px-4 py-3 text-left">은행</th>
                                                         <th className="px-4 py-3 text-left">계좌번호</th>
                                                         <th className="px-4 py-3 text-left">예금주</th>
-                                                        <th className="px-4 py-3 text-left">저장</th>
+                                                        <th className="px-4 py-3 text-left">관리</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
                                                     {group.items.map((team) => {
-                                                        const savingKey = `team:${team.id}`;
+                                                        const rowKey = `team:${team.id}`;
+                                                        const savingKey = rowKey;
+                                                        const isEditing = !!editingKeys[rowKey];
                                                         return (
                                                             <tr key={team.id} className="align-top">
                                                                 <td className="px-4 py-3">
@@ -1053,36 +1789,75 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                 <td className="px-4 py-3">{team.companyName || '미지정'}</td>
                                                                 <td className="px-4 py-3">{team.leaderName || '미지정'}</td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={team.bankName || ''}
-                                                                        onChange={(event) => updateTeamField(team.id || '', 'bankName', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={team.bankName || ''}
+                                                                            onChange={(event) => updateTeamField(team.id || '', 'bankName', event.target.value)}
+                                                                            className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{team.bankName || '-'}</div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={team.accountNumber || ''}
-                                                                        onChange={(event) => updateTeamField(team.id || '', 'accountNumber', event.target.value)}
-                                                                        className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={team.accountNumber || ''}
+                                                                            onChange={(event) => updateTeamField(team.id || '', 'accountNumber', event.target.value)}
+                                                                            className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                            style={workerDigitsStyle}
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>
+                                                                            {team.accountNumber || '-'}
+                                                                        </div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={team.accountHolder || ''}
-                                                                        onChange={(event) => updateTeamField(team.id || '', 'accountHolder', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={team.accountHolder || ''}
+                                                                            onChange={(event) => updateTeamField(team.id || '', 'accountHolder', event.target.value)}
+                                                                            className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{team.accountHolder || '-'}</div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={!team.id || !!savingKeys[savingKey]}
-                                                                        onClick={() => team.id && saveTeamAccount(team.id)}
-                                                                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faFloppyDisk} />
-                                                                        {savingKeys[savingKey] ? '저장 중...' : '저장'}
-                                                                    </button>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!team.id || !!savingKeys[savingKey]}
+                                                                            onClick={() => {
+                                                                                if (!team.id) return;
+                                                                                if (isEditing) cancelTeamEdit(team.id);
+                                                                                else beginRowEdit(rowKey, { ...team });
+                                                                            }}
+                                                                            className={rowActionSecondaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faPenToSquare} />
+                                                                            {isEditing ? '취소' : '수정'}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!team.id || !isEditing || !!savingKeys[savingKey]}
+                                                                            onClick={() => team.id && saveTeamAccount(team.id)}
+                                                                            className={rowActionPrimaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faFloppyDisk} />
+                                                                            {savingKeys[savingKey] ? '저장중' : '저장'}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!team.id || !!savingKeys[savingKey]}
+                                                                            onClick={() => team.id && clearTeamAccount(team.id)}
+                                                                            className={rowActionDangerClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faTrash} />
+                                                                            삭제
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         );
@@ -1127,12 +1902,14 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         <th className="px-4 py-3 text-left">은행</th>
                                                         <th className="px-4 py-3 text-left">계좌번호</th>
                                                         <th className="px-4 py-3 text-left">예금주</th>
-                                                        <th className="px-4 py-3 text-left">저장</th>
+                                                        <th className="px-4 py-3 text-left">관리</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-100">
                                                     {group.items.map((company) => {
-                                                        const savingKey = `company:${company.id}`;
+                                                        const rowKey = `company:${company.id}`;
+                                                        const savingKey = rowKey;
+                                                        const isEditing = !!editingKeys[rowKey];
                                                         return (
                                                             <tr key={company.id} className="align-top">
                                                                 <td className="px-4 py-3">
@@ -1142,36 +1919,75 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                 <td className="px-4 py-3">{company.ceoName || '미지정'}</td>
                                                                 <td className="px-4 py-3">{company.businessNumber || '미지정'}</td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={company.bankName || ''}
-                                                                        onChange={(event) => updateCompanyField(company.id || '', 'bankName', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={company.bankName || ''}
+                                                                            onChange={(event) => updateCompanyField(company.id || '', 'bankName', event.target.value)}
+                                                                            className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{company.bankName || '-'}</div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={company.accountNumber || ''}
-                                                                        onChange={(event) => updateCompanyField(company.id || '', 'accountNumber', event.target.value)}
-                                                                        className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={company.accountNumber || ''}
+                                                                            onChange={(event) => updateCompanyField(company.id || '', 'accountNumber', event.target.value)}
+                                                                            className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                            style={workerDigitsStyle}
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>
+                                                                            {company.accountNumber || '-'}
+                                                                        </div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <input
-                                                                        value={company.accountHolder || ''}
-                                                                        onChange={(event) => updateCompanyField(company.id || '', 'accountHolder', event.target.value)}
-                                                                        className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                                                                    />
+                                                                    {isEditing ? (
+                                                                        <input
+                                                                            value={company.accountHolder || ''}
+                                                                            onChange={(event) => updateCompanyField(company.id || '', 'accountHolder', event.target.value)}
+                                                                            className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                        />
+                                                                    ) : (
+                                                                        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{company.accountHolder || '-'}</div>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-4 py-3">
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={!company.id || !!savingKeys[savingKey]}
-                                                                        onClick={() => company.id && saveCompanyAccount(company.id)}
-                                                                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faFloppyDisk} />
-                                                                        {savingKeys[savingKey] ? '저장 중...' : '저장'}
-                                                                    </button>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!company.id || !!savingKeys[savingKey]}
+                                                                            onClick={() => {
+                                                                                if (!company.id) return;
+                                                                                if (isEditing) cancelCompanyEdit(company.id);
+                                                                                else beginRowEdit(rowKey, { ...company });
+                                                                            }}
+                                                                            className={rowActionSecondaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faPenToSquare} />
+                                                                            {isEditing ? '취소' : '수정'}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!company.id || !isEditing || !!savingKeys[savingKey]}
+                                                                            onClick={() => company.id && saveCompanyAccount(company.id)}
+                                                                            className={rowActionPrimaryClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faFloppyDisk} />
+                                                                            {savingKeys[savingKey] ? '저장중' : '저장'}
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={!company.id || !!savingKeys[savingKey]}
+                                                                            onClick={() => company.id && clearCompanyAccount(company.id)}
+                                                                            className={rowActionDangerClass}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faTrash} />
+                                                                            삭제
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         );
@@ -1251,27 +2067,78 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                             </thead>
                                                             <tbody className="divide-y divide-slate-100">
                                                                 {group.items.map((entry) => {
-                                                                    const rowSavingKey = `custom:${entry.id}`;
+                                                                    const rowKey = `custom:${entry.id}`;
+                                                                    const rowSavingKey = rowKey;
+                                                                    const isEditing = !!editingKeys[rowKey];
                                                                     return (
                                                                         <tr key={entry.id} className="align-top">
-                                                                            <td className="px-4 py-3"><input value={entry.name || ''} onChange={(event) => updateCustomField(entry.id || '', 'name', event.target.value)} className="w-48 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></td>
-                                                                            <td className="px-4 py-3"><input value={entry.bankName || ''} onChange={(event) => updateCustomField(entry.id || '', 'bankName', event.target.value)} className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></td>
-                                                                            <td className="px-4 py-3"><input value={entry.accountNumber || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountNumber', event.target.value)} className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></td>
-                                                                            <td className="px-4 py-3"><input value={entry.accountHolder || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountHolder', event.target.value)} className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></td>
-                                                                            <td className="px-4 py-3"><input value={entry.note || ''} onChange={(event) => updateCustomField(entry.id || '', 'note', event.target.value)} className="w-48 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></td>
                                                                             <td className="px-4 py-3">
-                                                                                <select value={entry.status || 'active'} onChange={(event) => updateCustomField(entry.id || '', 'status', event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
-                                                                                    <option value="active">사용중</option>
-                                                                                    <option value="inactive">보관</option>
-                                                                                </select>
+                                                                                {isEditing ? (
+                                                                                    <input value={entry.name || ''} onChange={(event) => updateCustomField(entry.id || '', 'name', event.target.value)} className="w-48 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                                                                ) : (
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{entry.name || '-'}</div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3">
+                                                                                {isEditing ? (
+                                                                                    <input value={entry.bankName || ''} onChange={(event) => updateCustomField(entry.id || '', 'bankName', event.target.value)} className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                                                                ) : (
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{entry.bankName || '-'}</div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3">
+                                                                                {isEditing ? (
+                                                                                    <input value={entry.accountNumber || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountNumber', event.target.value)} className="w-52 rounded-lg border border-slate-200 px-3 py-2 font-mono outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" style={workerDigitsStyle} />
+                                                                                ) : (
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold" style={workerDigitsStyle}>{entry.accountNumber || '-'}</div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3">
+                                                                                {isEditing ? (
+                                                                                    <input value={entry.accountHolder || ''} onChange={(event) => updateCustomField(entry.id || '', 'accountHolder', event.target.value)} className="w-40 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                                                                ) : (
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{entry.accountHolder || '-'}</div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3">
+                                                                                {isEditing ? (
+                                                                                    <input value={entry.note || ''} onChange={(event) => updateCustomField(entry.id || '', 'note', event.target.value)} className="w-48 rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                                                                ) : (
+                                                                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">{entry.note || '-'}</div>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3">
+                                                                                {isEditing ? (
+                                                                                    <select value={entry.status || 'active'} onChange={(event) => updateCustomField(entry.id || '', 'status', event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">
+                                                                                        <option value="active">사용중</option>
+                                                                                        <option value="inactive">보관</option>
+                                                                                    </select>
+                                                                                ) : (
+                                                                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${entry.status === 'inactive' ? 'border border-amber-200 bg-amber-50 text-amber-700' : 'border border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                                                                                        {entry.status === 'inactive' ? '보관' : '사용중'}
+                                                                                    </span>
+                                                                                )}
                                                                             </td>
                                                                             <td className="px-4 py-3">
                                                                                 <div className="flex items-center gap-2">
-                                                                                    <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && saveCustomEntry(entry.id)} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">
-                                                                                        <FontAwesomeIcon icon={faFloppyDisk} />
-                                                                                        {savingKeys[rowSavingKey] ? '저장 중...' : '저장'}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        disabled={!entry.id || !!savingKeys[rowSavingKey]}
+                                                                                        onClick={() => {
+                                                                                            if (!entry.id) return;
+                                                                                            if (isEditing) cancelCustomEdit(entry.id);
+                                                                                            else beginRowEdit(rowKey, { ...entry });
+                                                                                        }}
+                                                                                        className={rowActionSecondaryClass}
+                                                                                    >
+                                                                                        <FontAwesomeIcon icon={faPenToSquare} />
+                                                                                        {isEditing ? '취소' : '수정'}
                                                                                     </button>
-                                                                                    <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60">
+                                                                                    <button type="button" disabled={!entry.id || !isEditing || !!savingKeys[rowSavingKey]} onClick={() => entry.id && saveCustomEntry(entry.id)} className={rowActionPrimaryClass}>
+                                                                                        <FontAwesomeIcon icon={faFloppyDisk} />
+                                                                                        {savingKeys[rowSavingKey] ? '저장중' : '저장'}
+                                                                                    </button>
+                                                                                    <button type="button" disabled={!entry.id || !!savingKeys[rowSavingKey]} onClick={() => entry.id && deleteCustomEntry(entry.id)} className={rowActionDangerClass}>
                                                                                         <FontAwesomeIcon icon={faTrash} />
                                                                                         삭제
                                                                                     </button>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faThumbtack, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +8,8 @@ import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
+import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀';
@@ -27,6 +29,23 @@ interface PersonnelHistoryRow {
     invoiceAmount: number;
     totalAmount: number;
 }
+
+type PersonnelHistoryViewState = {
+    startDate: string;
+    endDate: string;
+    startDateInput: string;
+    endDateInput: string;
+    companyType: CompanyTypeFilter;
+    salaryModel: SalaryModelFilter;
+    selectedTeamId: string;
+    selectedWorkerId: string;
+    workerSearchTerm: string;
+    sortOrder: 'asc' | 'desc';
+    isFixed: boolean;
+    hasSearched: boolean;
+};
+
+const TOTAL_PERSONNEL_VIEW_KEY = 'output-management:total-personnel-history:v1';
 
 const resolveWorkerSalaryModel = (worker: Worker): SalaryModelFilter => {
     const raw = String(worker.salaryModel ?? worker.payType ?? '').trim();
@@ -89,6 +108,7 @@ const TotalPersonnelHistoryPage: React.FC = () => {
             className="flex flex-col overflow-hidden"
             style={{ height: 'calc(100vh - var(--header-height) - 60px)' }}
         >
+            <OutputManagementTabs activeTab="history" />
             <TotalPersonnelHistoryInner />
         </div>
     );
@@ -106,17 +126,46 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return `${year}-${month}-${day}`;
     };
 
-    const [startDate, setStartDate] = useState(formatDate(firstDay));
-    const [endDate, setEndDate] = useState(formatDate(lastDay));
-    const [startDateInput, setStartDateInput] = useState(formatDate(firstDay));
-    const [endDateInput, setEndDateInput] = useState(formatDate(lastDay));
+    const defaultStartDate = formatDate(firstDay);
+    const defaultEndDate = formatDate(lastDay);
+    const persistedViewState = useMemo(
+        () => loadSessionState<PersonnelHistoryViewState>(TOTAL_PERSONNEL_VIEW_KEY, {
+            startDate: defaultStartDate,
+            endDate: defaultEndDate,
+            startDateInput: defaultStartDate,
+            endDateInput: defaultEndDate,
+            companyType: 'construction',
+            salaryModel: '전체',
+            selectedTeamId: '',
+            selectedWorkerId: '',
+            workerSearchTerm: '',
+            sortOrder: 'asc',
+            isFixed: true,
+            hasSearched: false
+        }),
+        [defaultEndDate, defaultStartDate]
+    );
+    const initialSalaryModel: SalaryModelFilter = (
+        persistedViewState.salaryModel === '일급제'
+        || persistedViewState.salaryModel === '월급제'
+        || persistedViewState.salaryModel === '지원팀'
+    )
+        ? persistedViewState.salaryModel
+        : '전체';
+    const restoreSearchRef = useRef(persistedViewState.hasSearched);
+    const companyTypeInitRef = useRef(true);
 
-    const [companyType, setCompanyType] = useState<CompanyTypeFilter>('construction');
-    const [salaryModel, setSalaryModel] = useState<SalaryModelFilter>('전체');
+    const [startDate, setStartDate] = useState(persistedViewState.startDate);
+    const [endDate, setEndDate] = useState(persistedViewState.endDate);
+    const [startDateInput, setStartDateInput] = useState(persistedViewState.startDateInput);
+    const [endDateInput, setEndDateInput] = useState(persistedViewState.endDateInput);
 
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
-    const [workerSearchTerm, setWorkerSearchTerm] = useState<string>('');
+    const [companyType, setCompanyType] = useState<CompanyTypeFilter>(persistedViewState.companyType === 'partner' ? 'partner' : 'construction');
+    const [salaryModel, setSalaryModel] = useState<SalaryModelFilter>(initialSalaryModel);
+
+    const [selectedTeamId, setSelectedTeamId] = useState<string>(persistedViewState.selectedTeamId);
+    const [selectedWorkerId, setSelectedWorkerId] = useState<string>(persistedViewState.selectedWorkerId);
+    const [workerSearchTerm, setWorkerSearchTerm] = useState<string>(persistedViewState.workerSearchTerm);
     const [isWorkerDropdownOpen, setIsWorkerDropdownOpen] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
 
@@ -124,9 +173,11 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
+    const [initialDataReady, setInitialDataReady] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-    const [isFixed, setIsFixed] = useState<boolean>(true);
+    const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(persistedViewState.sortOrder === 'desc' ? 'desc' : 'asc');
+    const [isFixed, setIsFixed] = useState<boolean>(persistedViewState.isFixed);
+    const [hasSearched, setHasSearched] = useState<boolean>(persistedViewState.hasSearched);
 
     // Lock parent scroll for internal scrolling
     useEffect(() => {
@@ -152,6 +203,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
             setAllWorkers(fetchedWorkers);
         } catch (error) {
             console.error('Error fetching initial data:', error);
+        } finally {
+            setInitialDataReady(true);
         }
     };
 
@@ -168,6 +221,16 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     }, [endDate]);
 
     useEffect(() => {
+        if (companyTypeInitRef.current) {
+            companyTypeInitRef.current = false;
+            if (companyType === 'partner') {
+                if (salaryModel !== '지원팀') setSalaryModel('지원팀');
+            } else if (salaryModel === '지원팀') {
+                setSalaryModel('전체');
+            }
+            return;
+        }
+
         if (companyType === 'partner') {
             setSalaryModel('지원팀');
         } else {
@@ -177,6 +240,36 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         setSelectedWorkerId('');
         setWorkerSearchTerm('');
     }, [companyType]);
+
+    useEffect(() => {
+        saveSessionState(TOTAL_PERSONNEL_VIEW_KEY, {
+            startDate,
+            endDate,
+            startDateInput,
+            endDateInput,
+            companyType,
+            salaryModel,
+            selectedTeamId,
+            selectedWorkerId,
+            workerSearchTerm,
+            sortOrder,
+            isFixed,
+            hasSearched
+        } satisfies PersonnelHistoryViewState);
+    }, [
+        companyType,
+        endDate,
+        endDateInput,
+        hasSearched,
+        isFixed,
+        salaryModel,
+        selectedTeamId,
+        selectedWorkerId,
+        sortOrder,
+        startDate,
+        startDateInput,
+        workerSearchTerm
+    ]);
 
     const companyById = useMemo(() => {
         const map = new Map<string, Company>();
@@ -341,7 +434,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         };
     };
 
-    const fetchData = async (dateOverride?: { startDate: string; endDate: string }) => {
+    const fetchData = useCallback(async (dateOverride?: { startDate: string; endDate: string }) => {
+        setHasSearched(true);
         setLoading(true);
         try {
             const effectiveStartDate = dateOverride?.startDate ?? startDate;
@@ -540,7 +634,16 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [allWorkers, allowedTeamIds, companyType, endDate, salaryModel, selectedTeamId, selectedWorkerId, sortOrder, startDate, teamById, workerSearchTerm]);
+
+    useEffect(() => {
+        if (!initialDataReady || !restoreSearchRef.current) {
+            return;
+        }
+
+        restoreSearchRef.current = false;
+        void fetchData({ startDate, endDate });
+    }, [endDate, fetchData, initialDataReady, startDate]);
 
     const handleDownloadExcel = () => {
         if (historyData.length === 0) {

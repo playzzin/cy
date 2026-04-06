@@ -11,6 +11,8 @@ import { Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 
 interface BoardItem {
     id: string;
@@ -53,6 +55,19 @@ type CSSWithVars = React.CSSProperties & {
     [key: `--${string}`]: string | number | undefined;
 };
 
+type WhiteboardStatusViewState = {
+    viewMode: 'site' | 'team';
+    year: number;
+    month: number;
+    selectedCompanyId: string;
+    searchQuery: string;
+    sortBy: 'name-asc' | 'name-desc';
+    selectedTeamId: string;
+    mainCompanyId: string;
+};
+
+const WHITEBOARD_STATUS_VIEW_KEY = 'output-management:whiteboard-status:v1';
+
 const normalizeHexColor = (value: string | undefined): string | undefined => {
     if (!value) return undefined;
     const trimmed = value.trim();
@@ -70,17 +85,31 @@ const hexToRgba = (hex: string, alpha: number): string => {
 const WhiteboardStatusBoard: React.FC = () => {
     // Context에서 마스터 데이터 가져오기 (Firebase 호출 없이 바로 사용!)
     const { companies, teams, sites, loading: masterDataLoading } = useMasterData();
+    const today = React.useMemo(() => new Date(), []);
+    const persistedViewState = React.useMemo(
+        () => loadSessionState<WhiteboardStatusViewState>(WHITEBOARD_STATUS_VIEW_KEY, {
+            viewMode: 'site',
+            year: today.getFullYear(),
+            month: today.getMonth() + 1,
+            selectedCompanyId: '',
+            searchQuery: '',
+            sortBy: 'name-asc',
+            selectedTeamId: '',
+            mainCompanyId: ''
+        }),
+        [today]
+    );
 
-    const [viewMode, setViewMode] = useState<'site' | 'team'>('site');
-    const [year, setYear] = useState(new Date().getFullYear());
-    const [month, setMonth] = useState(new Date().getMonth() + 1);
+    const [viewMode, setViewMode] = useState<'site' | 'team'>(persistedViewState.viewMode === 'team' ? 'team' : 'site');
+    const [year, setYear] = useState(persistedViewState.year);
+    const [month, setMonth] = useState(persistedViewState.month);
 
     // Filter State
-    const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
-    const [searchQuery, setSearchQuery] = useState<string>('');
-    const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>('name-asc');
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [mainCompanyId, setMainCompanyId] = useState<string>('');
+    const [selectedCompanyId, setSelectedCompanyId] = useState<string>(persistedViewState.selectedCompanyId);
+    const [searchQuery, setSearchQuery] = useState<string>(persistedViewState.searchQuery);
+    const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc'>(persistedViewState.sortBy === 'name-desc' ? 'name-desc' : 'name-asc');
+    const [selectedTeamId, setSelectedTeamId] = useState<string>(persistedViewState.selectedTeamId);
+    const [mainCompanyId, setMainCompanyId] = useState<string>(persistedViewState.mainCompanyId);
 
     const [rawReports, setRawReports] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -115,6 +144,19 @@ const WhiteboardStatusBoard: React.FC = () => {
     useEffect(() => {
         fetchReports();
     }, [year, month]);
+
+    useEffect(() => {
+        saveSessionState(WHITEBOARD_STATUS_VIEW_KEY, {
+            viewMode,
+            year,
+            month,
+            selectedCompanyId,
+            searchQuery,
+            sortBy,
+            selectedTeamId,
+            mainCompanyId
+        } satisfies WhiteboardStatusViewState);
+    }, [mainCompanyId, month, searchQuery, selectedCompanyId, selectedTeamId, sortBy, viewMode, year]);
 
     const fetchReports = async () => {
         setLoading(true);
@@ -578,6 +620,8 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     return (
         <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
+            <OutputManagementTabs activeTab="status" />
+
             {/* Header Controls */}
             <div className="bg-white border-b border-slate-200 p-6 flex flex-col gap-4 shadow-sm z-10">
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4">

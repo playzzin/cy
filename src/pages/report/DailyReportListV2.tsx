@@ -11,10 +11,7 @@ import {
     faSave,
     faThumbtack,
     faFilter,
-    faDatabase,
     faDownload,
-    faUpload,
-    faFileExcel,
     faSpinner,
     faTrashCan,
 } from '@fortawesome/free-solid-svg-icons';
@@ -25,6 +22,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { confirm, toast } from '../../utils/swal';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
+import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
 import '../taxinvoice/WorkbookLedgerPage.css';
 import './DailyReportListV2.css';
 
@@ -79,6 +77,25 @@ type ColumnFilterState = Partial<Record<ColumnFilterKey, string[]>>;
 
 const EMPTY_COLUMN_FILTER_VALUE = '__EMPTY__';
 
+type DailyReportListViewState = {
+    startDate: string;
+    endDate: string;
+    startDateInput: string;
+    endDateInput: string;
+    selectedTeamId: string;
+    selectedWorkerTeamId: string;
+    selectedSiteId: string;
+    workerSearch: string;
+    dateSortOrder: 'asc' | 'desc';
+    sortMode: 'date' | 'name' | 'site';
+    nameSortOrder: 'asc' | 'desc';
+    siteSortOrder: 'asc' | 'desc';
+    isFixed: boolean;
+    columnFilters: ColumnFilterState;
+};
+
+const DAILY_REPORT_LIST_VIEW_KEY = 'output-management:daily-report-list-v2:v1';
+
 const formatManDay = (value: number): string => {
     return (Number.isFinite(value) ? value : 0).toFixed(1);
 };
@@ -93,6 +110,38 @@ const fromColumnFilterValue = (value: string): string => {
 
 const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) => {
     const todayStr = formatYmd(new Date());
+    const defaultDate = initialDate || todayStr;
+    const persistedViewState = useMemo(() => {
+        const fallback: DailyReportListViewState = {
+            startDate: defaultDate,
+            endDate: defaultDate,
+            startDateInput: defaultDate,
+            endDateInput: defaultDate,
+            selectedTeamId: '',
+            selectedWorkerTeamId: '',
+            selectedSiteId: '',
+            workerSearch: '',
+            dateSortOrder: 'desc',
+            sortMode: 'date',
+            nameSortOrder: 'asc',
+            siteSortOrder: 'asc',
+            isFixed: false,
+            columnFilters: {}
+        };
+        const persisted = loadSessionState<DailyReportListViewState>(DAILY_REPORT_LIST_VIEW_KEY, fallback);
+
+        if (!initialDate) {
+            return persisted;
+        }
+
+        return {
+            ...persisted,
+            startDate: initialDate,
+            endDate: initialDate,
+            startDateInput: initialDate,
+            endDateInput: initialDate
+        };
+    }, [defaultDate, initialDate]);
 
     const [rows, setRows] = useState<DailyReportWorkerRow[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -100,22 +149,22 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    const [startDate, setStartDate] = useState(initialDate || todayStr);
-    const [endDate, setEndDate] = useState(initialDate || todayStr);
-    const [startDateInput, setStartDateInput] = useState(initialDate || todayStr);
-    const [endDateInput, setEndDateInput] = useState(initialDate || todayStr);
-    const [selectedTeamId, setSelectedTeamId] = useState(''); // 해당팀 (Report Team)
-    const [selectedWorkerTeamId, setSelectedWorkerTeamId] = useState(''); // 소속팀 (Worker Team)
-    const [selectedSiteId, setSelectedSiteId] = useState('');
-    const [workerSearch, setWorkerSearch] = useState('');
-    const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc'>('desc');
+    const [startDate, setStartDate] = useState(persistedViewState.startDate);
+    const [endDate, setEndDate] = useState(persistedViewState.endDate);
+    const [startDateInput, setStartDateInput] = useState(persistedViewState.startDateInput);
+    const [endDateInput, setEndDateInput] = useState(persistedViewState.endDateInput);
+    const [selectedTeamId, setSelectedTeamId] = useState(persistedViewState.selectedTeamId); // 해당팀 (Report Team)
+    const [selectedWorkerTeamId, setSelectedWorkerTeamId] = useState(persistedViewState.selectedWorkerTeamId); // 소속팀 (Worker Team)
+    const [selectedSiteId, setSelectedSiteId] = useState(persistedViewState.selectedSiteId);
+    const [workerSearch, setWorkerSearch] = useState(persistedViewState.workerSearch);
+    const [dateSortOrder, setDateSortOrder] = useState<'asc' | 'desc'>(persistedViewState.dateSortOrder === 'asc' ? 'asc' : 'desc');
 
-    const [sortMode, setSortMode] = useState<'date' | 'name' | 'site'>('date');
-    const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc'>('asc');
-    const [siteSortOrder, setSiteSortOrder] = useState<'asc' | 'desc'>('asc');
+    const [sortMode, setSortMode] = useState<'date' | 'name' | 'site'>(persistedViewState.sortMode);
+    const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc'>(persistedViewState.nameSortOrder === 'desc' ? 'desc' : 'asc');
+    const [siteSortOrder, setSiteSortOrder] = useState<'asc' | 'desc'>(persistedViewState.siteSortOrder === 'desc' ? 'desc' : 'asc');
 
     const [isEditMode, setIsEditMode] = useState(true);
-    const [isFixed, setIsFixed] = useState(false); // 가로 틀고정 상태
+    const [isFixed, setIsFixed] = useState(persistedViewState.isFixed); // 가로 틀고정 상태
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
     const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -130,17 +179,12 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [bulkSiteType, setBulkSiteType] = useState('');
     const [bulkPaymentType, setBulkPaymentType] = useState('');
     const [bulkWorkerTeamName, setBulkWorkerTeamName] = useState('');
-    const [columnFilters, setColumnFilters] = useState<ColumnFilterState>({});
+    const [columnFilters, setColumnFilters] = useState<ColumnFilterState>(persistedViewState.columnFilters);
     const [openColumnFilter, setOpenColumnFilter] = useState<ColumnFilterKey | null>(null);
     const [columnFilterSearch, setColumnFilterSearch] = useState('');
     const [pendingColumnFilterValues, setPendingColumnFilterValues] = useState<string[] | null>(null);
     const filterMenuRef = React.useRef<HTMLDivElement | null>(null);
-    const dbUploadInputRef = React.useRef<HTMLInputElement | null>(null);
-    const excelUploadInputRef = React.useRef<HTMLInputElement | null>(null);
-    const [isUploadingDb, setIsUploadingDb] = useState(false);
-    const [isDownloadingDb, setIsDownloadingDb] = useState(false);
     const [isResettingDb, setIsResettingDb] = useState(false);
-    const [isUploadingExcel, setIsUploadingExcel] = useState(false);
     const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
 
     useEffect(() => {
@@ -167,6 +211,40 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     useEffect(() => {
         setEndDateInput(endDate);
     }, [endDate]);
+
+    useEffect(() => {
+        saveSessionState(DAILY_REPORT_LIST_VIEW_KEY, {
+            startDate,
+            endDate,
+            startDateInput,
+            endDateInput,
+            selectedTeamId,
+            selectedWorkerTeamId,
+            selectedSiteId,
+            workerSearch,
+            dateSortOrder,
+            sortMode,
+            nameSortOrder,
+            siteSortOrder,
+            isFixed,
+            columnFilters
+        } satisfies DailyReportListViewState);
+    }, [
+        columnFilters,
+        dateSortOrder,
+        endDate,
+        endDateInput,
+        isFixed,
+        nameSortOrder,
+        selectedSiteId,
+        selectedTeamId,
+        selectedWorkerTeamId,
+        siteSortOrder,
+        sortMode,
+        startDate,
+        startDateInput,
+        workerSearch
+    ]);
 
     const fetchRows = useCallback(async (): Promise<void> => {
         setIsLoading(true);
@@ -1275,57 +1353,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     };
 
-    const isTransferBusy = isLoading || isUploadingDb || isDownloadingDb || isResettingDb || isUploadingExcel || isDownloadingExcel;
-
-    const handleOpenDbUpload = useCallback(() => {
-        dbUploadInputRef.current?.click();
-    }, []);
-
-    const handleOpenExcelUpload = useCallback(() => {
-        excelUploadInputRef.current?.click();
-    }, []);
-
-    const handleDownloadDb = useCallback(async () => {
-        setIsDownloadingDb(true);
-        try {
-            await dailyReportTransferService.exportDbToExcel();
-            toast.success('일보 DB 다운로드 완료');
-        } catch (error) {
-            console.error('[DailyReportListV2] DB download failed', error);
-            toast.error('일보 DB 다운로드에 실패했습니다.');
-        } finally {
-            setIsDownloadingDb(false);
-        }
-    }, []);
-
-    const handleDbUploadFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-
-        const confirmed = await Swal.fire({
-            icon: 'question',
-            title: '일보 DB 업로드',
-            html: '<div class="text-sm text-slate-600">DB다운로드 파일을 기준으로 같은 ID는 덮어쓰고, 없는 ID는 새로 복원합니다.</div>',
-            showCancelButton: true,
-            confirmButtonText: '업로드',
-            cancelButtonText: '취소',
-            confirmButtonColor: '#2563eb',
-        });
-        if (!confirmed.isConfirmed) return;
-
-        setIsUploadingDb(true);
-        try {
-            const result = await dailyReportTransferService.importDbFromExcel(file);
-            await fetchRows();
-            toast.success(`DB 업로드 완료 (신규 ${result.created} / 갱신 ${result.updated} / 건너뜀 ${result.skipped})`);
-        } catch (error) {
-            console.error('[DailyReportListV2] DB upload failed', error);
-            toast.error(error instanceof Error ? error.message : '일보 DB 업로드에 실패했습니다.');
-        } finally {
-            setIsUploadingDb(false);
-        }
-    }, [fetchRows]);
+    const isTransferBusy = isLoading || isResettingDb || isDownloadingExcel;
 
     const handleResetDb = useCallback(async () => {
         const confirmed = await Swal.fire({
@@ -1371,76 +1399,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setIsDownloadingExcel(true);
         try {
             await dailyReportTransferService.exportRowsToExcel(sortedRows, `${startDate}_${endDate}`);
-            toast.success('엑셀 다운로드 완료');
+            toast.success('조회 목록 엑셀 다운로드 완료');
         } catch (error) {
             console.error('[DailyReportListV2] Excel download failed', error);
-            toast.error('엑셀 다운로드에 실패했습니다.');
+            toast.error('조회 목록 엑셀 다운로드에 실패했습니다.');
         } finally {
             setIsDownloadingExcel(false);
         }
     }, [endDate, sortedRows, startDate]);
 
-    const handleExcelUploadFile = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        event.target.value = '';
-        if (!file) return;
-
-        const confirmed = await Swal.fire({
-            icon: 'question',
-            title: '일보 엑셀 업로드',
-            html: '<div class="text-sm text-slate-600">같은 일보/작업자가 있으면 해당 행만 갱신하고, 없으면 새로 추가합니다.</div>',
-            showCancelButton: true,
-            confirmButtonText: '업로드',
-            cancelButtonText: '취소',
-            confirmButtonColor: '#2563eb',
-        });
-        if (!confirmed.isConfirmed) return;
-
-        setIsUploadingExcel(true);
-        try {
-            const result = await dailyReportTransferService.importRowsFromExcel(file, {
-                teams,
-                sites,
-                workers: allWorkers,
-            });
-            await fetchRows();
-
-            const summary = `엑셀 업로드 완료 (신규 ${result.created} / 갱신 ${result.updated} / 건너뜀 ${result.skipped})`;
-            if (result.warnings.length > 0) {
-                await Swal.fire({
-                    icon: 'warning',
-                    title: '엑셀 업로드 완료',
-                    html: `<div class="text-sm text-left"><div class="mb-2 font-semibold">${summary}</div><div>${result.warnings.slice(0, 8).join('<br />')}</div>${result.warnings.length > 8 ? `<div class="mt-2 text-slate-500">외 ${result.warnings.length - 8}건</div>` : ''}</div>`,
-                    confirmButtonText: '확인',
-                });
-            } else {
-                toast.success(summary);
-            }
-        } catch (error) {
-            console.error('[DailyReportListV2] Excel upload failed', error);
-            toast.error(error instanceof Error ? error.message : '엑셀 업로드에 실패했습니다.');
-        } finally {
-            setIsUploadingExcel(false);
-        }
-    }, [allWorkers, fetchRows, sites, teams]);
-
     return (
-        <div className="flex h-full flex-col flex-1 min-h-0 gap-4 p-1">
-            <input
-                ref={dbUploadInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={(event) => { void handleDbUploadFile(event); }}
-            />
-            <input
-                ref={excelUploadInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={(event) => { void handleExcelUploadFile(event); }}
-            />
-            <div className="flex-shrink-0 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-end">
+        <div className="flex h-full flex-col flex-1 min-h-0 gap-3 p-0">
+            <div className="flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-end">
                 <div className="flex items-center gap-2 flex-wrap w-full">
                     <div className="flex items-center gap-2">
                         <div className="relative">
@@ -1589,7 +1559,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             onChange={(e) => setSelectedTeamId(e.target.value)}
                             className="px-3 py-2 border-slate-300 rounded-lg text-sm min-w-[120px]"
                         >
-                            <option value="">전체 해당팀</option>
+                            <option value="">전체 현장담당팀</option>
                             {availableReportTeams.map((t) => (
                                 <option key={String(t.id)} value={String(t.id)}>{t.name}</option>
                             ))}
@@ -1671,40 +1641,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                     <button
                         onClick={handleSearch}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-auto"
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-auto"
                     >
                         <FontAwesomeIcon icon={faSearch} />
                         조회
                     </button>
 
                     <button
-                        onClick={() => { void handleDownloadDb(); }}
-                        disabled={isTransferBusy}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
-                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={isDownloadingDb ? faSpinner : faDatabase} spin={isDownloadingDb} />
-                        DB다운로드
-                    </button>
-
-                    <button
-                        onClick={handleOpenDbUpload}
-                        disabled={isTransferBusy}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
-                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                            : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={isUploadingDb ? faSpinner : faUpload} spin={isUploadingDb} />
-                        DB업로드
-                    </button>
-
-                    <button
                         onClick={() => { void handleResetDb(); }}
                         disabled={isTransferBusy}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
                             ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                             : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
                             }`}
@@ -1716,32 +1662,20 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     <button
                         onClick={() => { void handleDownloadExcel(); }}
                         disabled={isTransferBusy}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
+                            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
                             ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                             : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                             }`}
                     >
                         <FontAwesomeIcon icon={isDownloadingExcel ? faSpinner : faDownload} spin={isDownloadingExcel} />
-                        엑셀다운로드
-                    </button>
-
-                    <button
-                        onClick={handleOpenExcelUpload}
-                        disabled={isTransferBusy}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
-                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={isUploadingExcel ? faSpinner : faFileExcel} spin={isUploadingExcel} />
-                        엑셀업로드
+                        조회목록 엑셀다운로드
                     </button>
 
                     {dirtyRowCount > 0 && (
                         <button
                             onClick={handleSaveAllDirtyRows}
                             disabled={isLoading}
-                            className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-2 animate-pulse"
+                            className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-2 animate-pulse"
                             title="변경된 모든 항목 저장"
                         >
                             <FontAwesomeIcon icon={faSave} />
@@ -1767,7 +1701,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             </div>
 
             {isEditMode && isBulkEditOpen && (
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-3 items-end">
+                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-3 items-end">
                     <div className="text-sm font-bold text-slate-700">선택 항목 일괄 수정</div>
 
                     <div className="flex flex-col">
@@ -1832,7 +1766,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     </div>
 
                     <div className="flex flex-col">
-                        <label className="text-[11px] text-slate-500">작업팀명</label>
+                        <label className="text-[11px] text-slate-500">소속팀명</label>
                         <input
                             type="text"
                             value={bulkWorkerTeamName}
@@ -1963,13 +1897,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 )}
                                 {renderFilterHeader('siteType', '현장구분', 'px-2.5 py-2 whitespace-nowrap')}
                                 {renderFilterHeader('paymentType', '결제구분', 'px-2.5 py-2 whitespace-nowrap')}
-                                {renderFilterHeader('teamName', '담당팀', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('teamName', '현장담당팀', 'px-2.5 py-2 whitespace-nowrap')}
                                 {renderFilterHeader(
                                     'workerName',
                                     '이름',
                                     `px-2.5 py-2 whitespace-nowrap w-[112px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r-2 border-[#255e94] shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`
                                 )}
-                                {renderFilterHeader('workerTeamName', '작업팀', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader('workerTeamName', '소속팀', 'px-2.5 py-2 whitespace-nowrap')}
                                 {renderFilterHeader('salaryModel', '급여방식', 'px-2.5 py-2 whitespace-nowrap')}
                                 {renderFilterHeader('manDay', '공수', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
                                 {renderFilterHeader('unitPrice', '단가', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
@@ -2095,7 +2029,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         onChange={(e) => setRowDraft(r, { workerTeamName: e.target.value })}
                                                         disabled={saving}
                                                         className="px-2 py-1 border border-slate-300 rounded text-sm w-[104px] bg-white"
-                                                        placeholder="작업팀"
+                                                        placeholder="소속팀"
                                                     />
                                                 ) : (
                                                     (r.workerTeamName ?? '')

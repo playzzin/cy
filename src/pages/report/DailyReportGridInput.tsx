@@ -414,10 +414,10 @@ const DailyReportTable: React.FC<{
                                 }}
                                 disabled={!siteTeams.find(t => t.id === selectedSite.responsibleTeamId)}
                                 className="flex items-center gap-1 hover:bg-white/20 px-1 py-0.5 rounded cursor-pointer transition-colors"
-                                title="시공팀 (클릭하여 팀원 일괄 추가)"
+                                title="현장담당팀 (클릭하여 팀원 일괄 추가)"
                             >
                                 <span>👷</span>
-                                <span className="opacity-70 text-[9px]">팀:</span>
+                                <span className="opacity-70 text-[9px]">현장담당팀:</span>
                                 <span className="font-medium underline decoration-dotted">{selectedSite.responsibleTeamName}</span>
                             </button>
                         )}
@@ -432,7 +432,7 @@ const DailyReportTable: React.FC<{
                 <HotTable
                     ref={hotRef}
                     data={tableData}
-                    colHeaders={['이름', '공수', '팀명', '단가', '급여']}
+                    colHeaders={['이름', '공수', '소속팀', '단가', '급여']}
                     columns={[
                         { type: 'text', width: 80 }, // Name (0)
                         { type: 'numeric', width: 50 }, // ManDay (1)
