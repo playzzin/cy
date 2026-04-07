@@ -1893,7 +1893,7 @@ const AdvancePaymentPage: React.FC = () => {
             </div>
 
             {/* Filters */}
-            <div className="bg-white p-4 rounded-lg shadow-sm mb-4 flex flex-wrap gap-4 items-end shrink-0">
+            <div className="bg-white p-4 rounded-lg mb-4 flex flex-wrap gap-4 items-end shrink-0">
                 <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">업체 구분</label>
                     <select
@@ -1914,16 +1914,7 @@ const AdvancePaymentPage: React.FC = () => {
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">현장명 검색</label>
-                    <input
-                        type="text"
-                        value={teamSearch}
-                        onChange={e => setTeamSearch(e.target.value)}
-                        className="w-32 border border-slate-300 rounded px-2 py-1 text-xs mb-1"
-                        placeholder="현장명 검색 (예: 김포)"
-                        style={{ minWidth: 100 }}
-                    />
-                    <label className="block text-xs font-bold text-slate-500 mb-1 mt-2">팀 선택</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">팀 선택</label>
                     <select
                         value={selectedTeamId}
                         onChange={(e) => setSelectedTeamId(e.target.value)}
@@ -2116,10 +2107,10 @@ const AdvancePaymentPage: React.FC = () => {
             </div>
 
             {/* Table Area */}
-            <div className="flex-1 bg-white rounded-lg shadow border border-slate-200 overflow-hidden flex flex-col relative" id="table-container">
+                <div className="flex-1 bg-white rounded-lg border border-slate-200 overflow-hidden flex flex-col relative" id="table-container">
                 <div className="overflow-auto flex-1 relative">
                     <table className="w-full text-xs border-collapse">
-                        <thead className="bg-slate-100 sticky top-0 z-30 shadow-sm text-slate-700 font-bold border-b border-slate-300 h-10">
+                        <thead className="bg-slate-100 sticky top-0 z-30 text-slate-700 font-bold border-b border-slate-300 h-10">
                             <tr>
                                 <th rowSpan={2} className="p-2 border-r border-slate-300 w-12 text-center bg-slate-100 sticky left-0 z-40 shadow-[1px_0_2px_rgba(0,0,0,0.1)]">No</th>
                                 <th rowSpan={2} className="p-2 border-r border-slate-300 w-24 text-center bg-slate-100 sticky left-12 z-40 shadow-[1px_0_2px_rgba(0,0,0,0.1)] min-w-[80px]">이름</th>
@@ -2187,10 +2178,10 @@ const AdvancePaymentPage: React.FC = () => {
 
                                     return (
                                         <React.Fragment key={worker.id}>
-                                            {/* Top Row: 상단/좌/우 굵은 검정 테두리 */}
+                                            {/* Top Row */}
                                             <tr
                                                 ref={isHighlighted ? highlightedRowRef : null}
-                                                className={`transition-colors h-10 border-b-0 border-t-2 border-l-2 border-r-2 border-black ${rowClass}`}
+                                                className={`transition-colors h-10 ${rowClass}`}
                                             >
                                                 <td rowSpan={2} className="p-2 text-center border-r border-slate-200 sticky left-0 z-20 bg-white">{index + 1}</td>
                                                 <td rowSpan={2} className="p-2 text-center border-r border-slate-200 font-medium sticky left-12 z-20 bg-white shadow-[1px_0_2px_rgba(0,0,0,0.05)]">
@@ -2237,8 +2228,7 @@ const AdvancePaymentPage: React.FC = () => {
                                             </tr>
 
                                             {/* Bottom Row */}
-                                            {/* Bottom Row: 하단/좌/우 굵은 검정 테두리 */}
-                                            <tr className={`transition-colors h-10 border-b border-slate-300 border-b-2 border-l-2 border-r-2 border-black ${rowClass}`}>
+                                            <tr className={`transition-colors h-10 border-b border-slate-200 ${rowClass}`}>
                                                 {bottomDeductionItems.map((item) => (
                                                     <td key={item.id} className={getDeductionCellClassName(item.id)}>
                                                         {renderDeductionInput(worker.id!, item.id, 1)}

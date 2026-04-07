@@ -8,6 +8,7 @@ import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
+import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 
 type CompanyTypeFilter = 'construction' | 'partner';
 type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀';
@@ -85,11 +86,11 @@ const formatResidentNumberForDisplay = (rawValue: string): string => {
 
 const TotalPersonnelHistoryPage: React.FC = () => {
     return (
-        <div
-            className="flex flex-col overflow-hidden"
-            style={{ height: 'calc(100vh - var(--header-height) - 60px)' }}
-        >
-            <TotalPersonnelHistoryInner />
+        <div className="flex flex-col overflow-hidden" style={{ height: 'calc(100vh - var(--header-height))' }}>
+            <OutputManagementTabs activeTab="history" title="인원관리" />
+            <div className="flex flex-col overflow-hidden flex-1" style={{ minHeight: 0 }}>
+                <TotalPersonnelHistoryInner />
+            </div>
         </div>
     );
 };
