@@ -8,16 +8,17 @@ const normalizeKoreanToken = (value: unknown): string =>
 const isCorporateInvoiceSiteRow = (row: Partial<DailyReportWorkerRow>): boolean => {
     const paymentType = normalizeKoreanToken(row.paymentType);
     const siteType = normalizeKoreanToken(row.siteType);
+    const siteName = normalizeKoreanToken((row as { siteName?: unknown }).siteName);
 
     const isInvoicePayment = paymentType.includes('계산서');
-    const isSupportSite = siteType.includes('지원');
+    // 실데이터는 siteType이 '도급/직영/현장'으로 혼재하므로 모두 허용한다.
     const isSiteWork =
-        !siteType ||
         siteType.includes('현장') ||
         siteType.includes('도급') ||
-        siteType.includes('직영');
+        siteType.includes('직영') ||
+        siteName.length > 0;
 
-    return isInvoicePayment && isSiteWork && !isSupportSite;
+    return isInvoicePayment && isSiteWork;
 };
 
 /**

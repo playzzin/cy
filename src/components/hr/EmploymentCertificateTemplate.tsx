@@ -300,7 +300,8 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
         return (
             <>
                 <FontStyles />
-                <PrintContainer ref={ref}>
+                <div ref={ref}>
+                    <PrintContainer>
                     <MainTitle>재직증명서</MainTitle>
 
                     {/* 1. 인적사항 */}
@@ -311,8 +312,8 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                                 <tr>
                                     <Th>성 명</Th>
                                     <Td>{worker?.name || ''}</Td>
-                                    <Th>생년월일</Th>
-                                    <Td>{worker?.idNumber ? worker.idNumber.substring(0, 6) : ''}</Td>
+                                    <Th>주민등록번호</Th>
+                                    <Td>{worker?.idNumber || ''}</Td>
                                 </tr>
                                 <tr>
                                     <Th>주 소</Th>
@@ -329,7 +330,7 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                             <tbody>
                                 <tr>
                                     <Th>소 속</Th>
-                                    <Td>{worker?.companyName || company?.name || ''}</Td>
+                                    <Td>{company?.name || worker?.companyName || ''}</Td>
                                     <Th>직 위</Th>
                                     <Td>{position}</Td>
                                 </tr>
@@ -408,6 +409,7 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                         <WarningText>※ 본 증명서는 발행일로부터 3개월간 유효합니다. 위조 및 변조 시 법적 처벌을 받을 수 있습니다.</WarningText>
                     </FooterContainer>
                 </PrintContainer>
+                </div>
             </>
         );
     }

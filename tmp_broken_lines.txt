@@ -1,0 +1,105 @@
+L175:     { id: 'input', label: '?낅젰?? },
+L185:     '?꾩옣紐?,
+L192:     '?곸슜??,
+L195:     '?紐?
+L485:         const siteName = normalizeText(readCell(row, '?꾩옣紐?));
+L493:         const appliedMonth = toNumberOrNull(readCell(row, '?꾩옣紐?)) ?? getMonthFromDate(date);
+L496:         const teamName = normalizeText(readCell(row, '?紐?)) || fallbackTeamName;
+L699:         placeholder: isPurchase ? '吏湲?嫄곕옒泥? : '?낃툑 嫄곕옒泥?
+L1159:         mode: '?????,
+L1167:         mode: '?????,
+L1371:                         : (row.transactionType === '留ㅼ엯' ? '???' : '????)),
+L1443:                 confirmButtonText: '?????,
+L1580:                             <option value="???" ${entry.transactionType === '留ㅼ엯' ? 'selected' : ''}>???</option>
+L1581:                             <option value="???" ${entry.transactionType === '留ㅼ엯' ? 'selected' : ''}>???</option>
+L1633:             confirmButtonText: '????,
+L1925:             inputPlaceholder: '?????,
+L1928:             confirmButtonText: '?????,
+L1932:                 if (normalizeText(value) !== '?????) {
+L1933:                     Swal.showValidationMessage("'???????????????");
+L2082:             confirmButtonText: '????,
+L2470:         const paymentAmountLabel = ledgerFilter.transactionType === '留ㅼ엯' ? '??????' : '???????;
+L2662:                                     <th>???</th>
+L2663:                                     <th>??????</th>
+L2664:                                     <th>???</th>
+L2667:                                     <th>???</th>
+L2668:                                     <th>?????/th>
+L2669:                                     <th>???</th>
+L2670:                                     <th>????/th>
+L2913:                                     <th>??????</th>
+L2914:                                     <th>?????/th>
+L2915:                                     <th>?????/th>
+L2916:                                     <th>???????/th>
+L2917:                                     <th>???</th>
+L2918:                                     <th>???</th>
+L2922:                                     <th>???</th>
+L2923:                                     <th>????/th>
+L3195:         return `${baseLabel} ${dbSort.direction === 'asc' ? '?? : '??}`;
+L3385:         '?????,
+L3388:         '???????,
+L3389:         '??????,
+L3393:         '?????,
+L3395:         '????
+L3415:                         <th className="sheet-title-dark" colSpan={14}>???????? ???</th>
+L3452:                         <th className="sheet-label-yellow">??????</th>
+L3510:                         <th className="sheet-label-green">???????/th>
+L3524:                                     {getDbSortLabel('date', '?????)}
+L3536:                                     {getDbSortLabel('partnerName', '?????)}
+L3548:                                     {getDbSortLabel('amount', '?????)}
+L3634:                                     <option value="">???</option>
+L3635:                                     <option value="???">???</option>
+L3636:                                     <option value="???">???</option>
+L3799:                                                 <option value="???">???</option>
+L3800:                                                 <option value="???">???</option>
+L4048:                             <th className="sheet-title-dark" colSpan={16}>???/??? ?????/th>
+L4051:                             <th className="sheet-label-blue">????????</th>
+L4060:                             <th className="sheet-label-blue">????????</th>
+L4074:                                     onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '?????)}
+L4110:                             <th className="sheet-label-green">????/th>
+L4120:                                     <option value="???">???</option>
+L4121:                                     <option value="???">???</option>
+L4124:                             <th className="sheet-label-green">?????/th>
+L4134:                             <th className="sheet-label-green">?????/th>
+L4170:                                 <th>???</th>
+L4171:                                 <th>??????</th>
+L4172:                                 <th>???</th>
+L4174:                                 <th>{ledgerFilter.transactionType === '留ㅼ엯' ? '??????' : '???????}</th>
+L4175:                                 <th>???</th>
+L4176:                                 <th>?????/th>
+L4177:                                 <th>???</th>
+L4178:                                 <th>????/th>
+L4223:                             <th className="sheet-title-dark" colSpan={16}>??? ???</th>
+L4226:                             <th className="sheet-label-blue">????????</th>
+L4235:                             <th className="sheet-label-blue">????????</th>
+L4285:                             <th className="sheet-label-green">????/th>
+L4292:                                     <option value="???">???</option>
+L4293:                                     <option value="???">???</option>
+L4294:                                     <option value="?????>?????/option>
+L4295:                                     <option value="??????">??????</option>
+L4298:                             <th className="sheet-label-green">?????/th>
+L4308:                             <th className="sheet-label-green">?????/th>
+L4330:                                 : '?????? ??? ????????}
+L4375:                                 <th>??????</th>
+L4376:                                 <th>?????/th>
+L4377:                                 <th>?????/th>
+L4378:                                 <th>???????/th>
+L4379:                                 <th>???</th>
+L4380:                                 <th>???</th>
+L4381:                                 <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '?????' : '?????}</th>
+L4383:                                 <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '??????' : '?????}</th>
+L4384:                                 <th>???</th>
+L4385:                                 <th>????/th>
+L4386:                                 {canRegisterReceipt && <th>???</th>}
+L4644:                                                         <th>???</th>
+L4645:                                                         <th>???</th>
+L4646:                                                         <th>?????/th>
+L4647:                                                         <th>???</th>
+L4648:                                                         <th>???????/th>
+L4649:                                                         <th>???</th>
+L4650:                                                         <th>???</th>
+L4652:                                                         <th>???</th>
+L4653:                                                         <th>????/th>
+L4654:                                                         <th>???</th>
+L4709:                                                     <th>???</th>
+L4710:                                                     <th>???</th>
+L4723:                                                         <td>{receiptHistoryInvoice.note || '??? ???????}</td>

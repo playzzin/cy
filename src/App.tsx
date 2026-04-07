@@ -71,7 +71,6 @@ import OfficeManagementPage from './pages/office/OfficeManagementPage';
 
 import Login from './components/auth/Login';
 import IntegratedDatabase from './pages/database/ManpowerDatabase';
-import AccountManagementPage from './pages/database/AccountManagementPage';
 import ManualPage from './pages/manual';
 import ProfilePage from './pages/profile/ProfilePage';
 
@@ -149,10 +148,10 @@ import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPag
 import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
 import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
 import TaxInvoiceLedgerPage from './pages/taxinvoice/TaxInvoiceLedgerPage';
-import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import ReceivablesManagerPage from './pages/taxinvoice/ReceivablesManagerPage';
 
 import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
+import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 import AccountInquiryPage from './pages/taxinvoice/AccountInquiryPage';
@@ -202,6 +201,42 @@ const DashboardLayoutWrapper = () => (
   <DashboardLayout>
     <Outlet />
   </DashboardLayout>
+);
+
+const WorkbookLedgerRouteDebug: React.FC = () => (
+  <>
+    <div style={{
+      position: 'sticky',
+      top: 0,
+      zIndex: 9999,
+      background: '#b91c1c',
+      color: '#ffffff',
+      padding: '6px 10px',
+      fontWeight: 800,
+      fontSize: 12
+    }}>
+      APP-ROUTE-DEBUG: /payroll/workbook-ledger - WorkbookLedgerPage (cheongyeon)
+    </div>
+    <WorkbookLedgerPage tenantKey="cheongyeon" companyLabel="청연" />
+  </>
+);
+
+const WorkbookLedgerDawonRouteDebug: React.FC = () => (
+  <>
+    <div style={{
+      position: 'sticky',
+      top: 0,
+      zIndex: 9999,
+      background: '#0f766e',
+      color: '#ffffff',
+      padding: '6px 10px',
+      fontWeight: 800,
+      fontSize: 12
+    }}>
+      APP-ROUTE-DEBUG: /payroll/workbook-ledger-dawon - WorkbookLedgerPage (dawon)
+    </div>
+    <WorkbookLedgerPage tenantKey="dawon" companyLabel="다원" />
+  </>
 );
 
 
@@ -280,7 +315,6 @@ const App: React.FC = () => {
             <Route path="/database">
               <Route path="company-db" element={<CompanyDatabase />} />
               <Route path="manpower-db" element={<IntegratedDatabase />} />
-              <Route path="account-management" element={<AccountManagementPage />} />
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
             </Route>
 
@@ -317,13 +351,14 @@ const App: React.FC = () => {
               <Route path="labor-cost-statement-generator" element={<LaborCostStatementGeneratorPage />} />
               <Route path="tax-invoice" element={<TaxInvoicePage />} />
               <Route path="tax-invoice-ledger" element={<TaxInvoiceLedgerPage />} />
-              <Route path="workbook-ledger" element={<WorkbookLedgerPage />} />
               {/* Taxinvoice new routes */}
               <Route path="taxinvoice/issue" element={<TaxInvoicePage />} />
               <Route path="taxinvoice/ledger" element={<TaxInvoiceLedgerPage />} />
               <Route path="taxinvoice/receivables" element={<ReceivablesManagerPage />} />
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerRouteDebug />} />
+              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerDawonRouteDebug />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />

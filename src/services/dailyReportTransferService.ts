@@ -336,8 +336,8 @@ const resolveWorker = (
     const candidates = workerLookup.byName.get(nameKey) ?? [];
     if (candidates.length <= 1) return candidates[0];
 
-    const rawWorkerTeamId = pickRowValue(row, ['작업팀ID', 'workerTeamId']);
-    const rawWorkerTeamName = pickRowValue(row, ['작업팀', 'workerTeamName']);
+    const rawWorkerTeamId = pickRowValue(row, ['소속팀ID', '작업팀ID', 'workerTeamId']);
+    const rawWorkerTeamName = pickRowValue(row, ['소속팀', '작업팀', 'workerTeamName']);
     const resolvedTeam = resolveEntity(teamLookup, rawWorkerTeamId, rawWorkerTeamName);
     if (resolvedTeam?.id) {
         const resolvedTeamId = String(resolvedTeam.id);
@@ -357,31 +357,22 @@ const toDbExportRows = (reports: DailyReport[]) => {
 
     return ordered.map((report) => {
         const raw: JsonRecord = {
-            id: report.id ?? '',
-            legacyId: report.legacyId ?? '',
-            date: report.date ?? '',
-            teamId: report.teamId ?? '',
-            teamName: report.teamName ?? '',
-            siteId: report.siteId ?? '',
-            siteName: report.siteName ?? '',
-            responsibleTeamId: report.responsibleTeamId ?? '',
-            responsibleTeamName: report.responsibleTeamName ?? '',
-            companyId: report.companyId ?? '',
-            companyName: report.companyName ?? '',
-            constructorCompanyId: report.constructorCompanyId ?? '',
-            constructorCompanyName: report.constructorCompanyName ?? '',
-            partnerId: report.partnerId ?? '',
-            partnerName: report.partnerName ?? '',
-            writerId: report.writerId ?? '',
-            workers: report.workers ?? [],
-            totalManDay: report.totalManDay ?? 0,
-            totalAmount: report.totalAmount ?? 0,
-            weather: report.weather ?? '',
-            workContent: report.workContent ?? '',
-            siteType: report.siteType ?? '',
-            paymentType: report.paymentType ?? '',
-            createdAt: report.createdAt ?? '',
-            updatedAt: report.updatedAt ?? '',
+            'ID': report.id ?? '',
+            '레거시ID': report.legacyId ?? '',
+            '날짜': report.date ?? '',
+            '현장ID': report.siteId ?? '',
+            '현장명': report.siteName ?? '',
+            '담당팀ID': report.teamId ?? '',
+            '담당팀명': report.teamName ?? '',
+            '현장구분': report.siteType ?? '',
+            '결제구분': report.paymentType ?? '',
+            '작업자내역': report.workers ?? [],
+            '총공수': report.totalManDay ?? 0,
+            '총금액': report.totalAmount ?? 0,
+            '날씨': report.weather ?? '',
+            '작업내용': report.workContent ?? '',
+            '생성일': report.createdAt ?? '',
+            '수정일': report.updatedAt ?? '',
         };
 
         return Object.fromEntries(
@@ -393,26 +384,26 @@ const toDbExportRows = (reports: DailyReport[]) => {
 const toDbDetailRows = (reports: DailyReport[]) => {
     return reports.flatMap((report) => {
         return (report.workers ?? []).map((worker) => ({
-            reportId: report.id ?? '',
-            date: report.date ?? '',
-            teamId: report.teamId ?? '',
-            teamName: report.teamName ?? '',
-            siteId: report.siteId ?? '',
-            siteName: report.siteName ?? '',
-            workerId: worker.workerId ?? '',
-            workerName: worker.name ?? '',
-            workerTeamId: worker.teamId ?? '',
-            workerTeamName: worker.workerTeamName ?? '',
-            role: worker.role ?? '',
-            status: worker.status ?? 'attendance',
-            manDay: worker.manDay ?? 0,
-            unitPrice: worker.unitPrice ?? 0,
-            amount: (worker.manDay ?? 0) * (worker.unitPrice ?? 0),
-            salaryModel: worker.salaryModel ?? '',
-            payType: worker.payType ?? '',
-            siteType: worker.siteType ?? report.siteType ?? '',
-            paymentType: worker.paymentType ?? report.paymentType ?? '',
-            workContent: worker.workContent ?? '',
+            '일보ID': report.id ?? '',
+            '날짜': report.date ?? '',
+            '담당팀ID': report.teamId ?? '',
+            '현장담당팀': report.teamName ?? '',
+            '현장ID': report.siteId ?? '',
+            '현장명': report.siteName ?? '',
+            '작업자ID': worker.workerId ?? '',
+            '이름': worker.name ?? '',
+            '소속팀ID': worker.teamId ?? '',
+            '소속팀': worker.workerTeamName ?? '',
+            '직무': worker.role ?? '',
+            '출결': worker.status ?? 'attendance',
+            '공수': worker.manDay ?? 0,
+            '단가': worker.unitPrice ?? 0,
+            '금액': (worker.manDay ?? 0) * (worker.unitPrice ?? 0),
+            '급여방식': worker.salaryModel ?? '',
+            '지급유형': worker.payType ?? '',
+            '현장구분': worker.siteType ?? report.siteType ?? '',
+            '결제구분': worker.paymentType ?? report.paymentType ?? '',
+            '비고': worker.workContent ?? '',
         }));
     });
 };
@@ -504,24 +495,24 @@ export const dailyReportTransferService = {
         XLSX.utils.book_append_sheet(
             workbook,
             await createWorksheetFromRows(dbRows, [
-                'id', 'legacyId', 'date', 'teamId', 'teamName', 'siteId', 'siteName',
-                'siteType', 'paymentType', 'workers', 'totalManDay', 'totalAmount',
-                'createdAt', 'updatedAt'
+                'ID', '레거시ID', '날짜', '현장ID', '현장명', '담당팀ID', '담당팀명',
+                '현장구분', '결제구분', '작업자내역', '총공수', '총금액', '날씨', '작업내용',
+                '생성일', '수정일'
             ]),
             DB_SHEET_NAME
         );
         XLSX.utils.book_append_sheet(
             workbook,
             await createWorksheetFromRows(detailRows, [
-                'reportId', 'date', 'teamId', 'teamName', 'siteId', 'siteName',
-                'workerId', 'workerName', 'workerTeamId', 'workerTeamName', 'salaryModel',
-                'manDay', 'unitPrice', 'amount', 'workContent'
+                '일보ID', '날짜', '담당팀ID', '현장담당팀', '현장ID', '현장명',
+                '작업자ID', '이름', '소속팀ID', '소속팀', '급여방식',
+                '공수', '단가', '금액', '비고'
             ]),
             DB_DETAIL_SHEET_NAME
         );
         XLSX.utils.book_append_sheet(
             workbook,
-            await createWorksheetFromRows(metaRows, ['downloadedAt', 'reportCount', 'workerRowCount']),
+            await createWorksheetFromRows(metaRows, ['다운로드일시', '일보수', '상세내역수']),
             DB_META_SHEET_NAME
         );
 
@@ -611,21 +602,23 @@ export const dailyReportTransferService = {
     async exportRowsToExcel(rows: DailyReportWorkerRow[], rangeLabel: string): Promise<void> {
         const XLSX = await import('xlsx');
 
+        const statusMap: Record<string, string> = {
+            'attendance': '출근',
+            'absent': '결근',
+            'half': '반차'
+        };
+
         const exportRows: JsonRecord[] = rows.map((row) => ({
-            '일보ID': row.reportId ?? '',
-            '작업자ID': row.workerId ?? '',
             '날짜': row.date ?? '',
-            '현장ID': row.siteId ?? '',
             '현장': row.siteName ?? '',
             '현장구분': row.siteType ?? '',
             '결제구분': row.paymentType ?? '',
-            '담당팀ID': row.teamId ?? '',
-            '담당팀': row.teamName ?? '',
+            '현장담당팀': row.teamName ?? '',
             '이름': row.workerName ?? '',
-            '작업팀ID': row.workerTeamId ?? '',
-            '작업팀': row.workerTeamName ?? '',
+            '소속팀': row.workerTeamName ?? '',
             '급여방식': row.salaryModel ?? row.payType ?? '',
-            '공수': row.manDay ?? 0,
+            '상태': statusMap[row.status] || row.status,
+            '공수': (Number.isFinite(row.manDay) ? row.manDay : 0).toFixed(1),
             '단가': row.unitPrice ?? 0,
             '금액': row.amount ?? 0,
             '비고': row.workContent ?? '',
@@ -633,8 +626,7 @@ export const dailyReportTransferService = {
 
         const worksheet = XLSX.utils.json_to_sheet(exportRows, {
             header: [
-                '일보ID', '작업자ID', '날짜', '현장ID', '현장', '현장구분', '결제구분',
-                '담당팀ID', '담당팀', '이름', '작업팀ID', '작업팀', '급여방식', '공수', '단가', '금액', '비고'
+                '날짜', '현장', '현장구분', '결제구분', '현장담당팀', '이름', '소속팀', '급여방식', '상태', '공수', '단가', '금액', '비고'
             ]
         });
         const workbook = XLSX.utils.book_new();
@@ -675,14 +667,14 @@ export const dailyReportTransferService = {
                 return;
             }
 
-            const team = resolveEntity(teamLookup, pickRowValue(row, ['담당팀ID', 'teamId']), pickRowValue(row, ['담당팀', 'teamName']));
+            const team = resolveEntity(teamLookup, pickRowValue(row, ['현장담당팀ID', '담당팀ID', 'teamId']), pickRowValue(row, ['현장담당팀', '담당팀', 'teamName']));
             if (!team?.id) {
                 skipped += 1;
-                warnings.push(`${lineNo}행: 담당팀을 찾지 못해 건너뜀`);
+                warnings.push(`${lineNo}행: 현장담당팀을 찾지 못해 건너뜀`);
                 return;
             }
 
-            const site = resolveEntity(siteLookup, pickRowValue(row, ['현장ID', 'siteId']), pickRowValue(row, ['현장', 'siteName']));
+            const site = resolveEntity(siteLookup, pickRowValue(row, ['현장ID', 'siteId']), pickRowValue(row, ['현장', 'siteName', '현장명']));
             if (!site?.id) {
                 skipped += 1;
                 warnings.push(`${lineNo}행: 현장을 찾지 못해 건너뜀`);
@@ -697,7 +689,7 @@ export const dailyReportTransferService = {
             }
 
             const reportId = String(pickRowValue(row, ['일보ID', 'reportId']) ?? '').trim() || undefined;
-            const workerTeam = resolveEntity(teamLookup, pickRowValue(row, ['작업팀ID', 'workerTeamId']), pickRowValue(row, ['작업팀', 'workerTeamName']));
+            const workerTeam = resolveEntity(teamLookup, pickRowValue(row, ['소속팀ID', '작업팀ID', 'workerTeamId']), pickRowValue(row, ['소속팀', '작업팀', 'workerTeamName']));
             const salaryModel = String(pickRowValue(row, ['급여방식', 'salaryModel', 'payType']) ?? '').trim() || worker.salaryModel || worker.payType || '';
             const siteType = String(pickRowValue(row, ['현장구분', 'siteType']) ?? '').trim();
             const paymentType = String(pickRowValue(row, ['결제구분', 'paymentType']) ?? '').trim();

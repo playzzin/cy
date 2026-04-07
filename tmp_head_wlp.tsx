@@ -1,5 +1,4 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
@@ -22,11 +21,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { companyService } from '../../services/companyService';
 import { siteService } from '../../services/siteService';
 import { teamService } from '../../services/teamService';
-import { accountDirectoryService, AccountDirectory } from '../../services/accountDirectoryService';
 import {
-    createWorkbookLedgerService,
+    workbookLedgerService,
     WorkbookLedgerEntry,
-    WorkbookLedgerTenant,
     WorkbookTransactionType
 } from '../../services/workbookLedgerService';
 import './WorkbookLedgerPage.css';
@@ -34,7 +31,7 @@ import './WorkbookLedgerPage.css';
 registerAllModules();
 
 type WorkbookTab = 'input' | 'database' | 'ledger' | 'summary';
-type SummaryMode = '매출' | '매입' | '미수금' | '미지급금';
+type SummaryMode = '???' | '???' | '????? | '??????';
 
 interface InputRow {
     transactionType: WorkbookTransactionType | '';
@@ -173,32 +170,27 @@ const INPUT_ROW_COUNT = 80;
 const DB_PAGE_SIZE = 100;
 const buildDefaultLedgerStart = (year: number) => `${year}-01-01`;
 const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
-    { id: 'input', label: '입력폼' },
+    { id: 'input', label: '????? },
     { id: 'database', label: 'DB' },
-    { id: 'ledger', label: '조회 (매출, 매입 거래장)' },
-    { id: 'summary', label: '전체 조회' },
-];
-
-const TENANT_TABS: Array<{ key: WorkbookLedgerTenant; label: string; path: string }> = [
-    { key: 'cheongyeon', label: '청연', path: '/payroll/workbook-ledger' },
-    { key: 'dawon', label: '다원', path: '/payroll/workbook-ledger-dawon' }
+    { id: 'ledger', label: '???(???,????????' },
+    { id: 'summary', label: '??? ???' }
 ];
 
 const DB_HEADERS = [
-    '구분',
-    '날짜',
-    '거래처명',
-    '현장명',
-    '내용',
-    '공급가액',
-    '부가세',
-    '합계',
-    '입금금액',
-    '적용연도',
-    '적용월',
-    '매칭매출ID',
-    '비고',
-    '팀명',
+    '???',
+    '???',
+    '??????',
+    '?????,
+    '???',
+    '???????,
+    '??????,
+    '???',
+    '??????',
+    '??????',
+    '?????,
+    '??????ID',
+    '???',
+    '????
 ] as const;
 
 const emptyInputRow = (): InputRow => ({
@@ -286,46 +278,11 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-const WORKBOOK_DEBUG_TAG = 'KB_TAG_20260407_02';
-
-const normalizeBankName = (value: unknown) => (
-    String(value ?? '')
-        .toLowerCase()
-        .replace(/\s+/g, '')
-        .trim()
-);
-
-const KB_BANK_CODE_BY_NAME = new Map<string, string>([
-    ['국민은행', '004'],
-    ['kb국민', '004'],
-    ['kb국민은행', '004'],
-    ['신한은행', '088'],
-    ['우리은행', '020'],
-    ['하나은행', '081'],
-    ['nh농협은행', '011'],
-    ['농협은행', '011'],
-    ['기업은행', '003'],
-    ['ibk기업은행', '003'],
-    ['카카오뱅크', '090'],
-    ['토스뱅크', '092'],
-    ['케이뱅크', '089']
-]);
-
-const resolveKBBankCode = (bankName: unknown) => {
-    const normalized = normalizeBankName(bankName);
-    if (!normalized) return '';
-
-    for (const [key, code] of KB_BANK_CODE_BY_NAME.entries()) {
-        if (normalized.includes(normalizeBankName(key))) return code;
-    }
-
-    return '';
-};
 const normalizePartnerMatchKey = (value: unknown) => normalizeText(value)
     .toLowerCase()
-    .replace(/\(주\)|㈜|주식회사/g, '')
+    .replace(/\(??)|????????/g, '')
     .replace(/\s+/g, '')
-    .replace(/[^0-9a-z가-힣]/g, '');
+    .replace(/[^0-9a-z??-??/g, '');
 const escapeHtml = (value: string) => value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -377,8 +334,8 @@ const buildPrintColumnStyles = (columns: PrintColumnSpec[]) => columns
 
 const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
     const text = normalizeText(value);
-    if (text.includes('매입')) return '매입';
-    if (text.includes('매출')) return '매출';
+    if (text.includes('???')) return '???';
+    if (text.includes('???')) return '???';
     return null;
 };
 
@@ -504,11 +461,11 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
         if (header) headerIndex.set(header, index);
     });
 
-    const requiredHeaders = ['구분', '날짜', '거래처명'];
+    const requiredHeaders = ['???', '???', '??????'];
     const hasRequiredHeaders = requiredHeaders.every((header) => headerIndex.has(header));
 
     if (!hasRequiredHeaders) {
-        throw new Error('업로드 파일에서 DB 헤더를 찾지 못했습니다. DB 시트 또는 동일한 헤더 형식의 파일을 올려주세요.');
+        throw new Error('??????????? DB ???????? ???????? DB ??? ??? ???????? ??????????????????');
     }
 
     const readCell = (row: unknown[], header: string) => {
@@ -520,30 +477,24 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
     let skipped = 0;
 
     rows.slice(1).forEach((row) => {
-        const transactionType = normalizeTransactionType(readCell(row, '구분'));
-        const date = normalizeDate(readCell(row, '날짜'));
-        const partnerName = normalizeText(readCell(row, '거래처명'));
-        const siteName = normalizeText(
-            readCell(row, '현장명')
-        );
-        const description = normalizeText(readCell(row, '내용'));
-        const manDays = headerIndex.has('공수') ? toNumberOrNull(readCell(row, '공수')) : null;
-        const supplyAmount = toNumberOrNull(readCell(row, '공급가액')) ?? 0;
-        const taxAmount = toNumberOrNull(readCell(row, '부가세')) ?? 0;
-        const totalAmount = toNumberOrNull(readCell(row, '합계')) ?? 0;
-        const paymentAmount = toNumberOrNull(readCell(row, '입금금액')) ?? 0;
-        const appliedYear = toNumberOrNull(readCell(row, '적용연도')) ?? getYearFromDate(date) ?? fallbackYear;
-        const appliedMonth = toNumberOrNull(
-            readCell(row, '적용월')
-        ) ?? getMonthFromDate(date);
-        const matchedEntryId = normalizeText(readCell(row, '매칭매출ID'));
-        const note = normalizeText(readCell(row, '비고'));
-        const teamName = normalizeText(
-            readCell(row, '팀명')
-        ) || fallbackTeamName;
+        const transactionType = normalizeTransactionType(readCell(row, '???'));
+        const date = normalizeDate(readCell(row, '???'));
+        const partnerName = normalizeText(readCell(row, '??????'));
+        const siteName = normalizeText(readCell(row, '?????));
+        const description = normalizeText(readCell(row, '???'));
+        const manDays = headerIndex.has('???') ? toNumberOrNull(readCell(row, '???')) : null;
+        const supplyAmount = toNumberOrNull(readCell(row, '???????)) ?? 0;
+        const taxAmount = toNumberOrNull(readCell(row, '??????)) ?? 0;
+        const totalAmount = toNumberOrNull(readCell(row, '???')) ?? 0;
+        const paymentAmount = toNumberOrNull(readCell(row, '??????')) ?? 0;
+        const appliedYear = toNumberOrNull(readCell(row, '??????')) ?? getYearFromDate(date) ?? fallbackYear;
+        const appliedMonth = toNumberOrNull(readCell(row, '?????)) ?? getMonthFromDate(date);
+        const matchedEntryId = normalizeText(readCell(row, '??????ID'));
+        const note = normalizeText(readCell(row, '???'));
+        const teamName = normalizeText(readCell(row, '????)) || fallbackTeamName;
 
         const entry: WorkbookLedgerEntry = {
-            transactionType: transactionType ?? '매출',
+            transactionType: transactionType ?? '???',
             date,
             partnerName,
             siteName,
@@ -734,16 +685,16 @@ const findLegacyMatchedCandidateId = (
 };
 
 const getSettlementLabels = (transactionType: WorkbookTransactionType | undefined) => {
-    const isPurchase = transactionType === '매입';
+    const isPurchase = transactionType === '???';
 
     return {
-        action: isPurchase ? '지급' : '입금',
-        history: isPurchase ? '지급내역' : '입금내역',
-        date: isPurchase ? '지급일자' : '입금일자',
-        amount: isPurchase ? '지급금액' : '입금금액',
-        cumulative: isPurchase ? '누적지급' : '누적입금',
-        outstanding: isPurchase ? '미지급금' : '미수금',
-        placeholder: isPurchase ? '지급 메모' : '입금 메모',
+        action: isPurchase ? '???? : '???',
+        history: isPurchase ? '??????? : '??????',
+        date: isPurchase ? '??????? : '??????',
+        amount: isPurchase ? '??????? : '??????',
+        cumulative: isPurchase ? '??????? : '??????',
+        outstanding: isPurchase ? '??????' : '?????,
+        placeholder: isPurchase ? '???????' : '??? ???'
     };
 };
 
@@ -793,7 +744,7 @@ const buildReceiptHistorySettlementEntries = (
 ) => {
     if (!targetId) return [];
 
-    const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
+    const transactionType: WorkbookTransactionType = filter.mode === '???' || filter.mode === '??????' ? '???' : '???';
     const startDate = normalizeDate(filter.startDate);
     const endDate = normalizeDate(filter.endDate);
 
@@ -826,10 +777,10 @@ const buildReceiptHistorySettlementEntries = (
 };
 
 const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
-    const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
+    const transactionType: WorkbookTransactionType = filter.mode === '???' || filter.mode === '??????' ? '???' : '???';
     const startDate = normalizeDate(filter.startDate);
     const endDate = normalizeDate(filter.endDate);
-    const isSettlementMode = filter.mode === '미수금' || filter.mode === '미지급금';
+    const isSettlementMode = filter.mode === '????? || filter.mode === '??????';
 
     if (!startDate || !endDate) return [];
 
@@ -1146,23 +1097,12 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     return scopedRows.sort(sortSummaryRowsByDate);
 };
 
-interface WorkbookLedgerPageProps {
-    tenantKey?: WorkbookLedgerTenant;
-    companyLabel?: string;
-}
-
-const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
-    tenantKey = 'cheongyeon',
-    companyLabel = '청연'
-}) => {
-    const location = useLocation();
-    const navigate = useNavigate();
+const WorkbookLedgerPage: React.FC = () => {
     const hotRef = useRef<any>(null);
     const dbUploadInputRef = useRef<HTMLInputElement | null>(null);
     const ledgerCaptureRef = useRef<HTMLDivElement | null>(null);
     const summaryCaptureRef = useRef<HTMLDivElement | null>(null);
     const { currentUser } = useAuth();
-    const ledgerService = useMemo(() => createWorkbookLedgerService(tenantKey), [tenantKey]);
 
     const today = useMemo(() => new Date(), []);
     const currentYear = today.getFullYear();
@@ -1174,10 +1114,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [saving, setSaving] = useState(false);
     const [uploadingDb, setUploadingDb] = useState(false);
     const [downloadingDb, setDownloadingDb] = useState(false);
-    const [downloadingKb, setDownloadingKb] = useState(false);
-    const [showKbPreview, setShowKbPreview] = useState(false);
-    const [kbReceiverDisplay, setKbReceiverDisplay] = useState(companyLabel);
-    const [kbMemoSuffix, setKbMemoSuffix] = useState('');
     const [dbActionLoading, setDbActionLoading] = useState(false);
     const [capturingView, setCapturingView] = useState<'ledger' | 'summary' | null>(null);
     const [printingLedger, setPrintingLedger] = useState(false);
@@ -1201,7 +1137,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
-        transactionType: '매출',
+        transactionType: '???',
         partnerName: '',
         siteName: ''
     });
@@ -1209,7 +1145,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
-        transactionType: '매출',
+        transactionType: '???',
         partnerName: '',
         siteName: ''
     });
@@ -1218,24 +1154,22 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
-        mode: '미수금',
+        mode: '?????,
         partnerName: '',
-        siteName: '',
+        siteName: ''
     });
     const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>({
         startDate: defaultLedgerStart,
         endDate: todayString,
         teamName: '',
-        mode: '미수금',
+        mode: '?????,
         partnerName: '',
-        siteName: '',
+        siteName: ''
     });
     const [dbFilter, setDbFilter] = useState<DbFilterState>(emptyDbFilter);
     const [dbSort, setDbSort] = useState<DbSortState>({ field: 'date', direction: 'asc' });
     const [dbPage, setDbPage] = useState(1);
     const [selectedDbEntryIds, setSelectedDbEntryIds] = useState<string[]>([]);
-    const [selectedSummaryRowIds, setSelectedSummaryRowIds] = useState<string[]>([]);
-    const [purchaseAccountsByName, setPurchaseAccountsByName] = useState<Map<string, AccountDirectory>>(new Map());
     const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
     const [expandedDbEntryIds, setExpandedDbEntryIds] = useState<string[]>([]);
     const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
@@ -1264,7 +1198,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const shouldLoadCatalogs = options?.forceCatalogs || !catalogsLoadedRef.current;
             const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
             const [savedEntries, companies, sites, teams] = await Promise.all([
-                shouldLoadEntries ? ledgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
+                shouldLoadEntries ? workbookLedgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
                 shouldLoadCatalogs ? companyService.getActiveCompanies() : Promise.resolve(null),
                 shouldLoadCatalogs ? siteService.getSites() : Promise.resolve(null),
                 shouldLoadCatalogs ? teamService.getTeams() : Promise.resolve(null)
@@ -1290,11 +1224,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             }
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '전용 장부 데이터를 불러오지 못했습니다.', 'error');
+            Swal.fire('???', '??? ??? ?????? ?????? ????????', 'error');
         } finally {
             setLoading(false);
         }
-    }, [ledgerService, rebuildLookupOptions]);
+    }, [rebuildLookupOptions]);
 
     useEffect(() => {
         refreshPageData({ forceCatalogs: true, loadEntries: false });
@@ -1304,28 +1238,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         if (activeTab === 'input' || entriesLoadedRef.current) return;
         refreshPageData({ loadEntries: true });
     }, [activeTab, refreshPageData]);
-
-    useEffect(() => {
-        const loadPurchaseAccounts = async () => {
-            try {
-                const accounts = await accountDirectoryService.getEntriesByCategory('purchase');
-                const nextMap = new Map<string, AccountDirectory>();
-
-                accounts.forEach((account) => {
-                    const key = normalizeText(account.name);
-                    if (!key) return;
-                    nextMap.set(key, account);
-                });
-
-                setPurchaseAccountsByName(nextMap);
-            } catch (error) {
-                console.error(error);
-                setPurchaseAccountsByName(new Map());
-            }
-        };
-
-        loadPurchaseAccounts();
-    }, []);
 
     useEffect(() => {
         setInputRows((prevRows) => {
@@ -1357,7 +1269,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             .filter(({ row }) => hasInputContent(row));
 
         if (filledRows.length === 0) {
-            Swal.fire('안내', '저장할 입력 행이 없습니다.', 'info');
+            Swal.fire('???', '????? ??? ??? ??????.', 'info');
             return;
         }
 
@@ -1366,17 +1278,17 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         filledRows.forEach(({ row, excelRowNumber }) => {
             if (!row.transactionType) {
-                validationErrors.push(`${excelRowNumber}행: 구분을 선택하세요.`);
+                validationErrors.push(`${excelRowNumber}?? ?????????????`);
                 return;
             }
 
             if (!row.date) {
-                validationErrors.push(`${excelRowNumber}행: 날짜를 입력하세요.`);
+                validationErrors.push(`${excelRowNumber}?? ?????????????`);
                 return;
             }
 
             if (!row.partnerName) {
-                validationErrors.push(`${excelRowNumber}행: 거래처명을 입력하세요.`);
+                validationErrors.push(`${excelRowNumber}?? ????????????????`);
                 return;
             }
 
@@ -1387,7 +1299,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const appliedMonth = row.appliedMonth ?? getMonthFromDate(row.date);
 
             if (totalAmount === 0 && paymentAmount <= 0) {
-                validationErrors.push(`${excelRowNumber}행: 합계 또는 입금금액 중 하나는 입력되어야 합니다.`);
+                validationErrors.push(`${excelRowNumber}?? ??? ??? ?????? ????????????????????`);
                 return;
             }
 
@@ -1440,12 +1352,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 description:
                     row.description ||
                     (totalAmount !== 0
-                        ? (row.transactionType === '매출' ? '매출' : '매입')
-                        : (
-                            row.transactionType === '매출'
-                                ? '입금'
-                                : '지급'
-                        )),
+                        ? (row.transactionType === '???' ? '???' : '???')
+                        : (row.transactionType === '???' ? '???' : '????)),
                 supplyAmount,
                 taxAmount,
                 totalAmount,
@@ -1454,24 +1362,24 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         });
 
         if (validationErrors.length > 0) {
-            Swal.fire('입력 확인', validationErrors.slice(0, 8).join('<br />'), 'warning');
+            Swal.fire('??? ???', validationErrors.slice(0, 8).join('<br />'), 'warning');
             return;
         }
 
         if (preparedEntries.length === 0) {
-            Swal.fire('안내', '저장 가능한 데이터가 없습니다.', 'info');
+            Swal.fire('???', '????????? ?????? ??????.', 'info');
             return;
         }
 
         setSaving(true);
         try {
-            await ledgerService.addEntries(preparedEntries);
+            await workbookLedgerService.addEntries(preparedEntries);
             handleResetInputGrid();
             await refreshPageData();
-            Swal.fire('저장 완료', `${preparedEntries.length}건을 전용 장부 DB에 등록했습니다.`, 'success');
+            Swal.fire('???????', `${preparedEntries.length}??? ??? ??? DB???????????.`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '장부 데이터를 저장하지 못했습니다.', 'error');
+            Swal.fire('???', '??? ?????? ??????? ????????', 'error');
         } finally {
             setSaving(false);
         }
@@ -1495,7 +1403,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const sheetName = workbook.SheetNames.includes('DB') ? 'DB' : workbook.SheetNames[0];
 
             if (!sheetName) {
-                throw new Error('업로드 파일에서 시트를 찾을 수 없습니다.');
+                throw new Error('??????????? ???????? ????????.');
             }
 
             const worksheet = workbook.Sheets[sheetName];
@@ -1508,24 +1416,22 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const { entries: importedEntries, skipped } = parseImportedDbEntries(rows, selectedTeam, baseYear);
 
             if (importedEntries.length === 0) {
-                Swal.fire('안내', '가져올 수 있는 DB 행이 없습니다.', 'info');
+                Swal.fire('???', '????? ????? DB ??? ??????.', 'info');
                 return;
             }
 
             const result = await Swal.fire({
-                title: 'DB 업로드',
-                html:
-                    `${importedEntries.length.toLocaleString()}건을 현재 장부 DB에 추가합니다.` +
-                    `${skipped > 0 ? `<br />건너뜀: ${skipped.toLocaleString()}건` : ''}`,
+                title: 'DB ?????,
+                html: `${importedEntries.length.toLocaleString()}??? ??? ??? DB??????????${skipped > 0 ? `<br />?????: ${skipped.toLocaleString()}?? : ''}`,
                 icon: 'question',
                 showCancelButton: true,
-                confirmButtonText: '업로드',
-                cancelButtonText: '취소'
+                confirmButtonText: '?????,
+                cancelButtonText: '???'
             });
 
             if (!result.isConfirmed) return;
 
-            await ledgerService.addEntries(
+            await workbookLedgerService.addEntries(
                 importedEntries.map((entry) => ({
                     ...entry,
                     createdBy: currentUser?.uid ?? ''
@@ -1534,10 +1440,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
             await refreshPageData();
             setActiveTab('database');
-            Swal.fire('업로드 완료', `${importedEntries.length.toLocaleString()}건을 DB에 추가했습니다.`, 'success');
+            Swal.fire('????????', `${importedEntries.length.toLocaleString()}??? DB???????????.`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', error instanceof Error ? error.message : 'DB 업로드에 실패했습니다.', 'error');
+            Swal.fire('???', error instanceof Error ? error.message : 'DB ?????? ?????????.', 'error');
         } finally {
             setUploadingDb(false);
         }
@@ -1545,7 +1451,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const handleDownloadDb = useCallback(async () => {
         if (entries.length === 0) {
-            Swal.fire('안내', '다운로드할 DB 데이터가 없습니다.', 'info');
+            Swal.fire('???', '????????DB ?????? ??????.', 'info');
             return;
         }
 
@@ -1570,10 +1476,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             });
 
-            saveAs(blob, `매입매출_DB_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            saveAs(blob, `??????_DB_${new Date().toISOString().slice(0, 10)}.xlsx`);
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 다운로드에 실패했습니다.', 'error');
+            Swal.fire('???', 'DB ?????????????????.', 'error');
         } finally {
             setDownloadingDb(false);
         }
@@ -1585,7 +1491,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         label: string
     ) => {
         if (!element) {
-            Swal.fire('안내', `${label} 화면을 찾지 못했습니다.`, 'info');
+            Swal.fire('???', `${label} ???????? ????????`, 'info');
             return;
         }
 
@@ -1603,24 +1509,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 height: captureHeight,
                 windowWidth: captureWidth,
                 windowHeight: captureHeight,
-                onclone: (documentClone: Document) => {
-                    const rootClone = documentClone.querySelector('.workbook-ledger-page');
-                    if (!rootClone) return;
-
-                    // Expand scroll-limited wrappers so the copied image contains all searched rows.
-                    rootClone.querySelectorAll('.sheet-table-wrapper, .workbook-frozen-table-wrapper').forEach((node) => {
-                        const wrapper = node as HTMLElement;
-                        wrapper.style.maxHeight = 'none';
-                        wrapper.style.height = 'auto';
-                        wrapper.style.overflow = 'visible';
-                    });
-
-                    rootClone.querySelectorAll('.sheet-table thead th').forEach((node) => {
-                        const th = node as HTMLElement;
-                        th.style.position = 'static';
-                        th.style.top = 'auto';
-                    });
-                },
                 ignoreElements: (node: Element) => (node as HTMLElement).dataset?.html2canvasIgnore === 'true'
             });
 
@@ -1629,7 +1517,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
 
             if (!blob) {
-                Swal.fire('오류', `${label} 화면 이미지 생성에 실패했습니다.`, 'error');
+                Swal.fire('???', `${label} ??? ????? ??????????????.`, 'error');
                 return;
             }
 
@@ -1641,7 +1529,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             };
 
             if (!ClipboardItemCtor || !clipboard.write) {
-                Swal.fire('안내', '이 브라우저는 이미지 클립보드 복사를 지원하지 않습니다.', 'info');
+                Swal.fire('???', '??????????????? ?????? ???????????? ??????.', 'info');
                 return;
             }
 
@@ -1651,10 +1539,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 })
             ]);
 
-            Swal.fire('복사 완료', `${label} 화면이 클립보드에 복사되었습니다.`, 'success');
+            Swal.fire('??? ???', `${label} ????????????????????????`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', `${label} 화면 복사에 실패했습니다.`, 'error');
+            Swal.fire('???', `${label} ??? ??????????????.`, 'error');
         } finally {
             setCapturingView((current) => (current === target ? null : current));
         }
@@ -1667,55 +1555,68 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const linkedPaymentTotal = linkedPayments.reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
 
         const result = await Swal.fire({
-            title: 'DB 행 수정',
+            title: 'DB ?????',
             width: 760,
             html: `
                 <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;text-align:left;">
                     <label style="display:grid;gap:6px;">
-                        <span style="font-size:13px;font-weight:700;">구분</span>
+                        <span style="font-size:13px;font-weight:700;">???</span>
                         <select id="db-type" class="swal2-input" style="margin:0;width:100%;">
-                            <option value="매출" ${entry.transactionType === '매출' ? 'selected' : ''}>매출</option>
-                            <option value="매입" ${entry.transactionType === '매입' ? 'selected' : ''}>매입</option>
-                        </section>
-                    );
-                        <span style="font-size:13px;font-weight:700;">내용</span>
+                            <option value="???" ${entry.transactionType === '???' ? 'selected' : ''}>???</option>
+                            <option value="???" ${entry.transactionType === '???' ? 'selected' : ''}>???</option>
+                        </select>
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">???</span>
+                        <input id="db-date" type="date" value="${escapeHtml(entry.date || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">??????</span>
+                        <input id="db-partner" type="text" value="${escapeHtml(entry.partnerName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;">
+                        <span style="font-size:13px;font-weight:700;">?????/span>
+                        <input id="db-site" type="text" value="${escapeHtml(entry.siteName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                    </label>
+                    <label style="display:grid;gap:6px;grid-column:1 / -1;">
+                        <span style="font-size:13px;font-weight:700;">???</span>
                         <input id="db-description" type="text" value="${escapeHtml(entry.description || '')}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;">
-                        <span style="font-size:13px;font-weight:700;">공급가액</span>
+                        <span style="font-size:13px;font-weight:700;">???????/span>
                         <input id="db-supply" type="number" value="${entry.supplyAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;">
-                        <span style="font-size:13px;font-weight:700;">입금금액</span>
+                        <span style="font-size:13px;font-weight:700;">??????</span>
                         <input id="db-payment" type="number" min="0" value="${entry.paymentAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;">
-                        <span style="font-size:13px;font-weight:700;">적용연도</span>
+                        <span style="font-size:13px;font-weight:700;">??????</span>
                         <input id="db-year" type="number" min="2000" max="2100" value="${entry.appliedYear ?? getYearFromDate(entry.date) ?? baseYear}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;">
-                        <span style="font-size:13px;font-weight:700;">적용월</span>
+                        <span style="font-size:13px;font-weight:700;">?????/span>
                         <input id="db-month" type="number" min="1" max="12" value="${entry.appliedMonth ?? getMonthFromDate(entry.date) ?? 1}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;grid-column:1 / -1;">
-                        <span style="font-size:13px;font-weight:700;">비고</span>
+                        <span style="font-size:13px;font-weight:700;">???</span>
                         <input id="db-note" type="text" value="${escapeHtml(entry.note || '')}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     <label style="display:grid;gap:6px;grid-column:1 / -1;">
-                        <span style="font-size:13px;font-weight:700;">팀명</span>
+                        <span style="font-size:13px;font-weight:700;">????/span>
                         <input id="db-team" type="text" value="${escapeHtml(entry.teamName || '')}" class="swal2-input" style="margin:0;width:100%;" />
                     </label>
                     ${entry.matchedEntryId ? `
                         <label style="display:grid;gap:6px;grid-column:1 / -1;">
-                            <span style="font-size:13px;font-weight:700;">매칭매출ID</span>
+                            <span style="font-size:13px;font-weight:700;">??????ID</span>
                             <input type="text" value="${escapeHtml(entry.matchedEntryId)}" class="swal2-input" style="margin:0;width:100%;background:#f8fafc;" readonly />
                         </label>
                     ` : ''}
                 </div>
             `,
             showCancelButton: true,
-            confirmButtonText: '저장',
-            cancelButtonText: '취소',
+            confirmButtonText: '????,
+            cancelButtonText: '???',
             focusConfirm: false,
             preConfirm: () => {
                 const transactionType = ((document.getElementById('db-type') as HTMLSelectElement | null)?.value ?? '') as WorkbookTransactionType;
@@ -1732,45 +1633,45 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
                 const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
 
-                if (transactionType !== '매출' && transactionType !== '매입') {
-                    Swal.showValidationMessage('구분을 선택해 주세요.');
+                if (transactionType !== '???' && transactionType !== '???') {
+                    Swal.showValidationMessage('???????????????');
                     return null;
                 }
 
                 if (!date) {
-                    Swal.showValidationMessage('날짜를 입력해 주세요.');
+                    Swal.showValidationMessage('???????????????');
                     return null;
                 }
 
                 if (!partnerName) {
-                    Swal.showValidationMessage('거래처명을 입력해 주세요.');
+                    Swal.showValidationMessage('??????????????????');
                     return null;
                 }
 
                 if (totalAmount === 0 && paymentAmount <= 0) {
-                    Swal.showValidationMessage('공급가액 또는 입금금액 중 하나는 입력해 주세요.');
+                    Swal.showValidationMessage('?????????? ?????? ?????????????????');
                     return null;
                 }
 
                 if (paymentAmount < 0) {
-                    Swal.showValidationMessage('입금금액은 0 이상이어야 합니다.');
+                    Swal.showValidationMessage('???????? 0 ?????????????');
                     return null;
                 }
 
                 if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
-                    Swal.showValidationMessage('연결된 입금내역이 있는 매출/매입 행은 구분을 변경할 수 없습니다.');
+                    Swal.showValidationMessage('???????????????? ???/??? ??? ?????????? ????????.');
                     return null;
                 }
 
                 if (linkedPayments.length > 0 && totalAmount <= 0) {
-                    Swal.showValidationMessage('연결된 입금내역이 있는 행은 합계를 0으로 만들 수 없습니다.');
+                    Swal.showValidationMessage('???????????????? ??? ?????0??? ??? ????????.');
                     return null;
                 }
 
                 if (totalAmount > 0) {
                     const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
                     if (totalAmount < minimumInvoiceAmount) {
-                        Swal.showValidationMessage(`합계는 연결된 입금 ${formatNumber(minimumInvoiceAmount)}원 이상이어야 합니다.`);
+                        Swal.showValidationMessage(`????????????? ${formatNumber(minimumInvoiceAmount)}???????????????`);
                         return null;
                     }
                 }
@@ -1779,7 +1680,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
                     if (matchedInvoice) {
                         if (transactionType !== matchedInvoice.transactionType) {
-                            Swal.showValidationMessage('입금 행의 구분은 연결된 원본 행과 같아야 합니다.');
+                            Swal.showValidationMessage('??? ??? ????? ???????? ??? ??????????');
                             return null;
                         }
 
@@ -1789,7 +1690,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
 
                         if (paymentAmount > maxPaymentAmount) {
-                            Swal.showValidationMessage(`입금금액은 연결 매출의 잔액 ${formatNumber(maxPaymentAmount)}원을 넘을 수 없습니다.`);
+                            Swal.showValidationMessage(`???????? ??? ???????? ${formatNumber(maxPaymentAmount)}??? ??? ????????.`);
                             return null;
                         }
                     }
@@ -1817,15 +1718,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         setDbActionLoading(true);
         try {
-            await ledgerService.updateEntry(entry.id, {
+            await workbookLedgerService.updateEntry(entry.id, {
                 ...result.value,
                 updatedBy: currentUser?.uid ?? ''
             });
             await refreshPageData();
-            Swal.fire('수정 완료', 'DB 행을 수정했습니다.', 'success');
+            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 행 수정에 실패했습니다.', 'error');
+            Swal.fire('???', 'DB ????????????????.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -1849,7 +1750,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const entry = entries.find((item) => item.id === editingDbDraft.id);
         if (!entry?.id) {
-            Swal.fire('안내', '수정할 DB 행을 다시 불러와 주세요.', 'info');
+            Swal.fire('???', '?????DB ??? ??? ????? ?????', 'info');
             return;
         }
 
@@ -1869,45 +1770,45 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
         const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
 
-        if (transactionType !== '매출' && transactionType !== '매입') {
-            Swal.fire('입력 확인', '구분을 선택해 주세요.', 'warning');
+        if (transactionType !== '???' && transactionType !== '???') {
+            Swal.fire('??? ???', '???????????????', 'warning');
             return;
         }
 
         if (!date) {
-            Swal.fire('입력 확인', '날짜를 입력해 주세요.', 'warning');
+            Swal.fire('??? ???', '???????????????', 'warning');
             return;
         }
 
         if (!partnerName) {
-            Swal.fire('입력 확인', '거래처명을 입력해 주세요.', 'warning');
+            Swal.fire('??? ???', '??????????????????', 'warning');
             return;
         }
 
         if (totalAmount === 0 && paymentAmount <= 0) {
-            Swal.fire('입력 확인', '공급가액 또는 입금금액 중 하나를 입력해 주세요.', 'warning');
+            Swal.fire('??? ???', '?????????? ?????? ?????????????????', 'warning');
             return;
         }
 
         if (paymentAmount < 0) {
-            Swal.fire('입력 확인', '입금금액은 0 이상이어야 합니다.', 'warning');
+            Swal.fire('??? ???', '???????? 0 ?????????????', 'warning');
             return;
         }
 
         if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
-            Swal.fire('입력 확인', '연결된 입금내역이 있는 매출/매입 행은 구분을 변경할 수 없습니다.', 'warning');
+            Swal.fire('??? ???', '???????????????? ???/??? ??? ?????????? ????????.', 'warning');
             return;
         }
 
         if (linkedPayments.length > 0 && totalAmount <= 0) {
-            Swal.fire('입력 확인', '연결된 입금내역이 있는 행은 합계를 0 이하로 변경할 수 없습니다.', 'warning');
+            Swal.fire('??? ???', '???????????????? ??? ?????0 ?????????? ????????.', 'warning');
             return;
         }
 
         if (totalAmount > 0) {
             const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
             if (totalAmount < minimumInvoiceAmount) {
-                Swal.fire('입력 확인', `합계는 연결된 입금 ${formatNumber(minimumInvoiceAmount)}원 이상이어야 합니다.`, 'warning');
+                Swal.fire('??? ???', `????????????? ${formatNumber(minimumInvoiceAmount)}???????????????`, 'warning');
                 return;
             }
         }
@@ -1916,7 +1817,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
             if (matchedInvoice) {
                 if (transactionType !== matchedInvoice.transactionType) {
-                    Swal.fire('입력 확인', '입금 행의 구분은 연결된 원본 행과 같아야 합니다.', 'warning');
+                    Swal.fire('??? ???', '??? ??? ????? ???????? ??? ??????????', 'warning');
                     return;
                 }
 
@@ -1926,7 +1827,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
 
                 if (paymentAmount > maxPaymentAmount) {
-                    Swal.fire('입력 확인', `입금금액은 연결 매출의 잔액 ${formatNumber(maxPaymentAmount)}원을 넘을 수 없습니다.`, 'warning');
+                    Swal.fire('??? ???', `???????? ??? ???????? ${formatNumber(maxPaymentAmount)}??? ??? ????????.`, 'warning');
                     return;
                 }
             }
@@ -1934,7 +1835,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         setDbActionLoading(true);
         try {
-            await ledgerService.updateEntry(entry.id, {
+            await workbookLedgerService.updateEntry(entry.id, {
                 transactionType,
                 date,
                 partnerName,
@@ -1952,10 +1853,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             });
             await refreshPageData();
             setEditingDbDraft(null);
-            Swal.fire('수정 완료', 'DB 행을 수정했습니다.', 'success');
+            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 행 수정에 실패했습니다.', 'error');
+            Swal.fire('???', 'DB ????????????????.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -1967,30 +1868,30 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const linkedPayments = entries.filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.id);
 
         if (isInvoiceEntry(entry) && linkedPayments.length > 0) {
-            Swal.fire('삭제 불가', '이 행에 연결된 입금내역이 있습니다. 입금내역을 먼저 삭제해 주세요.', 'warning');
+            Swal.fire('??? ???', '????? ???????????????????. ??????????? ??????????', 'warning');
             return;
         }
 
         const result = await Swal.fire({
-            title: 'DB 행 삭제',
-            text: `${entry.date} / ${entry.partnerName} 행을 삭제하시겠습니까?`,
+            title: 'DB ?????',
+            text: `${entry.date} / ${entry.partnerName} ??? ?????????????`,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: '삭제',
-            cancelButtonText: '취소'
+            confirmButtonText: '???',
+            cancelButtonText: '???'
         });
 
         if (!result.isConfirmed) return;
 
         setDbActionLoading(true);
         try {
-            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
             await refreshPageData();
             setEditingDbDraft((prev) => (prev?.id === entry.id ? null : prev));
-            Swal.fire('삭제 완료', 'DB 행을 삭제했습니다.', 'success');
+            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 행 삭제에 실패했습니다.', 'error');
+            Swal.fire('???', 'DB ????????????????.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -1998,23 +1899,23 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const handleResetDatabase = useCallback(async () => {
         if (entries.length === 0) {
-            Swal.fire('안내', '초기화할 DB 데이터가 없습니다.', 'info');
+            Swal.fire('???', '?????? DB ?????? ??????.', 'info');
             return;
         }
 
         const result = await Swal.fire({
-            title: 'DB 초기화',
-            html: `현재 저장된 <strong>${entries.length.toLocaleString()}건</strong>을 모두 초기화합니다.<br />계속하려면 <strong>초기화</strong>를 입력하세요.`,
+            title: 'DB ?????,
+            html: `??? ????? <strong>${entries.length.toLocaleString()}??/strong>????? ?????????.<br />????????<strong>?????/strong>??????????`,
             input: 'text',
-            inputPlaceholder: '초기화',
+            inputPlaceholder: '?????,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: '초기화',
-            cancelButtonText: '취소',
+            confirmButtonText: '?????,
+            cancelButtonText: '???',
             focusConfirm: false,
             preConfirm: (value) => {
-                if (normalizeText(value) !== '초기화') {
-                    Swal.showValidationMessage("'초기화'를 입력하세요.");
+                if (normalizeText(value) !== '?????) {
+                    Swal.showValidationMessage("'???????????????");
                     return false;
                 }
 
@@ -2026,15 +1927,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         setDbActionLoading(true);
         try {
-            const deletedCount = await ledgerService.softDeleteAllEntries(currentUser?.uid ?? '');
+            const deletedCount = await workbookLedgerService.softDeleteAllEntries(currentUser?.uid ?? '');
             await refreshPageData({ forceEntries: true });
             setEditingDbDraft(null);
             setExpandedDbEntryIds([]);
             setDbPage(1);
-            Swal.fire('초기화 완료', `${deletedCount.toLocaleString()}건의 DB 데이터를 초기화했습니다.`, 'success');
+            Swal.fire('????????', `${deletedCount.toLocaleString()}??? DB ?????? ???????????`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', 'DB 초기화에 실패했습니다.', 'error');
+            Swal.fire('???', 'DB ?????? ?????????.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -2042,7 +1943,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const handleBulkDeleteDbEntries = useCallback(async () => {
         if (selectedDbEntryIds.length === 0) {
-            Swal.fire('안내', '삭제할 DB 행을 먼저 선택하세요.', 'info');
+            Swal.fire('???', '?????DB ??? ??? ????????', 'info');
             return;
         }
 
@@ -2050,7 +1951,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const selectedEntries = entries.filter((entry) => entry.id && selectedIdSet.has(entry.id));
 
         if (selectedEntries.length === 0) {
-            Swal.fire('안내', '선택한 DB 행을 다시 불러와 주세요.', 'info');
+            Swal.fire('???', '?????DB ??? ??? ????? ?????', 'info');
             return;
         }
 
@@ -2082,8 +1983,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 .map((entry) => `${escapeHtml(entry.date)} / ${escapeHtml(entry.partnerName)} / ${escapeHtml(entry.description || '-')}`)
                 .join('<br />');
             Swal.fire(
-                '삭제 불가',
-                `선택한 원본 행에 연결된 입금내역이 남아 있습니다.<br />연결 행까지 함께 선택한 뒤 다시 시도하세요.${blockedPreview ? `<br /><br />${blockedPreview}` : ''}`,
+                '??? ???',
+                `???????? ??? ???????????????? ??????.<br />??? ????? ??? ?????????? ????????${blockedPreview ? `<br /><br />${blockedPreview}` : ''}`,
                 'warning'
             );
             return;
@@ -2096,40 +1997,38 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             .join('<br />');
 
         const result = await Swal.fire({
-            title: '선택 행 일괄삭제',
+            title: '??? ????????',
             html: [
-                `선택한 <strong>${selectedEntries.length.toLocaleString()}건</strong> 중 <strong>${deletableEntryIds.length.toLocaleString()}건</strong>을 삭제합니다.`,
+                `?????<strong>${selectedEntries.length.toLocaleString()}??/strong> ??<strong>${deletableEntryIds.length.toLocaleString()}??/strong>??????????`,
                 blockedCount > 0
-                    ? `연결된 입금내역이 남아 있는 <strong>${blockedCount.toLocaleString()}건</strong>은 제외됩니다.${blockedPreview ? `<br /><br />${blockedPreview}${blockedCount > 5 ? '<br />...' : ''}` : ''}`
+                    ? `???????????????? ??? <strong>${blockedCount.toLocaleString()}??/strong>?? ????????${blockedPreview ? `<br /><br />${blockedPreview}${blockedCount > 5 ? '<br />...' : ''}` : ''}`
                     : ''
             ].filter(Boolean).join('<br />'),
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: blockedCount > 0
-                ? '가능한 항목만 삭제'
-                : '선택삭제',
-            cancelButtonText: '취소'
+            confirmButtonText: blockedCount > 0 ? '????? ????????' : '??????',
+            cancelButtonText: '???'
         });
 
         if (!result.isConfirmed) return;
 
         setDbActionLoading(true);
         try {
-            const deletedCount = await ledgerService.softDeleteEntries(deletableEntryIds, currentUser?.uid ?? '');
+            const deletedCount = await workbookLedgerService.softDeleteEntries(deletableEntryIds, currentUser?.uid ?? '');
             await refreshPageData({ forceEntries: true });
             setSelectedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
             setEditingDbDraft((prev) => (prev && deletableEntryIds.includes(prev.id) ? null : prev));
             setExpandedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
             Swal.fire(
-                blockedCount > 0 ? '부분 삭제 완료' : '삭제 완료',
+                blockedCount > 0 ? '??????? ???' : '??? ???',
                 blockedCount > 0
-                    ? `${deletedCount.toLocaleString()}건을 삭제했고 ${blockedCount.toLocaleString()}건은 제외했습니다.`
-                    : `${deletedCount.toLocaleString()}건을 삭제했습니다.`,
+                    ? `${deletedCount.toLocaleString()}??? ?????? ${blockedCount.toLocaleString()}??? ?????????.`
+                    : `${deletedCount.toLocaleString()}??? ?????????.`,
                 'success'
             );
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '선택 행 일괄삭제에 실패했습니다.', 'error');
+            Swal.fire('???', '??? ???????????????????.', 'error');
         } finally {
             setDbActionLoading(false);
         }
@@ -2139,16 +2038,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const labels = getSettlementLabels(row.transactionType);
 
         const result = await Swal.fire({
-            title: `${labels.action} 등록`,
+            title: `${labels.action} ???`,
             html: `
                 <div style="display:grid;gap:12px;text-align:left;">
                     <div>
-                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">거래처</div>
+                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">?????/div>
                         <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${row.partnerName}</div>
                     </div>
                     <div>
                         <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${labels.outstanding}</div>
-                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(row.outstandingAmount)}원</div>
+                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(row.outstandingAmount)}??/div>
                     </div>
                     <div>
                         <label for="receipt-date" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">${labels.date}</label>
@@ -2159,14 +2058,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <input id="receipt-amount" type="number" min="1" max="${Math.max(1, row.outstandingAmount)}" value="${row.outstandingAmount}" class="swal2-input" style="margin:0;width:100%;" />
                     </div>
                     <div>
-                        <label for="receipt-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">비고</label>
+                        <label for="receipt-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">???</label>
                         <input id="receipt-note" type="text" class="swal2-input" style="margin:0;width:100%;" placeholder="${labels.placeholder}" />
                     </div>
                 </div>
             `,
             showCancelButton: true,
-            confirmButtonText: '저장',
-            cancelButtonText: '취소',
+            confirmButtonText: '????,
+            cancelButtonText: '???',
             focusConfirm: false,
             preConfirm: () => {
                 const date = (document.getElementById('receipt-date') as HTMLInputElement | null)?.value ?? '';
@@ -2174,17 +2073,17 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 const note = (document.getElementById('receipt-note') as HTMLInputElement | null)?.value ?? '';
 
                 if (!date) {
-                    Swal.showValidationMessage(`${labels.date}를 입력하세요.`);
+                    Swal.showValidationMessage(`${labels.date}??????????`);
                     return null;
                 }
 
                 if (!Number.isFinite(amount) || amount <= 0) {
-                    Swal.showValidationMessage(`${labels.amount}은 0보다 커야 합니다.`);
+                    Swal.showValidationMessage(`${labels.amount}?? 0??? ??? ?????`);
                     return null;
                 }
 
                 if (amount > row.outstandingAmount) {
-                    Swal.showValidationMessage(`${labels.amount}은 현재 ${labels.outstanding}보다 클 수 없습니다.`);
+                    Swal.showValidationMessage(`${labels.amount}?? ??? ${labels.outstanding}??? ??????????.`);
                     return null;
                 }
 
@@ -2200,7 +2099,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         setSaving(true);
         try {
-            await ledgerService.addEntries([{
+            await workbookLedgerService.addEntries([{
                 transactionType: row.transactionType,
                 date,
                 partnerName: row.partnerName,
@@ -2220,10 +2119,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             }]);
 
             await refreshPageData();
-            Swal.fire('저장 완료', `${formatNumber(amount)}원 ${labels.action}을 등록했습니다.`, 'success');
+            Swal.fire('???????', `${formatNumber(amount)}??${labels.action}???????????.`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', `${labels.action} 등록에 실패했습니다.`, 'error');
+            Swal.fire('???', `${labels.action} ??????????????.`, 'error');
         } finally {
             setSaving(false);
         }
@@ -2266,7 +2165,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         );
 
         if (!receiptHistoryInvoice) {
-            Swal.fire('안내', '기준이 되는 원본 행을 다시 불러와주세요.', 'info');
+            Swal.fire('????', '?????????????? ???? ??????????????? ??????????', 'info');
             return;
         }
 
@@ -2281,7 +2180,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const labels = getSettlementLabels(receiptHistoryInvoice.transactionType);
 
         if (!currentReceipt) {
-            Swal.fire('안내', '수정할 입금내역을 다시 불러와주세요.', 'info');
+            Swal.fire('????', '???????????????????? ??????????', 'info');
             return;
         }
 
@@ -2289,23 +2188,23 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const maxAmount = Math.max((receiptHistoryInvoice.totalAmount ?? 0) - (receiptHistoryTotal - currentAmount), 0);
 
         if (!normalizedDate) {
-            Swal.fire('입력 확인', '입금일자를 입력하세요.', 'warning');
+            Swal.fire('??? ???', '????????????????', 'warning');
             return;
         }
 
         if (paymentAmount <= 0) {
-            Swal.fire('입력 확인', '입금금액은 0보다 커야 합니다.', 'warning');
+            Swal.fire('??? ???', '???????? 0??? ??? ?????', 'warning');
             return;
         }
 
         if (paymentAmount > maxAmount) {
-            Swal.fire('입력 확인', '수정 금액이 해당 매출의 잔액을 초과합니다.', 'warning');
+            Swal.fire('??? ???', '??? ???????? ??????????????????', 'warning');
             return;
         }
 
         setReceiptActionLoading(true);
         try {
-            await ledgerService.updateEntry(editingReceiptDraft.id, {
+            await workbookLedgerService.updateEntry(editingReceiptDraft.id, {
                 date: normalizedDate,
                 paymentAmount,
                 note: normalizeText(editingReceiptDraft.note),
@@ -2314,10 +2213,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
             await refreshPageData();
             setEditingReceiptDraft(null);
-            Swal.fire('수정 완료', '입금내역을 수정했습니다.', 'success');
+            Swal.fire('??? ???', '?????????????????.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '입금내역 수정에 실패했습니다.', 'error');
+            Swal.fire('???', '?????? ??????????????.', 'error');
         } finally {
             setReceiptActionLoading(false);
         }
@@ -2327,25 +2226,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         if (!entry.id) return;
 
         const result = await Swal.fire({
-            title: '입금내역 삭제',
-            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}원 입금내역을 삭제하시겠습니까?`,
+            title: '?????? ???',
+            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}???????????????????????`,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: '삭제',
-            cancelButtonText: '취소'
+            confirmButtonText: '???',
+            cancelButtonText: '???'
         });
 
         if (!result.isConfirmed) return;
 
         setReceiptActionLoading(true);
         try {
-            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
             await refreshPageData();
             setEditingReceiptDraft((prev) => (prev?.id === entry.id ? null : prev));
-            Swal.fire('삭제 완료', '입금내역을 삭제했습니다.', 'success');
+            Swal.fire('??? ???', '?????????????????.', 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', '입금내역 삭제에 실패했습니다.', 'error');
+            Swal.fire('???', '?????? ??????????????.', 'error');
         } finally {
             setReceiptActionLoading(false);
         }
@@ -2359,7 +2258,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         );
 
         if (!sourceEntry) {
-            Swal.fire('알림', '수정할 원본 행을 찾을 수 없습니다.', 'info');
+            Swal.fire('???', '???????? ??? ??? ????????.', 'info');
             return;
         }
 
@@ -2373,7 +2272,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const labels = getSettlementLabels(sourceEntry.transactionType);
 
         if (!currentEntry) {
-            Swal.fire('알림', '수정할 이력을 찾을 수 없습니다.', 'info');
+            Swal.fire('???', '????????????? ????????.', 'info');
             return;
         }
 
@@ -2381,23 +2280,23 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const maxAmount = Math.max((sourceEntry.totalAmount ?? 0) - (linkedTotal - currentAmount), 0);
 
         if (!normalizedDate) {
-            Swal.fire('입력 확인', `${labels.date}를 입력하세요.`, 'warning');
+            Swal.fire('??? ???', `${labels.date}??????????`, 'warning');
             return;
         }
 
         if (paymentAmount <= 0) {
-            Swal.fire('입력 확인', `${labels.amount}은 0보다 커야 합니다.`, 'warning');
+            Swal.fire('??? ???', `${labels.amount}?? 0??? ??? ?????`, 'warning');
             return;
         }
 
         if (paymentAmount > maxAmount) {
-            Swal.fire('입력 확인', `수정 금액이 해당 ${labels.outstanding} 잔액을 초과합니다.`, 'warning');
+            Swal.fire('??? ???', `??? ???????? ${labels.outstanding} ?????????????`, 'warning');
             return;
         }
 
         setReceiptActionLoading(true);
         try {
-            await ledgerService.updateEntry(editingReceiptDraft.id, {
+            await workbookLedgerService.updateEntry(editingReceiptDraft.id, {
                 date: normalizedDate,
                 paymentAmount,
                 note: normalizeText(editingReceiptDraft.note),
@@ -2406,10 +2305,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
             await refreshPageData();
             setEditingReceiptDraft(null);
-            Swal.fire('수정 완료', `${labels.history}을 수정했습니다.`, 'success');
+            Swal.fire('??? ???', `${labels.history}???????????.`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', `${labels.history} 수정에 실패했습니다.`, 'error');
+            Swal.fire('???', `${labels.history} ??????????????.`, 'error');
         } finally {
             setReceiptActionLoading(false);
         }
@@ -2420,25 +2319,25 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const labels = getSettlementLabels(entry.transactionType);
         const result = await Swal.fire({
-            title: `${labels.history} 삭제`,
-            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}원 ${labels.history}을 삭제하시겠습니까?`,
+            title: `${labels.history} ???`,
+            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}??${labels.history}???????????????`,
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: '삭제',
-            cancelButtonText: '취소'
+            confirmButtonText: '???',
+            cancelButtonText: '???'
         });
 
         if (!result.isConfirmed) return;
 
         setReceiptActionLoading(true);
         try {
-            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
             await refreshPageData();
             setEditingReceiptDraft((prev) => (prev?.id === entry.id ? null : prev));
-            Swal.fire('삭제 완료', `${labels.history}을 삭제했습니다.`, 'success');
+            Swal.fire('??? ???', `${labels.history}???????????.`, 'success');
         } catch (error) {
             console.error(error);
-            Swal.fire('오류', `${labels.history} 삭제에 실패했습니다.`, 'error');
+            Swal.fire('???', `${labels.history} ??????????????.`, 'error');
         } finally {
             setReceiptActionLoading(false);
         }
@@ -2459,7 +2358,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const endDate = draft.endDate;
 
         if (!startDate || !endDate) {
-            Swal.fire('입력 확인', '시작일과 종료일을 올바른 연/월/일로 입력해 주세요.', 'warning');
+            Swal.fire('??? ???', '?????? ?????? ???????????? ??????????', 'warning');
             return;
         }
 
@@ -2501,135 +2400,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }), { supplyAmount: 0, taxAmount: 0, totalAmount: 0, settledAmount: 0, outstandingAmount: 0 });
     }, [summaryRows]);
 
-    const resolveSummaryKbBankCode = useCallback((bankName: unknown) => {
-        const normalized = String(bankName ?? '')
-            .toLowerCase()
-            .replace(/\s+/g, '')
-            .trim();
-        if (!normalized) return '';
-
-        const bankCodeEntries: Array<[string, string]> = [
-            ['국민은행', '004'],
-            ['kb국민', '004'],
-            ['kb국민은행', '004'],
-            ['신한은행', '088'],
-            ['우리은행', '020'],
-            ['하나은행', '081'],
-            ['nh농협은행', '011'],
-            ['농협은행', '011'],
-            ['기업은행', '003'],
-            ['ibk기업은행', '003'],
-            ['카카오뱅크', '090'],
-            ['토스뱅크', '092'],
-            ['케이뱅크', '089']
-        ];
-
-        const matched = bankCodeEntries.find(([name]) => normalized.includes(name.toLowerCase().replace(/\s+/g, '')));
-        return matched?.[1] ?? '';
-    }, []);
-
-    const kbPreviewRows = useMemo(() => {
-        if (summaryFilter.mode !== '미지급금') return [];
-        const selectedIdSet = new Set(selectedSummaryRowIds);
-
-        return summaryRows
-            .filter((row) => selectedIdSet.has(row.id))
-            .filter((row) => row.outstandingAmount > 0)
-            .map((row) => {
-                const account = purchaseAccountsByName.get(normalizeText(row.partnerName));
-                const bankCode = resolveSummaryKbBankCode(account?.bankName);
-                const accountNumber = normalizeText(account?.accountNumber);
-                return {
-                    bankCode,
-                    accountNumber,
-                    amount: row.outstandingAmount,
-                    receiverDisplay: kbReceiverDisplay.slice(0, 10),
-                    memoDisplay: `${row.partnerName}${kbMemoSuffix}`.slice(0, 14)
-                };
-            });
-    }, [kbMemoSuffix, kbReceiverDisplay, purchaseAccountsByName, resolveSummaryKbBankCode, selectedSummaryRowIds, summaryFilter.mode, summaryRows]);
-
-    const handleOpenKbPreview = useCallback(() => {
-        if (summaryFilter.mode !== '미지급금') {
-            Swal.fire('안내', '국민은행용 다운로드는 미지급금 조회에서만 가능합니다.', 'info');
-            return;
-        }
-
-        if (kbPreviewRows.length === 0) {
-            Swal.fire('안내', '국민은행용으로 내보낼 미지급금 행을 먼저 선택하세요.', 'info');
-            return;
-        }
-
-        setShowKbPreview(true);
-    }, [kbPreviewRows.length, summaryFilter.mode]);
-
-    const handleDownloadSummaryKb = useCallback(async () => {
-        if (summaryFilter.mode !== '미지급금') {
-            Swal.fire('안내', '국민은행용 다운로드는 미지급금 조회에서만 가능합니다.', 'info');
-            return;
-        }
-
-        if (kbPreviewRows.length === 0) {
-            Swal.fire('안내', '국민은행용으로 내보낼 미지급금 행을 먼저 선택하세요.', 'info');
-            return;
-        }
-
-        setDownloadingKb(true);
-        try {
-            const XLSX = await import('xlsx');
-            const { saveAs } = await import('file-saver');
-
-            const rows = kbPreviewRows.map((row) => [
-                row.bankCode,
-                row.accountNumber,
-                row.amount,
-                row.receiverDisplay,
-                row.memoDisplay
-            ]);
-
-            const worksheet = XLSX.utils.aoa_to_sheet([
-                ['은행코드', '계좌번호', '이체금액', '받는분통장표시', '내통장메모'],
-                ...rows
-            ]);
-
-            worksheet['!cols'] = [
-                { wch: 10 },
-                { wch: 24 },
-                { wch: 14 },
-                { wch: 20 },
-                { wch: 28 }
-            ];
-
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, '국민은행용');
-
-            const workbookBuffer = XLSX.write(workbook, {
-                bookType: 'xlsx',
-                type: 'array'
-            });
-
-            const blob = new Blob([workbookBuffer], {
-                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            });
-
-            saveAs(blob, `미지급금_국민은행용_${new Date().toISOString().slice(0, 10)}.xlsx`);
-
-            const missingCount = rows.filter((row) => !row[0] || !row[1]).length;
-            if (missingCount > 0) {
-                Swal.fire('완료', `다운로드 완료 (${kbPreviewRows.length.toLocaleString()}건)\n계좌 미매핑 ${missingCount.toLocaleString()}건`, 'warning');
-            }
-        } catch (error) {
-            console.error(error);
-            Swal.fire('오류', '국민은행용 다운로드에 실패했습니다.', 'error');
-        } finally {
-            setDownloadingKb(false);
-            setShowKbPreview(false);
-        }
-    }, [kbPreviewRows, summaryFilter.mode]);
-
-    const canRegisterReceipt = summaryFilter.mode === '미수금' || summaryFilter.mode === '미지급금';
+    const canRegisterReceipt = summaryFilter.mode === '????? || summaryFilter.mode === '??????';
     const canOpenReceiptHistory = canRegisterReceipt;
-    const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '매입' : '매출';
+    const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '???' : '???';
     const summarySettlementLabels = getSettlementLabels(summarySettlementType);
 
     const receiptHistoryInvoice = useMemo(() => {
@@ -2674,20 +2447,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const handlePrintLedger = useCallback(() => {
         if (ledgerRows.length === 0) {
-            Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
+            Swal.fire('???', '???????? ????? ??????.', 'info');
             return;
         }
 
-        const transactionAmountLabel = ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액';
-        const paymentAmountLabel = ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액';
-        const title = ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`;
+        const transactionAmountLabel = ledgerFilter.transactionType === '???' ? '??????' : '??????';
+        const paymentAmountLabel = ledgerFilter.transactionType === '???' ? '??????' : '???????;
+        const title = ledgerFilter.partnerName || `${ledgerFilter.transactionType} ?????;
         const filterItems = [
-            ['조회 기간', `${ledgerFilter.startDate} ~ ${ledgerFilter.endDate}`],
-            ['구분', ledgerFilter.transactionType],
-            ['팀명', ledgerFilter.teamName || '전체'],
-            ['거래처', ledgerFilter.partnerName || '전체'],
-            ['현장명', ledgerFilter.siteName || '전체'],
-            ['건수', `${ledgerRows.length.toLocaleString()}건`]
+            ['??? ???', `${ledgerFilter.startDate} ~ ${ledgerFilter.endDate}`],
+            ['???', ledgerFilter.transactionType],
+            ['????, ledgerFilter.teamName || '???'],
+            ['?????, ledgerFilter.partnerName || '???'],
+            ['?????, ledgerFilter.siteName || '???'],
+            ['???', `${ledgerRows.length.toLocaleString()}??]
         ];
 
         const rowsHtml = ledgerRows
@@ -2710,7 +2483,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <tr class="summary-total-row">
                 <td></td>
                 <td></td>
-                <td>합계</td>
+                <td>???</td>
                 <td class="align-right">${formatNumber(ledgerTotals.transactionAmount)}</td>
                 <td class="align-right">${formatNumber(ledgerTotals.paymentAmount)}</td>
                 <td class="align-right">${formatNumber(ledgerTotals.balance)}</td>
@@ -2746,7 +2519,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const printWindow = iframe.contentWindow;
         if (!printWindow) {
             cleanup();
-            Swal.fire('오류', '인쇄 미리보기를 열 수 없습니다.', 'error');
+            Swal.fire('???', '??? ??????????????????.', 'error');
             return;
         }
 
@@ -2755,7 +2528,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <html lang="ko">
                 <head>
                     <meta charset="utf-8" />
-                    <title>${escapeHtml(title)} 인쇄</title>
+                    <title>${escapeHtml(title)} ???</title>
                     <style>
                         @page {
                             size: A4 landscape;
@@ -2871,15 +2644,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             ${ledgerPrintColGroup}
                             <thead>
                                 <tr>
-                                    <th>날짜</th>
-                                    <th>거래처명</th>
-                                    <th>내용</th>
+                                    <th>???</th>
+                                    <th>??????</th>
+                                    <th>???</th>
                                     <th>${escapeHtml(transactionAmountLabel)}</th>
                                     <th>${escapeHtml(paymentAmountLabel)}</th>
-                                    <th>잔액</th>
-                                    <th>현장명</th>
-                                    <th>비고</th>
-                                    <th>팀명</th>
+                                    <th>???</th>
+                                    <th>?????/th>
+                                    <th>???</th>
+                                    <th>????/th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -2910,31 +2683,31 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             } catch (error) {
                 console.error(error);
                 cleanup();
-                Swal.fire('오류', '인쇄 실행 중 오류가 발생했습니다.', 'error');
+                Swal.fire('???', '??? ??? ??????? ?????????.', 'error');
             }
         }, 150);
     }, [ledgerFilter, ledgerRows, ledgerTotals]);
 
     const handlePrintSummary = useCallback(() => {
         if (summaryRows.length === 0) {
-            Swal.fire('안내', '인쇄할 조회 결과가 없습니다.', 'info');
+            Swal.fire('???', '???????? ????? ??????.', 'info');
             return;
         }
 
         const paymentDateLabel = summarySettlementLabels.date;
         const settledAmountLabel = summarySettlementLabels.amount;
         const outstandingLabel = summarySettlementLabels.outstanding;
-        const countText = `${summaryRows.length.toLocaleString()}건`;
-        const dateRangeLabel = summaryFilter.mode === '매출' || summaryFilter.mode === '매입'
-            ? '발행일 기간'
-            : `${paymentDateLabel} 기간`;
+        const countText = `${summaryRows.length.toLocaleString()}??;
+        const dateRangeLabel = summaryFilter.mode === '???' || summaryFilter.mode === '???'
+            ? '????????'
+            : `${paymentDateLabel} ???`;
         const filterItems = [
             [dateRangeLabel, `${summaryFilter.startDate} ~ ${summaryFilter.endDate}`],
-            ['구분', summaryFilter.mode],
-            ['팀명', summaryFilter.teamName || '전체'],
-            ['거래처', summaryFilter.partnerName || '전체'],
-            ['현장명', summaryFilter.siteName || '전체'],
-            ['건수', countText]
+            ['???', summaryFilter.mode],
+            ['????, summaryFilter.teamName || '???'],
+            ['?????, summaryFilter.partnerName || '???'],
+            ['?????, summaryFilter.siteName || '???'],
+            ['???', countText]
         ];
 
         const rowsHtml = summaryRows
@@ -2959,7 +2732,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         const totalRowHtml = `
             <tr class="summary-total-row">
                 <td></td>
-                <td>합계</td>
+                <td>???</td>
                 <td></td>
                 <td></td>
                 <td class="align-right">${formatNumber(summaryTotals.supplyAmount)}</td>
@@ -3000,7 +2773,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         if (!printWindow) {
             cleanup();
-            Swal.fire('오류', '인쇄 미리보기를 열 수 없습니다.', 'error');
+            Swal.fire('???', '??? ??????????????????.', 'error');
             return;
         }
 
@@ -3009,7 +2782,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <html lang="ko">
                 <head>
                     <meta charset="utf-8" />
-                    <title>전체 조회 인쇄</title>
+                    <title>??? ??? ???</title>
                     <style>
                         @page {
                             size: A4 landscape;
@@ -3107,8 +2880,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <body>
                     <div class="print-shell">
                         <div class="print-header">
-                            <h1>전체 조회</h1>
-                            <p>현재 조회 조건으로 검색된 결과만 인쇄합니다.</p>
+                            <h1>??? ???</h1>
+                            <p>??? ??? ?????? ????? ?????????????</p>
                         </div>
                         <div class="print-filter-grid">
                             ${filterItems.map(([label, value]) => `
@@ -3122,17 +2895,17 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             <thead>
                                 <tr>
                                     <th>No</th>
-                                    <th>거래처명</th>
-                                    <th>현장명</th>
-                                    <th>발행일</th>
-                                    <th>공급가액</th>
-                                    <th>세액</th>
-                                    <th>합계</th>
+                                    <th>??????</th>
+                                    <th>?????/th>
+                                    <th>?????/th>
+                                    <th>???????/th>
+                                    <th>???</th>
+                                    <th>???</th>
                                     <th>${escapeHtml(paymentDateLabel)}</th>
                                     <th>${escapeHtml(settledAmountLabel)}</th>
                                     <th>${escapeHtml(outstandingLabel)}</th>
-                                    <th>비고</th>
-                                    <th>팀명</th>
+                                    <th>???</th>
+                                    <th>????/th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -3164,7 +2937,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 } catch (error) {
                     console.error(error);
                     cleanup();
-                    Swal.fire('오류', '인쇄 미리보기를 여는 중 문제가 발생했습니다.', 'error');
+                    Swal.fire('???', '??? ??????????? ??????? ?????????.', 'error');
                 }
             }, 150);
         };
@@ -3360,25 +3133,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         [selectedDbEntryIds]
     );
 
-    const selectedSummaryRowIdSet = useMemo(
-        () => new Set(selectedSummaryRowIds),
-        [selectedSummaryRowIds]
-    );
-
-    const selectableSummaryRowIds = useMemo(
-        () => summaryFilter.mode === '미지급금'
-            ? summaryRows
-                .filter((row) => row.outstandingAmount > 0)
-                .map((row) => row.id)
-            : [],
-        [summaryFilter.mode, summaryRows]
-    );
-
-    const areAllSelectableSummaryRowsSelected = useMemo(
-        () => selectableSummaryRowIds.length > 0 && selectableSummaryRowIds.every((id) => selectedSummaryRowIdSet.has(id)),
-        [selectableSummaryRowIds, selectedSummaryRowIdSet]
-    );
-
     const visibleSelectableDbEntryIds = useMemo(
         () => pagedDatabaseDisplayRows
             .map((row) => row.entry.id)
@@ -3405,11 +3159,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         setSelectedDbEntryIds((prev) => prev.filter((id) => validEntryIds.has(id)));
     }, [entries]);
 
-    useEffect(() => {
-        const validSummaryIds = new Set(selectableSummaryRowIds);
-        setSelectedSummaryRowIds((prev) => prev.filter((id) => validSummaryIds.has(id)));
-    }, [selectableSummaryRowIds]);
-
     const handleToggleDbEntryDetails = useCallback((entryId: string) => {
         setExpandedDbEntryIds((prev) => (
             prev.includes(entryId)
@@ -3428,7 +3177,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
     const getDbSortLabel = useCallback((field: DbSortField, baseLabel: string) => {
         if (dbSort.field !== field) return baseLabel;
-        return `${baseLabel} ${dbSort.direction === 'asc' ? '▲' : '▼'}`;
+        return `${baseLabel} ${dbSort.direction === 'asc' ? '?? : '??}`;
     }, [dbSort]);
 
     const handleMoveDbPage = useCallback((direction: 'prev' | 'next') => {
@@ -3475,35 +3224,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         });
     }, [visibleSelectableDbEntryIds]);
 
-    const handleToggleSummaryRowSelection = useCallback((rowId: string) => {
-        setSelectedSummaryRowIds((prev) => (
-            prev.includes(rowId)
-                ? prev.filter((id) => id !== rowId)
-                : [...prev, rowId]
-        ));
-    }, []);
-
-    const handleToggleAllSummaryRowSelection = useCallback(() => {
-        if (selectableSummaryRowIds.length === 0) return;
-
-        setSelectedSummaryRowIds((prev) => {
-            const nextSet = new Set(prev);
-            const shouldSelectAll = selectableSummaryRowIds.some((id) => !nextSet.has(id));
-
-            selectableSummaryRowIds.forEach((id) => {
-                if (shouldSelectAll) {
-                    nextSet.add(id);
-                } else {
-                    nextSet.delete(id);
-                }
-            });
-
-            return Array.from(nextSet);
-        });
-    }, [selectableSummaryRowIds]);
-
     const inputColumns = useMemo<any[]>(() => [
-        { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
+        { data: 'transactionType', type: 'dropdown', source: ['???', '???'], width: 88 },
         { data: 'date', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true, width: 118 },
         { data: 'partnerName', type: 'autocomplete', source: partnerNames, strict: false, width: 190 },
         { data: 'siteName', type: 'autocomplete', source: siteNames, strict: false, width: 210 },
@@ -3520,20 +3242,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     ], [partnerNames, siteNames]);
 
     const inputColHeaders = useMemo(() => ([
-        '구분',
-        '날짜',
-        '거래처명',
-        '현장명',
-        '내용',
-        '공수',
-        '공급가액',
-        '부가세',
-        '합계',
-        '입금금액',
-        '적용연도',
-        '적용월',
-        '비고',
-        '팀명'
+        '???',
+        '???',
+        '??????',
+        '?????,
+        '???',
+        '???',
+        '???????,
+        '??????,
+        '???',
+        '??????',
+        '??????',
+        '?????,
+        '???',
+        '????
     ]), []);
 
     const inputCells = useCallback((_row: number, column: number) => {
@@ -3553,16 +3275,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <table className="sheet-control-table input-sheet-table">
                 <tbody>
                     <tr>
-                        <th className="sheet-title-dark" colSpan={14}>데이터 입력 시트</th>
+                        <th className="sheet-title-dark" colSpan={14}>???????? ???</th>
                     </tr>
                     <tr>
-                        <th className="sheet-label-yellow">팀 명</th>
+                        <th className="sheet-label-yellow">?? ??/th>
                         <td className="sheet-value" colSpan={2}>
                             <input
                                 list="workbook-team-options"
                                 value={selectedTeam}
                                 onChange={(event) => setSelectedTeam(event.target.value)}
-                                placeholder="팀명 입력 또는 선택"
+                                placeholder="??????? ??? ???"
                             />
                         </td>
                         <td className="sheet-spacer" colSpan={6} />
@@ -3574,7 +3296,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={saving}
                             >
                                 <FontAwesomeIcon icon={saving ? faSpinner : faDatabase} spin={saving} />
-                                DB 등록
+                                DB ???
                             </button>
                         </td>
                         <td className="sheet-button-wrap" colSpan={3}>
@@ -3585,12 +3307,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={saving}
                             >
                                 <FontAwesomeIcon icon={faRotateRight} />
-                                리셋(RESET)
+                                ???(RESET)
                             </button>
                         </td>
                     </tr>
                     <tr>
-                        <th className="sheet-label-yellow">기준연도</th>
+                        <th className="sheet-label-yellow">??????</th>
                         <td className="sheet-value" colSpan={2}>
                             <input
                                 type="number"
@@ -3628,7 +3350,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             </div>
 
             <p className="workbook-help-text">
-                입력폼에서 공급가액을 넣으면 부가세와 합계가 자동 계산되고, 적용연도와 팀명은 상단 값으로 자동 반영됩니다.
+                ???????????????? ???????????? ????? ??? ??????, ???????? ????? ??? ???????? ????????
             </p>
         </section>
     );
@@ -3648,8 +3370,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <th className="sheet-title-dark" colSpan={16}>DB</th>
                     </tr>
                     <tr>
-                        <th className="sheet-label-green">저장건수</th>
-                        <td className="sheet-value-light">{entries.length.toLocaleString()}건</td>
+                        <th className="sheet-label-green">???????/th>
+                        <td className="sheet-value-light">{entries.length.toLocaleString()}??/td>
                         <td className="sheet-spacer workbook-db-sort-cell" colSpan={4}>
                             <div className="workbook-db-sort-actions">
                                 <button
@@ -3662,7 +3384,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onClick={() => handleChangeDbSort('date')}
                                     disabled={entries.length === 0}
                                 >
-                                    {getDbSortLabel('date', '날짜순')}
+                                    {getDbSortLabel('date', '?????)}
                                 </button>
                                 <button
                                     type="button"
@@ -3674,7 +3396,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onClick={() => handleChangeDbSort('partnerName')}
                                     disabled={entries.length === 0}
                                 >
-                                    {getDbSortLabel('partnerName', '이름순')}
+                                    {getDbSortLabel('partnerName', '?????)}
                                 </button>
                                 <button
                                     type="button"
@@ -3686,7 +3408,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onClick={() => handleChangeDbSort('amount')}
                                     disabled={entries.length === 0}
                                 >
-                                    {getDbSortLabel('amount', '금액순')}
+                                    {getDbSortLabel('amount', '?????)}
                                 </button>
                             </div>
                         </td>
@@ -3698,8 +3420,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={!hasDbFilterInput || uploadingDb || downloadingDb || dbActionLoading}
                             >
                                 <FontAwesomeIcon icon={faRotateRight} />
-                                필터 초기화
-                            </button>
+                                ??? ?????                            </button>
                         </td>
                         <td className="sheet-button-wrap" colSpan={2}>
                             <button
@@ -3709,8 +3430,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={uploadingDb || downloadingDb}
                             >
                                 <FontAwesomeIcon icon={uploadingDb ? faSpinner : faUpload} spin={uploadingDb} />
-                                DB 업로드
-                            </button>
+                                DB ?????                            </button>
                         </td>
                         <td className="sheet-button-wrap" colSpan={2}>
                             <button
@@ -3720,7 +3440,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={uploadingDb || downloadingDb || entries.length === 0}
                             >
                                 <FontAwesomeIcon icon={downloadingDb ? faSpinner : faDownload} spin={downloadingDb} />
-                                DB 다운로드
+                                DB ??????
                             </button>
                         </td>
                         <td className="sheet-button-wrap" colSpan={2}>
@@ -3731,7 +3451,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={uploadingDb || downloadingDb || dbActionLoading || selectedDbEntryIds.length === 0}
                             >
                                 <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
-                                {`선택삭제${selectedDbEntryIds.length > 0 ? ` (${selectedDbEntryIds.length})` : ''}`}
+                                {`??????${selectedDbEntryIds.length > 0 ? ` (${selectedDbEntryIds.length})` : ''}`}
                             </button>
                         </td>
                         <td className="sheet-button-wrap" colSpan={2}>
@@ -3742,15 +3462,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 disabled={uploadingDb || downloadingDb || dbActionLoading || entries.length === 0}
                             >
                                 <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
-                                DB 초기화
-                            </button>
+                                DB ?????                            </button>
                         </td>
                     </tr>
                 </tbody>
             </table>
 
             <div className="workbook-help-text">
-                잔액은 선택한 종료일 기준으로 계산됩니다. 종료일 이후에 등록된 입금/지급은 해당 조회에 반영되지 않습니다.
+                ????? ???????????????? ???????? ??????????????????/????? ??? ??????????? ??????.
             </div>
 
             <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
@@ -3772,9 +3491,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     value={dbFilter.transactionType}
                                     onChange={(event) => handleChangeDbFilter('transactionType', event.target.value)}
                                 >
-                                    <option value="">전체</option>
-                                    <option value="매출">매출</option>
-                                    <option value="매입">매입</option>
+                                    <option value="">???</option>
+                                    <option value="???">???</option>
+                                    <option value="???">???</option>
                                 </select>
                             </th>
                             <th>
@@ -3783,7 +3502,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.date}
                                     onChange={(event) => handleChangeDbFilter('date', event.target.value)}
-                                    placeholder="날짜"
+                                    placeholder="???"
                                 />
                             </th>
                             <th>
@@ -3792,7 +3511,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.partnerName}
                                     onChange={(event) => handleChangeDbFilter('partnerName', event.target.value)}
-                                    placeholder="거래처명"
+                                    placeholder="??????"
                                 />
                             </th>
                             <th>
@@ -3801,7 +3520,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.siteName}
                                     onChange={(event) => handleChangeDbFilter('siteName', event.target.value)}
-                                    placeholder="현장명"
+                                    placeholder="?????
                                 />
                             </th>
                             <th>
@@ -3810,7 +3529,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.description}
                                     onChange={(event) => handleChangeDbFilter('description', event.target.value)}
-                                    placeholder="내용"
+                                    placeholder="???"
                                 />
                             </th>
                             <th>
@@ -3819,7 +3538,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.supplyAmount}
                                     onChange={(event) => handleChangeDbFilter('supplyAmount', event.target.value)}
-                                    placeholder="공급가액"
+                                    placeholder="???????
                                 />
                             </th>
                             <th>
@@ -3828,7 +3547,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.taxAmount}
                                     onChange={(event) => handleChangeDbFilter('taxAmount', event.target.value)}
-                                    placeholder="부가세"
+                                    placeholder="??????
                                 />
                             </th>
                             <th>
@@ -3837,7 +3556,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.totalAmount}
                                     onChange={(event) => handleChangeDbFilter('totalAmount', event.target.value)}
-                                    placeholder="합계"
+                                    placeholder="???"
                                 />
                             </th>
                             <th>
@@ -3846,7 +3565,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.paymentAmount}
                                     onChange={(event) => handleChangeDbFilter('paymentAmount', event.target.value)}
-                                    placeholder="입금금액"
+                                    placeholder="??????"
                                 />
                             </th>
                             <th>
@@ -3855,7 +3574,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.appliedYear}
                                     onChange={(event) => handleChangeDbFilter('appliedYear', event.target.value)}
-                                    placeholder="연도"
+                                    placeholder="???"
                                 />
                             </th>
                             <th>
@@ -3864,7 +3583,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.appliedMonth}
                                     onChange={(event) => handleChangeDbFilter('appliedMonth', event.target.value)}
-                                    placeholder="월"
+                                    placeholder="??
                                 />
                             </th>
                             <th>
@@ -3873,7 +3592,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.note}
                                     onChange={(event) => handleChangeDbFilter('note', event.target.value)}
-                                    placeholder="비고"
+                                    placeholder="???"
                                 />
                             </th>
                             <th>
@@ -3882,7 +3601,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     type="text"
                                     value={dbFilter.teamName}
                                     onChange={(event) => handleChangeDbFilter('teamName', event.target.value)}
-                                    placeholder="팀명"
+                                    placeholder="????
                                 />
                             </th>
                             <th className="workbook-filter-spacer" />
@@ -3892,7 +3611,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     <tbody>
                         {databaseDisplayRows.length === 0 && (
                             <tr>
-                                <td colSpan={17} className="sheet-empty-state">저장된 DB 데이터가 없습니다.</td>
+                                <td colSpan={17} className="sheet-empty-state">????? DB ?????? ??????.</td>
                             </tr>
                         )}
                         {pagedDatabaseDisplayRows.map((row) => {
@@ -3933,12 +3652,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         {isEditing ? (
                                             <select
                                                 className="workbook-inline-cell-select"
-                                                value={dbDraft?.transactionType ?? '매출'}
+                                                value={dbDraft?.transactionType ?? '???'}
                                                 onChange={(event) => handleChangeEditingDbDraft('transactionType', event.target.value)}
                                                 disabled={dbActionLoading}
                                             >
-                                                <option value="매출">매출</option>
-                                                <option value="매입">매입</option>
+                                                <option value="???">???</option>
+                                                <option value="???">???</option>
                                             </select>
                                         ) : entry.transactionType}
                                     </td>
@@ -4077,7 +3796,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     <td>
                                         {canToggleDetails && hasActiveDbFilter ? (
                                             visibleLinkedEntries.length > 0
-                                                ? <span className="workbook-linked-badge">필터 {visibleLinkedEntries.length}건</span>
+                                                ? <span className="workbook-linked-badge">??? {visibleLinkedEntries.length}??/span>
                                                 : '-'
                                         ) : canToggleDetails ? (
                                             <button
@@ -4086,11 +3805,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                 onClick={() => handleToggleDbEntryDetails(entry.id!)}
                                                 disabled={dbActionLoading}
                                             >
-                                                {isExpanded ? '닫기' : `내역 ${linkedEntries.length}건`}
+                                                {isExpanded ? '???' : `??? ${linkedEntries.length}??}
                                             </button>
                                         ) : (
                                             nested
-                                                ? <span className="workbook-linked-badge">연결내역</span>
+                                                ? <span className="workbook-linked-badge">??????</span>
                                                 : '-'
                                         )}
                                     </td>
@@ -4105,15 +3824,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         disabled={dbActionLoading}
                                                     >
                                                         <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faPenToSquare} spin={dbActionLoading} />
-                                                        저장
-                                                    </button>
+                                                        ????                                                    </button>
                                                     <button
                                                         type="button"
                                                         className="workbook-toolbar-button workbook-inline-button"
                                                         onClick={handleCancelEditDbEntry}
                                                         disabled={dbActionLoading}
                                                     >
-                                                        취소
+                                                        ???
                                                     </button>
                                                 </>
                                             ) : (
@@ -4125,7 +3843,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         disabled={dbActionLoading}
                                                     >
                                                         <FontAwesomeIcon icon={faPenToSquare} />
-                                                        수정
+                                                        ???
                                                     </button>
                                                     <button
                                                         type="button"
@@ -4134,7 +3852,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         disabled={dbActionLoading}
                                                     >
                                                         <FontAwesomeIcon icon={faTrashCan} />
-                                                        삭제
+                                                        ???
                                                     </button>
                                                 </>
                                             )}
@@ -4158,10 +3876,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         onClick={() => handleMoveDbPage('prev')}
                         disabled={dbPage <= 1}
                     >
-                        이전 100개
-                    </button>
+                        ??? 100??                    </button>
                     <span className="workbook-pagination-status">
-                        {`${dbPage} / ${totalDbPages} 페이지`}
+                        {`${dbPage} / ${totalDbPages} ?????`}
                     </span>
                     <button
                         type="button"
@@ -4169,13 +3886,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         onClick={() => handleMoveDbPage('next')}
                         disabled={dbPage >= totalDbPages}
                     >
-                        다음 100개
-                    </button>
+                        ??? 100??                    </button>
                 </div>
             )}
 
             <p className="workbook-help-text">
-                입력폼에서 저장한 원본 행과 조회에서 등록한 입금/지급 행은 DB에 함께 저장됩니다. 연결된 정산 행은 내역 버튼으로 같이 펼쳐 보고, 같은 화면에서 수정/삭제할 수 있습니다.
+                ????????????? ??? ??? ?????? ????????/??????? DB????? ????????. ???????? ??? ??? ?????? ??? ??? ???, ??? ?????? ???/?????????????.
             </p>
         </section>
     );
@@ -4186,10 +3902,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <table className="sheet-control-table query-sheet-table workbook-summary-filter-table">
                     <tbody>
                         <tr>
-                            <th className="sheet-title-dark" colSpan={16}>매출/매입 거래장</th>
+                            <th className="sheet-title-dark" colSpan={16}>???/??? ?????/th>
                         </tr>
                         <tr>
-                            <th className="sheet-label-blue">검색시작일</th>
+                            <th className="sheet-label-blue">????????</th>
                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
@@ -4198,7 +3914,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
                                 />
                             </td>
-                            <th className="sheet-label-blue">검색종료일</th>
+                            <th className="sheet-label-blue">????????</th>
                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
@@ -4212,11 +3928,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 <button
                                     type="button"
                                     className="excel-button excel-button-blue"
-                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '거래장')}
+                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '?????)}
                                     disabled={capturingView === 'ledger'}
                                 >
                                     <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
-                                    화면 복사
+                                    ??? ???
                                 </button>
                             </td>
                             <td className="sheet-button-wrap" colSpan={2}>
@@ -4227,28 +3943,28 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     disabled={printingLedger}
                                 >
                                     <FontAwesomeIcon icon={printingLedger ? faSpinner : faPrint} spin={printingLedger} />
-                                    인쇄
+                                    ???
                                 </button>
                             </td>
                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
                                 <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
                                     <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
+                                    ???
                                 </button>
                             </td>
                         </tr>
                         <tr>
-                            <th className="sheet-label-green">팀 명</th>
+                            <th className="sheet-label-green">?? ??/th>
                             <td className="sheet-value-light">
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-team-options"
                                     value={ledgerDraft.teamName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                    placeholder="전체"
+                                    placeholder="???"
                                 />
                             </td>
-                            <th className="sheet-label-green">구 분</th>
+                            <th className="sheet-label-green">????/th>
                             <td className="sheet-value-light">
                                 <select
                                     className="sheet-filter-input"
@@ -4258,39 +3974,39 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                         transactionType: event.target.value as WorkbookTransactionType
                                     }))}
                                 >
-                                    <option value="매출">매출</option>
-                                    <option value="매입">매입</option>
+                                    <option value="???">???</option>
+                                    <option value="???">???</option>
                                 </select>
                             </td>
-                            <th className="sheet-label-green">거래처</th>
+                            <th className="sheet-label-green">?????/th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-partner-options"
                                     value={ledgerDraft.partnerName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                    placeholder="거래처 전체"
+                                    placeholder="????????"
                                 />
                             </td>
-                            <th className="sheet-label-green">현장명</th>
+                            <th className="sheet-label-green">?????/th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-site-options"
                                     value={ledgerDraft.siteName}
                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
-                                    placeholder="현장 전체"
+                                    placeholder="??? ???"
                                 />
                             </td>
                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
-                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
+                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
 
                 <div className="sheet-merged-heading">
-                    {ledgerFilter.partnerName || `${ledgerFilter.transactionType} 거래장`}
+                    {ledgerFilter.partnerName || `${ledgerFilter.transactionType} ?????}
                 </div>
 
                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
@@ -4308,21 +4024,21 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         </colgroup>
                         <thead>
                             <tr>
-                                <th>날짜</th>
-                                <th>거래처명</th>
-                                <th>내용</th>
-                                <th>{ledgerFilter.transactionType === '매출' ? '매출금액' : '매입금액'}</th>
-                                <th>{ledgerFilter.transactionType === '매출' ? '입금금액' : '지급금액'}</th>
-                                <th>잔액</th>
-                                <th>현장명</th>
-                                <th>비고</th>
-                                <th>팀명</th>
+                                <th>???</th>
+                                <th>??????</th>
+                                <th>???</th>
+                                <th>{ledgerFilter.transactionType === '???' ? '??????' : '??????'}</th>
+                                <th>{ledgerFilter.transactionType === '???' ? '??????' : '???????}</th>
+                                <th>???</th>
+                                <th>?????/th>
+                                <th>???</th>
+                                <th>????/th>
                             </tr>
                         </thead>
                         <tbody>
                             {ledgerRows.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                    <td colSpan={9} className="sheet-empty-state">??? ????? ??????.</td>
                                 </tr>
                             )}
                             {ledgerRows.map((row) => (
@@ -4343,7 +4059,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             <tr>
                                 <td />
                                 <td />
-                                <td>합계</td>
+                                <td>???</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.paymentAmount)}</td>
                                 <td className="align-right">{formatNumber(ledgerTotals.balance)}</td>
@@ -4361,10 +4077,10 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <table className="sheet-control-table query-sheet-table">
                     <tbody>
                         <tr>
-                            <th className="sheet-title-dark" colSpan={16}>전체 조회</th>
+                            <th className="sheet-title-dark" colSpan={16}>??? ???</th>
                         </tr>
                         <tr>
-                            <th className="sheet-label-blue">검색시작일</th>
+                            <th className="sheet-label-blue">????????</th>
                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
@@ -4373,7 +4089,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDate: event.target.value }))}
                                 />
                             </td>
-                            <th className="sheet-label-blue">검색종료일</th>
+                            <th className="sheet-label-blue">????????</th>
                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
                                 <input
                                     type="date"
@@ -4382,16 +4098,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, endDate: event.target.value }))}
                                 />
                             </td>
-                            <td className="sheet-spacer" colSpan={4} />
+                            <td className="sheet-spacer" colSpan={6} />
                             <td className="sheet-button-wrap" colSpan={2}>
                                 <button
                                     type="button"
                                     className="excel-button excel-button-blue"
-                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '전체 조회')}
+                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '??? ???')}
                                     disabled={capturingView === 'summary'}
                                 >
                                     <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
-                                    화면 복사
+                                    ??? ???
                                 </button>
                             </td>
                             <td className="sheet-button-wrap" colSpan={2}>
@@ -4402,107 +4118,70 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     disabled={printingSummary}
                                 >
                                     <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
-                                    인쇄
-                                </button>
-                            </td>
-                            <td className="sheet-button-wrap" colSpan={2}>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-green"
-                                    onClick={handleOpenKbPreview}
-                                    disabled={
-                                        downloadingKb ||
-                                        summaryFilter.mode !== '미지급금' ||
-                                        selectedSummaryRowIds.length === 0
-                                    }
-                                >
-                                    <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                                    {`국민은행용 다운로드${selectedSummaryRowIds.length > 0 ? ` (${selectedSummaryRowIds.length})` : ''}`}
+                                    ???
                                 </button>
                             </td>
                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
                                 <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
                                     <FontAwesomeIcon icon={faMagnifyingGlass} />
-                                    조회
+                                    ???
                                 </button>
                             </td>
                         </tr>
                         <tr>
-                            <th className="sheet-label-green">팀 명</th>
+                            <th className="sheet-label-green">?? ??/th>
                             <td className="sheet-value-light">
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-team-options"
                                     value={summaryDraft.teamName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
-                                    placeholder="전체"
+                                    placeholder="???"
                                 />
                             </td>
-                            <th className="sheet-label-green">구 분</th>
+                            <th className="sheet-label-green">????/th>
                             <td className="sheet-value-light">
                                 <select
                                     className="sheet-filter-input"
                                     value={summaryDraft.mode}
-                                    onChange={(event) => {
-                                        const nextMode = event.target.value as SummaryMode;
-                                        setSummaryDraft((prev) => ({ ...prev, mode: nextMode }));
-                                        setSummaryFilter((prev) => ({ ...prev, mode: nextMode }));
-                                    }}
+                                    onChange={(event) => setSummaryDraft((prev) => ({ ...prev, mode: event.target.value as SummaryMode }))}
                                 >
-                                    <option value="매출">매출</option>
-                                    <option value="매입">매입</option>
-                                    <option value="미수금">미수금</option>
-                                    <option value="미지급금">미지급금</option>
+                                    <option value="???">???</option>
+                                    <option value="???">???</option>
+                                    <option value="?????>?????/option>
+                                    <option value="??????">??????</option>
                                 </select>
                             </td>
-                            <th className="sheet-label-green">거래처</th>
+                            <th className="sheet-label-green">?????/th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-partner-options"
                                     value={summaryDraft.partnerName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
-                                    placeholder="거래처 전체"
+                                    placeholder="????????"
                                 />
                             </td>
-                            <th className="sheet-label-green">현장명</th>
+                            <th className="sheet-label-green">?????/th>
                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
                                 <input
                                     className="sheet-filter-input"
                                     list="workbook-site-options"
                                     value={summaryDraft.siteName}
                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, siteName: event.target.value }))}
-                                    placeholder="현장 전체"
+                                    placeholder="??? ???"
                                 />
                             </td>
                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
-                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
+                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
                             </td>
                         </tr>
                     </tbody>
                 </table>
 
-                {summaryFilter.mode === '미지급금' && (
-                    <div className="mb-2 flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-sm text-emerald-900">
-                            미지급금 선택 {selectedSummaryRowIds.length.toLocaleString()}건
-                        </div>
-                        <button
-                            type="button"
-                            className="excel-button excel-button-green"
-                            onClick={handleOpenKbPreview}
-                            disabled={downloadingKb || selectedSummaryRowIds.length === 0}
-                        >
-                            <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                            {`국민은행용 다운로드${selectedSummaryRowIds.length > 0 ? ` (${selectedSummaryRowIds.length})` : ''}`}
-                        </button>
-                    </div>
-                )}
-
                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
                     <table className="sheet-table workbook-summary-table">
                         <colgroup>
-                            <col style={{ width: '92px' }} />
                             <col className="workbook-summary-col-no" />
                             <col className="workbook-summary-col-partner" />
                             <col className="workbook-summary-col-site" />
@@ -4519,54 +4198,29 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         </colgroup>
                         <thead className="summary-header">
                             <tr>
-                                <th>
-                                    <label className="workbook-summary-select-inline" htmlFor="summary-select-all">
-                                        <input
-                                            id="summary-select-all"
-                                            type="checkbox"
-                                            className="workbook-summary-select-checkbox"
-                                            checked={areAllSelectableSummaryRowsSelected}
-                                            onChange={handleToggleAllSummaryRowSelection}
-                                            disabled={summaryFilter.mode !== '미지급금' || selectableSummaryRowIds.length === 0}
-                                        />
-                                        <span>{areAllSelectableSummaryRowsSelected ? '전체해제' : '전체선택'}</span>
-                                    </label>
-                                </th>
                                 <th>No</th>
-                                <th>거래처명</th>
-                                <th>현장명</th>
-                                <th>발행일</th>
-                                <th>공급가액</th>
-                                <th>세액</th>
-                                <th>합계</th>
-                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급일' : '입금일'}</th>
-                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '지급금액' : '수금금액'}</th>
-                                <th>{summaryFilter.mode === '매입' || summaryFilter.mode === '미지급금' ? '미지급금' : '미수금'}</th>
-                                <th>비고</th>
-                                <th>팀명</th>
-                                {canRegisterReceipt && <th>처리</th>}
+                                <th>??????</th>
+                                <th>?????/th>
+                                <th>?????/th>
+                                <th>???????/th>
+                                <th>???</th>
+                                <th>???</th>
+                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '?????' : '?????}</th>
+                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '??????? : '??????'}</th>
+                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '??????' : '?????}</th>
+                                <th>???</th>
+                                <th>????/th>
+                                {canRegisterReceipt && <th>???</th>}
                             </tr>
                         </thead>
                         <tbody>
                             {summaryRows.length === 0 && (
                                 <tr>
-                                    <td colSpan={canRegisterReceipt ? 14 : 13} className="sheet-empty-state">조회 결과가 없습니다.</td>
+                                    <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">??? ????? ??????.</td>
                                 </tr>
                             )}
                             {summaryRows.map((row, index) => (
                                 <tr key={row.id}>
-                                    <td>
-                                        <label className="workbook-summary-select-inline">
-                                            <input
-                                                type="checkbox"
-                                                className="workbook-summary-select-checkbox"
-                                                checked={selectedSummaryRowIdSet.has(row.id)}
-                                                onChange={() => handleToggleSummaryRowSelection(row.id)}
-                                                disabled={summaryFilter.mode !== '미지급금' || row.outstandingAmount <= 0}
-                                            />
-                                            <span>{selectedSummaryRowIdSet.has(row.id) ? '해제' : '선택'}</span>
-                                        </label>
-                                    </td>
                                     <td className="align-right">{index + 1}</td>
                                     <td>{row.partnerName}</td>
                                     <td>{row.siteName || '-'}</td>
@@ -4605,7 +4259,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         onClick={() => handleOpenReceiptHistory(row)}
                                                         disabled={saving}
                                                     >
-                                                        내역
+                                                        ???
                                                     </button>
                                                 )}
                                             </div>
@@ -4617,8 +4271,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <tfoot>
                             <tr>
                                 <td />
-                                <td />
-                                <td>합계</td>
+                                <td>???</td>
                                 <td />
                                 <td />
                                 <td className="align-right">{formatNumber(summaryTotals.supplyAmount)}</td>
@@ -4640,11 +4293,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <div className="workbook-shell">
                 <div className="workbook-titlebar">
                     <div>
-                        <h1>{`매입매출 Pro Ver 2.5 (${companyLabel}) [KB-CHECKBOX-LIVE]`}</h1>
-                        <p>엑셀 통합문서 UI를 웹 화면으로 옮긴 전용 장부 페이지입니다.</p>
-                        <p style={{ marginTop: 4, color: '#b91c1c', fontWeight: 700 }}>
-                            ROUTE-CHECK: {location.pathname} / {WORKBOOK_DEBUG_TAG}
-                        </p>
+                        <h1>?????? Pro Ver 2.5 (???)</h1>
+                        <p>??? ?????? UI?????????? ??? ??? ??? ??????????</p>
                     </div>
                     <div className="workbook-title-actions">
                         <button
@@ -4654,22 +4304,9 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             disabled={loading}
                         >
                             <FontAwesomeIcon icon={loading ? faSpinner : faRotateRight} spin={loading} />
-                            새로고침
+                            ??????
                         </button>
                     </div>
-                </div>
-
-                <div className="workbook-tenant-tabs" role="tablist" aria-label="Tenant tabs">
-                    {TENANT_TABS.map((tab) => (
-                        <button
-                            key={tab.key}
-                            type="button"
-                            className={`workbook-tenant-tab ${tenantKey === tab.key ? 'active' : ''}`}
-                            onClick={() => navigate(tab.path)}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
                 </div>
 
                 <div className="workbook-tabs" role="tablist" aria-label="Workbook tabs">
@@ -4690,187 +4327,13 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 {activeTab === 'ledger' && renderLedgerTab()}
                 {activeTab === 'summary' && renderSummaryTab()}
 
-                {showKbPreview && (
-                    <div
-                        style={{
-                            position: 'fixed',
-                            inset: 0,
-                            zIndex: 9999,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            padding: 16,
-                            background: 'rgba(2, 6, 23, 0.68)',
-                            backdropFilter: 'blur(8px)'
-                        }}
-                        onClick={() => setShowKbPreview(false)}
-                    >
-                        <div
-                            style={{
-                                width: '100%',
-                                maxWidth: 1180,
-                                maxHeight: '88vh',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                overflow: 'hidden',
-                                borderRadius: 28,
-                                border: '1px solid rgba(71, 85, 105, 0.68)',
-                                background: 'linear-gradient(180deg, #020617 0%, #111827 100%)',
-                                boxShadow: '0 36px 80px -34px rgba(2, 6, 23, 0.92)'
-                            }}
-                            onClick={(event) => event.stopPropagation()}
-                        >
-                            <div
-                                style={{
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: 18,
-                                    padding: 22,
-                                    borderBottom: '1px solid rgba(71, 85, 105, 0.42)',
-                                    background: 'radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 24%), linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.94) 100%)'
-                                }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', color: '#f59e0b' }}>KB Transfer Preview</span>
-                                        <h3 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: '#f8fafc' }}>국민은행용 엑셀 미리보기</h3>
-                                        <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>monthly-wage와 동일한 팔레트/구성으로 송금표시와 메모 규칙을 미리 확인합니다.</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowKbPreview(false)}
-                                        style={{
-                                            width: 42,
-                                            height: 42,
-                                            border: '1px solid rgba(71, 85, 105, 0.82)',
-                                            borderRadius: 14,
-                                            background: 'rgba(15, 23, 42, 0.92)',
-                                            color: '#cbd5e1',
-                                            fontSize: 24,
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                    <FontAwesomeIcon icon={faXmark} />
-                                    </button>
-                                </div>
-
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 20, border: '1px solid rgba(51, 65, 85, 0.86)', background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.92) 100%)' }}>
-                                        <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#64748b' }}>받는분통장표시</label>
-                                        <input
-                                            type="text"
-                                            value={kbReceiverDisplay}
-                                            maxLength={10}
-                                            onChange={(event) => setKbReceiverDisplay(event.target.value)}
-                                            style={{
-                                                width: '100%',
-                                                minHeight: 46,
-                                                padding: '0 14px',
-                                                borderRadius: 14,
-                                                border: '1px solid rgba(71, 85, 105, 0.88)',
-                                                background: 'rgba(2, 6, 23, 0.72)',
-                                                color: '#f8fafc',
-                                                fontSize: 14,
-                                                fontWeight: 700,
-                                                outline: 'none'
-                                            }}
-                                            placeholder="㈜다원"
-                                        />
-                                        <span style={{ fontSize: 12, lineHeight: 1.45, color: '#94a3b8' }}>D열에 동일하게 적용됩니다.</span>
-                                    </div>
-
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16, borderRadius: 20, border: '1px solid rgba(51, 65, 85, 0.86)', background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.92) 100%)' }}>
-                                        <label style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#64748b' }}>내통장메모 규칙</label>
-                                        <input
-                                            type="text"
-                                            value={kbMemoSuffix}
-                                            onChange={(event) => setKbMemoSuffix(event.target.value)}
-                                            style={{
-                                                width: '100%',
-                                                minHeight: 46,
-                                                padding: '0 14px',
-                                                borderRadius: 14,
-                                                border: '1px solid rgba(71, 85, 105, 0.88)',
-                                                background: 'rgba(2, 6, 23, 0.72)',
-                                                color: '#f8fafc',
-                                                fontSize: 14,
-                                                fontWeight: 700,
-                                                outline: 'none'
-                                            }}
-                                            placeholder="{이름} 미지급금"
-                                        />
-                                        <span style={{ fontSize: 12, lineHeight: 1.45, color: '#94a3b8' }}>E열은 거래처명+접미어로 최대 14자까지 반영됩니다.</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{ flex: 1, overflow: 'auto', padding: '20px 22px', background: 'rgba(15, 23, 42, 0.78)' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, color: '#e2e8f0' }}>
-                                    <thead style={{ position: 'sticky', top: 0, background: 'rgba(30, 41, 59, 0.95)' }}>
-                                        <tr>
-                                            <th style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: '#f1f5f9' }}>A. 은행코드</th>
-                                            <th style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: '#f1f5f9' }}>B. 계좌번호</th>
-                                            <th style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: '#f1f5f9' }}>C. 이체금액</th>
-                                            <th style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: '#f1f5f9' }}>D. 받는분통장표시</th>
-                                            <th style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: '#f1f5f9' }}>E. 내통장메모</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {kbPreviewRows.map((row, index) => (
-                                            <tr key={`${row.accountNumber}-${index}`} style={{ background: index % 2 === 0 ? 'rgba(15, 23, 42, 0.45)' : 'rgba(30, 41, 59, 0.45)' }}>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px', color: row.bankCode ? '#e2e8f0' : '#f87171' }}>{row.bankCode || '?'}</td>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px', fontFamily: 'monospace', color: row.accountNumber ? '#e2e8f0' : '#f87171' }}>{row.accountNumber || '계좌 없음'}</td>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#fbbf24' }}>{row.amount.toLocaleString()}</td>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px' }}>{row.receiverDisplay}</td>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px' }}>{row.memoDisplay}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '18px 22px 22px', borderTop: '1px solid rgba(71, 85, 105, 0.42)', background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.96) 100%)' }}>
-                                <span style={{ fontSize: 14, color: '#cbd5e1' }}>
-                                    총 {kbPreviewRows.length.toLocaleString()}건 · 총 이체금액 {kbPreviewRows.reduce((sum, row) => sum + row.amount, 0).toLocaleString()}원
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowKbPreview(false)}
-                                    style={{
-                                        minHeight: 42,
-                                        padding: '0 16px',
-                                        borderRadius: 14,
-                                        border: '1px solid #64748b',
-                                        background: 'transparent',
-                                        color: '#e2e8f0',
-                                        cursor: 'pointer',
-                                        fontSize: 13,
-                                        fontWeight: 700
-                                    }}
-                                >
-                                    닫기
-                                </button>
-                                <button
-                                    type="button"
-                                    className="excel-button excel-button-green"
-                                    onClick={handleDownloadSummaryKb}
-                                    disabled={downloadingKb}
-                                    style={{ minHeight: 42, padding: '0 16px', borderRadius: 14, border: '1px solid rgba(202, 138, 4, 0.7)', background: 'linear-gradient(135deg, #f59e0b, #d97706)', color: '#111827', fontWeight: 800 }}
-                                >
-                                    <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                                    국민은행용 다운로드 ({kbPreviewRows.length})
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
                 {receiptHistoryTargetId && (
                     <div className="workbook-modal-overlay" onClick={handleCloseReceiptHistory}>
                         <div className="workbook-modal" onClick={(event) => event.stopPropagation()}>
                             <div className="workbook-modal-header">
                                 <div>
                                     <h2>{receiptHistoryLabels.history}</h2>
-                                    <p>선택한 {receiptHistoryLabels.outstanding} 행에 연결된 {receiptHistoryLabels.history}을 수정하거나 삭제합니다.</p>
+                                    <p>?????{receiptHistoryLabels.outstanding} ??? ?????{receiptHistoryLabels.history}??????????????????</p>
                                 </div>
                                 <button
                                     type="button"
@@ -4884,34 +4347,34 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                             {receiptHistoryInvoice ? (
                                 <>
                                     <div className="workbook-modal-summary">
-                                        <div><strong>거래처</strong><span>{receiptHistoryInvoice.partnerName}</span></div>
-                                        <div><strong>현장명</strong><span>{receiptHistoryInvoice.siteName || '-'}</span></div>
-                                        <div><strong>발행일</strong><span>{receiptHistoryInvoice.date}</span></div>
-                                        <div><strong>합계</strong><span>{formatNumber(receiptHistoryInvoice.totalAmount)}원</span></div>
-                                        <div><strong>{receiptHistoryLabels.cumulative}</strong><span>{formatNumber(receiptHistoryTotal)}원</span></div>
-                                        <div><strong>{receiptHistoryLabels.outstanding}</strong><span>{formatNumber(receiptHistoryOutstanding)}원</span></div>
+                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.partnerName}</span></div>
+                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.siteName || '-'}</span></div>
+                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.date}</span></div>
+                                        <div><strong>???</strong><span>{formatNumber(receiptHistoryInvoice.totalAmount)}??/span></div>
+                                        <div><strong>{receiptHistoryLabels.cumulative}</strong><span>{formatNumber(receiptHistoryTotal)}??/span></div>
+                                        <div><strong>{receiptHistoryLabels.outstanding}</strong><span>{formatNumber(receiptHistoryOutstanding)}??/span></div>
                                     </div>
 
                                     <div className="workbook-editor-card">
                                         <div className="workbook-editor-header">
-                                            <h3>원본 행</h3>
+                                            <h3>??? ??/h3>
                                         </div>
 
                                         <div className="sheet-table-wrapper compact">
                                             <table className="sheet-table">
                                                 <thead>
                                                     <tr>
-                                                        <th>구분</th>
-                                                        <th>일자</th>
-                                                        <th>현장명</th>
-                                                        <th>내용</th>
-                                                        <th>공급가액</th>
-                                                        <th>세액</th>
-                                                        <th>합계</th>
+                                                        <th>???</th>
+                                                        <th>???</th>
+                                                        <th>?????/th>
+                                                        <th>???</th>
+                                                        <th>???????/th>
+                                                        <th>???</th>
+                                                        <th>???</th>
                                                         <th>{receiptHistoryLabels.amount}</th>
-                                                        <th>비고</th>
-                                                        <th>팀명</th>
-                                                        <th>처리</th>
+                                                        <th>???</th>
+                                                        <th>????/th>
+                                                        <th>???</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -4935,7 +4398,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={dbActionLoading || receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    수정
+                                                                    ???
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -4944,7 +4407,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={dbActionLoading || receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faTrashCan} />
-                                                                    삭제
+                                                                    ???
                                                                 </button>
                                                             </div>
                                                         </td>
@@ -4956,7 +4419,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                                     {legacyMatchedGap > 0 && (
                                         <div className="workbook-modal-warning">
-                                            기존 자동매칭 수금 {formatNumber(legacyMatchedGap)}원은 개별 이력이 연결되지 않아 여기서 수정/삭제할 수 없습니다.
+                                            ??? ?????? ??? {formatNumber(legacyMatchedGap)}??? ??? ??????????? ??? ????????/?????????????.
                                         </div>
                                     )}
 
@@ -4966,21 +4429,21 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                 <tr>
                                                     <th>{receiptHistoryLabels.date}</th>
                                                     <th>{receiptHistoryLabels.amount}</th>
-                                                    <th>비고</th>
-                                                    <th>처리</th>
+                                                    <th>???</th>
+                                                    <th>???</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {receiptHistoryOriginalPaymentAmount <= 0 && receiptHistoryEntries.length === 0 && (
                                                     <tr>
-                                                        <td colSpan={4} className="sheet-empty-state">등록된 {receiptHistoryLabels.history}이 없습니다.</td>
+                                                        <td colSpan={4} className="sheet-empty-state">?????{receiptHistoryLabels.history}????????.</td>
                                                     </tr>
                                                 )}
                                                 {receiptHistoryInvoice && receiptHistoryOriginalPaymentAmount > 0 && (
                                                     <tr key={`original-${receiptHistoryInvoice.id ?? receiptHistoryInvoice.date}`}>
                                                         <td>{receiptHistoryInvoice.date}</td>
                                                         <td className="align-right">{formatNumber(receiptHistoryOriginalPaymentAmount)}</td>
-                                                        <td>{receiptHistoryInvoice.note || '원본 업로드 행'}</td>
+                                                        <td>{receiptHistoryInvoice.note || '??? ???????}</td>
                                                         <td>
                                                             <div className="workbook-inline-actions">
                                                                 <button
@@ -4990,7 +4453,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={dbActionLoading || receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    원본수정
+                                                                    ??????
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -4999,7 +4462,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={dbActionLoading || receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faTrashCan} />
-                                                                    원본삭제
+                                                                    ??????
                                                                 </button>
                                                             </div>
                                                         </td>
@@ -5019,7 +4482,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faPenToSquare} />
-                                                                    수정
+                                                                    ???
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -5028,7 +4491,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                                     disabled={receiptActionLoading}
                                                                 >
                                                                     <FontAwesomeIcon icon={faTrashCan} />
-                                                                    삭제
+                                                                    ???
                                                                 </button>
                                                             </div>
                                                         </td>
@@ -5040,7 +4503,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                                     <div className="workbook-editor-card">
                                         <div className="workbook-editor-header">
-                                            <h3>{receiptHistoryLabels.history} 수정</h3>
+                                            <h3>{receiptHistoryLabels.history} ???</h3>
                                             {editingReceiptDraft && (
                                                 <button
                                                     type="button"
@@ -5048,7 +4511,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                     onClick={handleCancelEditReceipt}
                                                     disabled={receiptActionLoading}
                                                 >
-                                                    취소
+                                                    ???
                                                 </button>
                                             )}
                                         </div>
@@ -5075,7 +4538,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                     />
                                                 </label>
                                                 <label className="workbook-editor-wide">
-                                                    <span>비고</span>
+                                                    <span>???</span>
                                                     <input
                                                         type="text"
                                                         value={editingReceiptDraft.note}
@@ -5091,17 +4554,16 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                                         disabled={receiptActionLoading}
                                                     >
                                                         <FontAwesomeIcon icon={receiptActionLoading ? faSpinner : faPenToSquare} spin={receiptActionLoading} />
-                                                        수정 저장
-                                                    </button>
+                                                        ??? ????                                                    </button>
                                                 </div>
                                             </div>
                                         ) : (
-                                            <div className="sheet-empty-state">수정할 {receiptHistoryLabels.history}을 선택하세요.</div>
+                                            <div className="sheet-empty-state">?????{receiptHistoryLabels.history}??????????</div>
                                         )}
                                     </div>
                                 </>
                             ) : (
-                                <div className="sheet-empty-state">대상 매출을 찾을 수 없습니다.</div>
+                                <div className="sheet-empty-state">???????????? ????????.</div>
                             )}
                         </div>
                     </div>

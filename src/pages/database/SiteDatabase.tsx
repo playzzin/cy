@@ -131,6 +131,18 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         checkPermission();
     }, [currentUser]);
 
+    const loadStats = async () => {
+        setLoading(true);
+        try {
+            const statsData = await statisticsService.getCumulativeManpower();
+            setSiteStats(statsData.siteStats);
+        } catch (error) {
+            console.error("Failed to load stats:", error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // 통계 데이터 로드
     useEffect(() => {
         loadStats();
@@ -182,17 +194,6 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
 
 
 
-    const loadStats = async () => {
-        setLoading(true);
-        try {
-            const statsData = await statisticsService.getCumulativeManpower();
-            setSiteStats(statsData.siteStats);
-        } catch (error) {
-            console.error("Failed to load stats:", error);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const renderCellValue = (site: Site, column: any) => {
         const value = site[column.key as keyof Site];

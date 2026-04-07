@@ -3500,9 +3500,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 memo = item.workerName;
             }
 
+            let bankCode = resolveBankCode(item.bankName, item.bankCode);
+            let accountNumber = item.accountNumber;
+
             return {
-                은행코드: resolveBankCode(item.bankName, item.bankCode),
-                계좌번호: item.accountNumber,
+                은행코드: bankCode,
+                계좌번호: accountNumber,
                 이체금액: amount,
                 받는분통장표시: kbReceiverDisplay,
                 내통장메모: memo

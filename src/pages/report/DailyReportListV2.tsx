@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Swal from 'sweetalert2';
 import {
@@ -9,7 +9,6 @@ import {
     faPenToSquare,
     faTrash,
     faSave,
-    faThumbtack,
     faFilter,
     faDownload,
     faSpinner,
@@ -45,6 +44,20 @@ const compareKo = (a: string, b: string): number => {
     return a.localeCompare(b, 'ko');
 };
 
+const normalizeTeamNameKey = (value?: string | null): string => {
+    return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase();
+};
+
+const compareTeamsWithPriority = (a: string, b: string): number => {
+    const isAPriority = a.includes('청연');
+    const isBPriority = b.includes('청연');
+
+    if (isAPriority && !isBPriority) return -1;
+    if (!isAPriority && isBPriority) return 1;
+
+    return a.localeCompare(b, 'ko');
+};
+
 const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지원팀', '용역팀', '도급', '팀기성'];
 
 type RowDraft = {
@@ -52,6 +65,7 @@ type RowDraft = {
     workerId?: string; // New Worker ID if changed
     workerName?: string;
     workerTeamName?: string;
+    workerTeamId?: string; // 소속팀 ID 추가
     salaryModel: string;
     manDay: string;
     unitPrice: string;
@@ -90,7 +104,6 @@ type DailyReportListViewState = {
     sortMode: 'date' | 'name' | 'site';
     nameSortOrder: 'asc' | 'desc';
     siteSortOrder: 'asc' | 'desc';
-    isFixed: boolean;
     columnFilters: ColumnFilterState;
 };
 
@@ -125,7 +138,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             sortMode: 'date',
             nameSortOrder: 'asc',
             siteSortOrder: 'asc',
-            isFixed: false,
             columnFilters: {}
         };
         const persisted = loadSessionState<DailyReportListViewState>(DAILY_REPORT_LIST_VIEW_KEY, fallback);
@@ -163,8 +175,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [nameSortOrder, setNameSortOrder] = useState<'asc' | 'desc'>(persistedViewState.nameSortOrder === 'desc' ? 'desc' : 'asc');
     const [siteSortOrder, setSiteSortOrder] = useState<'asc' | 'desc'>(persistedViewState.siteSortOrder === 'desc' ? 'desc' : 'asc');
 
-    const [isEditMode, setIsEditMode] = useState(true);
-    const [isFixed, setIsFixed] = useState(persistedViewState.isFixed); // 가로 틀고정 상태
+    const [isEditMode, setIsEditMode] = useState(false);
+    const isFixed = true;
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
     const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -226,7 +238,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             sortMode,
             nameSortOrder,
             siteSortOrder,
-            isFixed,
             columnFilters
         } satisfies DailyReportListViewState);
     }, [
@@ -234,7 +245,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         dateSortOrder,
         endDate,
         endDateInput,
-        isFixed,
         nameSortOrder,
         selectedSiteId,
         selectedTeamId,
@@ -245,6 +255,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         startDateInput,
         workerSearch
     ]);
+
+    // 10자리(YYYY-MM-DD)가 완성되어도 자동으로 조회를 트리거하지 않도록 변경
+    // 사용자가 '조회' 버튼을 누를 때만 startDate/endDate가 업데이트 되도록 관리합니다.
+
 
     const fetchRows = useCallback(async (): Promise<void> => {
         setIsLoading(true);
@@ -261,9 +275,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     }, [startDate, endDate]);
 
+    // 초기 로딩 시에만 1회 호출
     useEffect(() => {
         fetchRows();
-    }, [fetchRows]);
+    }, []);
+
 
     useEffect(() => {
         if (!openColumnFilter) return;
@@ -319,12 +335,33 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, []);
 
     const handleSearch = useCallback(() => {
-        const startChanged = commitDateInput('start');
-        const endChanged = commitDateInput('end');
-        if (!startChanged && !endChanged) {
-            fetchRows();
-        }
-    }, [commitDateInput, fetchRows]);
+        const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
+        const normalizedEnd = normalizeTypedDateInput(endDateInput) ?? endDate;
+
+        setStartDate(normalizedStart);
+        setEndDate(normalizedEnd);
+        setStartDateInput(normalizedStart);
+        setEndDateInput(normalizedEnd);
+
+        // 상태 반영을 위해 fetchData를 직접 호출하거나 의존성을 startDate/endDate로 넘겨야 하지만
+        // 여기서는 안전하게 normalized 값으로 직접 호출할 수 있도록 fetchRows를 수정하거나
+        // 또는 set이 비동기이므로 fetchRows 내부에서 최신 상태를 쓰게 합니다.
+        // 현재 fetchRows는 startDate, endDate에 의존하므로, 이 함수가 다음 렌더링에 호출되게 하지 않고
+        // 즉시 fetch를 할 수 있도록 인자를 받는 버전으로 고려합니다.
+        
+        setIsLoading(true);
+        dailyReportService.getReportWorkerRowsByRange({
+            startDate: normalizedStart,
+            endDate: normalizedEnd
+        }).then(data => {
+            setRows(data);
+        }).catch(error => {
+            console.error('[DailyReportListV2] Search fetch failed', error);
+        }).finally(() => {
+            setIsLoading(false);
+        });
+    }, [startDateInput, endDateInput, startDate, endDate]);
+
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         return `${String(r.reportId)}::${String(r.workerId)}`;
@@ -368,6 +405,36 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return teamCanonicalIdMap.get(raw) ?? raw;
     }, [teamCanonicalIdMap]);
 
+    const teamNameCanonicalIdMap = useMemo(() => {
+        const map = new Map<string, string>();
+        for (const team of teams) {
+            const canonicalId = normalizeTeamId(team.id ? String(team.id) : (team.legacyId ? String(team.legacyId) : ''));
+            const nameKey = normalizeTeamNameKey(team.name);
+            if (canonicalId && nameKey && !map.has(nameKey)) {
+                map.set(nameKey, canonicalId);
+            }
+        }
+        return map;
+    }, [teams, normalizeTeamId]);
+
+    const resolveWorkerTeamCanonicalId = useCallback((params: { workerTeamId?: string | null; workerTeamName?: string | null }) => {
+        const byId = normalizeTeamId(params.workerTeamId);
+        if (byId) return byId;
+        const nameKey = normalizeTeamNameKey(params.workerTeamName);
+        if (!nameKey) return '';
+        return teamNameCanonicalIdMap.get(nameKey) ?? '';
+    }, [normalizeTeamId, teamNameCanonicalIdMap]);
+
+    const resolveWorkerTeamDisplayName = useCallback((params: { workerTeamId?: string | null; workerTeamName?: string | null }) => {
+        const rawName = String(params.workerTeamName ?? '').trim();
+        if (rawName) return rawName;
+
+        const canonicalId = resolveWorkerTeamCanonicalId(params);
+        if (!canonicalId) return '';
+
+        return teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === canonicalId)?.name ?? '';
+    }, [normalizeTeamId, resolveWorkerTeamCanonicalId, teams]);
+
     const normalizeSiteId = useCallback((id?: string | null) => {
         const raw = id ? String(id) : '';
         if (!raw) return '';
@@ -389,7 +456,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             case 'workerName':
                 return row.workerName ?? '';
             case 'workerTeamName':
-                return row.workerTeamName ?? '';
+                return resolveWorkerTeamDisplayName({
+                    workerTeamId: row.workerTeamId,
+                    workerTeamName: row.workerTeamName
+                });
             case 'salaryModel':
                 return String(row.salaryModel ?? row.payType ?? '');
             case 'manDay':
@@ -401,7 +471,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             default:
                 return '';
         }
-    }, []);
+    }, [resolveWorkerTeamDisplayName]);
 
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
@@ -411,40 +481,99 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return rows.filter(r => {
             if (wantTeam && normalizeTeamId(r.teamId) !== wantTeam) return false;
             if (wantSite && normalizeSiteId(r.siteId) !== wantSite) return false;
-            if (wantWorkerTeam && normalizeTeamId(r.workerTeamId) !== wantWorkerTeam) return false;
+            
+            // 소속팀 필터: workerTeamId 우선, 없으면 workerTeamName으로 팀 ID 매핑
+            if (wantWorkerTeam) {
+                const rowWorkerTeamId = resolveWorkerTeamCanonicalId({
+                    workerTeamId: r.workerTeamId,
+                    workerTeamName: r.workerTeamName
+                });
+                if (!rowWorkerTeamId || rowWorkerTeamId !== wantWorkerTeam) return false;
+            }
             return true;
         });
-    }, [rows, normalizeTeamId, normalizeSiteId]);
+    }, [rows, normalizeTeamId, normalizeSiteId, resolveWorkerTeamCanonicalId]);
 
     // 1. Available Sites (Filtered by Report Team ONLY) - Worker Team selection does NOT constrain sites
     const availableSites = useMemo(() => {
+        if (rows.length === 0) {
+            return sites
+                .slice()
+                .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+        }
+
         const filtered = getFiltered({ teamId: selectedTeamId });
         const siteIds = new Set(filtered.map(r => r.siteId ? String(r.siteId) : null).filter((id): id is string => !!id));
         return sites
             .filter(s => siteIds.has(String(s.id)) || (s.legacyId ? siteIds.has(String(s.legacyId)) : false))
             .slice()
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, sites, selectedTeamId]);
+    }, [getFiltered, sites, selectedTeamId, rows.length]);
 
     // 2. Available Report Teams (Filtered by Site ONLY) - Worker Team selection does NOT constrain report teams
     const availableReportTeams = useMemo(() => {
+        if (rows.length === 0) {
+            return teams
+                .slice()
+                .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
+        }
+
         const filtered = getFiltered({ siteId: selectedSiteId });
         const teamIds = new Set(filtered.map(r => r.teamId ? String(r.teamId) : null).filter((id): id is string => !!id));
         return teams
             .filter(t => teamIds.has(String(t.id)) || (t.legacyId ? teamIds.has(String(t.legacyId)) : false))
             .slice()
-            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, teams, selectedSiteId]);
+            .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
+    }, [getFiltered, teams, selectedSiteId, rows.length]);
 
     // 3. Available Worker Teams (Filtered by Site & Report Team)
     const availableWorkerTeams = useMemo(() => {
-        const filtered = getFiltered({ siteId: selectedSiteId, teamId: selectedTeamId });
-        const teamIds = new Set(filtered.map(r => r.workerTeamId ? String(r.workerTeamId) : null).filter((id): id is string => !!id));
-        return teams
-            .filter(t => teamIds.has(String(t.id)) || (t.legacyId ? teamIds.has(String(t.legacyId)) : false))
-            .slice()
-            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, teams, selectedSiteId, selectedTeamId]);
+        // 1단계: 현재 조회된 전체 행(rows)에서 소속팀 정보(ID 및 이름) 추출
+        const foundTeamIds = new Set<string>();
+        const foundTeamNames = new Set<string>();
+        
+        rows.forEach(r => {
+            if (r.workerTeamId) foundTeamIds.add(normalizeTeamId(r.workerTeamId));
+            const displayName = resolveWorkerTeamDisplayName({
+                workerTeamId: r.workerTeamId,
+                workerTeamName: r.workerTeamName
+            });
+            if (displayName) foundTeamNames.add(displayName);
+        });
+
+        // 2단계: 만약 조회된 데이터가 하나도 없다면 전체 팀 목록을 반환
+        if (rows.length === 0) {
+            return teams
+                .slice()
+                .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
+        }
+
+        // 3단계: 기존 팀 목록에서 매칭되는 항목 추출
+        const matchedTeams = teams.filter(t => 
+            foundTeamIds.has(String(t.id)) || 
+            (t.legacyId ? foundTeamIds.has(String(t.legacyId)) : false) || 
+            foundTeamNames.has(t.name ?? '')
+        );
+
+        // 4단계: 팀 목록에 없지만 데이터(workerTeamName)에는 존재하는 "직접 입력" 팀들 추가 (예: 지원팀, 용역팀 등)
+        const matchedTeamNamesSet = new Set(matchedTeams.map(t => t.name));
+        const virtualTeams: Team[] = [];
+        
+        foundTeamNames.forEach(name => {
+            if (!matchedTeamNamesSet.has(name)) {
+                virtualTeams.push({
+                    id: name, // 이름을 ID로 사용
+                    name: name,
+                    active: true,
+                } as any);
+            }
+        });
+
+        // 5단계: 합치고 정렬 (청연 우선)
+        return [...matchedTeams, ...virtualTeams]
+            .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
+    }, [rows, teams, normalizeTeamId, resolveWorkerTeamDisplayName]);
+
 
     // 4. Base Display Rows (Filtered by ALL selection + Search)
     const baseFilteredRows = useMemo(() => {
@@ -916,10 +1045,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const getRowInitialDraft = useCallback((r: DailyReportWorkerRow): RowDraft => {
         const baseManDay = Number.isFinite(r.manDay) ? String(r.manDay) : '0';
         const baseUnitPrice = Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0';
+        const canonicalWorkerTeamId = resolveWorkerTeamCanonicalId({
+            workerTeamId: r.workerTeamId,
+            workerTeamName: r.workerTeamName
+        });
+        const fallbackWorkerTeamName = r.workerTeamName
+            ?? teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === canonicalWorkerTeamId)?.name
+            ?? '';
         return {
             siteId: normalizeSiteId(r.siteId),
             workerName: r.workerName ?? '',
-            workerTeamName: r.workerTeamName ?? '',
+            workerTeamName: fallbackWorkerTeamName,
+            workerTeamId: canonicalWorkerTeamId || undefined,
             salaryModel: String(r.salaryModel ?? r.payType ?? ''),
             manDay: baseManDay,
             unitPrice: baseUnitPrice,
@@ -927,7 +1064,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             siteType: String(r.siteType ?? ''),
             paymentType: String(r.paymentType ?? '')
         };
-    }, [normalizeSiteId]);
+    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, teams]);
 
     const isRowDirty = useCallback((original: DailyReportWorkerRow, draft?: RowDraft) => {
         if (!draft) return false;
@@ -959,6 +1096,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 siteId: normalizeSiteId(r.siteId),
                 workerName: r.workerName ?? '',
                 workerTeamName: r.workerTeamName ?? '',
+                workerTeamId: resolveWorkerTeamCanonicalId({
+                    workerTeamId: r.workerTeamId,
+                    workerTeamName: r.workerTeamName
+                }) || undefined,
                 salaryModel: String(r.salaryModel ?? r.payType ?? ''),
                 manDay: String(Number.isFinite(r.manDay) ? r.manDay : 0),
                 unitPrice: String(Number.isFinite(r.unitPrice) ? r.unitPrice : 0),
@@ -971,7 +1112,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 [key]: { ...current, ...changes }
             };
         });
-    }, [getRowKey, normalizeSiteId]);
+    }, [getRowKey, normalizeSiteId, resolveWorkerTeamCanonicalId]);
 
     const clearRowDraft = useCallback((rowKey: string) => {
         setRowDrafts((prev) => {
@@ -1064,6 +1205,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 workerId: matched.id ? String(matched.id) : undefined,
                 // 우선순위: 1. 팀 매칭 결과(resolvedTeamName) 2. 작업자 정보의 팀명(matched.teamName) 3. 작업자 정보의 팀유형(matched.teamType - 지원팀 등)
                 workerTeamName: resolvedTeamName || matched.teamName || (matched.teamType === '지원팀' ? '지원팀' : ''),
+                workerTeamId: normalizeTeamId(team?.id ? String(team.id) : (matched.teamId ? String(matched.teamId) : '')) || undefined,
                 unitPrice: String(matched.unitPrice ?? 0),
                 salaryModel: matched.payType || matched.salaryModel || '일급'
             };
@@ -1074,7 +1216,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 workerName: newName
             });
         }
-    }, [allWorkers, teams, setRowDraft, rows, rowDrafts, getRowKey]);
+    }, [allWorkers, teams, setRowDraft, rows, rowDrafts, getRowKey, normalizeTeamId]);
 
     const handleSaveRow = useCallback(async (r: DailyReportWorkerRow) => {
         const key = getRowKey(r);
@@ -1100,12 +1242,20 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (draft.workerName !== undefined && draft.workerName !== r.workerName) {
                 updates.name = draft.workerName;
             }
+
+            const resolvedWorkerTeamId = draft.workerTeamId
+                ? normalizeTeamId(draft.workerTeamId)
+                : resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
+
             // Resolve teamId from worker master when worker is changed
             if (draft.workerId) {
                 const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
                 if (matchedWorker?.teamId) {
                     updates.teamId = matchedWorker.teamId;
                 }
+            }
+            if (!updates.teamId && resolvedWorkerTeamId) {
+                updates.teamId = resolvedWorkerTeamId;
             }
 
             updates.salaryModel = draft.salaryModel;
@@ -1153,7 +1303,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return next;
             });
         }
-    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, getRowKey, rowDrafts, confirm, toast]);
+    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, getRowKey, rowDrafts, confirm, toast, normalizeTeamId, resolveWorkerTeamCanonicalId]);
 
     const handleBulkApply = async () => {
         const selected = Array.from(selectedRowKeys)
@@ -1306,7 +1456,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     const updates: any = {};
                     if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
                     if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
-                    if (draft.workerId) {
+                    
+                    // 소속팀 ID 및 이름 업데이트
+                    if (draft.workerTeamId !== undefined) {
+                        updates.teamId = normalizeTeamId(draft.workerTeamId);
+                    } else {
+                        const resolvedWorkerTeamId = resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
+                        if (resolvedWorkerTeamId) updates.teamId = resolvedWorkerTeamId;
+                    }
+
+                    if (!updates.teamId && draft.workerId) {
                         const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
                         if (matchedWorker?.teamId) {
                             updates.teamId = matchedWorker.teamId;
@@ -1398,7 +1557,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         setIsDownloadingExcel(true);
         try {
-            await dailyReportTransferService.exportRowsToExcel(sortedRows, `${startDate}_${endDate}`);
+            await dailyReportTransferService.exportRowsToExcel(sortedRows, `조회일보목록_${startDate}_${endDate}`);
             toast.success('조회 목록 엑셀 다운로드 완료');
         } catch (error) {
             console.error('[DailyReportListV2] Excel download failed', error);
@@ -1409,7 +1568,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, [endDate, sortedRows, startDate]);
 
     return (
-        <div className="flex h-full flex-col flex-1 min-h-0 gap-3 p-0">
+        <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
             <div className="flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-end">
                 <div className="flex items-center gap-2 flex-wrap w-full">
                     <div className="flex items-center gap-2">
@@ -1597,17 +1756,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     >
                         <FontAwesomeIcon icon={faPenToSquare} />
                         {isEditMode ? '수정 종료' : '수정모드'}
-                    </button>
-
-                    <button
-                        onClick={() => setIsFixed(!isFixed)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isFixed
-                            ? 'bg-amber-500 text-white border-amber-500 hover:bg-amber-600'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={faThumbtack} className={isFixed ? 'rotate-45' : ''} />
-                        {isFixed ? '틀고정 해제' : '틀고정 활성'}
                     </button>
 
                     {isEditMode && (
@@ -1820,7 +1968,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 </div>
             )}
 
-            <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="daily-report-v2-panel flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                 <datalist id="daily-report-v2-salary-model-options">
                     {SALARY_MODEL_OPTIONS.map((option) => (
                         <option key={option} value={option} />
@@ -1833,13 +1981,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         </option>
                     ))}
                 </datalist>
+                <datalist id="worker-team-list-v2">
+                    {availableWorkerTeams.map((team) => (
+                        <option key={String(team.id ?? team.name)} value={team.name ?? ''} />
+                    ))}
+                </datalist>
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-2"></div>
                         <span className="text-sm font-medium">불러오는 중...</span>
                     </div>
                 ) : sortedRows.length === 0 ? (
-                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper daily-report-v2-empty" style={{ flex: 1 }}>
                         <table className="sheet-table daily-report-workbook-table">
                             <tbody>
                                 <tr>
@@ -1854,7 +2007,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         </table>
                     </div>
                 ) : (
-                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper" style={{ flex: 1 }}>
                     <table className="sheet-table daily-report-workbook-table min-w-[1310px] text-left text-slate-700">
                         <colgroup>
                             {isEditMode && <col className="daily-report-col-select" />}
@@ -1901,7 +2054,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 {renderFilterHeader(
                                     'workerName',
                                     '이름',
-                                    `px-2.5 py-2 whitespace-nowrap w-[112px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r-2 border-[#255e94] shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`
+                                    `px-2.5 py-2 whitespace-nowrap w-[112px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r border-[#255e94] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`
                                 )}
                                 {renderFilterHeader('workerTeamName', '소속팀', 'px-2.5 py-2 whitespace-nowrap')}
                                 {renderFilterHeader('salaryModel', '급여방식', 'px-2.5 py-2 whitespace-nowrap')}
@@ -1933,6 +2086,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                     const effectiveSalaryModel = draft ? draft.salaryModel : String(r.salaryModel ?? r.payType ?? '');
                                     const effectiveWorkContent = draft ? draft.workContent : String(r.workContent ?? '');
                                     const effectiveSiteId = draft ? draft.siteId : normalizeSiteId(r.siteId);
+                                    const resolvedWorkerTeamName = resolveWorkerTeamDisplayName({
+                                        workerTeamId: r.workerTeamId,
+                                        workerTeamName: r.workerTeamName
+                                    });
+                                    const effectiveWorkerTeamName = draft
+                                        ? (draft.workerTeamName ?? '')
+                                        : resolvedWorkerTeamName;
                                     const stickyActionCellBg = selectedRowKeys.has(rowKey) ? 'bg-indigo-50' : 'bg-white';
 
                                     return (
@@ -2005,7 +2165,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">{r.teamName ?? ''}</td>
-                                            <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r-2 border-slate-300 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
+                                            <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-200 ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
                                                 {isEditMode ? (
                                                     <>
                                                         <input
@@ -2025,14 +2185,22 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 {isEditMode ? (
                                                     <input
                                                         type="text"
-                                                        value={draft ? (draft.workerTeamName ?? r.workerTeamName ?? '') : (r.workerTeamName ?? '')}
-                                                        onChange={(e) => setRowDraft(r, { workerTeamName: e.target.value })}
+                                                        list="worker-team-list-v2"
+                                                        value={effectiveWorkerTeamName}
+                                                        onChange={(e) => {
+                                                            const nextName = e.target.value;
+                                                            const nextTeamId = teamNameCanonicalIdMap.get(normalizeTeamNameKey(nextName)) ?? '';
+                                                            setRowDraft(r, {
+                                                                workerTeamName: nextName,
+                                                                workerTeamId: nextTeamId || undefined
+                                                            });
+                                                        }}
                                                         disabled={saving}
                                                         className="px-2 py-1 border border-slate-300 rounded text-sm w-[104px] bg-white"
                                                         placeholder="소속팀"
                                                     />
                                                 ) : (
-                                                    (r.workerTeamName ?? '')
+                                                    resolvedWorkerTeamName
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2127,20 +2295,20 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 })()
                             ))}
                         </tbody>
-                        <tfoot>
-                            <tr>
-                                {isEditMode && <td />}
-                                <td colSpan={8}>합계</td>
-                                <td className="align-right">{totals.totalManDay.toFixed(1)}</td>
-                                <td />
-                                <td className="align-right">{formatNumber(Math.round(totals.totalAmount))}</td>
-                                <td />
-                                {isEditMode && <td />}
-                            </tr>
-                        </tfoot>
                     </table>
                     </div>
                 )}
+
+                <div className="daily-report-v2-summarybar">
+                    <div className="daily-report-v2-summaryitem">
+                        <span className="daily-report-v2-summarylabel">총공수</span>
+                        <span className="daily-report-v2-summaryvalue">{totals.totalManDay.toFixed(1)}</span>
+                    </div>
+                    <div className="daily-report-v2-summaryitem">
+                        <span className="daily-report-v2-summarylabel">총금액</span>
+                        <span className="daily-report-v2-summaryvalue">{formatNumber(Math.round(totals.totalAmount))}</span>
+                    </div>
+                </div>
             </div>
         </div>
     );

@@ -122,6 +122,72 @@ const WhiteboardStatusBoard: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
+    const normalizeName = React.useCallback((value: string | undefined | null) => String(value ?? '').replace(/\s+/g, '').trim(), []);
+
+    const visibleCompanies = React.useMemo(
+        () => companies.filter((company) => {
+            const name = normalizeName(company.name);
+            return name.includes('청연') || name.includes('다원');
+        }),
+        [companies, normalizeName]
+    );
+
+    const visibleCompanyIdSet = React.useMemo(
+        () => new Set(visibleCompanies.map((company) => company.id).filter((id): id is string => Boolean(id))),
+        [visibleCompanies]
+    );
+
+    const cheongyeonCompanyIdSet = React.useMemo(
+        () => new Set(
+            visibleCompanies
+                .filter((company) => normalizeName(company.name).includes('청연'))
+                .map((company) => company.id)
+                .filter((id): id is string => Boolean(id))
+        ),
+        [visibleCompanies, normalizeName]
+    );
+
+    const isSupportTeam = React.useCallback((team: Team | undefined) => String(team?.type ?? '').trim() === '지원팀', []);
+
+    const selectedTeam = React.useMemo(
+        () => teams.find((team) => team.id === selectedTeamId),
+        [selectedTeamId, teams]
+    );
+
+    const selectedTeamResponsibleSiteIdSet = React.useMemo(() => {
+        if (!selectedTeam) return new Set<string>();
+
+        return new Set(
+            [
+                ...(selectedTeam.siteIds ?? []),
+                selectedTeam.assignedSiteId ?? ''
+            ].filter((id): id is string => Boolean(id))
+        );
+    }, [selectedTeam]);
+
+    const defaultVisibleTeams = React.useMemo(
+        () => teams.filter((team) => team.companyId && cheongyeonCompanyIdSet.has(team.companyId) && !isSupportTeam(team)),
+        [cheongyeonCompanyIdSet, isSupportTeam, teams]
+    );
+
+    const selectableSupportTeams = React.useMemo(
+        () => teams.filter((team) => isSupportTeam(team) || (team.companyId ? !cheongyeonCompanyIdSet.has(team.companyId) : false)),
+        [cheongyeonCompanyIdSet, isSupportTeam, teams]
+    );
+
+    const visibleTeamsForSelector = React.useMemo(() => {
+        if (selectedCompanyId) {
+            const internal = teams.filter((team) => team.companyId === selectedCompanyId && !isSupportTeam(team));
+            const support = teams.filter((team) => team.companyId === selectedCompanyId && isSupportTeam(team));
+            return { internal, support };
+        }
+
+        return {
+            internal: defaultVisibleTeams,
+            support: selectableSupportTeams
+        };
+    }, [defaultVisibleTeams, isSupportTeam, selectableSupportTeams, selectedCompanyId, teams]);
+
     const selectedCompany = selectedCompanyId
         ? companies.find(c => c.id === selectedCompanyId)
         : companies.find(c => c.id === mainCompanyId);
@@ -132,14 +198,36 @@ const WhiteboardStatusBoard: React.FC = () => {
 
     // 마스터 데이터 로드 시 기본 회사 설정
     useEffect(() => {
-        if (companies.length > 0 && !mainCompanyId) {
-            const defaultCompany = companies.find(c => c.name.includes('청연이엔지') || c.name === '청연이엔지');
+        if (visibleCompanies.length > 0 && !mainCompanyId) {
+            const defaultCompany = visibleCompanies.find(c => normalizeName(c.name).includes('청연')) ?? visibleCompanies[0];
             if (defaultCompany && defaultCompany.id) {
                 setSelectedCompanyId(defaultCompany.id);
                 setMainCompanyId(defaultCompany.id);
             }
         }
-    }, [companies, mainCompanyId]);
+    }, [mainCompanyId, normalizeName, visibleCompanies]);
+
+    useEffect(() => {
+        if (!selectedCompanyId) return;
+        if (visibleCompanyIdSet.has(selectedCompanyId)) return;
+
+        const defaultCompany = visibleCompanies.find((company) => normalizeName(company.name).includes('청연')) ?? visibleCompanies[0];
+        setSelectedCompanyId(defaultCompany?.id ?? '');
+    }, [normalizeName, selectedCompanyId, visibleCompanies, visibleCompanyIdSet]);
+
+    useEffect(() => {
+        if (!selectedTeamId) return;
+
+        const selectableTeamIds = new Set(
+            [...visibleTeamsForSelector.internal, ...visibleTeamsForSelector.support]
+                .map((team) => team.id)
+                .filter((id): id is string => Boolean(id))
+        );
+
+        if (!selectableTeamIds.has(selectedTeamId)) {
+            setSelectedTeamId('');
+        }
+    }, [selectedTeamId, visibleTeamsForSelector]);
 
     useEffect(() => {
         fetchReports();
@@ -183,14 +271,17 @@ const WhiteboardStatusBoard: React.FC = () => {
 
         // Pre-fill items based on Master Data
         if (viewMode === 'site') {
-            const validCompanyIds = new Set(
-                companies.filter(c => c.type === '시공사' || c.type === '협력사').map(c => c.id)
-            );
             items = sites
                 .filter(s => s.status === 'active')
                 .filter(s => {
                     if (selectedCompanyId) return s.companyId === selectedCompanyId;
-                    return s.companyId && validCompanyIds.has(s.companyId);
+                    return s.companyId && visibleCompanyIdSet.has(s.companyId);
+                })
+                .filter(s => {
+                    if (!selectedTeamId) return true;
+                    const matchesResponsibleTeam = s.responsibleTeamId === selectedTeamId;
+                    const matchesTeamSiteAssignment = selectedTeamResponsibleSiteIdSet.has(s.id || '');
+                    return matchesResponsibleTeam || matchesTeamSiteAssignment;
                 })
                 .map(s => ({
                     id: s.id!,
@@ -210,13 +301,11 @@ const WhiteboardStatusBoard: React.FC = () => {
                     hasExternalSupport: false
                 }));
         } else {
-            const validCompanyIds = new Set(
-                companies.filter(c => c.type === '시공사' || c.type === '협력사').map(c => c.id)
-            );
             items = teams
                 .filter(t => {
-                    if (selectedCompanyId) return t.companyId === selectedCompanyId;
-                    return t.companyId && validCompanyIds.has(t.companyId);
+                    if (selectedTeamId) return t.id === selectedTeamId;
+                    if (selectedCompanyId) return t.companyId === selectedCompanyId && !isSupportTeam(t);
+                    return t.companyId ? cheongyeonCompanyIdSet.has(t.companyId) && !isSupportTeam(t) : false;
                 })
                 .map(t => ({
                     id: t.id!,
@@ -294,18 +383,24 @@ const WhiteboardStatusBoard: React.FC = () => {
             // If filter is active, we check strict ownership.
             let reportVisible = true;
             if (selectedTeamId) {
-                const isWriter = report.teamId === selectedTeamId;
-                const isResponsible = targetSite?.responsibleTeamId === selectedTeamId;
-                if (!isWriter && !isResponsible) reportVisible = false;
-                // Note: If I am a worker on this report valid? 
-                // Simplicity: Report Level permission primarily. 
-                // If I selected "Team A", I want to see Report A. 
-                // OR if I am Site Manager, I see Report B on my site.
+                if (viewMode === 'site') {
+                    const isManagedSite = targetSite
+                        ? targetSite.responsibleTeamId === selectedTeamId || selectedTeamResponsibleSiteIdSet.has(targetSite.id || '')
+                        : false;
+                    if (!isManagedSite) reportVisible = false;
+                } else {
+                    const isWriter = report.teamId === selectedTeamId;
+                    if (!isWriter) reportVisible = false;
+                }
             }
             if (selectedCompanyId) { // Check site ownership or team ownership
                 const isMyTeam = reportWriterTeam?.companyId === selectedCompanyId;
                 const isMySite = targetSite?.companyId === selectedCompanyId;
                 if (!isMyTeam && !isMySite) reportVisible = false;
+            } else {
+                const isVisibleSite = targetSite?.companyId ? visibleCompanyIdSet.has(targetSite.companyId) : false;
+                const isVisibleTeam = reportWriterTeam?.companyId ? visibleCompanyIdSet.has(reportWriterTeam.companyId) : false;
+                if (!isVisibleSite && !isVisibleTeam) reportVisible = false;
             }
 
             if (!reportVisible) return;
@@ -494,7 +589,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                 if (sortBy === 'name-desc') return b.name.localeCompare(a.name, 'ko');
                 return a.name.localeCompare(b.name, 'ko');
             });
-    }, [rawReports, viewMode, selectedTeamId, selectedCompanyId, sites, teams, sortBy, expandedItems]);
+    }, [rawReports, viewMode, selectedTeamId, selectedCompanyId, sites, teams, sortBy, expandedItems, visibleCompanyIdSet, selectedTeamResponsibleSiteIdSet, cheongyeonCompanyIdSet, isSupportTeam]);
 
     const toggleAccordion = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
@@ -632,41 +727,39 @@ const WhiteboardStatusBoard: React.FC = () => {
                         </h1>
 
                         <div className="flex items-center gap-2">
-                            {/* Company Filter - 시공사/협력사만 표시 */}
+                            {/* Company Filter - 청연/다원만 표시 */}
                             <select
                                 value={selectedCompanyId}
                                 onChange={(e) => { setSelectedCompanyId(e.target.value); setExpandedItems(new Set()); }}
                                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500"
                             >
                                 <option value="">전체 회사 (All)</option>
-                                <optgroup label="📌 시공사">
-                                    {companies
-                                        .filter(c => c.type === '시공사')
-                                        .map(company => (
-                                            <option key={company.id} value={company.id}>{company.name}</option>
-                                        ))}
-                                </optgroup>
-                                <optgroup label="🤝 협력사">
-                                    {companies
-                                        .filter(c => c.type === '협력사')
-                                        .map(company => (
-                                            <option key={company.id} value={company.id}>{company.name}</option>
-                                        ))}
-                                </optgroup>
+                                {visibleCompanies.map(company => (
+                                    <option key={company.id} value={company.id}>{company.name}</option>
+                                ))}
                             </select>
 
-                            {/* Team Filter (New) */}
+                            {/* Team Filter */}
                             <select
                                 value={selectedTeamId}
                                 onChange={(e) => { setSelectedTeamId(e.target.value); setExpandedItems(new Set()); }}
                                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500 ml-2"
                             >
                                 <option value="">전체 팀 (All Teams)</option>
-                                {teams
-                                    .filter(t => !selectedCompanyId || t.companyId === selectedCompanyId) // Filter teams by selected company if any
-                                    .map(team => (
-                                        <option key={team.id} value={team.id}>{team.name}</option>
-                                    ))}
+                                {visibleTeamsForSelector.internal.length > 0 && (
+                                    <optgroup label={selectedCompanyId ? '소속팀' : '청연팀'}>
+                                        {visibleTeamsForSelector.internal.map(team => (
+                                            <option key={team.id} value={team.id}>{team.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {visibleTeamsForSelector.support.length > 0 && (
+                                    <optgroup label="지원팀">
+                                        {visibleTeamsForSelector.support.map(team => (
+                                            <option key={team.id} value={team.id}>{team.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
                             </select>
 
                             {/* View Mode Toggle */}
@@ -809,8 +902,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                 <div className="bg-slate-50 rounded-lg p-3 text-center border border-slate-100">
                     <p className="text-slate-600 text-sm font-medium">
                         <span className="font-bold mr-2 inline-flex items-center gap-1" style={{ color: accentColor }}>
-                            <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
-                            {companies.find(c => c.id === selectedCompanyId)?.name || '전체 회사'}
+                                    <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
+                                    {companies.find(c => c.id === selectedCompanyId)?.name || '청연 · 다원'}
                         </span>
                         {selectedTeamId ? (
                             <>
@@ -820,8 +913,8 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 </span>
                                 {viewMode === 'site' ? (
                                     <span>
-                                        팀의 <span className="font-bold text-slate-800">인원(팀원)들</span>이
-                                        해당 <span className="font-bold text-slate-800">현장에 투입된 공수</span> 내역입니다.
+                                                팀이 실제 출역한 현장이 아니라
+                                                <span className="font-bold text-slate-800"> 담당 현장 기준</span>으로 정리한 공수 내역입니다.
                                     </span>
                                 ) : (
                                     <span>
@@ -834,12 +927,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
                                     <FontAwesomeIcon icon={faUserGroup} className="text-slate-400" />
-                                    전체 팀
+                                    청연 소속팀
                                 </span>
                                 {viewMode === 'site' ? (
                                     <span>
-                                        이 투입된 <span className="font-bold text-slate-800">현장별 총 공수</span>와,
-                                        각 현장에 들어온 <span className="font-bold text-slate-800">팀들의 상세 공수</span> 내역입니다.
+                                        청연/다원 현장의 <span className="font-bold text-slate-800">현장별 총 공수</span>와,
+                                        각 현장에 들어온 <span className="font-bold text-slate-800">청연팀·지원팀 상세 공수</span> 내역입니다.
                                     </span>
                                 ) : (
                                     <span>
@@ -864,7 +957,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                 </div>
 
                 {filteredItems.length > 0 ? (
-                    <div className="flex flex-wrap gap-3 w-full px-4">
+                    <div className="flex flex-wrap gap-2 w-full px-2">
                         {sortedItems.map(item => {
                             // Check expansion state for dynamic sizing
                             const isItemExpanded = expandedItems.has(item.id);
@@ -872,7 +965,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                             const hasExpandedDetail = Array.from(expandedDetails).some(key => key.startsWith(`${item.id}-`));
 
                             // Determine Flex Class (Flexible width with min-width)
-                            let colSpanClass = 'flex-1 min-w-[280px]';
+                            let colSpanClass = 'flex-1 min-w-[220px]';
 
                             // Only expand width if the main item is expanded
                             if (isItemExpanded) {
@@ -918,10 +1011,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                     style={ringStyle}
                                     onClick={(e) => toggleAccordion(item.id, e)}
                                 >
-                                    <div className="p-4 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
+                                    <div className="p-3 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
                                         {/* 컨텐츠 영역 */}
                                         <div className="min-w-0 flex-1">
-                                            <h3 className="font-bold text-lg text-slate-800 truncate whitespace-nowrap flex items-center gap-2" title={item.name}>
+                                            <h3 className="font-bold text-base text-slate-800 truncate whitespace-nowrap flex items-center gap-2" title={item.name}>
                                                 {item.type === 'site' && (
                                                     <span
                                                         className="inline-flex items-center justify-center w-6 h-6 rounded-full border border-slate-200 flex-shrink-0"
@@ -934,10 +1027,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                             </h3>
                                             {/* 현장인 경우: 회사명과 담당팀을 바로 아래에 표시 */}
                                             {item.type === 'site' && (
-                                                <div className="flex items-center gap-3 mt-0.5 mb-2">
+                                                <div className="flex items-center gap-2 mt-0.5 mb-1.5 flex-wrap">
                                                     {siteCompany && (
                                                         <span
-                                                            className="text-sm font-medium flex items-center gap-1.5"
+                                                            className="text-xs font-medium flex items-center gap-1.5"
                                                             style={{ color: siteCompany.color || '#6b7280' }}
                                                         >
                                                             <span
@@ -954,7 +1047,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         const teamColor = responsibleTeam?.color || '#8b5cf6';
                                                         return (
                                                             <span
-                                                                className="text-sm font-medium flex items-center gap-1.5"
+                                                                className="text-xs font-medium flex items-center gap-1.5"
                                                                 style={{ color: teamColor }}
                                                             >
                                                                 <span
@@ -980,21 +1073,21 @@ const WhiteboardStatusBoard: React.FC = () => {
 
 
                                     {!isItemExpanded && (
-                                        <div className="p-4 flex flex-col gap-3 min-h-[120px] relative">
+                                        <div className="p-3 flex flex-col gap-2 min-h-[96px] relative">
                                             <div className="flex items-baseline justify-between gap-4">
                                                 <div>
-                                                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                                                    <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">
                                                         총 공수
                                                     </div>
                                                     <div
-                                                        className={`mt-1 text-3xl md:text-4xl font-black whitespace-nowrap ${item.manDay && item.manDay > 0 ? '' : 'text-slate-300'}`}
+                                                        className={`mt-1 text-2xl md:text-3xl font-black whitespace-nowrap ${item.manDay && item.manDay > 0 ? '' : 'text-slate-300'}`}
                                                         style={item.manDay && item.manDay > 0 ? { color: brandColor } : undefined}
                                                     >
                                                         {(item.manDay || 0).toFixed(1)}
                                                         <span className="ml-1 text-sm font-semibold text-slate-400">MD</span>
                                                     </div>
                                                 </div>
-                                                <div className="flex flex-col items-end gap-1 text-xs text-slate-600 whitespace-nowrap">
+                                                <div className="flex flex-col items-end gap-1 text-[11px] text-slate-600 whitespace-nowrap">
                                                     <div className="flex items-center gap-1.5 mb-1">
                                                         <FontAwesomeIcon icon={viewMode === 'site' ? faUserGroup : faBuilding} className="text-slate-400" />
                                                         <span className="font-bold text-slate-700">
@@ -1005,7 +1098,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         <div className="flex flex-col gap-0.5 items-end opacity-80">
                                                             {item.workDetails.slice(0, 3).map((d, i) => (
                                                                 <div key={i} className="flex items-center gap-2 text-[10px]">
-                                                                    <span className="text-slate-500 max-w-[80px] truncate">{d.targetName}</span>
+                                                                    <span className="text-slate-500 max-w-[70px] truncate">{d.targetName}</span>
                                                                     <span className="font-bold text-indigo-600">{d.manDay.toFixed(1)}</span>
                                                                 </div>
                                                             ))}

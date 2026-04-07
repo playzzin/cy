@@ -1,12 +1,96 @@
+.daily-report-v2-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: calc(100dvh - 74px);
+    overflow: hidden;
+}
+
+.daily-report-v2-panel {
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+.daily-report-v2-wrapper {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: auto;
+    background: #ffffff;
+    padding-bottom: 10px;
+    scrollbar-gutter: stable both-edges;
+}
+
+.sheet-table-wrapper.workbook-frozen-table-wrapper.daily-report-v2-wrapper {
+    max-height: none;
+}
+
+.daily-report-v2-empty {
+    display: flex;
+    align-items: stretch;
+}
+
+
+/* 테이블의 바닥 여백 제거 및 레이아웃 최적화 */
 .daily-report-workbook-table {
     width: 100%;
     table-layout: fixed;
 }
 
+
+/* 틀고정(Sticky) 배경색 및 보더 일체감 형성 */
+.daily-report-workbook-table thead th {
+    position: sticky;
+    top: 0;
+    background-color: #2e75b6;
+    color: white;
+    z-index: 50; /* 헤더가 가장 위 */
+    border-bottom: 1px solid #255e94;
+}
+
+.daily-report-v2-summarybar {
+    display: flex;
+    flex-shrink: 0;
+    justify-content: flex-end;
+    gap: 20px;
+    padding: 8px 10px 6px;
+    border-top: 1px solid #dbe4ee;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.daily-report-v2-summaryitem {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.daily-report-v2-summarylabel {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+}
+
+.daily-report-v2-summaryvalue {
+    font-size: 18px;
+    font-weight: 800;
+    color: #0f172a;
+}
+
+/* 틀고정 컬럼의 보더를 더 깔끔하게 (하얀 구분선 느낌) */
+.daily-report-workbook-table th.sticky,
+.daily-report-workbook-table td.sticky {
+    border-right: 1px solid #d7dde7 !important;
+}
+
+/* 마지막 틀고정 컬럼 경계는 일반 보더로 통일 */
+.daily-report-workbook-table th.border-r-2,
+.daily-report-workbook-table td.border-r-2 {
+    border-right: 1px solid #d7dde7 !important;
+}
+
 .daily-report-workbook-table .daily-report-col-select {
     width: 48px;
 }
-
 .daily-report-workbook-table .daily-report-col-date {
     width: 86px;
 }
@@ -62,4 +146,27 @@
 .daily-report-workbook-table select,
 .daily-report-workbook-table input:not([type="checkbox"]) {
     min-height: 30px;
+}
+
+@media (max-width: 768px) {
+    .daily-report-v2-page {
+        height: calc(100dvh - 62px);
+    }
+
+}
+
+@media (max-width: 768px) {
+    .daily-report-v2-wrapper {
+        padding-bottom: 8px;
+    }
+
+    .daily-report-v2-summarybar {
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px 6px;
+    }
+
+    .daily-report-v2-summaryvalue {
+        font-size: 16px;
+    }
 }

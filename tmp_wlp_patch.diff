@@ -1,0 +1,2638 @@
+diff --git a/src/pages/taxinvoice/WorkbookLedgerPage.tsx b/src/pages/taxinvoice/WorkbookLedgerPage.tsx
+index 4ec06de..4862c2b 100644
+--- a/src/pages/taxinvoice/WorkbookLedgerPage.tsx
++++ b/src/pages/taxinvoice/WorkbookLedgerPage.tsx
+@@ -18,6 +18,8 @@ import {
+     faXmark
+ } from '@fortawesome/free-solid-svg-icons';
+ import { useAuth } from '../../contexts/AuthContext';
++import * as XLSX from 'xlsx';
++import { accountDirectoryService, AccountDirectory } from '../../services/accountDirectoryService';
+ import { companyService } from '../../services/companyService';
+ import { siteService } from '../../services/siteService';
+ import { teamService } from '../../services/teamService';
+@@ -31,7 +33,7 @@ import './WorkbookLedgerPage.css';
+ registerAllModules();
+ 
+ type WorkbookTab = 'input' | 'database' | 'ledger' | 'summary';
+-type SummaryMode = '???' | '???' | '????? | '??????';
++type SummaryMode = '????? | '????? | '??????? | '?????????;
+ 
+ interface InputRow {
+     transactionType: WorkbookTransactionType | '';
+@@ -170,27 +172,27 @@ const INPUT_ROW_COUNT = 80;
+ const DB_PAGE_SIZE = 100;
+ const buildDefaultLedgerStart = (year: number) => `${year}-01-01`;
+ const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
+-    { id: 'input', label: '????? },
++    { id: 'input', label: '?????? },
+     { id: 'database', label: 'DB' },
+-    { id: 'ledger', label: '???(???,????????' },
+-    { id: 'summary', label: '??? ???' }
++    { id: 'ledger', label: '?????????????????????' },
++    { id: 'summary', label: '???? ????? }
+ ];
+ 
+ const DB_HEADERS = [
+-    '???',
+-    '???',
+-    '??????',
+-    '?????,
+-    '???',
+-    '???????,
+-    '??????,
+-    '???',
+-    '??????',
+-    '??????',
+-    '?????,
+-    '??????ID',
+-    '???',
+-    '????
++    '????',
++    '????',
++    '?????????',
++    '??????,
++    '????',
++    '?????????,
++    '????????,
++    '?????,
++    '?????????,
++    '????????',
++    '??????,
++    '?????????ID',
++    '?????,
++    '????
+ ] as const;
+ 
+ const emptyInputRow = (): InputRow => ({
+@@ -280,9 +282,9 @@ const toNumberOrNull = (value: unknown): number | null => {
+ const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+ const normalizePartnerMatchKey = (value: unknown) => normalizeText(value)
+     .toLowerCase()
+-    .replace(/\(??)|????????/g, '')
++    .replace(/\(??)|??????????/g, '')
+     .replace(/\s+/g, '')
+-    .replace(/[^0-9a-z??-??/g, '');
++    .replace(/[^0-9a-z???-??/g, '');
+ const escapeHtml = (value: string) => value
+     .replace(/&/g, '&amp;')
+     .replace(/</g, '&lt;')
+@@ -334,8 +336,8 @@ const buildPrintColumnStyles = (columns: PrintColumnSpec[]) => columns
+ 
+ const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
+     const text = normalizeText(value);
+-    if (text.includes('???')) return '???';
+-    if (text.includes('???')) return '???';
++    if (text.includes('?????)) return '?????;
++    if (text.includes('?????)) return '?????;
+     return null;
+ };
+ 
+@@ -461,11 +463,11 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
+         if (header) headerIndex.set(header, index);
+     });
+ 
+-    const requiredHeaders = ['???', '???', '??????'];
++    const requiredHeaders = ['????', '????', '?????????'];
+     const hasRequiredHeaders = requiredHeaders.every((header) => headerIndex.has(header));
+ 
+     if (!hasRequiredHeaders) {
+-        throw new Error('??????????? DB ???????? ???????? DB ??? ??? ???????? ??????????????????');
++        throw new Error('?????????????? DB ?????????? ?????????? DB ???? ???? ?????????? ??????????????????????');
+     }
+ 
+     const readCell = (row: unknown[], header: string) => {
+@@ -477,24 +479,24 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
+     let skipped = 0;
+ 
+     rows.slice(1).forEach((row) => {
+-        const transactionType = normalizeTransactionType(readCell(row, '???'));
+-        const date = normalizeDate(readCell(row, '???'));
+-        const partnerName = normalizeText(readCell(row, '??????'));
+-        const siteName = normalizeText(readCell(row, '?????));
+-        const description = normalizeText(readCell(row, '???'));
+-        const manDays = headerIndex.has('???') ? toNumberOrNull(readCell(row, '???')) : null;
+-        const supplyAmount = toNumberOrNull(readCell(row, '???????)) ?? 0;
+-        const taxAmount = toNumberOrNull(readCell(row, '??????)) ?? 0;
+-        const totalAmount = toNumberOrNull(readCell(row, '???')) ?? 0;
+-        const paymentAmount = toNumberOrNull(readCell(row, '??????')) ?? 0;
+-        const appliedYear = toNumberOrNull(readCell(row, '??????')) ?? getYearFromDate(date) ?? fallbackYear;
+-        const appliedMonth = toNumberOrNull(readCell(row, '?????)) ?? getMonthFromDate(date);
+-        const matchedEntryId = normalizeText(readCell(row, '??????ID'));
+-        const note = normalizeText(readCell(row, '???'));
+-        const teamName = normalizeText(readCell(row, '????)) || fallbackTeamName;
++        const transactionType = normalizeTransactionType(readCell(row, '????'));
++        const date = normalizeDate(readCell(row, '????'));
++        const partnerName = normalizeText(readCell(row, '?????????'));
++        const siteName = normalizeText(readCell(row, '??????));
++        const description = normalizeText(readCell(row, '????'));
++        const manDays = headerIndex.has('?????) ? toNumberOrNull(readCell(row, '?????)) : null;
++        const supplyAmount = toNumberOrNull(readCell(row, '?????????)) ?? 0;
++        const taxAmount = toNumberOrNull(readCell(row, '????????)) ?? 0;
++        const totalAmount = toNumberOrNull(readCell(row, '?????)) ?? 0;
++        const paymentAmount = toNumberOrNull(readCell(row, '?????????)) ?? 0;
++        const appliedYear = toNumberOrNull(readCell(row, '????????')) ?? getYearFromDate(date) ?? fallbackYear;
++        const appliedMonth = toNumberOrNull(readCell(row, '??????)) ?? getMonthFromDate(date);
++        const matchedEntryId = normalizeText(readCell(row, '?????????ID'));
++        const note = normalizeText(readCell(row, '?????));
++        const teamName = normalizeText(readCell(row, '????)) || fallbackTeamName;
+ 
+         const entry: WorkbookLedgerEntry = {
+-            transactionType: transactionType ?? '???',
++            transactionType: transactionType ?? '?????,
+             date,
+             partnerName,
+             siteName,
+@@ -685,16 +687,16 @@ const findLegacyMatchedCandidateId = (
+ };
+ 
+ const getSettlementLabels = (transactionType: WorkbookTransactionType | undefined) => {
+-    const isPurchase = transactionType === '???';
++    const isPurchase = transactionType === '?????;
+ 
+     return {
+-        action: isPurchase ? '???? : '???',
+-        history: isPurchase ? '??????? : '??????',
+-        date: isPurchase ? '??????? : '??????',
+-        amount: isPurchase ? '??????? : '??????',
+-        cumulative: isPurchase ? '??????? : '??????',
+-        outstanding: isPurchase ? '??????' : '?????,
+-        placeholder: isPurchase ? '???????' : '??? ???'
++        action: isPurchase ? '????? : '????',
++        history: isPurchase ? '????????? : '????????',
++        date: isPurchase ? '????????? : '????????',
++        amount: isPurchase ? '????????? : '?????????,
++        cumulative: isPurchase ? '????????? : '????????',
++        outstanding: isPurchase ? '????????? : '???????,
++        placeholder: isPurchase ? '?????????? : '???? ?????
+     };
+ };
+ 
+@@ -744,7 +746,7 @@ const buildReceiptHistorySettlementEntries = (
+ ) => {
+     if (!targetId) return [];
+ 
+-    const transactionType: WorkbookTransactionType = filter.mode === '???' || filter.mode === '??????' ? '???' : '???';
++    const transactionType: WorkbookTransactionType = filter.mode === '????? || filter.mode === '????????? ? '????? : '?????;
+     const startDate = normalizeDate(filter.startDate);
+     const endDate = normalizeDate(filter.endDate);
+ 
+@@ -777,10 +779,10 @@ const buildReceiptHistorySettlementEntries = (
+ };
+ 
+ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter): SummaryRow[] => {
+-    const transactionType: WorkbookTransactionType = filter.mode === '???' || filter.mode === '??????' ? '???' : '???';
++    const transactionType: WorkbookTransactionType = filter.mode === '????? || filter.mode === '????????? ? '????? : '?????;
+     const startDate = normalizeDate(filter.startDate);
+     const endDate = normalizeDate(filter.endDate);
+-    const isSettlementMode = filter.mode === '????? || filter.mode === '??????';
++    const isSettlementMode = filter.mode === '??????? || filter.mode === '?????????;
+ 
+     if (!startDate || !endDate) return [];
+ 
+@@ -1137,7 +1139,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         startDate: defaultLedgerStart,
+         endDate: todayString,
+         teamName: '',
+-        transactionType: '???',
++        transactionType: '?????,
+         partnerName: '',
+         siteName: ''
+     });
+@@ -1145,7 +1147,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         startDate: defaultLedgerStart,
+         endDate: todayString,
+         teamName: '',
+-        transactionType: '???',
++        transactionType: '?????,
+         partnerName: '',
+         siteName: ''
+     });
+@@ -1154,7 +1156,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         startDate: defaultLedgerStart,
+         endDate: todayString,
+         teamName: '',
+-        mode: '?????,
++        mode: '???????,
+         partnerName: '',
+         siteName: ''
+     });
+@@ -1162,7 +1164,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         startDate: defaultLedgerStart,
+         endDate: todayString,
+         teamName: '',
+-        mode: '?????,
++        mode: '???????,
+         partnerName: '',
+         siteName: ''
+     });
+@@ -1170,11 +1172,24 @@ const WorkbookLedgerPage: React.FC = () => {
+     const [dbSort, setDbSort] = useState<DbSortState>({ field: 'date', direction: 'asc' });
+     const [dbPage, setDbPage] = useState(1);
+     const [selectedDbEntryIds, setSelectedDbEntryIds] = useState<string[]>([]);
++    const [selectedSummaryRowIds, setSelectedSummaryRowIds] = useState<string[]>([]);
++    const [purchaseAccountsByName, setPurchaseAccountsByName] = useState<Map<string, AccountDirectory>>(new Map());
+     const [editingDbDraft, setEditingDbDraft] = useState<DbEditDraft | null>(null);
+     const [expandedDbEntryIds, setExpandedDbEntryIds] = useState<string[]>([]);
+     const [receiptHistoryTargetId, setReceiptHistoryTargetId] = useState<string | null>(null);
+     const [editingReceiptDraft, setEditingReceiptDraft] = useState<ReceiptEditDraft | null>(null);
+ 
++    useEffect(() => {
++        accountDirectoryService.getEntriesByCategory('purchase').then((accounts) => {
++            const nextMap = new Map<string, AccountDirectory>();
++            accounts.forEach((acc) => {
++                const key = (acc.name ?? '').trim();
++                if (key) nextMap.set(key, acc);
++            });
++            setPurchaseAccountsByName(nextMap);
++        }).catch(() => {});
++    }, []);
++
+     const rebuildLookupOptions = useCallback((savedEntries: WorkbookLedgerEntry[]) => {
+         const nextPartnerNames = new Set(partnerSeedNamesRef.current);
+         const nextSiteNames = new Set(siteSeedNamesRef.current);
+@@ -1198,7 +1213,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             const shouldLoadCatalogs = options?.forceCatalogs || !catalogsLoadedRef.current;
+             const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
+             const [savedEntries, companies, sites, teams] = await Promise.all([
+-                shouldLoadEntries ? workbookLedgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
++                shouldLoadEntries ? ledgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
+                 shouldLoadCatalogs ? companyService.getActiveCompanies() : Promise.resolve(null),
+                 shouldLoadCatalogs ? siteService.getSites() : Promise.resolve(null),
+                 shouldLoadCatalogs ? teamService.getTeams() : Promise.resolve(null)
+@@ -1224,7 +1239,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             }
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', '??? ??? ?????? ?????? ????????', 'error');
++            Swal.fire('????', '???? ??? ??????? ??????? ??????????', 'error');
+         } finally {
+             setLoading(false);
+         }
+@@ -1269,7 +1284,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             .filter(({ row }) => hasInputContent(row));
+ 
+         if (filledRows.length === 0) {
+-            Swal.fire('???', '????? ??? ??? ??????.', 'info');
++            Swal.fire('????', '?????????? ???? ????????.', 'info');
+             return;
+         }
+ 
+@@ -1278,17 +1293,17 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         filledRows.forEach(({ row, excelRowNumber }) => {
+             if (!row.transactionType) {
+-                validationErrors.push(`${excelRowNumber}?? ?????????????`);
++                validationErrors.push(`${excelRowNumber}?? ????????????????`);
+                 return;
+             }
+ 
+             if (!row.date) {
+-                validationErrors.push(`${excelRowNumber}?? ?????????????`);
++                validationErrors.push(`${excelRowNumber}?? ????????????????`);
+                 return;
+             }
+ 
+             if (!row.partnerName) {
+-                validationErrors.push(`${excelRowNumber}?? ????????????????`);
++                validationErrors.push(`${excelRowNumber}?? ?????????????????????`);
+                 return;
+             }
+ 
+@@ -1299,7 +1314,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             const appliedMonth = row.appliedMonth ?? getMonthFromDate(row.date);
+ 
+             if (totalAmount === 0 && paymentAmount <= 0) {
+-                validationErrors.push(`${excelRowNumber}?? ??? ??? ?????? ????????????????????`);
++                validationErrors.push(`${excelRowNumber}?? ????????? ?????????????????????????????????`);
+                 return;
+             }
+ 
+@@ -1352,8 +1367,8 @@ const WorkbookLedgerPage: React.FC = () => {
+                 description:
+                     row.description ||
+                     (totalAmount !== 0
+-                        ? (row.transactionType === '???' ? '???' : '???')
+-                        : (row.transactionType === '???' ? '???' : '????)),
++                        ? (row.transactionType === '????? ? '????? : '?????)
++                        : (row.transactionType === '????? ? '????' : '?????)),
+                 supplyAmount,
+                 taxAmount,
+                 totalAmount,
+@@ -1362,24 +1377,24 @@ const WorkbookLedgerPage: React.FC = () => {
+         });
+ 
+         if (validationErrors.length > 0) {
+-            Swal.fire('??? ???', validationErrors.slice(0, 8).join('<br />'), 'warning');
++            Swal.fire('???? ????', validationErrors.slice(0, 8).join('<br />'), 'warning');
+             return;
+         }
+ 
+         if (preparedEntries.length === 0) {
+-            Swal.fire('???', '????????? ?????? ??????.', 'info');
++            Swal.fire('????', '?????????????????? ????????.', 'info');
+             return;
+         }
+ 
+         setSaving(true);
+         try {
+-            await workbookLedgerService.addEntries(preparedEntries);
++            await ledgerService.addEntries(preparedEntries);
+             handleResetInputGrid();
+             await refreshPageData();
+-            Swal.fire('???????', `${preparedEntries.length}??? ??? ??? DB???????????.`, 'success');
++            Swal.fire('????????', `${preparedEntries.length}????????? ??? DB??????????????.`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', '??? ?????? ??????? ????????', 'error');
++            Swal.fire('????', '??? ??????? ???????? ??????????', 'error');
+         } finally {
+             setSaving(false);
+         }
+@@ -1403,7 +1418,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             const sheetName = workbook.SheetNames.includes('DB') ? 'DB' : workbook.SheetNames[0];
+ 
+             if (!sheetName) {
+-                throw new Error('??????????? ???????? ????????.');
++                throw new Error('?????????????? ?????????????????????.');
+             }
+ 
+             const worksheet = workbook.Sheets[sheetName];
+@@ -1416,22 +1431,22 @@ const WorkbookLedgerPage: React.FC = () => {
+             const { entries: importedEntries, skipped } = parseImportedDbEntries(rows, selectedTeam, baseYear);
+ 
+             if (importedEntries.length === 0) {
+-                Swal.fire('???', '????? ????? DB ??? ??????.', 'info');
++                Swal.fire('????', '??????? ?????? DB ???? ????????.', 'info');
+                 return;
+             }
+ 
+             const result = await Swal.fire({
+-                title: 'DB ?????,
+-                html: `${importedEntries.length.toLocaleString()}??? ??? ??? DB??????????${skipped > 0 ? `<br />?????: ${skipped.toLocaleString()}?? : ''}`,
++                title: 'DB ??????,
++                html: `${importedEntries.length.toLocaleString()}????????? ??? DB????????????${skipped > 0 ? `<br />??????: ${skipped.toLocaleString()}?? : ''}`,
+                 icon: 'question',
+                 showCancelButton: true,
+-                confirmButtonText: '?????,
+-                cancelButtonText: '???'
++                confirmButtonText: '??????,
++                cancelButtonText: '?????
+             });
+ 
+             if (!result.isConfirmed) return;
+ 
+-            await workbookLedgerService.addEntries(
++            await ledgerService.addEntries(
+                 importedEntries.map((entry) => ({
+                     ...entry,
+                     createdBy: currentUser?.uid ?? ''
+@@ -1440,10 +1455,10 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+             await refreshPageData();
+             setActiveTab('database');
+-            Swal.fire('????????', `${importedEntries.length.toLocaleString()}??? DB???????????.`, 'success');
++            Swal.fire('??????????', `${importedEntries.length.toLocaleString()}?????DB??????????????.`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', error instanceof Error ? error.message : 'DB ?????? ?????????.', 'error');
++            Swal.fire('????', error instanceof Error ? error.message : 'DB ???????? ????????????.', 'error');
+         } finally {
+             setUploadingDb(false);
+         }
+@@ -1451,7 +1466,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+     const handleDownloadDb = useCallback(async () => {
+         if (entries.length === 0) {
+-            Swal.fire('???', '????????DB ?????? ??????.', 'info');
++            Swal.fire('????', '??????????DB ??????? ????????.', 'info');
+             return;
+         }
+ 
+@@ -1476,10 +1491,10 @@ const WorkbookLedgerPage: React.FC = () => {
+                 type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+             });
+ 
+-            saveAs(blob, `??????_DB_${new Date().toISOString().slice(0, 10)}.xlsx`);
++            saveAs(blob, `?????????_DB_${new Date().toISOString().slice(0, 10)}.xlsx`);
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', 'DB ?????????????????.', 'error');
++            Swal.fire('????', 'DB ??????????????????????.', 'error');
+         } finally {
+             setDownloadingDb(false);
+         }
+@@ -1491,7 +1506,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         label: string
+     ) => {
+         if (!element) {
+-            Swal.fire('???', `${label} ???????? ????????`, 'info');
++            Swal.fire('????', `${label} ?????????? ??????????`, 'info');
+             return;
+         }
+ 
+@@ -1517,7 +1532,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             });
+ 
+             if (!blob) {
+-                Swal.fire('???', `${label} ??? ????? ??????????????.`, 'error');
++                Swal.fire('????', `${label} ???? ??????? ??????????????????.`, 'error');
+                 return;
+             }
+ 
+@@ -1529,7 +1544,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             };
+ 
+             if (!ClipboardItemCtor || !clipboard.write) {
+-                Swal.fire('???', '??????????????? ?????? ???????????? ??????.', 'info');
++                Swal.fire('????', '?????????????????? ??????????????????????????? ????????.', 'info');
+                 return;
+             }
+ 
+@@ -1539,10 +1554,10 @@ const WorkbookLedgerPage: React.FC = () => {
+                 })
+             ]);
+ 
+-            Swal.fire('??? ???', `${label} ????????????????????????`, 'success');
++            Swal.fire('?????????', `${label} ???????????????????????????????`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', `${label} ??? ??????????????.`, 'error');
++            Swal.fire('????', `${label} ???? ??????????????????.`, 'error');
+         } finally {
+             setCapturingView((current) => (current === target ? null : current));
+         }
+@@ -1555,68 +1570,68 @@ const WorkbookLedgerPage: React.FC = () => {
+         const linkedPaymentTotal = linkedPayments.reduce((sum, item) => sum + (item.paymentAmount ?? 0), 0);
+ 
+         const result = await Swal.fire({
+-            title: 'DB ?????',
++            title: 'DB ??????',
+             width: 760,
+             html: `
+                 <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;text-align:left;">
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">???</span>
++                        <span style="font-size:13px;font-weight:700;">????</span>
+                         <select id="db-type" class="swal2-input" style="margin:0;width:100%;">
+-                            <option value="???" ${entry.transactionType === '???' ? 'selected' : ''}>???</option>
+-                            <option value="???" ${entry.transactionType === '???' ? 'selected' : ''}>???</option>
++                            <option value="????? ${entry.transactionType === '????? ? 'selected' : ''}>?????/option>
++                            <option value="????? ${entry.transactionType === '????? ? 'selected' : ''}>?????/option>
+                         </select>
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">???</span>
++                        <span style="font-size:13px;font-weight:700;">????</span>
+                         <input id="db-date" type="date" value="${escapeHtml(entry.date || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">??????</span>
++                        <span style="font-size:13px;font-weight:700;">?????????</span>
+                         <input id="db-partner" type="text" value="${escapeHtml(entry.partnerName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">?????/span>
++                        <span style="font-size:13px;font-weight:700;">??????/span>
+                         <input id="db-site" type="text" value="${escapeHtml(entry.siteName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;grid-column:1 / -1;">
+-                        <span style="font-size:13px;font-weight:700;">???</span>
++                        <span style="font-size:13px;font-weight:700;">????</span>
+                         <input id="db-description" type="text" value="${escapeHtml(entry.description || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">???????/span>
++                        <span style="font-size:13px;font-weight:700;">?????????/span>
+                         <input id="db-supply" type="number" value="${entry.supplyAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">??????</span>
++                        <span style="font-size:13px;font-weight:700;">?????????/span>
+                         <input id="db-payment" type="number" min="0" value="${entry.paymentAmount || 0}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">??????</span>
++                        <span style="font-size:13px;font-weight:700;">????????</span>
+                         <input id="db-year" type="number" min="2000" max="2100" value="${entry.appliedYear ?? getYearFromDate(entry.date) ?? baseYear}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;">
+-                        <span style="font-size:13px;font-weight:700;">?????/span>
++                        <span style="font-size:13px;font-weight:700;">??????/span>
+                         <input id="db-month" type="number" min="1" max="12" value="${entry.appliedMonth ?? getMonthFromDate(entry.date) ?? 1}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;grid-column:1 / -1;">
+-                        <span style="font-size:13px;font-weight:700;">???</span>
++                        <span style="font-size:13px;font-weight:700;">?????/span>
+                         <input id="db-note" type="text" value="${escapeHtml(entry.note || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     <label style="display:grid;gap:6px;grid-column:1 / -1;">
+-                        <span style="font-size:13px;font-weight:700;">????/span>
++                        <span style="font-size:13px;font-weight:700;">????/span>
+                         <input id="db-team" type="text" value="${escapeHtml(entry.teamName || '')}" class="swal2-input" style="margin:0;width:100%;" />
+                     </label>
+                     ${entry.matchedEntryId ? `
+                         <label style="display:grid;gap:6px;grid-column:1 / -1;">
+-                            <span style="font-size:13px;font-weight:700;">??????ID</span>
++                            <span style="font-size:13px;font-weight:700;">?????????ID</span>
+                             <input type="text" value="${escapeHtml(entry.matchedEntryId)}" class="swal2-input" style="margin:0;width:100%;background:#f8fafc;" readonly />
+                         </label>
+                     ` : ''}
+                 </div>
+             `,
+             showCancelButton: true,
+-            confirmButtonText: '????,
+-            cancelButtonText: '???',
++            confirmButtonText: '????,
++            cancelButtonText: '?????,
+             focusConfirm: false,
+             preConfirm: () => {
+                 const transactionType = ((document.getElementById('db-type') as HTMLSelectElement | null)?.value ?? '') as WorkbookTransactionType;
+@@ -1633,45 +1648,45 @@ const WorkbookLedgerPage: React.FC = () => {
+                 const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
+                 const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
+ 
+-                if (transactionType !== '???' && transactionType !== '???') {
+-                    Swal.showValidationMessage('???????????????');
++                if (transactionType !== '????? && transactionType !== '?????) {
++                    Swal.showValidationMessage('??????????????????');
+                     return null;
+                 }
+ 
+                 if (!date) {
+-                    Swal.showValidationMessage('???????????????');
++                    Swal.showValidationMessage('??????????????????');
+                     return null;
+                 }
+ 
+                 if (!partnerName) {
+-                    Swal.showValidationMessage('??????????????????');
++                    Swal.showValidationMessage('???????????????????????');
+                     return null;
+                 }
+ 
+                 if (totalAmount === 0 && paymentAmount <= 0) {
+-                    Swal.showValidationMessage('?????????? ?????? ?????????????????');
++                    Swal.showValidationMessage('????????????? ?????????????????????????????');
+                     return null;
+                 }
+ 
+                 if (paymentAmount < 0) {
+-                    Swal.showValidationMessage('???????? 0 ?????????????');
++                    Swal.showValidationMessage('?????????? 0 ????????????????');
+                     return null;
+                 }
+ 
+                 if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
+-                    Swal.showValidationMessage('???????????????? ???/??? ??? ?????????? ????????.');
++                    Swal.showValidationMessage('???????????????????? ????????????? ????????????????????????.');
+                     return null;
+                 }
+ 
+                 if (linkedPayments.length > 0 && totalAmount <= 0) {
+-                    Swal.showValidationMessage('???????????????? ??? ?????0??? ??? ????????.');
++                    Swal.showValidationMessage('???????????????????? ??? ???????0???? ???????????????.');
+                     return null;
+                 }
+ 
+                 if (totalAmount > 0) {
+                     const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
+                     if (totalAmount < minimumInvoiceAmount) {
+-                        Swal.showValidationMessage(`????????????? ${formatNumber(minimumInvoiceAmount)}???????????????`);
++                        Swal.showValidationMessage(`???????????????? ${formatNumber(minimumInvoiceAmount)}??????????????????`);
+                         return null;
+                     }
+                 }
+@@ -1680,7 +1695,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                     const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
+                     if (matchedInvoice) {
+                         if (transactionType !== matchedInvoice.transactionType) {
+-                            Swal.showValidationMessage('??? ??? ????? ???????? ??? ??????????');
++                            Swal.showValidationMessage('???? ???? ?????? ?????????? ???? ????????????');
+                             return null;
+                         }
+ 
+@@ -1690,7 +1705,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                         const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
+ 
+                         if (paymentAmount > maxPaymentAmount) {
+-                            Swal.showValidationMessage(`???????? ??? ???????? ${formatNumber(maxPaymentAmount)}??? ??? ????????.`);
++                            Swal.showValidationMessage(`?????????? ???? ?????????? ${formatNumber(maxPaymentAmount)}???? ???? ??????????.`);
+                             return null;
+                         }
+                     }
+@@ -1718,15 +1733,15 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         setDbActionLoading(true);
+         try {
+-            await workbookLedgerService.updateEntry(entry.id, {
++            await ledgerService.updateEntry(entry.id, {
+                 ...result.value,
+                 updatedBy: currentUser?.uid ?? ''
+             });
+             await refreshPageData();
+-            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
++            Swal.fire('???? ????', 'DB ???? ????????????.', 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', 'DB ????????????????.', 'error');
++            Swal.fire('????', 'DB ????????????????????.', 'error');
+         } finally {
+             setDbActionLoading(false);
+         }
+@@ -1750,7 +1765,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         const entry = entries.find((item) => item.id === editingDbDraft.id);
+         if (!entry?.id) {
+-            Swal.fire('???', '?????DB ??? ??? ????? ?????', 'info');
++            Swal.fire('????', '??????DB ???? ???? ?????? ??????', 'info');
+             return;
+         }
+ 
+@@ -1770,45 +1785,45 @@ const WorkbookLedgerPage: React.FC = () => {
+         const taxAmount = supplyAmount !== 0 ? Math.round(supplyAmount * 0.1) : 0;
+         const totalAmount = supplyAmount !== 0 ? supplyAmount + taxAmount : 0;
+ 
+-        if (transactionType !== '???' && transactionType !== '???') {
+-            Swal.fire('??? ???', '???????????????', 'warning');
++        if (transactionType !== '????? && transactionType !== '?????) {
++            Swal.fire('???? ????', '??????????????????', 'warning');
+             return;
+         }
+ 
+         if (!date) {
+-            Swal.fire('??? ???', '???????????????', 'warning');
++            Swal.fire('???? ????', '??????????????????', 'warning');
+             return;
+         }
+ 
+         if (!partnerName) {
+-            Swal.fire('??? ???', '??????????????????', 'warning');
++            Swal.fire('???? ????', '???????????????????????', 'warning');
+             return;
+         }
+ 
+         if (totalAmount === 0 && paymentAmount <= 0) {
+-            Swal.fire('??? ???', '?????????? ?????? ?????????????????', 'warning');
++            Swal.fire('???? ????', '????????????? ?????????????????????????????', 'warning');
+             return;
+         }
+ 
+         if (paymentAmount < 0) {
+-            Swal.fire('??? ???', '???????? 0 ?????????????', 'warning');
++            Swal.fire('???? ????', '?????????? 0 ????????????????', 'warning');
+             return;
+         }
+ 
+         if (linkedPayments.length > 0 && transactionType !== entry.transactionType) {
+-            Swal.fire('??? ???', '???????????????? ???/??? ??? ?????????? ????????.', 'warning');
++            Swal.fire('???? ????', '???????????????????? ????????????? ????????????????????????.', 'warning');
+             return;
+         }
+ 
+         if (linkedPayments.length > 0 && totalAmount <= 0) {
+-            Swal.fire('??? ???', '???????????????? ??? ?????0 ?????????? ????????.', 'warning');
++            Swal.fire('???? ????', '???????????????????? ??? ???????0 ????????????????????????.', 'warning');
+             return;
+         }
+ 
+         if (totalAmount > 0) {
+             const minimumInvoiceAmount = linkedPaymentTotal + paymentAmount;
+             if (totalAmount < minimumInvoiceAmount) {
+-                Swal.fire('??? ???', `????????????? ${formatNumber(minimumInvoiceAmount)}???????????????`, 'warning');
++                Swal.fire('???? ????', `???????????????? ${formatNumber(minimumInvoiceAmount)}??????????????????`, 'warning');
+                 return;
+             }
+         }
+@@ -1817,7 +1832,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             const matchedInvoice = entries.find((item) => item.id === entry.matchedEntryId && isInvoiceEntry(item));
+             if (matchedInvoice) {
+                 if (transactionType !== matchedInvoice.transactionType) {
+-                    Swal.fire('??? ???', '??? ??? ????? ???????? ??? ??????????', 'warning');
++                    Swal.fire('???? ????', '???? ???? ?????? ?????????? ???? ????????????', 'warning');
+                     return;
+                 }
+ 
+@@ -1827,7 +1842,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                 const maxPaymentAmount = Math.max((matchedInvoice.totalAmount ?? 0) - siblingPayments, 0);
+ 
+                 if (paymentAmount > maxPaymentAmount) {
+-                    Swal.fire('??? ???', `???????? ??? ???????? ${formatNumber(maxPaymentAmount)}??? ??? ????????.`, 'warning');
++                    Swal.fire('???? ????', `?????????? ???? ?????????? ${formatNumber(maxPaymentAmount)}???? ???? ??????????.`, 'warning');
+                     return;
+                 }
+             }
+@@ -1835,7 +1850,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         setDbActionLoading(true);
+         try {
+-            await workbookLedgerService.updateEntry(entry.id, {
++            await ledgerService.updateEntry(entry.id, {
+                 transactionType,
+                 date,
+                 partnerName,
+@@ -1853,10 +1868,10 @@ const WorkbookLedgerPage: React.FC = () => {
+             });
+             await refreshPageData();
+             setEditingDbDraft(null);
+-            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
++            Swal.fire('???? ????', 'DB ???? ????????????.', 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', 'DB ????????????????.', 'error');
++            Swal.fire('????', 'DB ????????????????????.', 'error');
+         } finally {
+             setDbActionLoading(false);
+         }
+@@ -1868,30 +1883,30 @@ const WorkbookLedgerPage: React.FC = () => {
+         const linkedPayments = entries.filter((item) => isPaymentEntry(item) && item.matchedEntryId === entry.id);
+ 
+         if (isInvoiceEntry(entry) && linkedPayments.length > 0) {
+-            Swal.fire('??? ???', '????? ???????????????????. ??????????? ??????????', 'warning');
++            Swal.fire('????????', '?????? ????????????????????????. ?????????????? ???????????', 'warning');
+             return;
+         }
+ 
+         const result = await Swal.fire({
+-            title: 'DB ?????',
+-            text: `${entry.date} / ${entry.partnerName} ??? ?????????????`,
++            title: 'DB ??????,
++            text: `${entry.date} / ${entry.partnerName} ???? ????????????????`,
+             icon: 'warning',
+             showCancelButton: true,
+-            confirmButtonText: '???',
+-            cancelButtonText: '???'
++            confirmButtonText: '????,
++            cancelButtonText: '?????
+         });
+ 
+         if (!result.isConfirmed) return;
+ 
+         setDbActionLoading(true);
+         try {
+-            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
++            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+             await refreshPageData();
+             setEditingDbDraft((prev) => (prev?.id === entry.id ? null : prev));
+-            Swal.fire('??? ???', 'DB ??? ?????????.', 'success');
++            Swal.fire('????????', 'DB ???? ???????????.', 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', 'DB ????????????????.', 'error');
++            Swal.fire('????', 'DB ???????????????????.', 'error');
+         } finally {
+             setDbActionLoading(false);
+         }
+@@ -1899,23 +1914,23 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+     const handleResetDatabase = useCallback(async () => {
+         if (entries.length === 0) {
+-            Swal.fire('???', '?????? DB ?????? ??????.', 'info');
++            Swal.fire('????', '?????????DB ??????? ????????.', 'info');
+             return;
+         }
+ 
+         const result = await Swal.fire({
+-            title: 'DB ?????,
+-            html: `??? ????? <strong>${entries.length.toLocaleString()}??/strong>????? ?????????.<br />????????<strong>?????/strong>??????????`,
++            title: 'DB ??????,
++            html: `???? ??????<strong>${entries.length.toLocaleString()}??/strong>????????????????????.<br />??????????<strong>??????/strong>????????????`,
+             input: 'text',
+-            inputPlaceholder: '?????,
++            inputPlaceholder: '??????,
+             icon: 'warning',
+             showCancelButton: true,
+-            confirmButtonText: '?????,
+-            cancelButtonText: '???',
++            confirmButtonText: '??????,
++            cancelButtonText: '?????,
+             focusConfirm: false,
+             preConfirm: (value) => {
+-                if (normalizeText(value) !== '?????) {
+-                    Swal.showValidationMessage("'???????????????");
++                if (normalizeText(value) !== '??????) {
++                    Swal.showValidationMessage("'??????????????????");
+                     return false;
+                 }
+ 
+@@ -1927,15 +1942,15 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         setDbActionLoading(true);
+         try {
+-            const deletedCount = await workbookLedgerService.softDeleteAllEntries(currentUser?.uid ?? '');
++            const deletedCount = await ledgerService.softDeleteAllEntries(currentUser?.uid ?? '');
+             await refreshPageData({ forceEntries: true });
+             setEditingDbDraft(null);
+             setExpandedDbEntryIds([]);
+             setDbPage(1);
+-            Swal.fire('????????', `${deletedCount.toLocaleString()}??? DB ?????? ???????????`, 'success');
++            Swal.fire('??????????', `${deletedCount.toLocaleString()}?????DB ??????? ??????????????`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', 'DB ?????? ?????????.', 'error');
++            Swal.fire('????', 'DB ???????? ????????????.', 'error');
+         } finally {
+             setDbActionLoading(false);
+         }
+@@ -1943,7 +1958,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+     const handleBulkDeleteDbEntries = useCallback(async () => {
+         if (selectedDbEntryIds.length === 0) {
+-            Swal.fire('???', '?????DB ??? ??? ????????', 'info');
++            Swal.fire('????', '?????DB ???? ???? ??????????', 'info');
+             return;
+         }
+ 
+@@ -1951,7 +1966,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const selectedEntries = entries.filter((entry) => entry.id && selectedIdSet.has(entry.id));
+ 
+         if (selectedEntries.length === 0) {
+-            Swal.fire('???', '?????DB ??? ??? ????? ?????', 'info');
++            Swal.fire('????', '??????DB ???? ???? ?????? ??????', 'info');
+             return;
+         }
+ 
+@@ -1983,8 +1998,8 @@ const WorkbookLedgerPage: React.FC = () => {
+                 .map((entry) => `${escapeHtml(entry.date)} / ${escapeHtml(entry.partnerName)} / ${escapeHtml(entry.description || '-')}`)
+                 .join('<br />');
+             Swal.fire(
+-                '??? ???',
+-                `???????? ??? ???????????????? ??????.<br />??? ????? ??? ?????????? ????????${blockedPreview ? `<br /><br />${blockedPreview}` : ''}`,
++                '????????',
++                `?????????? ???? ???????????????????? ????????.<br />???? ??????? ???? ???????????? ??????????${blockedPreview ? `<br /><br />${blockedPreview}` : ''}`,
+                 'warning'
+             );
+             return;
+@@ -1997,38 +2012,38 @@ const WorkbookLedgerPage: React.FC = () => {
+             .join('<br />');
+ 
+         const result = await Swal.fire({
+-            title: '??? ????????',
++            title: '???? ??????????,
+             html: [
+-                `?????<strong>${selectedEntries.length.toLocaleString()}??/strong> ??<strong>${deletableEntryIds.length.toLocaleString()}??/strong>??????????`,
++                `??????<strong>${selectedEntries.length.toLocaleString()}??/strong> ??<strong>${deletableEntryIds.length.toLocaleString()}??/strong>???????????`,
+                 blockedCount > 0
+-                    ? `???????????????? ??? <strong>${blockedCount.toLocaleString()}??/strong>?? ????????${blockedPreview ? `<br /><br />${blockedPreview}${blockedCount > 5 ? '<br />...' : ''}` : ''}`
++                    ? `???????????????????? ???? <strong>${blockedCount.toLocaleString()}??/strong>?? ??????????${blockedPreview ? `<br /><br />${blockedPreview}${blockedCount > 5 ? '<br />...' : ''}` : ''}`
+                     : ''
+             ].filter(Boolean).join('<br />'),
+             icon: 'warning',
+             showCancelButton: true,
+-            confirmButtonText: blockedCount > 0 ? '????? ????????' : '??????',
+-            cancelButtonText: '???'
++            confirmButtonText: blockedCount > 0 ? '????????????????? : '????????,
++            cancelButtonText: '?????
+         });
+ 
+         if (!result.isConfirmed) return;
+ 
+         setDbActionLoading(true);
+         try {
+-            const deletedCount = await workbookLedgerService.softDeleteEntries(deletableEntryIds, currentUser?.uid ?? '');
++            const deletedCount = await ledgerService.softDeleteEntries(deletableEntryIds, currentUser?.uid ?? '');
+             await refreshPageData({ forceEntries: true });
+             setSelectedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
+             setEditingDbDraft((prev) => (prev && deletableEntryIds.includes(prev.id) ? null : prev));
+             setExpandedDbEntryIds((prev) => prev.filter((id) => !deletableEntryIds.includes(id)));
+             Swal.fire(
+-                blockedCount > 0 ? '??????? ???' : '??? ???',
++                blockedCount > 0 ? '?????????????' : '????????',
+                 blockedCount > 0
+-                    ? `${deletedCount.toLocaleString()}??? ?????? ${blockedCount.toLocaleString()}??? ?????????.`
+-                    : `${deletedCount.toLocaleString()}??? ?????????.`,
++                    ? `${deletedCount.toLocaleString()}?????????????${blockedCount.toLocaleString()}???? ????????????.`
++                    : `${deletedCount.toLocaleString()}????????????????.`,
+                 'success'
+             );
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', '??? ???????????????????.', 'error');
++            Swal.fire('????', '???? ???????????????????????.', 'error');
+         } finally {
+             setDbActionLoading(false);
+         }
+@@ -2038,16 +2053,16 @@ const WorkbookLedgerPage: React.FC = () => {
+         const labels = getSettlementLabels(row.transactionType);
+ 
+         const result = await Swal.fire({
+-            title: `${labels.action} ???`,
++            title: `${labels.action} ????`,
+             html: `
+                 <div style="display:grid;gap:12px;text-align:left;">
+                     <div>
+-                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">?????/div>
++                        <div style="font-size:13px;font-weight:700;margin-bottom:6px;">???????/div>
+                         <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${row.partnerName}</div>
+                     </div>
+                     <div>
+                         <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${labels.outstanding}</div>
+-                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(row.outstandingAmount)}??/div>
++                        <div style="padding:10px 12px;border:1px solid #d7dde7;border-radius:10px;background:#f8fafc;">${formatNumber(row.outstandingAmount)}??/div>
+                     </div>
+                     <div>
+                         <label for="receipt-date" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">${labels.date}</label>
+@@ -2058,14 +2073,14 @@ const WorkbookLedgerPage: React.FC = () => {
+                         <input id="receipt-amount" type="number" min="1" max="${Math.max(1, row.outstandingAmount)}" value="${row.outstandingAmount}" class="swal2-input" style="margin:0;width:100%;" />
+                     </div>
+                     <div>
+-                        <label for="receipt-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">???</label>
++                        <label for="receipt-note" style="font-size:13px;font-weight:700;display:block;margin-bottom:6px;">?????/label>
+                         <input id="receipt-note" type="text" class="swal2-input" style="margin:0;width:100%;" placeholder="${labels.placeholder}" />
+                     </div>
+                 </div>
+             `,
+             showCancelButton: true,
+-            confirmButtonText: '????,
+-            cancelButtonText: '???',
++            confirmButtonText: '????,
++            cancelButtonText: '?????,
+             focusConfirm: false,
+             preConfirm: () => {
+                 const date = (document.getElementById('receipt-date') as HTMLInputElement | null)?.value ?? '';
+@@ -2073,17 +2088,17 @@ const WorkbookLedgerPage: React.FC = () => {
+                 const note = (document.getElementById('receipt-note') as HTMLInputElement | null)?.value ?? '';
+ 
+                 if (!date) {
+-                    Swal.showValidationMessage(`${labels.date}??????????`);
++                    Swal.showValidationMessage(`${labels.date}????????????`);
+                     return null;
+                 }
+ 
+                 if (!Number.isFinite(amount) || amount <= 0) {
+-                    Swal.showValidationMessage(`${labels.amount}?? 0??? ??? ?????`);
++                    Swal.showValidationMessage(`${labels.amount}?? 0????????????????`);
+                     return null;
+                 }
+ 
+                 if (amount > row.outstandingAmount) {
+-                    Swal.showValidationMessage(`${labels.amount}?? ??? ${labels.outstanding}??? ??????????.`);
++                    Swal.showValidationMessage(`${labels.amount}?? ???? ${labels.outstanding}?????????????????.`);
+                     return null;
+                 }
+ 
+@@ -2099,7 +2114,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         setSaving(true);
+         try {
+-            await workbookLedgerService.addEntries([{
++            await ledgerService.addEntries([{
+                 transactionType: row.transactionType,
+                 date,
+                 partnerName: row.partnerName,
+@@ -2119,10 +2134,10 @@ const WorkbookLedgerPage: React.FC = () => {
+             }]);
+ 
+             await refreshPageData();
+-            Swal.fire('???????', `${formatNumber(amount)}??${labels.action}???????????.`, 'success');
++            Swal.fire('????????', `${formatNumber(amount)}??${labels.action}??????????????.`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', `${labels.action} ??????????????.`, 'error');
++            Swal.fire('????', `${labels.action} ??????????????????.`, 'error');
+         } finally {
+             setSaving(false);
+         }
+@@ -2165,7 +2180,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         );
+ 
+         if (!receiptHistoryInvoice) {
+-            Swal.fire('????', '?????????????? ???? ??????????????? ??????????', 'info');
++            Swal.fire('?????', '????????????????? ????? ?????????????????? ????????????', 'info');
+             return;
+         }
+ 
+@@ -2180,7 +2195,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const labels = getSettlementLabels(receiptHistoryInvoice.transactionType);
+ 
+         if (!currentReceipt) {
+-            Swal.fire('????', '???????????????????? ??????????', 'info');
++            Swal.fire('?????', '???????????????????????? ????????????', 'info');
+             return;
+         }
+ 
+@@ -2188,23 +2203,23 @@ const WorkbookLedgerPage: React.FC = () => {
+         const maxAmount = Math.max((receiptHistoryInvoice.totalAmount ?? 0) - (receiptHistoryTotal - currentAmount), 0);
+ 
+         if (!normalizedDate) {
+-            Swal.fire('??? ???', '????????????????', 'warning');
++            Swal.fire('???? ????', '????????????????????', 'warning');
+             return;
+         }
+ 
+         if (paymentAmount <= 0) {
+-            Swal.fire('??? ???', '???????? 0??? ??? ?????', 'warning');
++            Swal.fire('???? ????', '?????????? 0????????????????', 'warning');
+             return;
+         }
+ 
+         if (paymentAmount > maxAmount) {
+-            Swal.fire('??? ???', '??? ???????? ??????????????????', 'warning');
++            Swal.fire('???? ????', '???? ?????????????????????????????????', 'warning');
+             return;
+         }
+ 
+         setReceiptActionLoading(true);
+         try {
+-            await workbookLedgerService.updateEntry(editingReceiptDraft.id, {
++            await ledgerService.updateEntry(editingReceiptDraft.id, {
+                 date: normalizedDate,
+                 paymentAmount,
+                 note: normalizeText(editingReceiptDraft.note),
+@@ -2213,10 +2228,10 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+             await refreshPageData();
+             setEditingReceiptDraft(null);
+-            Swal.fire('??? ???', '?????????????????.', 'success');
++            Swal.fire('???? ????', '??????????????????????.', 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', '?????? ??????????????.', 'error');
++            Swal.fire('????', '???????? ??????????????????.', 'error');
+         } finally {
+             setReceiptActionLoading(false);
+         }
+@@ -2226,25 +2241,25 @@ const WorkbookLedgerPage: React.FC = () => {
+         if (!entry.id) return;
+ 
+         const result = await Swal.fire({
+-            title: '?????? ???',
+-            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}???????????????????????`,
++            title: '???????? ????,
++            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}????????????????????????????`,
+             icon: 'warning',
+             showCancelButton: true,
+-            confirmButtonText: '???',
+-            cancelButtonText: '???'
++            confirmButtonText: '????,
++            cancelButtonText: '?????
+         });
+ 
+         if (!result.isConfirmed) return;
+ 
+         setReceiptActionLoading(true);
+         try {
+-            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
++            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+             await refreshPageData();
+             setEditingReceiptDraft((prev) => (prev?.id === entry.id ? null : prev));
+-            Swal.fire('??? ???', '?????????????????.', 'success');
++            Swal.fire('????????', '?????????????????????.', 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', '?????? ??????????????.', 'error');
++            Swal.fire('????', '???????? ?????????????????.', 'error');
+         } finally {
+             setReceiptActionLoading(false);
+         }
+@@ -2258,7 +2273,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         );
+ 
+         if (!sourceEntry) {
+-            Swal.fire('???', '???????? ??? ??? ????????.', 'info');
++            Swal.fire('????', '?????????? ???? ???????????????.', 'info');
+             return;
+         }
+ 
+@@ -2272,7 +2287,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const labels = getSettlementLabels(sourceEntry.transactionType);
+ 
+         if (!currentEntry) {
+-            Swal.fire('???', '????????????? ????????.', 'info');
++            Swal.fire('????', '???????????????????????????.', 'info');
+             return;
+         }
+ 
+@@ -2280,23 +2295,23 @@ const WorkbookLedgerPage: React.FC = () => {
+         const maxAmount = Math.max((sourceEntry.totalAmount ?? 0) - (linkedTotal - currentAmount), 0);
+ 
+         if (!normalizedDate) {
+-            Swal.fire('??? ???', `${labels.date}??????????`, 'warning');
++            Swal.fire('???? ????', `${labels.date}????????????`, 'warning');
+             return;
+         }
+ 
+         if (paymentAmount <= 0) {
+-            Swal.fire('??? ???', `${labels.amount}?? 0??? ??? ?????`, 'warning');
++            Swal.fire('???? ????', `${labels.amount}?? 0????????????????`, 'warning');
+             return;
+         }
+ 
+         if (paymentAmount > maxAmount) {
+-            Swal.fire('??? ???', `??? ???????? ${labels.outstanding} ?????????????`, 'warning');
++            Swal.fire('???? ????', `???? ???????????${labels.outstanding} ????????????????`, 'warning');
+             return;
+         }
+ 
+         setReceiptActionLoading(true);
+         try {
+-            await workbookLedgerService.updateEntry(editingReceiptDraft.id, {
++            await ledgerService.updateEntry(editingReceiptDraft.id, {
+                 date: normalizedDate,
+                 paymentAmount,
+                 note: normalizeText(editingReceiptDraft.note),
+@@ -2305,10 +2320,10 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+             await refreshPageData();
+             setEditingReceiptDraft(null);
+-            Swal.fire('??? ???', `${labels.history}???????????.`, 'success');
++            Swal.fire('???? ????', `${labels.history}??????????????.`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', `${labels.history} ??????????????.`, 'error');
++            Swal.fire('????', `${labels.history} ??????????????????.`, 'error');
+         } finally {
+             setReceiptActionLoading(false);
+         }
+@@ -2319,25 +2334,25 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         const labels = getSettlementLabels(entry.transactionType);
+         const result = await Swal.fire({
+-            title: `${labels.history} ???`,
+-            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}??${labels.history}???????????????`,
++            title: `${labels.history} ????,
++            text: `${entry.date} / ${formatNumber(entry.paymentAmount)}??${labels.history}??????????????????`,
+             icon: 'warning',
+             showCancelButton: true,
+-            confirmButtonText: '???',
+-            cancelButtonText: '???'
++            confirmButtonText: '????,
++            cancelButtonText: '?????
+         });
+ 
+         if (!result.isConfirmed) return;
+ 
+         setReceiptActionLoading(true);
+         try {
+-            await workbookLedgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
++            await ledgerService.softDeleteEntry(entry.id, currentUser?.uid ?? '');
+             await refreshPageData();
+             setEditingReceiptDraft((prev) => (prev?.id === entry.id ? null : prev));
+-            Swal.fire('??? ???', `${labels.history}???????????.`, 'success');
++            Swal.fire('????????', `${labels.history}?????????????.`, 'success');
+         } catch (error) {
+             console.error(error);
+-            Swal.fire('???', `${labels.history} ??????????????.`, 'error');
++            Swal.fire('????', `${labels.history} ?????????????????.`, 'error');
+         } finally {
+             setReceiptActionLoading(false);
+         }
+@@ -2358,7 +2373,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const endDate = draft.endDate;
+ 
+         if (!startDate || !endDate) {
+-            Swal.fire('??? ???', '?????? ?????? ???????????? ??????????', 'warning');
++            Swal.fire('???? ????', '???????? ???????? ?????????????? ????????????', 'warning');
+             return;
+         }
+ 
+@@ -2400,9 +2415,9 @@ const WorkbookLedgerPage: React.FC = () => {
+         }), { supplyAmount: 0, taxAmount: 0, totalAmount: 0, settledAmount: 0, outstandingAmount: 0 });
+     }, [summaryRows]);
+ 
+-    const canRegisterReceipt = summaryFilter.mode === '????? || summaryFilter.mode === '??????';
++    const canRegisterReceipt = summaryFilter.mode === '??????? || summaryFilter.mode === '?????????;
+     const canOpenReceiptHistory = canRegisterReceipt;
+-    const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '???' : '???';
++    const summarySettlementType: WorkbookTransactionType = summaryFilter.mode === '????? || summaryFilter.mode === '????????? ? '????? : '?????;
+     const summarySettlementLabels = getSettlementLabels(summarySettlementType);
+ 
+     const receiptHistoryInvoice = useMemo(() => {
+@@ -2447,20 +2462,20 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+     const handlePrintLedger = useCallback(() => {
+         if (ledgerRows.length === 0) {
+-            Swal.fire('???', '???????? ????? ??????.', 'info');
++            Swal.fire('????', '?????????????????? ????????.', 'info');
+             return;
+         }
+ 
+-        const transactionAmountLabel = ledgerFilter.transactionType === '???' ? '??????' : '??????';
+-        const paymentAmountLabel = ledgerFilter.transactionType === '???' ? '??????' : '???????;
+-        const title = ledgerFilter.partnerName || `${ledgerFilter.transactionType} ?????;
++        const transactionAmountLabel = ledgerFilter.transactionType === '????? ? '?????????' : '?????????';
++        const paymentAmountLabel = ledgerFilter.transactionType === '????? ? '????????? : '?????????;
++        const title = ledgerFilter.partnerName || `${ledgerFilter.transactionType} ??????;
+         const filterItems = [
+-            ['??? ???', `${ledgerFilter.startDate} ~ ${ledgerFilter.endDate}`],
+-            ['???', ledgerFilter.transactionType],
+-            ['????, ledgerFilter.teamName || '???'],
+-            ['?????, ledgerFilter.partnerName || '???'],
+-            ['?????, ledgerFilter.siteName || '???'],
+-            ['???', `${ledgerRows.length.toLocaleString()}??]
++            ['??????????, `${ledgerFilter.startDate} ~ ${ledgerFilter.endDate}`],
++            ['????', ledgerFilter.transactionType],
++            ['????, ledgerFilter.teamName || '????'],
++            ['???????, ledgerFilter.partnerName || '????'],
++            ['??????, ledgerFilter.siteName || '????'],
++            ['?????, `${ledgerRows.length.toLocaleString()}??]
+         ];
+ 
+         const rowsHtml = ledgerRows
+@@ -2483,7 +2498,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             <tr class="summary-total-row">
+                 <td></td>
+                 <td></td>
+-                <td>???</td>
++                <td>?????/td>
+                 <td class="align-right">${formatNumber(ledgerTotals.transactionAmount)}</td>
+                 <td class="align-right">${formatNumber(ledgerTotals.paymentAmount)}</td>
+                 <td class="align-right">${formatNumber(ledgerTotals.balance)}</td>
+@@ -2519,7 +2534,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const printWindow = iframe.contentWindow;
+         if (!printWindow) {
+             cleanup();
+-            Swal.fire('???', '??? ??????????????????.', 'error');
++            Swal.fire('????', '???? ???????????????????????.', 'error');
+             return;
+         }
+ 
+@@ -2528,7 +2543,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             <html lang="ko">
+                 <head>
+                     <meta charset="utf-8" />
+-                    <title>${escapeHtml(title)} ???</title>
++                    <title>${escapeHtml(title)} ????</title>
+                     <style>
+                         @page {
+                             size: A4 landscape;
+@@ -2644,15 +2659,15 @@ const WorkbookLedgerPage: React.FC = () => {
+                             ${ledgerPrintColGroup}
+                             <thead>
+                                 <tr>
+-                                    <th>???</th>
+-                                    <th>??????</th>
+-                                    <th>???</th>
++                                    <th>????</th>
++                                    <th>?????????</th>
++                                    <th>????</th>
+                                     <th>${escapeHtml(transactionAmountLabel)}</th>
+                                     <th>${escapeHtml(paymentAmountLabel)}</th>
+-                                    <th>???</th>
+-                                    <th>?????/th>
+-                                    <th>???</th>
+-                                    <th>????/th>
++                                    <th>????</th>
++                                    <th>??????/th>
++                                    <th>?????/th>
++                                    <th>????/th>
+                                 </tr>
+                             </thead>
+                             <tbody>
+@@ -2683,31 +2698,31 @@ const WorkbookLedgerPage: React.FC = () => {
+             } catch (error) {
+                 console.error(error);
+                 cleanup();
+-                Swal.fire('???', '??? ??? ??????? ?????????.', 'error');
++                Swal.fire('????', '???? ???? ????????? ????????????.', 'error');
+             }
+         }, 150);
+     }, [ledgerFilter, ledgerRows, ledgerTotals]);
+ 
+     const handlePrintSummary = useCallback(() => {
+         if (summaryRows.length === 0) {
+-            Swal.fire('???', '???????? ????? ??????.', 'info');
++            Swal.fire('????', '?????????????????? ????????.', 'info');
+             return;
+         }
+ 
+         const paymentDateLabel = summarySettlementLabels.date;
+         const settledAmountLabel = summarySettlementLabels.amount;
+         const outstandingLabel = summarySettlementLabels.outstanding;
+-        const countText = `${summaryRows.length.toLocaleString()}??;
+-        const dateRangeLabel = summaryFilter.mode === '???' || summaryFilter.mode === '???'
+-            ? '????????'
+-            : `${paymentDateLabel} ???`;
++        const countText = `${summaryRows.length.toLocaleString()}??;
++        const dateRangeLabel = summaryFilter.mode === '????? || summaryFilter.mode === '?????
++            ? '???????????
++            : `${paymentDateLabel} ?????;
+         const filterItems = [
+             [dateRangeLabel, `${summaryFilter.startDate} ~ ${summaryFilter.endDate}`],
+-            ['???', summaryFilter.mode],
+-            ['????, summaryFilter.teamName || '???'],
+-            ['?????, summaryFilter.partnerName || '???'],
+-            ['?????, summaryFilter.siteName || '???'],
+-            ['???', countText]
++            ['????', summaryFilter.mode],
++            ['????, summaryFilter.teamName || '????'],
++            ['???????, summaryFilter.partnerName || '????'],
++            ['??????, summaryFilter.siteName || '????'],
++            ['?????, countText]
+         ];
+ 
+         const rowsHtml = summaryRows
+@@ -2732,7 +2747,7 @@ const WorkbookLedgerPage: React.FC = () => {
+         const totalRowHtml = `
+             <tr class="summary-total-row">
+                 <td></td>
+-                <td>???</td>
++                <td>?????/td>
+                 <td></td>
+                 <td></td>
+                 <td class="align-right">${formatNumber(summaryTotals.supplyAmount)}</td>
+@@ -2773,7 +2788,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+         if (!printWindow) {
+             cleanup();
+-            Swal.fire('???', '??? ??????????????????.', 'error');
++            Swal.fire('????', '???? ???????????????????????.', 'error');
+             return;
+         }
+ 
+@@ -2782,7 +2797,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             <html lang="ko">
+                 <head>
+                     <meta charset="utf-8" />
+-                    <title>??? ??? ???</title>
++                    <title>???? ?????????</title>
+                     <style>
+                         @page {
+                             size: A4 landscape;
+@@ -2880,8 +2895,8 @@ const WorkbookLedgerPage: React.FC = () => {
+                 <body>
+                     <div class="print-shell">
+                         <div class="print-header">
+-                            <h1>??? ???</h1>
+-                            <p>??? ??? ?????? ????? ?????????????</p>
++                            <h1>???? ?????/h1>
++                            <p>???? ????????????? ??????? ?????????????????</p>
+                         </div>
+                         <div class="print-filter-grid">
+                             ${filterItems.map(([label, value]) => `
+@@ -2895,17 +2910,17 @@ const WorkbookLedgerPage: React.FC = () => {
+                             <thead>
+                                 <tr>
+                                     <th>No</th>
+-                                    <th>??????</th>
+-                                    <th>?????/th>
+-                                    <th>?????/th>
+-                                    <th>???????/th>
+-                                    <th>???</th>
+-                                    <th>???</th>
++                                    <th>?????????</th>
++                                    <th>??????/th>
++                                    <th>??????/th>
++                                    <th>?????????/th>
++                                    <th>????</th>
++                                    <th>?????/th>
+                                     <th>${escapeHtml(paymentDateLabel)}</th>
+                                     <th>${escapeHtml(settledAmountLabel)}</th>
+                                     <th>${escapeHtml(outstandingLabel)}</th>
+-                                    <th>???</th>
+-                                    <th>????/th>
++                                    <th>?????/th>
++                                    <th>????/th>
+                                 </tr>
+                             </thead>
+                             <tbody>
+@@ -2937,7 +2952,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                 } catch (error) {
+                     console.error(error);
+                     cleanup();
+-                    Swal.fire('???', '??? ??????????? ??????? ?????????.', 'error');
++                    Swal.fire('????', '???? ???????????????????????? ????????????.', 'error');
+                 }
+             }, 150);
+         };
+@@ -3177,7 +3192,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+     const getDbSortLabel = useCallback((field: DbSortField, baseLabel: string) => {
+         if (dbSort.field !== field) return baseLabel;
+-        return `${baseLabel} ${dbSort.direction === 'asc' ? '?? : '??}`;
++        return `${baseLabel} ${dbSort.direction === 'asc' ? '?? : '??}`;
+     }, [dbSort]);
+ 
+     const handleMoveDbPage = useCallback((direction: 'prev' | 'next') => {
+@@ -3224,8 +3239,130 @@ const WorkbookLedgerPage: React.FC = () => {
+         });
+     }, [visibleSelectableDbEntryIds]);
+ 
++    const selectedSummaryRowIdSet = useMemo(
++        () => new Set(selectedSummaryRowIds),
++        [selectedSummaryRowIds]
++    );
++
++    const selectableSummaryRowIds = useMemo(
++        () => summaryFilter.mode === '?????????
++            ? summaryRows
++                .filter((row) => row.outstandingAmount > 0)
++                .map((row) => row.id)
++            : [],
++        [summaryFilter.mode, summaryRows]
++    );
++
++    const areAllSelectableSummaryRowsSelected = useMemo(
++        () => selectableSummaryRowIds.length > 0 && selectableSummaryRowIds.every((id) => selectedSummaryRowIdSet.has(id)),
++        [selectableSummaryRowIds, selectedSummaryRowIdSet]
++    );
++
++    useEffect(() => {
++        const validSummaryIds = new Set(selectableSummaryRowIds);
++        setSelectedSummaryRowIds((prev) => prev.filter((id) => validSummaryIds.has(id)));
++    }, [selectableSummaryRowIds]);
++
++    const handleToggleSummaryRowSelection = useCallback((rowId: string) => {
++        setSelectedSummaryRowIds((prev) => (
++            prev.includes(rowId)
++                ? prev.filter((id) => id !== rowId)
++                : [...prev, rowId]
++        ));
++    }, []);
++
++    const handleToggleAllSummaryRowSelection = useCallback(() => {
++        if (selectableSummaryRowIds.length === 0) return;
++        setSelectedSummaryRowIds((prev) => {
++            const nextSet = new Set(prev);
++            const shouldSelectAll = selectableSummaryRowIds.some((id) => !nextSet.has(id));
++            selectableSummaryRowIds.forEach((id) => {
++                if (shouldSelectAll) nextSet.add(id); else nextSet.delete(id);
++            });
++            return Array.from(nextSet);
++        });
++    }, [selectableSummaryRowIds]);
++
++    const [downloadingKb, setDownloadingKb] = useState(false);
++    const [showKbPreview, setShowKbPreview] = useState(false);
++    const [kbReceiverDisplay, setKbReceiverDisplay] = useState('????);
++    const [kbMemoSuffix, setKbMemoSuffix] = useState('');
++
++    const resolveSummaryKbBankCode = useCallback((bankName: unknown) => {
++        const normalized = String(bankName ?? '')
++            .toLowerCase()
++            .replace(/\s+/g, '')
++            .trim();
++        if (!normalized) return '';
++
++        const bankCodeEntries: Array<[string, string]> = [
++            ['???????, '004'],
++            ['kb???', '004'],
++            ['kb???????, '004'],
++            ['????????, '088'],
++            ['????????, '020'],
++            ['????????, '081'],
++            ['nh????????, '011'],
++            ['????????, '011'],
++            ['????????, '003'],
++            ['ibk????????, '003'],
++            ['??????????, '090'],
++            ['?????????, '092'],
++            ['?????????, '089']
++        ];
++
++        const matched = bankCodeEntries.find(([name]) => normalized.includes(name.toLowerCase().replace(/\s+/g, '')));
++        return matched?.[1] ?? '';
++    }, []);
++
++    const kbPreviewRows = useMemo(() => {
++        const selectedIdSet = new Set(selectedSummaryRowIds);
++        return summaryRows
++            .filter((row) => selectedIdSet.has(row.id))
++            .filter((row) => row.outstandingAmount > 0)
++            .map((row) => {
++                const acc = purchaseAccountsByName.get(row.partnerName);
++                return {
++                    bankCode: resolveSummaryKbBankCode(acc?.bankName),
++                    accountNumber: acc?.accountNumber ?? '',
++                    amount: row.outstandingAmount,
++                    receiverDisplay: kbReceiverDisplay.slice(0, 10),
++                    memoDisplay: `${row.partnerName}${kbMemoSuffix}`.slice(0, 14),
++                };
++            });
++    }, [kbMemoSuffix, kbReceiverDisplay, purchaseAccountsByName, selectedSummaryRowIds, summaryRows]);
++
++    const handleOpenKbPreview = useCallback(() => {
++        if (kbPreviewRows.length === 0) return;
++        setShowKbPreview(true);
++    }, [kbPreviewRows.length]);
++
++    const handleDownloadSummaryKb = useCallback(async () => {
++        if (kbPreviewRows.length === 0) return;
++        setDownloadingKb(true);
++        try {
++            const rawData: (string | number)[][] = [
++                ['????????, '?????????', '?????????, '????????????', '????????????'],
++                ...kbPreviewRows.map((row) => [
++                    row.bankCode,
++                    row.accountNumber,
++                    row.amount,
++                    row.receiverDisplay,
++                    row.memoDisplay
++                ])
++            ];
++            const ws = XLSX.utils.aoa_to_sheet(rawData);
++            const wb = XLSX.utils.book_new();
++            XLSX.utils.book_append_sheet(wb, ws, '?????????');
++            XLSX.writeFile(wb, `??????????????????_${summaryFilter.startDate}_${summaryFilter.endDate}.xlsx`);
++        } finally {
++            setDownloadingKb(false);
++            setShowKbPreview(false);
++        }
++    }, [kbPreviewRows, summaryFilter.endDate, summaryFilter.startDate]);
++
+     const inputColumns = useMemo<any[]>(() => [
+-        { data: 'transactionType', type: 'dropdown', source: ['???', '???'], width: 88 },
++        { data: 'transactionType', type: 'dropdown', source: ['?????, '?????], width: 88 },
+         { data: 'date', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true, width: 118 },
+         { data: 'partnerName', type: 'autocomplete', source: partnerNames, strict: false, width: 190 },
+         { data: 'siteName', type: 'autocomplete', source: siteNames, strict: false, width: 210 },
+@@ -3242,20 +3379,20 @@ const WorkbookLedgerPage: React.FC = () => {
+     ], [partnerNames, siteNames]);
+ 
+     const inputColHeaders = useMemo(() => ([
+-        '???',
+-        '???',
+-        '??????',
+-        '?????,
+-        '???',
+-        '???',
+-        '???????,
+-        '??????,
+-        '???',
+-        '??????',
+-        '??????',
+-        '?????,
+-        '???',
+-        '????
++        '????',
++        '????',
++        '?????????',
++        '??????,
++        '????',
++        '?????,
++        '?????????,
++        '????????,
++        '?????,
++        '?????????,
++        '????????',
++        '??????,
++        '?????,
++        '????
+     ]), []);
+ 
+     const inputCells = useCallback((_row: number, column: number) => {
+@@ -3275,16 +3412,16 @@ const WorkbookLedgerPage: React.FC = () => {
+             <table className="sheet-control-table input-sheet-table">
+                 <tbody>
+                     <tr>
+-                        <th className="sheet-title-dark" colSpan={14}>???????? ???</th>
++                        <th className="sheet-title-dark" colSpan={14}>?????????? ????</th>
+                     </tr>
+                     <tr>
+-                        <th className="sheet-label-yellow">?? ??/th>
++                        <th className="sheet-label-yellow">?? ??/th>
+                         <td className="sheet-value" colSpan={2}>
+                             <input
+                                 list="workbook-team-options"
+                                 value={selectedTeam}
+                                 onChange={(event) => setSelectedTeam(event.target.value)}
+-                                placeholder="??????? ??? ???"
++                                placeholder="???????? ???? ????"
+                             />
+                         </td>
+                         <td className="sheet-spacer" colSpan={6} />
+@@ -3296,7 +3433,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={saving}
+                             >
+                                 <FontAwesomeIcon icon={saving ? faSpinner : faDatabase} spin={saving} />
+-                                DB ???
++                                DB ????
+                             </button>
+                         </td>
+                         <td className="sheet-button-wrap" colSpan={3}>
+@@ -3307,12 +3444,12 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={saving}
+                             >
+                                 <FontAwesomeIcon icon={faRotateRight} />
+-                                ???(RESET)
++                                ?????RESET)
+                             </button>
+                         </td>
+                     </tr>
+                     <tr>
+-                        <th className="sheet-label-yellow">??????</th>
++                        <th className="sheet-label-yellow">????????</th>
+                         <td className="sheet-value" colSpan={2}>
+                             <input
+                                 type="number"
+@@ -3350,7 +3487,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             </div>
+ 
+             <p className="workbook-help-text">
+-                ???????????????? ???????????? ????? ??? ??????, ???????? ????? ??? ???????? ????????
++                ????????????????????? ??????????????? ??????? ???? ????????? ?????????? ?????? ???? ??????????? ??????????
+             </p>
+         </section>
+     );
+@@ -3370,8 +3507,8 @@ const WorkbookLedgerPage: React.FC = () => {
+                         <th className="sheet-title-dark" colSpan={16}>DB</th>
+                     </tr>
+                     <tr>
+-                        <th className="sheet-label-green">???????/th>
+-                        <td className="sheet-value-light">{entries.length.toLocaleString()}??/td>
++                        <th className="sheet-label-green">???????/th>
++                        <td className="sheet-value-light">{entries.length.toLocaleString()}??/td>
+                         <td className="sheet-spacer workbook-db-sort-cell" colSpan={4}>
+                             <div className="workbook-db-sort-actions">
+                                 <button
+@@ -3384,7 +3521,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     onClick={() => handleChangeDbSort('date')}
+                                     disabled={entries.length === 0}
+                                 >
+-                                    {getDbSortLabel('date', '?????)}
++                                    {getDbSortLabel('date', '??????)}
+                                 </button>
+                                 <button
+                                     type="button"
+@@ -3396,7 +3533,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     onClick={() => handleChangeDbSort('partnerName')}
+                                     disabled={entries.length === 0}
+                                 >
+-                                    {getDbSortLabel('partnerName', '?????)}
++                                    {getDbSortLabel('partnerName', '??????)}
+                                 </button>
+                                 <button
+                                     type="button"
+@@ -3408,7 +3545,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     onClick={() => handleChangeDbSort('amount')}
+                                     disabled={entries.length === 0}
+                                 >
+-                                    {getDbSortLabel('amount', '?????)}
++                                    {getDbSortLabel('amount', '??????)}
+                                 </button>
+                             </div>
+                         </td>
+@@ -3420,7 +3557,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={!hasDbFilterInput || uploadingDb || downloadingDb || dbActionLoading}
+                             >
+                                 <FontAwesomeIcon icon={faRotateRight} />
+-                                ??? ?????+                                ???? ??????
+                             </button>
+                         </td>
+                         <td className="sheet-button-wrap" colSpan={2}>
+@@ -3431,7 +3568,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={uploadingDb || downloadingDb}
+                             >
+                                 <FontAwesomeIcon icon={uploadingDb ? faSpinner : faUpload} spin={uploadingDb} />
+-                                DB ?????+                                DB ??????
+                             </button>
+                         </td>
+                         <td className="sheet-button-wrap" colSpan={2}>
+@@ -3442,7 +3579,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={uploadingDb || downloadingDb || entries.length === 0}
+                             >
+                                 <FontAwesomeIcon icon={downloadingDb ? faSpinner : faDownload} spin={downloadingDb} />
+-                                DB ??????
++                                DB ?????????                             </button>
+                         </td>
+                         <td className="sheet-button-wrap" colSpan={2}>
+@@ -3453,7 +3590,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={uploadingDb || downloadingDb || dbActionLoading || selectedDbEntryIds.length === 0}
+                             >
+                                 <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
+-                                {`??????${selectedDbEntryIds.length > 0 ? ` (${selectedDbEntryIds.length})` : ''}`}
++                                {`????????{selectedDbEntryIds.length > 0 ? ` (${selectedDbEntryIds.length})` : ''}`}
+                             </button>
+                         </td>
+                         <td className="sheet-button-wrap" colSpan={2}>
+@@ -3464,7 +3601,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 disabled={uploadingDb || downloadingDb || dbActionLoading || entries.length === 0}
+                             >
+                                 <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faTrashCan} spin={dbActionLoading} />
+-                                DB ?????+                                DB ??????
+                             </button>
+                         </td>
+                     </tr>
+@@ -3472,7 +3609,7 @@ const WorkbookLedgerPage: React.FC = () => {
+             </table>
+ 
+             <div className="workbook-help-text">
+-                ????? ???????????????? ???????? ??????????????????/????? ??? ??????????? ??????.
++                ?????? ???????????????????? ?????????? ??????????????????????/??????? ?????????????????? ????????.
+             </div>
+ 
+             <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+@@ -3494,9 +3631,9 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     value={dbFilter.transactionType}
+                                     onChange={(event) => handleChangeDbFilter('transactionType', event.target.value)}
+                                 >
+-                                    <option value="">???</option>
+-                                    <option value="???">???</option>
+-                                    <option value="???">???</option>
++                                    <option value="">????</option>
++                                    <option value="?????>?????/option>
++                                    <option value="?????>?????/option>
+                                 </select>
+                             </th>
+                             <th>
+@@ -3505,7 +3642,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.date}
+                                     onChange={(event) => handleChangeDbFilter('date', event.target.value)}
+-                                    placeholder="???"
++                                    placeholder="????"
+                                 />
+                             </th>
+                             <th>
+@@ -3514,7 +3651,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.partnerName}
+                                     onChange={(event) => handleChangeDbFilter('partnerName', event.target.value)}
+-                                    placeholder="??????"
++                                    placeholder="?????????"
+                                 />
+                             </th>
+                             <th>
+@@ -3523,7 +3660,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.siteName}
+                                     onChange={(event) => handleChangeDbFilter('siteName', event.target.value)}
+-                                    placeholder="?????
++                                    placeholder="??????
+                                 />
+                             </th>
+                             <th>
+@@ -3532,7 +3669,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.description}
+                                     onChange={(event) => handleChangeDbFilter('description', event.target.value)}
+-                                    placeholder="???"
++                                    placeholder="????"
+                                 />
+                             </th>
+                             <th>
+@@ -3541,7 +3678,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.supplyAmount}
+                                     onChange={(event) => handleChangeDbFilter('supplyAmount', event.target.value)}
+-                                    placeholder="???????
++                                    placeholder="?????????
+                                 />
+                             </th>
+                             <th>
+@@ -3550,7 +3687,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.taxAmount}
+                                     onChange={(event) => handleChangeDbFilter('taxAmount', event.target.value)}
+-                                    placeholder="??????
++                                    placeholder="????????
+                                 />
+                             </th>
+                             <th>
+@@ -3559,7 +3696,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.totalAmount}
+                                     onChange={(event) => handleChangeDbFilter('totalAmount', event.target.value)}
+-                                    placeholder="???"
++                                    placeholder="?????
+                                 />
+                             </th>
+                             <th>
+@@ -3568,7 +3705,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.paymentAmount}
+                                     onChange={(event) => handleChangeDbFilter('paymentAmount', event.target.value)}
+-                                    placeholder="??????"
++                                    placeholder="?????????
+                                 />
+                             </th>
+                             <th>
+@@ -3577,7 +3714,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.appliedYear}
+                                     onChange={(event) => handleChangeDbFilter('appliedYear', event.target.value)}
+-                                    placeholder="???"
++                                    placeholder="????"
+                                 />
+                             </th>
+                             <th>
+@@ -3586,7 +3723,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.appliedMonth}
+                                     onChange={(event) => handleChangeDbFilter('appliedMonth', event.target.value)}
+-                                    placeholder="??
++                                    placeholder="??
+                                 />
+                             </th>
+                             <th>
+@@ -3595,7 +3732,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.note}
+                                     onChange={(event) => handleChangeDbFilter('note', event.target.value)}
+-                                    placeholder="???"
++                                    placeholder="?????
+                                 />
+                             </th>
+                             <th>
+@@ -3604,7 +3741,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     type="text"
+                                     value={dbFilter.teamName}
+                                     onChange={(event) => handleChangeDbFilter('teamName', event.target.value)}
+-                                    placeholder="????
++                                    placeholder="????
+                                 />
+                             </th>
+                             <th className="workbook-filter-spacer" />
+@@ -3614,7 +3751,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                     <tbody>
+                         {databaseDisplayRows.length === 0 && (
+                             <tr>
+-                                <td colSpan={17} className="sheet-empty-state">????? DB ?????? ??????.</td>
++                                <td colSpan={17} className="sheet-empty-state">??????DB ??????? ????????.</td>
+                             </tr>
+                         )}
+                         {pagedDatabaseDisplayRows.map((row) => {
+@@ -3655,12 +3792,12 @@ const WorkbookLedgerPage: React.FC = () => {
+                                         {isEditing ? (
+                                             <select
+                                                 className="workbook-inline-cell-select"
+-                                                value={dbDraft?.transactionType ?? '???'}
++                                                value={dbDraft?.transactionType ?? '?????}
+                                                 onChange={(event) => handleChangeEditingDbDraft('transactionType', event.target.value)}
+                                                 disabled={dbActionLoading}
+                                             >
+-                                                <option value="???">???</option>
+-                                                <option value="???">???</option>
++                                                <option value="?????>?????/option>
++                                                <option value="?????>?????/option>
+                                             </select>
+                                         ) : entry.transactionType}
+                                     </td>
+@@ -3799,7 +3936,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     <td>
+                                         {canToggleDetails && hasActiveDbFilter ? (
+                                             visibleLinkedEntries.length > 0
+-                                                ? <span className="workbook-linked-badge">??? {visibleLinkedEntries.length}??/span>
++                                                ? <span className="workbook-linked-badge">???? {visibleLinkedEntries.length}??/span>
+                                                 : '-'
+                                         ) : canToggleDetails ? (
+                                             <button
+@@ -3808,11 +3945,11 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                 onClick={() => handleToggleDbEntryDetails(entry.id!)}
+                                                 disabled={dbActionLoading}
+                                             >
+-                                                {isExpanded ? '???' : `??? ${linkedEntries.length}??}
++                                                {isExpanded ? '????' : `???? ${linkedEntries.length}??}
+                                             </button>
+                                         ) : (
+                                             nested
+-                                                ? <span className="workbook-linked-badge">??????</span>
++                                                ? <span className="workbook-linked-badge">????????</span>
+                                                 : '-'
+                                         )}
+                                     </td>
+@@ -3827,7 +3964,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         disabled={dbActionLoading}
+                                                     >
+                                                         <FontAwesomeIcon icon={dbActionLoading ? faSpinner : faPenToSquare} spin={dbActionLoading} />
+-                                                        ????+                                                        ????
+                                                     </button>
+                                                     <button
+                                                         type="button"
+@@ -3835,7 +3972,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         onClick={handleCancelEditDbEntry}
+                                                         disabled={dbActionLoading}
+                                                     >
+-                                                        ???
++                                                        ?????                                                     </button>
+                                                 </>
+                                             ) : (
+@@ -3847,7 +3984,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         disabled={dbActionLoading}
+                                                     >
+                                                         <FontAwesomeIcon icon={faPenToSquare} />
+-                                                        ???
++                                                        ????
+                                                     </button>
+                                                     <button
+                                                         type="button"
+@@ -3856,7 +3993,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         disabled={dbActionLoading}
+                                                     >
+                                                         <FontAwesomeIcon icon={faTrashCan} />
+-                                                        ???
++                                                        ????                                                     </button>
+                                                 </>
+                                             )}
+@@ -3880,10 +4017,10 @@ const WorkbookLedgerPage: React.FC = () => {
+                         onClick={() => handleMoveDbPage('prev')}
+                         disabled={dbPage <= 1}
+                     >
+-                        ??? 100??+                        ???? 100??
+                     </button>
+                     <span className="workbook-pagination-status">
+-                        {`${dbPage} / ${totalDbPages} ?????`}
++                        {`${dbPage} / ${totalDbPages} ???????`}
+                     </span>
+                     <button
+                         type="button"
+@@ -3891,13 +4028,13 @@ const WorkbookLedgerPage: React.FC = () => {
+                         onClick={() => handleMoveDbPage('next')}
+                         disabled={dbPage >= totalDbPages}
+                     >
+-                        ??? 100??+                        ???? 100??
+                     </button>
+                 </div>
+             )}
+ 
+             <p className="workbook-help-text">
+-                ????????????? ??? ??? ?????? ????????/??????? DB????? ????????. ???????? ??? ??? ?????? ??? ??? ???, ??? ?????? ???/?????????????.
++                ???????????????????? ???? ???????? ??????????/???????? DB?????? ?????????. ?????????? ??? ???? ???????? ??????????????? ???? ???????? ????/???????????????.
+             </p>
+         </section>
+     );
+@@ -3908,10 +4045,10 @@ const WorkbookLedgerPage: React.FC = () => {
+                 <table className="sheet-control-table query-sheet-table workbook-summary-filter-table">
+                     <tbody>
+                         <tr>
+-                            <th className="sheet-title-dark" colSpan={16}>???/??? ?????/th>
++                            <th className="sheet-title-dark" colSpan={16}>????????????????/th>
+                         </tr>
+                         <tr>
+-                            <th className="sheet-label-blue">????????</th>
++                            <th className="sheet-label-blue">???????????</th>
+                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                 <input
+                                     type="date"
+@@ -3920,7 +4057,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                                 />
+                             </td>
+-                            <th className="sheet-label-blue">????????</th>
++                            <th className="sheet-label-blue">????????????/th>
+                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                 <input
+                                     type="date"
+@@ -3934,11 +4071,11 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 <button
+                                     type="button"
+                                     className="excel-button excel-button-blue"
+-                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '?????)}
++                                    onClick={() => handleCopyCapture('ledger', ledgerCaptureRef.current, '??????)}
+                                     disabled={capturingView === 'ledger'}
+                                 >
+                                     <FontAwesomeIcon icon={capturingView === 'ledger' ? faSpinner : faCopy} spin={capturingView === 'ledger'} />
+-                                    ??? ???
++                                    ???? ?????                                 </button>
+                             </td>
+                             <td className="sheet-button-wrap" colSpan={2}>
+@@ -3949,28 +4086,28 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     disabled={printingLedger}
+                                 >
+                                     <FontAwesomeIcon icon={printingLedger ? faSpinner : faPrint} spin={printingLedger} />
+-                                    ???
++                                    ????
+                                 </button>
+                             </td>
+                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
+                                 <button type="button" className="excel-button excel-button-green" onClick={applyLedgerFilter}>
+                                     <FontAwesomeIcon icon={faMagnifyingGlass} />
+-                                    ???
++                                    ?????                                 </button>
+                             </td>
+                         </tr>
+                         <tr>
+-                            <th className="sheet-label-green">?? ??/th>
++                            <th className="sheet-label-green">?? ??/th>
+                             <td className="sheet-value-light">
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-team-options"
+                                     value={ledgerDraft.teamName}
+                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, teamName: event.target.value }))}
+-                                    placeholder="???"
++                                    placeholder="????"
+                                 />
+                             </td>
+-                            <th className="sheet-label-green">????/th>
++                            <th className="sheet-label-green">????/th>
+                             <td className="sheet-value-light">
+                                 <select
+                                     className="sheet-filter-input"
+@@ -3980,39 +4117,39 @@ const WorkbookLedgerPage: React.FC = () => {
+                                         transactionType: event.target.value as WorkbookTransactionType
+                                     }))}
+                                 >
+-                                    <option value="???">???</option>
+-                                    <option value="???">???</option>
++                                    <option value="?????>?????/option>
++                                    <option value="?????>?????/option>
+                                 </select>
+                             </td>
+-                            <th className="sheet-label-green">?????/th>
++                            <th className="sheet-label-green">???????/th>
+                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-partner-options"
+                                     value={ledgerDraft.partnerName}
+                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
+-                                    placeholder="????????"
++                                    placeholder="???????????"
+                                 />
+                             </td>
+-                            <th className="sheet-label-green">?????/th>
++                            <th className="sheet-label-green">??????/th>
+                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-site-options"
+                                     value={ledgerDraft.siteName}
+                                     onChange={(event) => setLedgerDraft((prev) => ({ ...prev, siteName: event.target.value }))}
+-                                    placeholder="??? ???"
++                                    placeholder="???? ????"
+                                 />
+                             </td>
+                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
+-                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
++                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
+                             </td>
+                         </tr>
+                     </tbody>
+                 </table>
+ 
+                 <div className="sheet-merged-heading">
+-                    {ledgerFilter.partnerName || `${ledgerFilter.transactionType} ?????}
++                    {ledgerFilter.partnerName || `${ledgerFilter.transactionType} ??????}
+                 </div>
+ 
+                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+@@ -4030,21 +4167,21 @@ const WorkbookLedgerPage: React.FC = () => {
+                         </colgroup>
+                         <thead>
+                             <tr>
+-                                <th>???</th>
+-                                <th>??????</th>
+-                                <th>???</th>
+-                                <th>{ledgerFilter.transactionType === '???' ? '??????' : '??????'}</th>
+-                                <th>{ledgerFilter.transactionType === '???' ? '??????' : '???????}</th>
+-                                <th>???</th>
+-                                <th>?????/th>
+-                                <th>???</th>
+-                                <th>????/th>
++                                <th>????</th>
++                                <th>?????????</th>
++                                <th>????</th>
++                                <th>{ledgerFilter.transactionType === '????? ? '?????????' : '?????????'}</th>
++                                <th>{ledgerFilter.transactionType === '????? ? '????????? : '?????????}</th>
++                                <th>????</th>
++                                <th>??????/th>
++                                <th>?????/th>
++                                <th>????/th>
+                             </tr>
+                         </thead>
+                         <tbody>
+                             {ledgerRows.length === 0 && (
+                                 <tr>
+-                                    <td colSpan={9} className="sheet-empty-state">??? ????? ??????.</td>
++                                    <td colSpan={9} className="sheet-empty-state">???????????? ????????.</td>
+                                 </tr>
+                             )}
+                             {ledgerRows.map((row) => (
+@@ -4065,7 +4202,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                             <tr>
+                                 <td />
+                                 <td />
+-                                <td>???</td>
++                                <td>?????/td>
+                                 <td className="align-right">{formatNumber(ledgerTotals.transactionAmount)}</td>
+                                 <td className="align-right">{formatNumber(ledgerTotals.paymentAmount)}</td>
+                                 <td className="align-right">{formatNumber(ledgerTotals.balance)}</td>
+@@ -4083,10 +4220,10 @@ const WorkbookLedgerPage: React.FC = () => {
+                 <table className="sheet-control-table query-sheet-table">
+                     <tbody>
+                         <tr>
+-                            <th className="sheet-title-dark" colSpan={16}>??? ???</th>
++                            <th className="sheet-title-dark" colSpan={16}>???? ?????/th>
+                         </tr>
+                         <tr>
+-                            <th className="sheet-label-blue">????????</th>
++                            <th className="sheet-label-blue">???????????</th>
+                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                 <input
+                                     type="date"
+@@ -4095,7 +4232,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, startDate: event.target.value }))}
+                                 />
+                             </td>
+-                            <th className="sheet-label-blue">????????</th>
++                            <th className="sheet-label-blue">????????????/th>
+                             <td className="sheet-value sheet-filter-date-cell" colSpan={2}>
+                                 <input
+                                     type="date"
+@@ -4109,11 +4246,11 @@ const WorkbookLedgerPage: React.FC = () => {
+                                 <button
+                                     type="button"
+                                     className="excel-button excel-button-blue"
+-                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '??? ???')}
++                                    onClick={() => handleCopyCapture('summary', summaryCaptureRef.current, '???? ?????)}
+                                     disabled={capturingView === 'summary'}
+                                 >
+                                     <FontAwesomeIcon icon={capturingView === 'summary' ? faSpinner : faCopy} spin={capturingView === 'summary'} />
+-                                    ??? ???
++                                    ???? ?????                                 </button>
+                             </td>
+                             <td className="sheet-button-wrap" colSpan={2}>
+@@ -4124,67 +4261,86 @@ const WorkbookLedgerPage: React.FC = () => {
+                                     disabled={printingSummary}
+                                 >
+                                     <FontAwesomeIcon icon={printingSummary ? faSpinner : faPrint} spin={printingSummary} />
+-                                    ???
++                                    ????
+                                 </button>
+                             </td>
+                             <td className="sheet-button-wrap sheet-button-stack" colSpan={2}>
+                                 <button type="button" className="excel-button excel-button-green" onClick={applySummaryFilter}>
+                                     <FontAwesomeIcon icon={faMagnifyingGlass} />
+-                                    ???
++                                    ?????                                 </button>
+                             </td>
+                         </tr>
+                         <tr>
+-                            <th className="sheet-label-green">?? ??/th>
++                            <th className="sheet-label-green">?? ??/th>
+                             <td className="sheet-value-light">
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-team-options"
+                                     value={summaryDraft.teamName}
+                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, teamName: event.target.value }))}
+-                                    placeholder="???"
++                                    placeholder="????"
+                                 />
+                             </td>
+-                            <th className="sheet-label-green">????/th>
++                            <th className="sheet-label-green">????/th>
+                             <td className="sheet-value-light">
+                                 <select
+                                     className="sheet-filter-input"
+                                     value={summaryDraft.mode}
+                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, mode: event.target.value as SummaryMode }))}
+                                 >
+-                                    <option value="???">???</option>
+-                                    <option value="???">???</option>
+-                                    <option value="?????>?????/option>
+-                                    <option value="??????">??????</option>
++                                    <option value="?????>?????/option>
++                                    <option value="?????>?????/option>
++                                    <option value="???????>???????/option>
++                                    <option value="?????????>?????????/option>
+                                 </select>
+                             </td>
+-                            <th className="sheet-label-green">?????/th>
++                            <th className="sheet-label-green">???????/th>
+                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-partner-options"
+                                     value={summaryDraft.partnerName}
+                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, partnerName: event.target.value }))}
+-                                    placeholder="????????"
++                                    placeholder="???????????"
+                                 />
+                             </td>
+-                            <th className="sheet-label-green">?????/th>
++                            <th className="sheet-label-green">??????/th>
+                             <td className="sheet-value-light sheet-filter-wide-cell" colSpan={2}>
+                                 <input
+                                     className="sheet-filter-input"
+                                     list="workbook-site-options"
+                                     value={summaryDraft.siteName}
+                                     onChange={(event) => setSummaryDraft((prev) => ({ ...prev, siteName: event.target.value }))}
+-                                    placeholder="??? ???"
++                                    placeholder="???? ????"
+                                 />
+                             </td>
+                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
+-                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
++                                <div className="sheet-button-count">{entries.length.toLocaleString()}??/div>
+                             </td>
+                         </tr>
+                     </tbody>
+                 </table>
+ 
++                {summaryFilter.mode === '????????? && (
++                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: '8px', padding: '8px 12px', marginBottom: '8px' }}>
++                        <span style={{ fontSize: '13px', color: '#065f46', fontWeight: 700 }}>
++                            {selectedSummaryRowIds.length > 0
++                                ? `???? ${selectedSummaryRowIds.length}??
++                                : '????????????? ??????????}
++                        </span>
++                        <button
++                            type="button"
++                            className="excel-button excel-button-green"
++                            onClick={handleOpenKbPreview}
++                            disabled={downloadingKb || selectedSummaryRowIds.length === 0}
++                            style={{ minHeight: '36px' }}
++                        >
++                            <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
++                            {`????????? ?????????{selectedSummaryRowIds.length > 0 ? ` (\${selectedSummaryRowIds.length})` : ''}`}
++                        </button>
++                    </div>
++                )}
+                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
+                     <table className="sheet-table workbook-summary-table">
+                         <colgroup>
+@@ -4204,30 +4360,52 @@ const WorkbookLedgerPage: React.FC = () => {
+                         </colgroup>
+                         <thead className="summary-header">
+                             <tr>
+-                                <th>No</th>
+-                                <th>??????</th>
+-                                <th>?????/th>
+-                                <th>?????/th>
+-                                <th>???????/th>
+-                                <th>???</th>
+-                                <th>???</th>
+-                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '?????' : '?????}</th>
+-                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '??????? : '??????'}</th>
+-                                <th>{summaryFilter.mode === '???' || summaryFilter.mode === '??????' ? '??????' : '?????}</th>
+-                                <th>???</th>
+-                                <th>????/th>
+-                                {canRegisterReceipt && <th>???</th>}
++                                <th>
++                                    <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
++                                        <input
++                                            type="checkbox"
++                                            style={{ width: '14px', height: '14px', accentColor: '#2563eb' }}
++                                            checked={areAllSelectableSummaryRowsSelected}
++                                            onChange={handleToggleAllSummaryRowSelection}
++                                            disabled={summaryFilter.mode !== '????????? || selectableSummaryRowIds.length === 0}
++                                        />
++                                        No
++                                    </label>
++                                </th>
++                                <th>?????????</th>
++                                <th>??????/th>
++                                <th>??????/th>
++                                <th>?????????/th>
++                                <th>????</th>
++                                <th>?????/th>
++                                <th>{summaryFilter.mode === '????? || summaryFilter.mode === '????????? ? '???????? : '??????}</th>
++                                <th>{summaryFilter.mode === '????? || summaryFilter.mode === '????????? ? '????????? : '?????????}</th>
++                                <th>{summaryFilter.mode === '????? || summaryFilter.mode === '????????? ? '????????? : '???????}</th>
++                                <th>?????/th>
++                                <th>????/th>
++                                {canRegisterReceipt && <th>?????/th>}
+                             </tr>
+                         </thead>
+                         <tbody>
+                             {summaryRows.length === 0 && (
+                                 <tr>
+-                                    <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">??? ????? ??????.</td>
++                                    <td colSpan={canRegisterReceipt ? 13 : 12} className="sheet-empty-state">???????????? ????????.</td>
+                                 </tr>
+                             )}
+                             {summaryRows.map((row, index) => (
+                                 <tr key={row.id}>
+-                                    <td className="align-right">{index + 1}</td>
++                                    <td className="align-right">
++                                        <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', cursor: summaryFilter.mode === '????????? && row.outstandingAmount > 0 ? 'pointer' : 'default' }}>
++                                            <input
++                                                type="checkbox"
++                                                style={{ width: '14px', height: '14px', accentColor: '#2563eb', flexShrink: 0 }}
++                                                checked={selectedSummaryRowIdSet.has(row.id)}
++                                                onChange={() => handleToggleSummaryRowSelection(row.id)}
++                                                disabled={summaryFilter.mode !== '????????? || row.outstandingAmount <= 0}
++                                            />
++                                            {index + 1}
++                                        </label>
++                                    </td>
+                                     <td>{row.partnerName}</td>
+                                     <td>{row.siteName || '-'}</td>
+                                     <td>{row.issueDate}</td>
+@@ -4265,7 +4443,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         onClick={() => handleOpenReceiptHistory(row)}
+                                                         disabled={saving}
+                                                     >
+-                                                        ???
++                                                        ????
+                                                     </button>
+                                                 )}
+                                             </div>
+@@ -4277,7 +4455,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                         <tfoot>
+                             <tr>
+                                 <td />
+-                                <td>???</td>
++                                <td>?????/td>
+                                 <td />
+                                 <td />
+                                 <td className="align-right">{formatNumber(summaryTotals.supplyAmount)}</td>
+@@ -4299,8 +4477,8 @@ const WorkbookLedgerPage: React.FC = () => {
+             <div className="workbook-shell">
+                 <div className="workbook-titlebar">
+                     <div>
+-                        <h1>?????? Pro Ver 2.5 (???)</h1>
+-                        <p>??? ?????? UI?????????? ??? ??? ??? ??????????</p>
++                        <h1>????????? Pro Ver 2.5 (????</h1>
++                        <p>??? ?????????UI???????????? ???????? ??? ?????????????</p>
+                     </div>
+                     <div className="workbook-title-actions">
+                         <button
+@@ -4310,7 +4488,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                             disabled={loading}
+                         >
+                             <FontAwesomeIcon icon={loading ? faSpinner : faRotateRight} spin={loading} />
+-                            ??????
++                            ?????????                         </button>
+                     </div>
+                 </div>
+@@ -4333,13 +4511,106 @@ const WorkbookLedgerPage: React.FC = () => {
+                 {activeTab === 'ledger' && renderLedgerTab()}
+                 {activeTab === 'summary' && renderSummaryTab()}
+ 
++                {showKbPreview && (
++                    <div
++                        style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
++                        onClick={() => setShowKbPreview(false)}
++                    >
++                        <div
++                            style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: 780, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 8px 40px rgba(0,0,0,0.25)' }}
++                            onClick={(e) => e.stopPropagation()}
++                        >
++                            {/* ???? */}
++                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #e5e7eb' }}>
++                                <span style={{ fontWeight: 700, fontSize: 16 }}>????????? ???????? ?????????</span>
++                                <button type="button" onClick={() => setShowKbPreview(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#6b7280' }}>
++                                    <FontAwesomeIcon icon={faXmark} />
++                                </button>
++                            </div>
++
++                            {/* ???????*/}
++                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '16px 20px', borderBottom: '1px solid #e5e7eb' }}>
++                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
++                                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>???????????? <span style={{ color: '#9ca3af', fontWeight: 400 }}>(D?? ???? 10??</span></label>
++                                    <input
++                                        type="text"
++                                        value={kbReceiverDisplay}
++                                        maxLength={10}
++                                        onChange={(e) => setKbReceiverDisplay(e.target.value)}
++                                        style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
++                                        placeholder="?????????????????????
++                                    />
++                                </div>
++                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
++                                    <label style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>???????????? ?????<span style={{ color: '#9ca3af', fontWeight: 400 }}>(E?? ?????????+????? ???? 14??</span></label>
++                                    <input
++                                        type="text"
++                                        value={kbMemoSuffix}
++                                        onChange={(e) => setKbMemoSuffix(e.target.value)}
++                                        style={{ border: '1px solid #d1d5db', borderRadius: 6, padding: '6px 10px', fontSize: 13 }}
++                                        placeholder="?? ??????
++                                    />
++                                </div>
++                            </div>
++
++                            {/* ????????? ??????*/}
++                            <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
++                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
++                                    <thead>
++                                        <tr style={{ background: '#1f2937', color: '#fff' }}>
++                                            <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, width: 60 }}>A<br/><span style={{ fontWeight: 400, fontSize: 11 }}>????????/span></th>
++                                            <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600 }}>B<br/><span style={{ fontWeight: 400, fontSize: 11 }}>?????????</span></th>
++                                            <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, width: 110 }}>C<br/><span style={{ fontWeight: 400, fontSize: 11 }}>?????????/span></th>
++                                            <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, width: 120 }}>D<br/><span style={{ fontWeight: 400, fontSize: 11 }}>????????????</span></th>
++                                            <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, width: 150 }}>E<br/><span style={{ fontWeight: 400, fontSize: 11 }}>????????????</span></th>
++                                        </tr>
++                                    </thead>
++                                    <tbody>
++                                        {kbPreviewRows.map((r, idx) => (
++                                            <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6', background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
++                                                <td style={{ padding: '7px 10px', textAlign: 'center', color: r.bankCode ? '#111827' : '#ef4444' }}>{r.bankCode || '?'}</td>
++                                                <td style={{ padding: '7px 10px', fontFamily: 'monospace', color: r.accountNumber ? '#111827' : '#ef4444' }}>{r.accountNumber || '?????????'}</td>
++                                                <td style={{ padding: '7px 10px', textAlign: 'right' }}>{r.amount.toLocaleString()}</td>
++                                                <td style={{ padding: '7px 10px', textAlign: 'center' }}>{r.receiverDisplay}</td>
++                                                <td style={{ padding: '7px 10px', textAlign: 'center' }}>{r.memoDisplay}</td>
++                                            </tr>
++                                        ))}
++                                    </tbody>
++                                </table>
++                            </div>
++
++                            {/* ???? */}
++                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '14px 20px', borderTop: '1px solid #e5e7eb' }}>
++                                <button
++                                    type="button"
++                                    onClick={() => setShowKbPreview(false)}
++                                    style={{ padding: '8px 18px', borderRadius: 7, border: '1px solid #d1d5db', background: '#f9fafb', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
++                                >
++                                    ????
++                                </button>
++                                <button
++                                    type="button"
++                                    className="excel-button excel-button-green"
++                                    onClick={handleDownloadSummaryKb}
++                                    disabled={downloadingKb}
++                                    style={{ minHeight: 36, padding: '8px 18px' }}
++                                >
++                                    <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
++                                    ????????? ?????????({kbPreviewRows.length})
++                                </button>
++                            </div>
++                        </div>
++                    </div>
++                )}
++
++
+                 {receiptHistoryTargetId && (
+                     <div className="workbook-modal-overlay" onClick={handleCloseReceiptHistory}>
+                         <div className="workbook-modal" onClick={(event) => event.stopPropagation()}>
+                             <div className="workbook-modal-header">
+                                 <div>
+                                     <h2>{receiptHistoryLabels.history}</h2>
+-                                    <p>?????{receiptHistoryLabels.outstanding} ??? ?????{receiptHistoryLabels.history}??????????????????</p>
++                                    <p>??????{receiptHistoryLabels.outstanding} ???? ??????{receiptHistoryLabels.history}?????????????????????</p>
+                                 </div>
+                                 <button
+                                     type="button"
+@@ -4353,34 +4624,34 @@ const WorkbookLedgerPage: React.FC = () => {
+                             {receiptHistoryInvoice ? (
+                                 <>
+                                     <div className="workbook-modal-summary">
+-                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.partnerName}</span></div>
+-                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.siteName || '-'}</span></div>
+-                                        <div><strong>?????/strong><span>{receiptHistoryInvoice.date}</span></div>
+-                                        <div><strong>???</strong><span>{formatNumber(receiptHistoryInvoice.totalAmount)}??/span></div>
+-                                        <div><strong>{receiptHistoryLabels.cumulative}</strong><span>{formatNumber(receiptHistoryTotal)}??/span></div>
+-                                        <div><strong>{receiptHistoryLabels.outstanding}</strong><span>{formatNumber(receiptHistoryOutstanding)}??/span></div>
++                                        <div><strong>???????/strong><span>{receiptHistoryInvoice.partnerName}</span></div>
++                                        <div><strong>??????/strong><span>{receiptHistoryInvoice.siteName || '-'}</span></div>
++                                        <div><strong>??????/strong><span>{receiptHistoryInvoice.date}</span></div>
++                                        <div><strong>?????/strong><span>{formatNumber(receiptHistoryInvoice.totalAmount)}??/span></div>
++                                        <div><strong>{receiptHistoryLabels.cumulative}</strong><span>{formatNumber(receiptHistoryTotal)}??/span></div>
++                                        <div><strong>{receiptHistoryLabels.outstanding}</strong><span>{formatNumber(receiptHistoryOutstanding)}??/span></div>
+                                     </div>
+ 
+                                     <div className="workbook-editor-card">
+                                         <div className="workbook-editor-header">
+-                                            <h3>??? ??/h3>
++                                            <h3>???? ??/h3>
+                                         </div>
+ 
+                                         <div className="sheet-table-wrapper compact">
+                                             <table className="sheet-table">
+                                                 <thead>
+                                                     <tr>
+-                                                        <th>???</th>
+-                                                        <th>???</th>
+-                                                        <th>?????/th>
+-                                                        <th>???</th>
+-                                                        <th>???????/th>
+-                                                        <th>???</th>
+-                                                        <th>???</th>
++                                                        <th>????</th>
++                                                        <th>????</th>
++                                                        <th>??????/th>
++                                                        <th>????</th>
++                                                        <th>?????????/th>
++                                                        <th>????</th>
++                                                        <th>?????/th>
+                                                         <th>{receiptHistoryLabels.amount}</th>
+-                                                        <th>???</th>
+-                                                        <th>????/th>
+-                                                        <th>???</th>
++                                                        <th>?????/th>
++                                                        <th>????/th>
++                                                        <th>?????/th>
+                                                     </tr>
+                                                 </thead>
+                                                 <tbody>
+@@ -4404,7 +4675,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={dbActionLoading || receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faPenToSquare} />
+-                                                                    ???
++                                                                    ????
+                                                                 </button>
+                                                                 <button
+                                                                     type="button"
+@@ -4413,7 +4684,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={dbActionLoading || receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faTrashCan} />
+-                                                                    ???
++                                                                    ????                                                                 </button>
+                                                             </div>
+                                                         </td>
+@@ -4425,7 +4696,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+                                     {legacyMatchedGap > 0 && (
+                                         <div className="workbook-modal-warning">
+-                                            ??? ?????? ??? {formatNumber(legacyMatchedGap)}??? ??? ??????????? ??? ????????/?????????????.
++                                            ?????????????????? {formatNumber(legacyMatchedGap)}??? ?????????????????? ???? ?????????/???????????????.
+                                         </div>
+                                     )}
+ 
+@@ -4435,21 +4706,21 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                 <tr>
+                                                     <th>{receiptHistoryLabels.date}</th>
+                                                     <th>{receiptHistoryLabels.amount}</th>
+-                                                    <th>???</th>
+-                                                    <th>???</th>
++                                                    <th>?????/th>
++                                                    <th>?????/th>
+                                                 </tr>
+                                             </thead>
+                                             <tbody>
+                                                 {receiptHistoryOriginalPaymentAmount <= 0 && receiptHistoryEntries.length === 0 && (
+                                                     <tr>
+-                                                        <td colSpan={4} className="sheet-empty-state">?????{receiptHistoryLabels.history}????????.</td>
++                                                        <td colSpan={4} className="sheet-empty-state">??????{receiptHistoryLabels.history}??????????.</td>
+                                                     </tr>
+                                                 )}
+                                                 {receiptHistoryInvoice && receiptHistoryOriginalPaymentAmount > 0 && (
+                                                     <tr key={`original-${receiptHistoryInvoice.id ?? receiptHistoryInvoice.date}`}>
+                                                         <td>{receiptHistoryInvoice.date}</td>
+                                                         <td className="align-right">{formatNumber(receiptHistoryOriginalPaymentAmount)}</td>
+-                                                        <td>{receiptHistoryInvoice.note || '??? ???????}</td>
++                                                        <td>{receiptHistoryInvoice.note || '???? ????????}</td>
+                                                         <td>
+                                                             <div className="workbook-inline-actions">
+                                                                 <button
+@@ -4459,7 +4730,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={dbActionLoading || receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faPenToSquare} />
+-                                                                    ??????
++                                                                    ????????
+                                                                 </button>
+                                                                 <button
+                                                                     type="button"
+@@ -4468,7 +4739,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={dbActionLoading || receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faTrashCan} />
+-                                                                    ??????
++                                                                    ????????                                                                 </button>
+                                                             </div>
+                                                         </td>
+@@ -4488,7 +4759,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faPenToSquare} />
+-                                                                    ???
++                                                                    ????
+                                                                 </button>
+                                                                 <button
+                                                                     type="button"
+@@ -4497,7 +4768,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                                     disabled={receiptActionLoading}
+                                                                 >
+                                                                     <FontAwesomeIcon icon={faTrashCan} />
+-                                                                    ???
++                                                                    ????                                                                 </button>
+                                                             </div>
+                                                         </td>
+@@ -4509,7 +4780,7 @@ const WorkbookLedgerPage: React.FC = () => {
+ 
+                                     <div className="workbook-editor-card">
+                                         <div className="workbook-editor-header">
+-                                            <h3>{receiptHistoryLabels.history} ???</h3>
++                                            <h3>{receiptHistoryLabels.history} ????</h3>
+                                             {editingReceiptDraft && (
+                                                 <button
+                                                     type="button"
+@@ -4517,7 +4788,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                     onClick={handleCancelEditReceipt}
+                                                     disabled={receiptActionLoading}
+                                                 >
+-                                                    ???
++                                                    ?????                                                 </button>
+                                             )}
+                                         </div>
+@@ -4544,7 +4815,7 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                     />
+                                                 </label>
+                                                 <label className="workbook-editor-wide">
+-                                                    <span>???</span>
++                                                    <span>?????/span>
+                                                     <input
+                                                         type="text"
+                                                         value={editingReceiptDraft.note}
+@@ -4560,17 +4831,17 @@ const WorkbookLedgerPage: React.FC = () => {
+                                                         disabled={receiptActionLoading}
+                                                     >
+                                                         <FontAwesomeIcon icon={receiptActionLoading ? faSpinner : faPenToSquare} spin={receiptActionLoading} />
+-                                                        ??? ????+                                                        ???? ????
+                                                     </button>
+                                                 </div>
+                                             </div>
+                                         ) : (
+-                                            <div className="sheet-empty-state">?????{receiptHistoryLabels.history}??????????</div>
++                                            <div className="sheet-empty-state">??????{receiptHistoryLabels.history}????????????</div>
+                                         )}
+                                     </div>
+                                 </>
+                             ) : (
+-                                <div className="sheet-empty-state">???????????? ????????.</div>
++                                <div className="sheet-empty-state">?????????????????????????.</div>
+                             )}
+                         </div>
+                     </div>
+@@ -4597,3 +4868,5 @@ const WorkbookLedgerPage: React.FC = () => {
+ };
+ 
+ export default WorkbookLedgerPage;
++
++

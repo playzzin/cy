@@ -28,6 +28,8 @@ interface GridRow {
     payType: string; // 급여구분 (New)
     role: string;
     description: string; // 작업내용
+    workerTeamId?: string; // Original Team ID of the worker
+    workerTeamName?: string; // Original Team Name of the worker
 }
 
 interface Ledger {
@@ -199,9 +201,16 @@ const DailyReportTable: React.FC<{
                         if (team) {
                             newRows[row].teamName = team.name;
                             newRows[row].teamId = team.id || '';
+                            newRows[row].workerTeamName = team.name;
+                            newRows[row].workerTeamId = team.id || '';
                         } else {
-                            newRows[row].teamName = matchedWorker.teamName || '';
-                            newRows[row].teamId = matchedWorker.teamId || '';
+                             // Use teammate name from worker master as fallback
+                            const masterTeamName = matchedWorker.teamName || (matchedWorker as any).workerTeamName || '';
+                            const masterTeamId = matchedWorker.teamId || (matchedWorker as any).workerTeamId || '';
+                            newRows[row].teamName = masterTeamName;
+                            newRows[row].teamId = masterTeamId;
+                            newRows[row].workerTeamName = masterTeamName;
+                            newRows[row].workerTeamId = masterTeamId;
                         }
                     } else {
                         // Name exists but NO match found -> Worker ID empty (Unknown Worker)
@@ -299,7 +308,9 @@ const DailyReportTable: React.FC<{
                     unitPrice: worker.unitPrice || 0,
                     payType: worker.payType || worker.salaryModel || '일급',
                     role: worker.role || '작업자',
-                    description: ''
+                    description: '',
+                    workerTeamId: team.id || '',
+                    workerTeamName: team.name
                 };
                 filledCount++;
             }
@@ -612,8 +623,10 @@ const DailyReportGridInput: React.FC = () => {
                                     workerId: matchedWorker.id ?? '',
                                     unitPrice: matchedWorker.unitPrice ?? 0,
                                     role: matchedWorker.role || '작업자',
-                                    teamId: matchedTeam?.id ?? matchedWorker.teamId ?? '',
-                                    teamName: matchedTeam?.name ?? matchedWorker.teamName ?? ''
+                                    teamId: matchedTeam?.id ?? matchedWorker.teamId ?? (matchedWorker as any).workerTeamId ?? '',
+                                    teamName: matchedTeam?.name ?? matchedWorker.teamName ?? (matchedWorker as any).workerTeamName ?? '',
+                                    workerTeamId: matchedTeam?.id ?? matchedWorker.teamId ?? (matchedWorker as any).workerTeamId ?? '',
+                                    workerTeamName: matchedTeam?.name ?? matchedWorker.teamName ?? (matchedWorker as any).workerTeamName ?? ''
                                 };
                             })
                         }))
@@ -772,7 +785,10 @@ const DailyReportGridInput: React.FC = () => {
                             unitPrice: w.unitPrice ?? 0,
                             payType: (w as any).payType || (w as any).salaryModel || '일급',
                             role: w.role || '작업자',
-                            description: w.workContent || (w as any).workDescription || ''
+                            description: w.workContent || (w as any).workDescription || '',
+                            // Support for both teamName and workerTeamName for robustness
+                            workerTeamId: finalTeamId,
+                            workerTeamName: finalTeamName
                         });
                     });
                 });
@@ -912,7 +928,9 @@ const DailyReportGridInput: React.FC = () => {
             unitPrice: null,
             payType: '', // Added
             role: '작업자',
-            description: ''
+            description: '',
+            workerTeamId: '',
+            workerTeamName: ''
         }));
     };
 
@@ -1032,7 +1050,9 @@ const DailyReportGridInput: React.FC = () => {
                         manDay: r.manDay,
                         workContent: r.description, // User removed individual work content input, but logic remains if needed
                         teamId: r.teamId, // ✅ 작업자의 실제 소속팀 저장 (인력교류 추적용)
-                        unitPrice: r.unitPrice ?? 0
+                        unitPrice: r.unitPrice ?? 0,
+                        workerTeamId: r.workerTeamId || r.teamId,
+                        workerTeamName: r.workerTeamName || r.teamName
                     }));
 
                     allReports.push({
@@ -1182,7 +1202,9 @@ const DailyReportGridInput: React.FC = () => {
                         unitPrice: worker?.unitPrice || 0,
                         payType: worker?.payType || worker?.salaryModel || '일급',
                         role: w.role || worker?.role || '작업자',
-                        description: w.workContent || '' // AI content or Empty
+                        description: w.workContent || '', // AI content or Empty
+                        workerTeamId: worker?.teamId || '',
+                        workerTeamName: worker?.teamType === '지원팀' ? '지원' : (worker ? (teams.find(t => t.id === worker.teamId)?.name || worker?.teamName || '') : '')
                     };
                 });
 

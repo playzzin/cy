@@ -88,6 +88,9 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "dev:start": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-start.ps1",
+    "dev:stop": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-stop.ps1",
+    "dev:restart": "npm run dev:stop && npm run dev:start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

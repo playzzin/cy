@@ -100,10 +100,6 @@ function IntegratedDatabase() {
     const [expandedIssue, setExpandedIssue] = useState<keyof IssueStats | null>(null);
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-    useEffect(() => {
-        loadStats();
-    }, []);
-
     const loadStats = async () => {
         setLoading(true);
         try {
@@ -133,6 +129,11 @@ function IntegratedDatabase() {
             setLoading(false);
         }
     };
+
+    useEffect(() => {
+        loadStats();
+    }, []);
+
 
     const calculateStats = (
         workers: Worker[],

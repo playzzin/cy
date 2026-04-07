@@ -47,11 +47,16 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
+    min-width: 0;
     border: 1px solid rgba(15, 23, 42, 0.18);
     border-radius: 10px;
     padding: 10px 14px;
     font-size: 13px;
     font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     cursor: pointer;
     transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
@@ -141,6 +146,38 @@
     padding-bottom: 2px;
 }
 
+.workbook-tenant-tabs {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.workbook-tenant-tab {
+    border: 1px solid #c7d2fe;
+    background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+    color: #3730a3;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.workbook-tenant-tab:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 16px rgba(79, 70, 229, 0.14);
+}
+
+.workbook-tenant-tab.active {
+    border-color: #4338ca;
+    background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
+    color: #f8fafc;
+    box-shadow: 0 10px 18px rgba(67, 56, 202, 0.24);
+}
+
 .workbook-tab {
     border: 1px solid #cbd5e1;
     background: linear-gradient(180deg, #dbe4ef 0%, #c8d5e6 100%);
@@ -158,6 +195,17 @@
     color: #0f172a;
     border-bottom-color: #ffffff;
     box-shadow: 0 -1px 0 #ffffff inset;
+}
+
+@media (max-width: 768px) {
+    .workbook-tenant-tabs {
+        gap: 6px;
+    }
+
+    .workbook-tenant-tab {
+        padding: 7px 12px;
+        font-size: 12px;
+    }
 }
 
 .workbook-sheet {
@@ -242,6 +290,7 @@
 
 .sheet-button-wrap {
     padding: 0;
+    min-width: 108px;
 }
 
 .workbook-db-sort-cell {
@@ -671,6 +720,53 @@
 .workbook-summary-table .summary-header th {
     padding-top: 7px;
     padding-bottom: 7px;
+}
+
+.workbook-summary-table th:first-child,
+.workbook-summary-table td:first-child {
+    background: #f8fafc;
+    white-space: nowrap;
+}
+
+.workbook-summary-select-btn {
+    border: 1px solid #94a3b8;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.workbook-summary-select-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.workbook-summary-select-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+}
+
+.workbook-summary-select-checkbox {
+    width: 16px;
+    height: 16px;
+    accent-color: #2563eb;
+    cursor: pointer;
+    vertical-align: middle;
+    flex: 0 0 auto;
+}
+
+.workbook-summary-select-checkbox:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
 }
 
 .workbook-summary-table .workbook-inline-actions-horizontal .workbook-inline-button {
