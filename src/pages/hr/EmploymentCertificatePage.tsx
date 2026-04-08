@@ -153,6 +153,8 @@ const EmploymentCertificatePage: React.FC = () => {
 
     const componentRef = useRef<HTMLDivElement>(null);
 
+    const sanitizeCertificateName = (name?: string | null) => String(name || '').replace(/\d+/g, '').trim();
+
     const isTargetIssuerCompany = (company: Company): boolean => {
         const name = String(company.name || '');
         const isConstruction = company.type === '시공사';
@@ -192,8 +194,8 @@ const EmploymentCertificatePage: React.FC = () => {
     }, []);
 
     const handlePrint = useReactToPrint({
-        content: () => componentRef.current,
-        documentTitle: `재직증명서_${selectedWorker?.name || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
+        contentRef: componentRef,
+        documentTitle: `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
     });
 
     // 대상 근로자는 회사 선택과 무관하게 청연 소속만 노출
@@ -397,7 +399,7 @@ const EmploymentCertificatePage: React.FC = () => {
 
                 <div style={{ flex: 1 }}></div>
 
-                <Button onClick={handlePrint} disabled={!selectedWorker}>
+                <Button onClick={() => handlePrint()} disabled={!selectedWorker}>
                     <FontAwesomeIcon icon={faPrint} />
                     재직증명서 인쇄 / PDF 저장
                 </Button>

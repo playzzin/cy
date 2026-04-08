@@ -140,6 +140,9 @@ import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPag
 import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
+import AccountManagementPage from './pages/database/AccountManagementPage';
+import ConstructionCompanyDatabase from './pages/database/ConstructionCompanyDatabase';
+import WorkerDatabaseInput from './pages/database/WorkerDatabaseInput';
 
 import HomepageClientProgressPage from './pages/homepage/HomepageClientProgressPage';
 import HomepageRequestListPage from './pages/homepage/HomepageRequestListPage';
@@ -202,45 +205,6 @@ const DashboardLayoutWrapper = () => (
     <Outlet />
   </DashboardLayout>
 );
-
-const WorkbookLedgerRouteDebug: React.FC = () => (
-  <>
-    <div style={{
-      position: 'sticky',
-      top: 0,
-      zIndex: 9999,
-      background: '#b91c1c',
-      color: '#ffffff',
-      padding: '6px 10px',
-      fontWeight: 800,
-      fontSize: 12
-    }}>
-      APP-ROUTE-DEBUG: /payroll/workbook-ledger - WorkbookLedgerPage (cheongyeon)
-    </div>
-    <WorkbookLedgerPage tenantKey="cheongyeon" companyLabel="청연" />
-  </>
-);
-
-const WorkbookLedgerDawonRouteDebug: React.FC = () => (
-  <>
-    <div style={{
-      position: 'sticky',
-      top: 0,
-      zIndex: 9999,
-      background: '#0f766e',
-      color: '#ffffff',
-      padding: '6px 10px',
-      fontWeight: 800,
-      fontSize: 12
-    }}>
-      APP-ROUTE-DEBUG: /payroll/workbook-ledger-dawon - WorkbookLedgerPage (dawon)
-    </div>
-    <WorkbookLedgerPage tenantKey="dawon" companyLabel="다원" />
-  </>
-);
-
-
-
 
 const App: React.FC = () => {
   return (
@@ -314,7 +278,10 @@ const App: React.FC = () => {
             {/* Database Management */}
             <Route path="/database">
               <Route path="company-db" element={<CompanyDatabase />} />
+              <Route path="company-db-construction" element={<ConstructionCompanyDatabase />} />
               <Route path="manpower-db" element={<IntegratedDatabase />} />
+              <Route path="account-management" element={<AccountManagementPage />} />
+              <Route path="worker-input" element={<WorkerDatabaseInput />} />
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
             </Route>
 
@@ -357,8 +324,8 @@ const App: React.FC = () => {
               <Route path="taxinvoice/receivables" element={<ReceivablesManagerPage />} />
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
-              <Route path="workbook-ledger" element={<WorkbookLedgerRouteDebug />} />
-              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerDawonRouteDebug />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerPage tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />

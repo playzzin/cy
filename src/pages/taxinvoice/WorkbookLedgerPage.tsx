@@ -1,5 +1,5 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
@@ -286,8 +286,6 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-const WORKBOOK_DEBUG_TAG = 'KB_TAG_20260407_02';
-
 const normalizeBankName = (value: unknown) => (
     String(value ?? '')
         .toLowerCase()
@@ -1155,7 +1153,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     tenantKey = 'cheongyeon',
     companyLabel = '청연'
 }) => {
-    const location = useLocation();
     const navigate = useNavigate();
     const hotRef = useRef<any>(null);
     const dbUploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -1594,8 +1591,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const { default: html2canvas } = await import('html2canvas');
             const captureWidth = Math.max(element.scrollWidth, element.clientWidth);
             const captureHeight = Math.max(element.scrollHeight, element.clientHeight);
+            const deviceScale = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+            const preferredScale = Math.max(2.5, Math.min(deviceScale * 2, 4));
+            const maxPixelArea = 36000000;
+            const estimatedPixelArea = captureWidth * captureHeight * preferredScale * preferredScale;
+            const captureScale = estimatedPixelArea > maxPixelArea
+                ? Math.max(2, Math.sqrt(maxPixelArea / Math.max(captureWidth * captureHeight, 1)))
+                : preferredScale;
             const canvas = await (html2canvas as any)(element, {
-                scale: 2,
+                scale: captureScale,
                 backgroundColor: '#ffffff',
                 logging: false,
                 useCORS: true,
@@ -1607,18 +1611,35 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     const rootClone = documentClone.querySelector('.workbook-ledger-page');
                     if (!rootClone) return;
 
+                    const rootElement = rootClone as HTMLElement;
+                    rootElement.style.background = '#ffffff';
+                    rootElement.style.textRendering = 'geometricPrecision';
+                    rootElement.style.setProperty('-webkit-font-smoothing', 'antialiased');
+
+                    const bodyClone = documentClone.body as HTMLBodyElement;
+                    bodyClone.style.background = '#ffffff';
+                    bodyClone.style.textRendering = 'geometricPrecision';
+                    bodyClone.style.setProperty('-webkit-font-smoothing', 'antialiased');
+
                     // Expand scroll-limited wrappers so the copied image contains all searched rows.
                     rootClone.querySelectorAll('.sheet-table-wrapper, .workbook-frozen-table-wrapper').forEach((node) => {
                         const wrapper = node as HTMLElement;
                         wrapper.style.maxHeight = 'none';
                         wrapper.style.height = 'auto';
                         wrapper.style.overflow = 'visible';
+                        wrapper.style.contain = 'none';
                     });
 
                     rootClone.querySelectorAll('.sheet-table thead th').forEach((node) => {
                         const th = node as HTMLElement;
                         th.style.position = 'static';
                         th.style.top = 'auto';
+                    });
+
+                    rootClone.querySelectorAll('table, th, td, input, button, .sheet-merged-heading').forEach((node) => {
+                        const elementNode = node as HTMLElement;
+                        elementNode.style.textRendering = 'geometricPrecision';
+                        elementNode.style.setProperty('-webkit-font-smoothing', 'antialiased');
                     });
                 },
                 ignoreElements: (node: Element) => (node as HTMLElement).dataset?.html2canvasIgnore === 'true'
@@ -4642,9 +4663,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     <div>
                         <h1>{`매입매출 Pro Ver 2.5 (${companyLabel}) [KB-CHECKBOX-LIVE]`}</h1>
                         <p>엑셀 통합문서 UI를 웹 화면으로 옮긴 전용 장부 페이지입니다.</p>
-                        <p style={{ marginTop: 4, color: '#b91c1c', fontWeight: 700 }}>
-                            ROUTE-CHECK: {location.pathname} / {WORKBOOK_DEBUG_TAG}
-                        </p>
                     </div>
                     <div className="workbook-title-actions">
                         <button

@@ -158,7 +158,7 @@ const DelegationBuilderPage: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handlePrint = useReactToPrint({
-        content: () => printComponentRef.current,
+        contentRef: printComponentRef,
         documentTitle: '위임장_출력',
         onBeforeGetContent: () => {
             // Optional: Loading state or preparation
@@ -671,7 +671,7 @@ const DelegationBuilderPage: React.FC = () => {
                             임시저장
                         </ActionButton>
 
-                        <ActionButton onClick={handlePrint} $primary>
+                        <ActionButton onClick={() => handlePrint()} $primary>
                             <FontAwesomeIcon icon={faPrint} className="mr-2" />
                             출력 / PDF
                         </ActionButton>

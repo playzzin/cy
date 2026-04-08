@@ -24,13 +24,26 @@ const A4_HEIGHT_MM = 297;
 // Import Fonts globally for the print window or component
 const FontStyles = createGlobalStyle`
     @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
+
+    @page {
+        size: A4 portrait;
+        margin: 10mm;
+    }
+
+    @media print {
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+        }
+    }
 `;
 
 const PrintContainer = styled.div`
   width: ${A4_WIDTH_MM}mm;
   min-height: ${A4_HEIGHT_MM}mm;
   background: white;
-  padding: 25mm 20mm;
+    padding: 20mm 16mm;
   margin: 0 auto;
   box-sizing: border-box;
   font-family: 'Noto Sans KR', sans-serif;
@@ -54,9 +67,12 @@ const PrintContainer = styled.div`
 
   @media print {
     margin: 0;
+        width: 190mm;
+        min-height: 277mm;
     box-shadow: none;
     border: none;
-    padding: 20mm 15mm;
+        padding: 12mm 10mm;
+        overflow: hidden;
     
     &::before {
         display: none;
@@ -66,26 +82,40 @@ const PrintContainer = styled.div`
 
 const MainTitle = styled.h1`
   font-family: 'Noto Serif KR', serif;
-  font-size: 3.5rem;
+    font-size: 3rem;
   font-weight: 700;
   text-align: center;
-  letter-spacing: 1.5rem;
-  margin-top: 1.5rem;
-  margin-bottom: 3.5rem;
+    letter-spacing: 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 2.25rem;
   color: #1a1a1a;
   text-decoration: underline;
-  text-underline-offset: 15px;
+    text-underline-offset: 11px;
   text-decoration-thickness: 1px;
+
+    @media print {
+        font-size: 2.35rem;
+        letter-spacing: 0.7rem;
+        margin-top: 0;
+        margin-bottom: 1.5rem;
+        text-underline-offset: 8px;
+    }
 `;
 
 const SectionHeader = styled.h2`
   font-size: 1.1rem;
   font-weight: 700;
   margin-bottom: 0.8rem;
-  margin-top: 2.5rem;
+    margin-top: 1.6rem;
   display: flex;
   align-items: center;
   color: #222;
+
+    @media print {
+        font-size: 1rem;
+        margin-top: 1.1rem;
+        margin-bottom: 0.5rem;
+    }
 
   &::before {
     content: '';
@@ -103,6 +133,10 @@ const DocTable = styled.table`
   margin-bottom: 5px;
   border-top: 2px solid #000;
   border-bottom: 1px solid #000;
+
+    @media print {
+        margin-bottom: 2px;
+    }
 `;
 
 const Th = styled.th`
@@ -115,6 +149,11 @@ const Th = styled.th`
   vertical-align: middle;
   text-align: center;
   color: #555;
+
+    @media print {
+        padding: 7px 6px;
+        font-size: 0.82rem;
+    }
 `;
 
 const Td = styled.td`
@@ -124,17 +163,30 @@ const Td = styled.td`
   vertical-align: middle;
   color: #111;
   text-align: left;
+
+    @media print {
+        padding: 7px 10px;
+        font-size: 0.82rem;
+    }
 `;
 
 const ProofText = styled.div`
-    margin-top: 4rem;
+    margin-top: 2.5rem;
     text-align: center;
     
     p {
-        font-size: 1.3rem;
+        font-size: 1.15rem;
         font-weight: 500;
         letter-spacing: 0.05rem;
         color: #1f2937;
+    }
+
+    @media print {
+        margin-top: 1.4rem;
+
+        p {
+            font-size: 1rem;
+        }
     }
 `;
 
@@ -153,6 +205,13 @@ const OfficialSeal = styled.div`
   font-family: 'Noto Serif KR', serif;
   margin-left: 12px;
 
+    @media print {
+        width: 64px;
+        height: 64px;
+        font-size: 0.95rem;
+        margin-left: 10px;
+    }
+
   img {
     width: 100%;
     height: 100%;
@@ -168,13 +227,20 @@ const OfficialSeal = styled.div`
 
 const CompanyInfoGrid = styled.div`
   border-top: 1px solid #333;
-  padding-top: 1.5rem;
+    padding-top: 1rem;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 40px;
+    gap: 8px 28px;
   font-size: 0.9rem;
   color: #555;
   line-height: 1.6;
+
+    @media print {
+        padding-top: 0.8rem;
+        gap: 6px 18px;
+        font-size: 0.78rem;
+        line-height: 1.35;
+    }
 `;
 
 const InfoItem = styled.div`
@@ -194,7 +260,11 @@ const InfoValue = styled.span`
 
 const FooterContainer = styled.div`
   margin-top: auto;
-  padding-top: 3rem;
+    padding-top: 1.8rem;
+
+    @media print {
+        padding-top: 1rem;
+    }
 `;
 
 const DateText = styled.div`
@@ -202,17 +272,27 @@ const DateText = styled.div`
   font-size: 1.2rem;
   font-weight: 500;
   letter-spacing: 0.3rem;
-  margin-bottom: 3rem;
+    margin-bottom: 1.8rem;
   font-family: 'Noto Serif KR', serif;
+
+    @media print {
+        font-size: 1rem;
+        margin-bottom: 1.1rem;
+        letter-spacing: 0.18rem;
+    }
 `;
 
 const SignatureArea = styled.div`
   text-align: center;
-  margin-bottom: 4rem;
+    margin-bottom: 2rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+
+    @media print {
+        margin-bottom: 1.2rem;
+    }
 `;
 
 const CompanyNameObj = styled.div`
@@ -222,6 +302,11 @@ const CompanyNameObj = styled.div`
   letter-spacing: 0.2rem;
   margin-bottom: 1rem;
   color: #1a1a1a;
+
+    @media print {
+        font-size: 1.7rem;
+        margin-bottom: 0.65rem;
+    }
 `;
 
 const CeoText = styled.div`
@@ -232,18 +317,28 @@ const CeoText = styled.div`
   align-items: center;
   gap: 10px;
   font-family: 'Noto Serif KR', serif;
+
+    @media print {
+        font-size: 1.08rem;
+    }
 `;
 
 const WarningText = styled.p`
-  margin-top: 1.5rem;
+    margin-top: 1rem;
   font-size: 0.7rem;
   color: #9ca3af;
   text-align: center;
+
+    @media print {
+        margin-top: 0.7rem;
+        font-size: 0.62rem;
+    }
 `;
 
 export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, EmploymentCertificateTemplateProps>(
     ({ company, worker, purpose, issueDate, position, duties, joinDate, endDate, isServing }, ref) => {
         const [sealUrl, setSealUrl] = useState<string | null>(null);
+        const workerDisplayName = String(worker?.name || '').replace(/\d+/g, '').trim();
 
         useEffect(() => {
             const fetchSeal = async () => {
@@ -311,7 +406,7 @@ export const EmploymentCertificateTemplate = forwardRef<HTMLDivElement, Employme
                             <tbody>
                                 <tr>
                                     <Th>성 명</Th>
-                                    <Td>{worker?.name || ''}</Td>
+                                    <Td>{workerDisplayName}</Td>
                                     <Th>주민등록번호</Th>
                                     <Td>{worker?.idNumber || ''}</Td>
                                 </tr>
