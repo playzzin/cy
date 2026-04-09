@@ -133,35 +133,56 @@ const resolveTeamUuid = async (id: string): Promise<string | null> => {
     return dcTeamLegacyIdToUuid.get(raw) ?? null;
 };
 
+const normalizeAssignmentRecord = (value: unknown): Record<string, 'corporate' | 'labor'> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+            .filter(([k, v]) => typeof k === 'string' && k.trim().length > 0 && (v === 'corporate' || v === 'labor'))
+            .map(([k, v]) => [k, v as 'corporate' | 'labor'] as const)
+    );
+};
+
 const safeJsonParseAssignmentRecord = (value: unknown): Record<string, 'corporate' | 'labor'> => {
-    if (!value || typeof value !== 'string') return {};
+    if (!value) return {};
+    if (typeof value === 'object') return normalizeAssignmentRecord(value);
+    if (typeof value !== 'string') return {};
     const raw = value.trim();
     if (!raw) return {};
     try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-        return Object.fromEntries(
-            Object.entries(parsed as Record<string, unknown>)
-                .filter(([k, v]) => typeof k === 'string' && k.trim().length > 0 && (v === 'corporate' || v === 'labor'))
-                .map(([k, v]) => [k, v as 'corporate' | 'labor'] as const)
-        );
+        return normalizeAssignmentRecord(JSON.parse(raw));
     } catch {
         return {};
     }
 };
 
+const asFiniteNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const normalized = value.replace(/,/g, '').trim();
+        if (!normalized) return 0;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+};
+
+const normalizeNumberRecord = (value: unknown): Record<string, number> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+            .filter(([k]) => typeof k === 'string' && k.trim().length > 0)
+            .map(([k, v]) => [k, asFiniteNumber(v)] as const)
+    );
+};
+
 const safeJsonParseRecord = (value: unknown): Record<string, number> => {
-    if (!value || typeof value !== 'string') return {};
+    if (!value) return {};
+    if (typeof value === 'object') return normalizeNumberRecord(value);
+    if (typeof value !== 'string') return {};
     const raw = value.trim();
     if (!raw) return {};
     try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-        return Object.fromEntries(
-            Object.entries(parsed as Record<string, unknown>)
-                .filter(([k]) => typeof k === 'string' && k.trim().length > 0)
-                .map(([k, v]) => [k, typeof v === 'number' && Number.isFinite(v) ? v : 0] as const)
-        );
+        return normalizeNumberRecord(JSON.parse(raw));
     } catch {
         return {};
     }
@@ -172,7 +193,7 @@ const normalizeItems = (items?: Record<string, number>): Record<string, number> 
     return Object.fromEntries(
         Object.entries(items)
             .filter(([k]) => typeof k === 'string' && k.trim().length > 0)
-            .map(([k, v]) => [k, Number.isFinite(v) ? v : 0] as const)
+            .map(([k, v]) => [k, asFiniteNumber(v)] as const)
     );
 };
 
@@ -193,6 +214,28 @@ const parseAdvancePaymentCompositeId = (
     if (!/^\d{4}-\d{2}$/.test(yearMonth)) return null;
 
     return { teamId, workerId, yearMonth };
+};
+
+const listEveryAdvancePaymentRow = async (): Promise<any[]> => {
+    const limit = 1000;
+    let offset = 0;
+    const rows: any[] = [];
+
+    while (true) {
+        const res = await listAllAdvancePayments({ limit, offset } as any);
+        const pageRows = (res as any)?.data?.advancePayments ?? [];
+        if (Array.isArray(pageRows)) rows.push(...pageRows);
+        if (!Array.isArray(pageRows) || pageRows.length < limit) break;
+        offset += limit;
+    }
+
+    if (rows.length === 0) {
+        const fallbackRes = await listAllAdvancePayments();
+        const fallbackRows = (fallbackRes as any)?.data?.advancePayments ?? [];
+        if (Array.isArray(fallbackRows)) rows.push(...fallbackRows);
+    }
+
+    return rows;
 };
 
 const toDate = (value?: string | null): Date | undefined => {
@@ -219,20 +262,55 @@ const isOpaqueSqlFailureOnAdvancePaymentInsert = (error: unknown): boolean => {
         && (normalized.includes('advancepayment') || normalized.includes('insert'));
 };
 
+const mapAdvancePaymentRow = (row: any): AdvancePayment => {
+    const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
+    const rawItems = safeJsonParseRecord(row?.items);
+    return {
+        id: String(row?.id ?? ''),
+        workerId:
+            row?.worker?.legacyId
+                ? String(row.worker.legacyId)
+                : String(row?.worker?.id ?? row?.workerId ?? (parsed?.workerId ?? '')),
+        workerName: row?.workerName ? String(row.workerName) : (row?.worker?.name ? String(row.worker.name) : ''),
+        teamId:
+            row?.team?.legacyId
+                ? String(row.team.legacyId)
+                : String(row?.team?.id ?? row?.teamId ?? (parsed?.teamId ?? '')),
+        teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
+        yearMonth: String(row?.yearMonth ?? (parsed?.yearMonth ?? '')),
+        items: rawItems,
+        prevMonthCarryover: asFiniteNumber(row?.prevMonthCarryover),
+        accommodation: asFiniteNumber(row?.accommodation),
+        privateRoom: asFiniteNumber(row?.privateRoom),
+        gloves: asFiniteNumber(row?.gloves),
+        deposit: asFiniteNumber(row?.deposit),
+        fines: asFiniteNumber(row?.fines),
+        electricity: asFiniteNumber(row?.electricity),
+        gas: asFiniteNumber(row?.gas),
+        internet: asFiniteNumber(row?.internet),
+        water: asFiniteNumber(row?.water),
+        totalDeduction: asFiniteNumber(row?.totalDeduction),
+        itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
+        assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
+        memo: row?.memo ? String(row.memo) : '',
+        updatedAt: toDate(row?.updatedAt)
+    } as AdvancePayment;
+};
+
 export const advancePaymentService = {
     getAdvancePayments: async (year: number, month: number, teamId: string): Promise<AdvancePayment[]> => {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
             const safeTeamId = String(teamId ?? '').trim();
             const teamUuid = await resolveTeamUuid(safeTeamId);
-            const res = await listAllAdvancePayments();
-            const rows = (res as any)?.data?.advancePayments ?? [];
+            const rows = await listEveryAdvancePaymentRow();
 
             return rows
                 .filter((row: any) => {
-                    if (String(row?.yearMonth ?? '') !== String(yearMonth)) return false;
-
                     const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
+                    const rowYearMonth = String(row?.yearMonth ?? (parsed?.yearMonth ?? ''));
+                    if (rowYearMonth !== String(yearMonth)) return false;
+
                     const dcTeamId = row?.team?.id ? String(row.team.id).trim() : '';
                     const dcTeamLegacyId = row?.team?.legacyId ? String(row.team.legacyId).trim() : '';
                     const flatTeamId = row?.teamId ? String(row.teamId).trim() : '';
@@ -247,40 +325,7 @@ export const advancePaymentService = {
                     if (teamUuid && candidateTeamIds.has(teamUuid)) return true;
                     return false;
                 })
-                .map((row: any) => {
-                    const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
-                    const rawItems = safeJsonParseRecord(row?.items);
-                    return {
-                        id: String(row?.id ?? ''),
-                        workerId:
-                            row?.worker?.legacyId
-                                ? String(row.worker.legacyId)
-                                : String(row?.worker?.id ?? row?.workerId ?? (parsed?.workerId ?? '')),
-                        workerName: row?.workerName ? String(row.workerName) : (row?.worker?.name ? String(row.worker.name) : ''),
-                        teamId:
-                            row?.team?.legacyId
-                                ? String(row.team.legacyId)
-                                : String(row?.team?.id ?? row?.teamId ?? (parsed?.teamId ?? '')),
-                        teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
-                        yearMonth: String(row?.yearMonth ?? (parsed?.yearMonth ?? '')),
-                        items: rawItems,
-                        prevMonthCarryover: typeof row?.prevMonthCarryover === 'number' ? row.prevMonthCarryover : 0,
-                        accommodation: typeof row?.accommodation === 'number' ? row.accommodation : 0,
-                        privateRoom: typeof row?.privateRoom === 'number' ? row.privateRoom : 0,
-                        gloves: typeof row?.gloves === 'number' ? row.gloves : 0,
-                        deposit: typeof row?.deposit === 'number' ? row.deposit : 0,
-                        fines: typeof row?.fines === 'number' ? row.fines : 0,
-                        electricity: typeof row?.electricity === 'number' ? row.electricity : 0,
-                        gas: typeof row?.gas === 'number' ? row.gas : 0,
-                        internet: typeof row?.internet === 'number' ? row.internet : 0,
-                        water: typeof row?.water === 'number' ? row.water : 0,
-                        totalDeduction: typeof row?.totalDeduction === 'number' ? row.totalDeduction : 0,
-                        itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
-                        assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
-                        memo: row?.memo ? String(row.memo) : '',
-                        updatedAt: toDate(row?.updatedAt)
-                    } as AdvancePayment;
-                });
+                .map(mapAdvancePaymentRow);
         } catch (error) {
             console.error("Error fetching advance payments:", error);
             throw error;
@@ -290,45 +335,14 @@ export const advancePaymentService = {
     getAdvancePaymentsByYearMonth: async (year: number, month: number): Promise<AdvancePayment[]> => {
         try {
             const yearMonth = `${year}-${String(month).padStart(2, '0')}`;
-            const res = await listAllAdvancePayments();
-            const rows = (res as any)?.data?.advancePayments ?? [];
+            const rows = await listEveryAdvancePaymentRow();
 
             return rows
-                .filter((row: any) => String(row?.yearMonth ?? '') === String(yearMonth))
-                .map((row: any) => {
+                .filter((row: any) => {
                     const parsed = parseAdvancePaymentCompositeId(String(row?.id ?? ''));
-                    const rawItems = safeJsonParseRecord(row?.items);
-                    return {
-                        id: String(row?.id ?? ''),
-                        workerId:
-                            row?.worker?.legacyId
-                                ? String(row.worker.legacyId)
-                                : String(row?.worker?.id ?? row?.workerId ?? (parsed?.workerId ?? '')),
-                        workerName: row?.workerName ? String(row.workerName) : (row?.worker?.name ? String(row.worker.name) : ''),
-                        teamId:
-                            row?.team?.legacyId
-                                ? String(row.team.legacyId)
-                                : String(row?.team?.id ?? row?.teamId ?? (parsed?.teamId ?? '')),
-                        teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
-                        yearMonth: String(row?.yearMonth ?? (parsed?.yearMonth ?? '')),
-                        items: rawItems,
-                        prevMonthCarryover: typeof row?.prevMonthCarryover === 'number' ? row.prevMonthCarryover : 0,
-                        accommodation: typeof row?.accommodation === 'number' ? row.accommodation : 0,
-                        privateRoom: typeof row?.privateRoom === 'number' ? row.privateRoom : 0,
-                        gloves: typeof row?.gloves === 'number' ? row.gloves : 0,
-                        deposit: typeof row?.deposit === 'number' ? row.deposit : 0,
-                        fines: typeof row?.fines === 'number' ? row.fines : 0,
-                        electricity: typeof row?.electricity === 'number' ? row.electricity : 0,
-                        gas: typeof row?.gas === 'number' ? row.gas : 0,
-                        internet: typeof row?.internet === 'number' ? row.internet : 0,
-                        water: typeof row?.water === 'number' ? row.water : 0,
-                        totalDeduction: typeof row?.totalDeduction === 'number' ? row.totalDeduction : 0,
-                        itemAssignments: safeJsonParseAssignmentRecord(row?.itemAssignments),
-                        assignmentType: row?.assignmentType ? (String(row.assignmentType) as 'corporate' | 'labor') : 'labor',
-                        memo: row?.memo ? String(row.memo) : '',
-                        updatedAt: toDate(row?.updatedAt)
-                    } as AdvancePayment;
-                });
+                    return String(row?.yearMonth ?? (parsed?.yearMonth ?? '')) === String(yearMonth);
+                })
+                .map(mapAdvancePaymentRow);
         } catch (error) {
             console.error("Error fetching advance payments by yearMonth:", error);
             throw error;

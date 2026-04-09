@@ -13,7 +13,16 @@ import { PaymentData, MonthlyAdvanceLedgerRow, DeductionBreakdown, WorkerWorkEnt
 import { BANK_CODES, STANDARD_DEDUCTION_FIELDS } from '../constants/payroll.constants';
 
 // Helper: Convert any value to number safely
-const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+const toNumber = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const normalized = value.replace(/,/g, '').trim();
+    if (!normalized) return 0;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
 
 // Helper: Normalize team name for comparison
 const normalizeTeamName = (value: string | undefined): string => {
@@ -157,25 +166,68 @@ const buildDeductionLabelMap = (
 const pickPreferredAdvanceRecord = (
   records: AdvancePayment[],
   yearMonth: string,
-  preferredTeamId?: string
+  options: {
+    preferredTeamId?: string;
+    preferredTeamName?: string;
+  } = {}
 ): AdvancePayment | undefined => {
   const monthMatched = records.filter((record) => String(record.yearMonth ?? '') === yearMonth);
   if (monthMatched.length === 0) return undefined;
 
-  const scoped = preferredTeamId
-    ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === String(preferredTeamId).trim())
-    : monthMatched;
+  const preferredTeamId = String(options.preferredTeamId ?? '').trim();
+  const preferredTeamNameKey = normalizeTeamName(options.preferredTeamName);
 
-  const candidates = scoped.length > 0 ? scoped : monthMatched;
+  const exactTeamIdMatched = preferredTeamId
+    ? monthMatched.filter((record) => String(record.teamId ?? '').trim() === preferredTeamId)
+    : [];
+
+  const teamNameMatched = preferredTeamNameKey
+    ? monthMatched.filter((record) => normalizeTeamName(record.teamName) === preferredTeamNameKey)
+    : [];
+
+  const getRecordValueScore = (record: AdvancePayment): number => {
+    const standardTotal = STANDARD_DEDUCTION_FIELDS.reduce(
+      (sum, { key }) => sum + toNumber((record as any)[key]),
+      0
+    );
+    const itemsTotal = Object.values(record.items ?? {}).reduce((sum, value) => sum + toNumber(value), 0);
+    return standardTotal + itemsTotal;
+  };
+
+  const candidates =
+    exactTeamIdMatched.length > 0
+      ? exactTeamIdMatched
+      : (teamNameMatched.length > 0 ? teamNameMatched : monthMatched);
+
+  const getPreferenceRank = (record: AdvancePayment): number => {
+    const recordTeamId = String(record.teamId ?? '').trim();
+    const recordTeamNameKey = normalizeTeamName(record.teamName);
+    if (preferredTeamId && recordTeamId === preferredTeamId) return 3;
+    if (preferredTeamNameKey && recordTeamNameKey === preferredTeamNameKey) return 2;
+    return 1;
+  };
+
   return candidates.reduce<AdvancePayment | undefined>((best, current) => {
     if (!best) return current;
+
+    const bestPreferenceRank = getPreferenceRank(best);
+    const currentPreferenceRank = getPreferenceRank(current);
+    if (currentPreferenceRank !== bestPreferenceRank) {
+      return currentPreferenceRank > bestPreferenceRank ? current : best;
+    }
+
+    const bestScore = getRecordValueScore(best);
+    const currentScore = getRecordValueScore(current);
+    const bestHasValue = bestScore > 0;
+    const currentHasValue = currentScore > 0;
+    if (currentHasValue !== bestHasValue) return currentHasValue ? current : best;
+    if (currentScore !== bestScore) return currentScore > bestScore ? current : best;
+
     const bestTs = best.updatedAt instanceof Date ? best.updatedAt.getTime() : 0;
     const currentTs = current.updatedAt instanceof Date ? current.updatedAt.getTime() : 0;
     if (currentTs !== bestTs) return currentTs > bestTs ? current : best;
 
-    const bestScore = toNumber(best.totalDeduction);
-    const currentScore = toNumber(current.totalDeduction);
-    return currentScore >= bestScore ? current : best;
+    return best;
   }, undefined);
 };
 
@@ -194,7 +246,7 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
   return {
     invoice: {
       ...createEmptyLedgerSideInput(),
-      carry: toNumber(corporateAdvance1 ?? record.prevMonthCarryover),
+      carry: toNumber(corporateAdvance1),
       carrySecond: toNumber(corporateAdvance2 ?? record.items?.carrySecond),
       currentAdvance: toNumber(corporateAdvance3 ?? record.items?.currentAdvance),
       currentAdvanceSecond: toNumber(corporateAdvance4 ?? record.items?.currentAdvanceSecond),
@@ -203,7 +255,7 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       gas: toNumber(record.gas),
       water: toNumber(record.water),
       internet: toNumber(record.internet),
-      management: toNumber(record.items?.management),
+      management: toNumber(record.items?.management ?? record.items?.maintenance),
       fine: toNumber(record.fines),
       other: toNumber(record.items?.other),
     },
@@ -215,7 +267,7 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       currentAdvanceSecond: toNumber(laborAdvance4),
     },
     personalMemo: String(record.memo ?? ''),
-    assignmentType: (record.assignmentType === 'labor' ? 'labor' : 'corporate'),
+    assignmentType: (record.assignmentType === 'corporate' ? 'corporate' : 'labor'),
     itemAssignments: record.itemAssignments ?? {},
   };
 };
@@ -326,7 +378,23 @@ export const usePayrollData = (
       const deductionLabelMap = buildDeductionLabelMap(config);
 
       const workerMap = new Map<string, Worker>();
-      allWorkers.forEach(w => { if (w.id) workerMap.set(w.id, w); });
+      const workerCanonicalIdByAnyId = new Map<string, string>();
+      allWorkers.forEach((w) => {
+        const workerId = String(w.id ?? '').trim();
+        const legacyId = String(w.legacyId ?? '').trim();
+        const canonicalWorkerId = workerId || legacyId;
+        if (!canonicalWorkerId) return;
+
+        workerMap.set(canonicalWorkerId, w);
+        if (workerId) {
+          workerMap.set(workerId, w);
+          workerCanonicalIdByAnyId.set(workerId, canonicalWorkerId);
+        }
+        if (legacyId) {
+          workerMap.set(legacyId, w);
+          workerCanonicalIdByAnyId.set(legacyId, canonicalWorkerId);
+        }
+      });
 
       const siteMap = new Map<string, Site>();
       allSites.forEach(s => {
@@ -337,7 +405,35 @@ export const usePayrollData = (
       });
 
       const teamMap = new Map<string, Team>();
-      allTeams.forEach(t => { if (t.id) teamMap.set(t.id, t); });
+      const teamCanonicalIdByAnyId = new Map<string, string>();
+      allTeams.forEach((t) => {
+        const teamId = String(t.id ?? '').trim();
+        const legacyId = String(t.legacyId ?? '').trim();
+        const canonicalTeamId = teamId || legacyId;
+        if (!canonicalTeamId) return;
+
+        teamMap.set(canonicalTeamId, t);
+        if (teamId) {
+          teamMap.set(teamId, t);
+          teamCanonicalIdByAnyId.set(teamId, canonicalTeamId);
+        }
+        if (legacyId) {
+          teamMap.set(legacyId, t);
+          teamCanonicalIdByAnyId.set(legacyId, canonicalTeamId);
+        }
+      });
+
+      const resolveWorkerCanonicalId = (rawId: string | undefined | null): string => {
+        const safe = String(rawId ?? '').trim();
+        if (!safe) return '';
+        return workerCanonicalIdByAnyId.get(safe) ?? safe;
+      };
+
+      const resolveTeamCanonicalId = (rawId: string | undefined | null): string => {
+        const safe = String(rawId ?? '').trim();
+        if (!safe) return '';
+        return teamCanonicalIdByAnyId.get(safe) ?? safe;
+      };
 
       // 2. 월별 리포트 및 가불금 데이터 페칭
       const [endYear, endMonthNum] = endMonth.split('-');
@@ -354,27 +450,75 @@ export const usePayrollData = (
       ]);
 
       const advanceByWorkerTeamKey = new Map<string, AdvancePayment[]>();
+      const advanceByWorkerTeamNameKey = new Map<string, AdvancePayment[]>();
       const advanceListByWorkerId = new Map<string, AdvancePayment[]>();
       advances.forEach((item) => {
-        const workerId = (item.workerId ?? '').trim();
-        const teamId = (item.teamId ?? '').trim();
+        const workerId = resolveWorkerCanonicalId(item.workerId);
+        const teamId = resolveTeamCanonicalId(item.teamId);
         if (!workerId) return;
+        const normalizedItem =
+          workerId === String(item.workerId ?? '').trim() && teamId === String(item.teamId ?? '').trim()
+            ? item
+            : { ...item, workerId, teamId };
         if (teamId) {
           const key = `${workerId}__${teamId}`;
-          advanceByWorkerTeamKey.set(key, [...(advanceByWorkerTeamKey.get(key) ?? []), item]);
+          advanceByWorkerTeamKey.set(key, [...(advanceByWorkerTeamKey.get(key) ?? []), normalizedItem]);
         }
-        advanceListByWorkerId.set(workerId, [...(advanceListByWorkerId.get(workerId) ?? []), item]);
+        const normalizedTeamNameKey = normalizeTeamName(normalizedItem.teamName || teamMap.get(teamId)?.name);
+        if (normalizedTeamNameKey) {
+          const nameKey = `${workerId}__${normalizedTeamNameKey}`;
+          advanceByWorkerTeamNameKey.set(nameKey, [...(advanceByWorkerTeamNameKey.get(nameKey) ?? []), normalizedItem]);
+        }
+        advanceListByWorkerId.set(workerId, [...(advanceListByWorkerId.get(workerId) ?? []), normalizedItem]);
       });
+
+      const getAdvanceCandidates = (params: {
+        workerId: string;
+        teamId?: string;
+        teamName?: string;
+      }): AdvancePayment[] => {
+        const safeWorkerId = String(params.workerId ?? '').trim();
+        if (!safeWorkerId) return [];
+
+        const collected: AdvancePayment[] = [];
+        const seen = new Set<string>();
+        const pushUnique = (items: AdvancePayment[]) => {
+          items.forEach((item) => {
+            const key = String(item.id ?? `${item.teamId ?? ''}__${item.workerId ?? ''}__${item.yearMonth ?? ''}`).trim();
+            if (seen.has(key)) return;
+            seen.add(key);
+            collected.push(item);
+          });
+        };
+
+        const safeTeamId = String(params.teamId ?? '').trim();
+        if (safeTeamId) {
+          pushUnique(advanceByWorkerTeamKey.get(`${safeWorkerId}__${safeTeamId}`) ?? []);
+        }
+
+        const normalizedTeamNameKey = normalizeTeamName(params.teamName);
+        if (normalizedTeamNameKey) {
+          pushUnique(advanceByWorkerTeamNameKey.get(`${safeWorkerId}__${normalizedTeamNameKey}`) ?? []);
+        }
+
+        pushUnique(advanceListByWorkerId.get(safeWorkerId) ?? []);
+        return collected;
+      };
 
       // 3. 필터링 준비
       const allowedTeamIds = (() => {
         if (!selectedTeamId) return null;
-        const selectedTeam = allTeams.find(t => t.id === selectedTeamId);
+        const canonicalSelectedTeamId = resolveTeamCanonicalId(selectedTeamId);
+        const selectedTeam = allTeams.find((t) => resolveTeamCanonicalId(t.id) === canonicalSelectedTeamId);
         const selectedTeamNamePart = normalizeTeamName(selectedTeam?.name);
-        const ids = new Set<string>([selectedTeamId]);
+        const ids = new Set<string>(canonicalSelectedTeamId ? [canonicalSelectedTeamId] : []);
         allTeams.forEach(team => {
-          if (team.parentTeamId === selectedTeamId) ids.add(team.id!);
-          if (selectedTeamNamePart && normalizeTeamName(team.parentTeamName) === selectedTeamNamePart) ids.add(team.id!);
+          const canonicalTeamId = resolveTeamCanonicalId(team.id);
+          const canonicalParentTeamId = resolveTeamCanonicalId(team.parentTeamId);
+          if (canonicalTeamId && canonicalParentTeamId === canonicalSelectedTeamId) ids.add(canonicalTeamId);
+          if (canonicalTeamId && selectedTeamNamePart && normalizeTeamName(team.parentTeamName) === selectedTeamNamePart) {
+            ids.add(canonicalTeamId);
+          }
         });
         return ids;
       })();
@@ -450,33 +594,40 @@ export const usePayrollData = (
         const reportYM = (report.date ?? '').slice(0, 7);
         if (!months.includes(reportYM)) return;
 
-        const reportSite = siteMap.get(report.siteId);
-        const reportTeamId = report.teamId || allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(report.teamName))?.id || '';
+        const reportSite = siteMap.get(String(report.siteId ?? '').trim());
+        const reportTeamId = resolveTeamCanonicalId(report.teamId)
+          || resolveTeamCanonicalId(allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(report.teamName))?.id)
+          || '';
         const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
 
         report.workers.forEach(rw => {
-          const w = workerMap.get(rw.workerId);
+          const canonicalWorkerId = resolveWorkerCanonicalId(rw.workerId);
+          const w = workerMap.get(canonicalWorkerId) ?? workerMap.get(String(rw.workerId ?? '').trim());
           if (!w) return;
-          if (selectedWorkerId && rw.workerId !== selectedWorkerId) return;
+          if (selectedWorkerId && canonicalWorkerId !== resolveWorkerCanonicalId(selectedWorkerId)) return;
 
           const salaryModel = (rw.salaryModel || rw.payType || w.salaryModel || '').trim();
           const isMonthly = salaryModel === '월급제';
           const isDaily = salaryModel === '일급제';
           if (!isMonthly && !isDaily) return;
 
-          if (selectedTeamId && allowedTeamIds) {
-            const wTeamId = (w.teamId ?? '').trim();
-            if (!wTeamId || !allowedTeamIds.has(wTeamId)) return;
-          }
+          const workerTeamId = resolveTeamCanonicalId(w.teamId);
+          const resolvedTeamId = reportTeamId || workerTeamId || '';
+          const resolvedTeamName =
+            reportTeamName
+            || (teamMap.get(resolvedTeamId)?.name ?? '').trim()
+            || (w.teamName ?? '').trim()
+            || '';
 
-          const resolvedTeamId = (w.teamId ?? '').trim() || reportTeamId || '';
-          const resolvedTeamName = (w.teamName ?? '').trim() || reportTeamName || '';
+          if (selectedTeamId && allowedTeamIds) {
+            if (!resolvedTeamId || !allowedTeamIds.has(resolvedTeamId)) return;
+          }
           const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
           const unitPrice = rw.unitPrice ?? w.unitPrice ?? 0;
           const isLabor = reportSite?.paymentMethod === '노무';
 
           const baseParams = {
-            workerId: rw.workerId,
+            workerId: canonicalWorkerId || String(rw.workerId ?? '').trim(),
             companyId: w.companyId || teamMap.get(resolvedTeamId)?.companyId || report.companyId || '',
             companyName: w.companyName || teamMap.get(resolvedTeamId)?.companyName || report.companyName || '',
             teamId: safeTeamKey,
@@ -492,9 +643,9 @@ export const usePayrollData = (
             paymentMethod: reportSite?.paymentMethod || '-'
           };
 
-          const paymentKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
+          const paymentKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
           mergeAggregate(workerAggregates, paymentKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
-          const ledgerKey = `${reportYM}__${rw.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
+          const ledgerKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
           mergeAggregate(ledgerWorkerAggregates, ledgerKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
         });
       });
@@ -515,15 +666,27 @@ export const usePayrollData = (
         const accountNumber = w.accountNumber || '';
         const accountHolder = w.accountHolder || '';
 
-        const canonicalTeamId = (agg.teamId.startsWith('unresolved:') || agg.teamId === 'no-team') ? (w.teamId ?? '').trim() : agg.teamId;
-        const advanceRecords = canonicalTeamId 
-          ? (advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) || advanceListByWorkerId.get(agg.workerId) || [])
-          : (advanceListByWorkerId.get(agg.workerId) || []);
-
-        const deductionBreakdown = buildDeductionBreakdownFromRecords(
-          advanceRecords.filter((record) => String(record.yearMonth ?? '') === agg.month),
-          deductionLabelMap
+        const canonicalTeamId =
+          agg.teamId.startsWith('unresolved:') || agg.teamId === 'no-team'
+            ? ''
+            : resolveTeamCanonicalId(agg.teamId);
+        const advanceCandidates = getAdvanceCandidates({
+          workerId: agg.workerId,
+          teamId: canonicalTeamId,
+          teamName: agg.teamName || w?.teamName,
+        });
+        const selectedAdvanceRecord = pickPreferredAdvanceRecord(
+          advanceCandidates,
+          agg.month,
+          {
+            preferredTeamId: canonicalTeamId,
+            preferredTeamName: agg.teamName || w?.teamName,
+          }
         );
+
+        const deductionBreakdown = selectedAdvanceRecord
+          ? buildDeductionBreakdownFromRecords([selectedAdvanceRecord], deductionLabelMap)
+          : createEmptyDeductionBreakdown();
         const totalDeduction = deductionBreakdown.total;
         const netAmount = grossAmount - totalDeduction;
 
@@ -581,15 +744,22 @@ export const usePayrollData = (
         const grossAmount = agg.totalAmount;
         const unitPrice = agg.unitPrices.length === 1 ? agg.unitPrices[0] : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (w?.unitPrice || 0));
 
-        const canonicalTeamId = (agg.teamId.startsWith('unresolved:') || agg.teamId === 'no-team') ? (w?.teamId ?? '').trim() : agg.teamId;
-        const primaryAdvanceRecords = canonicalTeamId
-          ? (advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) ?? [])
-          : [];
-        const fallbackAdvanceRecords = advanceListByWorkerId.get(agg.workerId) ?? [];
+        const canonicalTeamId =
+          agg.teamId.startsWith('unresolved:') || agg.teamId === 'no-team'
+            ? ''
+            : resolveTeamCanonicalId(agg.teamId);
+        const advanceCandidates = getAdvanceCandidates({
+          workerId: agg.workerId,
+          teamId: canonicalTeamId,
+          teamName: agg.teamName || w?.teamName,
+        });
         const selectedAdvanceRecord = pickPreferredAdvanceRecord(
-          primaryAdvanceRecords.length > 0 ? primaryAdvanceRecords : fallbackAdvanceRecords,
+          advanceCandidates,
           agg.month,
-          canonicalTeamId
+          {
+            preferredTeamId: canonicalTeamId,
+            preferredTeamName: agg.teamName || w?.teamName,
+          }
         );
         const manual = buildManualInputFromAdvanceRecord(selectedAdvanceRecord);
 

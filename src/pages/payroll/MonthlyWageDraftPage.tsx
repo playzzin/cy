@@ -731,7 +731,16 @@ const stripTemporaryTaxLines = (breakdown: DeductionBreakdown | undefined): Dedu
 
 const floorWon = (value: number): number => Math.floor(toNumber(value));
 
-const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+const toNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const normalized = value.replace(/,/g, '').trim();
+        if (!normalized) return 0;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+};
 
 const APPLIED_UTILITY_FIELDS: Array<{ key: keyof LedgerUtilityInputLike['invoice']; label: string }> = [
     { key: 'lodging', label: '숙소비' },
@@ -838,6 +847,53 @@ const mergeDeductionBreakdownWithLines = (
     });
 
     return rebuildDeductionBreakdown({ standardLines, additionalLines });
+};
+
+const buildAdvanceDeductionLines = (
+    manual: LedgerUtilityInputLike | undefined,
+    config?: PayrollConfig | null
+): DeductionLine[] => {
+    if (!manual) return [];
+
+    const labels = {
+        ...DEFAULT_ADVANCE_ITEM_LABELS,
+        ...(config?.advanceItemLabels ?? {}),
+    };
+
+    const mapped: Array<{ label: string; amount: number }> = [
+        { label: labels.corporateAdvance1, amount: toNumber(manual.invoice?.carry) },
+        { label: labels.corporateAdvance2, amount: toNumber(manual.invoice?.carrySecond) },
+        { label: labels.corporateAdvance3, amount: toNumber(manual.invoice?.currentAdvance) },
+        { label: labels.corporateAdvance4, amount: toNumber(manual.invoice?.currentAdvanceSecond) },
+        { label: labels.laborAdvance1, amount: toNumber(manual.labor?.carry) },
+        { label: labels.laborAdvance2, amount: toNumber(manual.labor?.carrySecond) },
+        { label: labels.laborAdvance3, amount: toNumber(manual.labor?.currentAdvance) },
+        { label: labels.laborAdvance4, amount: toNumber(manual.labor?.currentAdvanceSecond) },
+    ];
+
+    return mapped
+        .filter((item) => String(item.label ?? '').trim().length > 0 && item.amount > 0)
+        .map((item) => ({ label: String(item.label).trim(), amount: item.amount }));
+};
+
+const ensureAdvanceLinesInBreakdown = (
+    breakdown: DeductionBreakdown,
+    manual: LedgerUtilityInputLike | undefined,
+    config?: PayrollConfig | null
+): DeductionBreakdown => {
+    const source = breakdown ?? createEmptyDeductionBreakdown();
+    const sourceLines = [
+        ...(source.standardLines ?? []),
+        ...(source.additionalLines ?? []),
+    ];
+    const advanceLabelSet = buildAdvanceLabelSet(config);
+    const hasAdvanceLines = sourceLines.some((line) => advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? ''))));
+    if (hasAdvanceLines) return source;
+
+    const manualAdvanceLines = buildAdvanceDeductionLines(manual, config);
+    if (manualAdvanceLines.length === 0) return source;
+
+    return mergeDeductionBreakdownWithLines(source, manualAdvanceLines);
 };
 
 const TAX_LINE_BUSINESS_INCOME_PREFIX = '[3.0%]';
@@ -2532,8 +2588,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 Object.entries(ledgerInputsMap).forEach(([ledgerRowKey, manual]) => {
                     const parts = ledgerRowKey.split('__');
                     if (parts.length < 4) return;
-                    const [month, workerId, teamName, salaryModelStr] = parts;
-                    const team = normalizeTeamNameRef.current(teamName);
+                    const [month, workerId, _teamId, salaryModelStr] = parts;
+                    const ledgerRow = ledgerRowsDataRef.current.find((row) => row.rowKey === ledgerRowKey);
+                    const team = normalizeTeamNameRef.current(ledgerRow?.teamName);
 
                     const groupKey = `${month}__${workerId}__${salaryModelStr}`;
                     let group = ledgerEntriesMergedByMonthWorker.get(groupKey);
@@ -2553,10 +2610,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 const taxCache = persistentTaxCacheRef.current;
 
                 const newPaymentData = basePD.map((item) => {
-                    const sourceDeductionBreakdown = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
+                    const sourceDeductionBreakdownRaw = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
                     const baseDeductionBreakdown = rebuildDeductionBreakdownRef.current({
-                        standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-                        additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                        standardLines: (sourceDeductionBreakdownRaw.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                        additionalLines: (sourceDeductionBreakdownRaw.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
                     });
                     const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
 
@@ -2606,9 +2663,18 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         dailyFeePerManDay,
                     });
                     const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
+                    const sourceDeductionBreakdown = ensureAdvanceLinesInBreakdown(
+                        sourceDeductionBreakdownRaw,
+                        utilityInput,
+                        config
+                    );
+                    const rebasedDeductionBreakdown = rebuildDeductionBreakdownRef.current({
+                        standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                        additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                    });
 
                     const nextDeductionBreakdown = (params.applyUtilities || params.applyDailyFee)
-                        ? mergeDeductionBreakdownWithLinesRef.current(baseDeductionBreakdown, deductionAppliedLines)
+                        ? mergeDeductionBreakdownWithLinesRef.current(rebasedDeductionBreakdown, deductionAppliedLines)
                         : sourceDeductionBreakdown;
 
                     let nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
@@ -2764,10 +2830,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             dailyFeePerManDay,
         });
         const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
-        const sourceDeductionBreakdown = stripTemporaryDeductionLines(baseItem.deductionBreakdown);
-        const baseDeductionBreakdown = rebuildDeductionBreakdown({
-            standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
-            additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+            const sourceDeductionBreakdownRaw = stripTemporaryDeductionLines(baseItem.deductionBreakdown);
+            const sourceDeductionBreakdown = ensureAdvanceLinesInBreakdown(
+                sourceDeductionBreakdownRaw,
+                utilityInput,
+                payrollConfig
+            );
+            const baseDeductionBreakdown = rebuildDeductionBreakdown({
+                standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
         });
         const nextDeductionBreakdown = mergeDeductionBreakdownWithLines(baseDeductionBreakdown, deductionAppliedLines);
         const nextTaxBreakdown = rebuildDeductionBreakdown({
@@ -3121,7 +3192,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             });
             const deductionAppliedLines = [...utilityLinesForDisplay, ...dailyFeeLinesForDisplay];
 
-            const sourceDeduction = stripTemporaryDeductionLines(baseItemForDisplay.deductionBreakdown);
+            const sourceDeduction = ensureAdvanceLinesInBreakdown(
+                stripTemporaryDeductionLines(baseItemForDisplay.deductionBreakdown),
+                utilityInputForDisplay,
+                payrollConfig
+            );
             const baseDeduction = rebuildDeductionBreakdown({
                 standardLines: (sourceDeduction.standardLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
                 additionalLines: (sourceDeduction.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
