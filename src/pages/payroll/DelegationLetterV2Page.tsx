@@ -512,7 +512,13 @@ const DelegationLetterV2Page: React.FC = () => {
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
                     html, body { width: 100%; height: auto; }
-                    body { margin: 0; padding: 0; background: white !important; }
+                    body {
+                        margin: 0;
+                        padding: 0;
+                        background: white !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
                     .no-print { display: none !important; }
                     .measure-only { display: none !important; }
                     .delegation-page-root {
@@ -548,6 +554,8 @@ const DelegationLetterV2Page: React.FC = () => {
                         width: 210mm !important;
                         height: 297mm !important;
                         padding: 15mm !important;
+                        overflow: visible !important;
+                        background: white !important;
                         break-inside: avoid;
                         page-break-inside: avoid;
                         page-break-after: always;
@@ -561,6 +569,13 @@ const DelegationLetterV2Page: React.FC = () => {
                     .delegation-workers-table thead { display: table-header-group; }
                     .delegation-workers-table tfoot { display: table-footer-group; }
                     .delegation-workers-table tr { break-inside: avoid; page-break-inside: avoid; }
+                    .delegation-workers-table th,
+                    .delegation-workers-table td { vertical-align: middle !important; }
+                    .delegation-letter-page img {
+                        max-width: 100% !important;
+                        max-height: 100% !important;
+                        object-fit: contain !important;
+                    }
                 }
             `}</style>
             {/* --- Left Panel: Settings --- */}
@@ -1103,7 +1118,9 @@ const DelegationLetterV2Page: React.FC = () => {
                         @media print {
                             body {
                                 background-color: white !important;
-                                overflow: visible !important; 
+                                overflow: visible !important;
+                                -webkit-print-color-adjust: exact !important;
+                                print-color-adjust: exact !important;
                             }
                             #root, .print-area-wrapper {
                                 width: 100% !important;
@@ -1129,9 +1146,19 @@ const DelegationLetterV2Page: React.FC = () => {
                                 padding: 15mm !important;
                                 margin: 0 auto !important;
                                 background-color: white !important;
+                                overflow: visible !important;
                                 break-inside: avoid;
                                 page-break-inside: avoid;
                                 page-break-after: always;
+                            }
+                            .delegation-workers-table th,
+                            .delegation-workers-table td {
+                                vertical-align: middle !important;
+                            }
+                            .delegation-letter-page img {
+                                max-width: 100% !important;
+                                max-height: 100% !important;
+                                object-fit: contain !important;
                             }
                         }
                         
@@ -1160,19 +1187,8 @@ const DelegationLetterV2Page: React.FC = () => {
 
                     <div ref={measureRef} className="measure-only delegation-letter-page h-auto min-h-0 m-0 p-[15mm]" style={{ position: 'absolute', top: -9999, left: -9999, visibility: 'hidden', height: 'auto', display: 'block' }}>
                         {/* Title Header */}
-                        <div className="flex justify-between items-start mb-6">
-                            <h2 className="text-[32px] font-bold tracking-[0.2em] ml-12">위 임 장</h2>
-                            <table className="border-collapse border-2 border-black w-[160px] text-xs">
-                                <tbody>
-                                    <tr>
-                                        <td className="border-b border-black w-6 text-center py-1">확</td>
-                                        <td rowSpan={2} className="border-l border-black p-0 relative h-[60px]"></td>
-                                    </tr>
-                                    <tr>
-                                        <td className="w-6 text-center py-1">인</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <div className="flex justify-center items-start mb-6">
+                            <h2 className="text-[32px] font-bold tracking-[0.2em]">위 임 장</h2>
                         </div>
 
                         {/* Top Context Info */}
@@ -1196,7 +1212,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                     <tr className="border-b border-black">
                                         <th className="border-r border-black bg-gray-50 p-2 w-24 text-center font-bold">성 명</th>
                                         <td className="border-r border-black p-2 relative h-12 w-48 text-center font-bold tracking-widest text-sm">
-                                            {mandataryInfo?.name}
+                                            <span className="block text-center pr-8">{mandataryInfo?.name}</span>
+                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 tracking-normal">(인)</span>
                                         </td>
                                         <th className="border-r border-black bg-gray-50 p-2 w-28 text-center font-bold">주민등록번호</th>
                                         <td className="p-2 text-center tracking-wider">{mandataryInfo?.idNumber}</td>
@@ -1270,11 +1287,6 @@ const DelegationLetterV2Page: React.FC = () => {
 
                         <div className="text-center font-bold text-sm tracking-widest mt-8 flex flex-col items-center">
                             <span>{formatDate(documentDate)}</span>
-                            <div className="flex gap-4 mt-8 items-center text-sm font-bold tracking-widest">
-                                <span>대표 위임자 :</span>
-                                <span className="underline underline-offset-4 px-2">{mandataryInfo?.name}</span>
-                                <span>(인)</span>
-                            </div>
                         </div>
                     </div>
 
@@ -1289,19 +1301,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                         {pageIndex === 0 && (
                                             <>
                                                 {/* Title Header */}
-                                                <div className="flex justify-between items-start mb-[4mm]">
-                                                    <h2 className="text-[28px] font-bold tracking-[0.2em] ml-12">위 임 장</h2>
-                                                    <table className="border-collapse border-[1.5px] border-black w-[140px] text-[10px]">
-                                                        <tbody>
-                                                            <tr>
-                                                                <td className="border-b border-black w-5 text-center py-1 bg-gray-50">확</td>
-                                                                <td rowSpan={2} className="border-l border-black p-0 relative h-[50px]"></td>
-                                                            </tr>
-                                                            <tr>
-                                                                <td className="w-5 text-center py-1 bg-gray-50">인</td>
-                                                            </tr>
-                                                        </tbody>
-                                                    </table>
+                                                <div className="flex justify-center items-start mb-[4mm]">
+                                                    <h2 className="text-[28px] font-bold tracking-[0.2em]">위 임 장</h2>
                                                 </div>
 
                                                 {/* Top Context Info */}
@@ -1326,7 +1327,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                                             <tr className="border-b border-black">
                                                                 <th className="border-r border-black bg-gray-100 p-1.5 w-20 text-center font-bold">성 명</th>
                                                                 <td className="border-r border-black p-1.5 relative h-10 w-40 text-center font-bold tracking-[0.2em] text-[13px]">
-                                                                    {mandataryInfo?.name}
+                                                                    <span className="block text-center pr-7">{mandataryInfo?.name}</span>
+                                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] tracking-normal">(인)</span>
                                                                 </td>
                                                                 <th className="border-r border-black bg-gray-100 p-1.5 w-24 text-center font-bold">주민등록번호</th>
                                                                 <td className="p-1.5 text-center tracking-wider bg-yellow-50/10">{mandataryInfo?.idNumber}</td>
@@ -1427,11 +1429,6 @@ const DelegationLetterV2Page: React.FC = () => {
                                     {isLastPage && (
                                         <div className="text-center mt-auto pt-[6mm]">
                                             <span className="font-bold text-[13px] tracking-[0.2em]">{formatDate(documentDate)}</span>
-                                            <div className="flex justify-center items-end mt-[5mm] text-[13px] font-bold tracking-[0.1em]">
-                                                <span className="text-gray-600 mr-2">대표 위임자 :</span>
-                                                <span className="border-b border-black px-4 pb-0.5 min-w-[80px] inline-block">{mandataryInfo?.name}</span>
-                                                <span className="ml-2 font-medium">(인)</span>
-                                            </div>
                                         </div>
                                     )}
                                 </div>

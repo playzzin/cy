@@ -62,6 +62,7 @@ const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지
 
 type RowDraft = {
     siteId: string;
+    teamId: string;
     workerId?: string; // New Worker ID if changed
     workerName?: string;
     workerTeamName?: string;
@@ -418,11 +419,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, [teams, normalizeTeamId]);
 
     const resolveWorkerTeamCanonicalId = useCallback((params: { workerTeamId?: string | null; workerTeamName?: string | null }) => {
+        // 소속팀명과 소속팀ID가 충돌하는 레거시 데이터가 있어, 이름 매핑을 우선 사용합니다.
+        const nameKey = normalizeTeamNameKey(params.workerTeamName);
+        if (nameKey) {
+            const byName = teamNameCanonicalIdMap.get(nameKey);
+            if (byName) return byName;
+        }
+
         const byId = normalizeTeamId(params.workerTeamId);
         if (byId) return byId;
-        const nameKey = normalizeTeamNameKey(params.workerTeamName);
-        if (!nameKey) return '';
-        return teamNameCanonicalIdMap.get(nameKey) ?? '';
+        return '';
     }, [normalizeTeamId, teamNameCanonicalIdMap]);
 
     const resolveWorkerTeamDisplayName = useCallback((params: { workerTeamId?: string | null; workerTeamName?: string | null }) => {
@@ -528,11 +534,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
     // 3. Available Worker Teams (Filtered by Site & Report Team)
     const availableWorkerTeams = useMemo(() => {
-        // 1단계: 현재 조회된 전체 행(rows)에서 소속팀 정보(ID 및 이름) 추출
+        // 소속팀 옵션은 현재 선택된 현장/현장담당팀 범위 내 데이터에서만 계산
+        const scopedRows = getFiltered({ siteId: selectedSiteId, teamId: selectedTeamId });
+
+        // 1단계: 현재 범위 내 행에서 소속팀 정보(ID 및 이름) 추출
         const foundTeamIds = new Set<string>();
         const foundTeamNames = new Set<string>();
         
-        rows.forEach(r => {
+        scopedRows.forEach(r => {
             if (r.workerTeamId) foundTeamIds.add(normalizeTeamId(r.workerTeamId));
             const displayName = resolveWorkerTeamDisplayName({
                 workerTeamId: r.workerTeamId,
@@ -541,8 +550,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (displayName) foundTeamNames.add(displayName);
         });
 
-        // 2단계: 만약 조회된 데이터가 하나도 없다면 전체 팀 목록을 반환
-        if (rows.length === 0) {
+        // 2단계: 만약 범위 내 데이터가 없다면 전체 팀 목록을 반환
+        if (scopedRows.length === 0) {
             return teams
                 .slice()
                 .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
@@ -572,7 +581,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         // 5단계: 합치고 정렬 (청연 우선)
         return [...matchedTeams, ...virtualTeams]
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
-    }, [rows, teams, normalizeTeamId, resolveWorkerTeamDisplayName]);
+    }, [getFiltered, selectedSiteId, selectedTeamId, teams, normalizeTeamId, resolveWorkerTeamDisplayName]);
 
 
     // 4. Base Display Rows (Filtered by ALL selection + Search)
@@ -1054,6 +1063,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             ?? '';
         return {
             siteId: normalizeSiteId(r.siteId),
+            teamId: normalizeTeamId(r.teamId),
             workerName: r.workerName ?? '',
             workerTeamName: fallbackWorkerTeamName,
             workerTeamId: canonicalWorkerTeamId || undefined,
@@ -1076,6 +1086,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         if (draft.workerName !== undefined && draft.workerName !== original.workerName) return true;
 
         if (draft.siteId !== normalizeSiteId(original.siteId)) return true;
+        if (draft.teamId !== normalizeTeamId(original.teamId)) return true;
         if (draft.salaryModel !== String(original.salaryModel ?? original.payType ?? '')) return true;
         if (Number(draft.manDay) !== (Number.isFinite(original.manDay) ? original.manDay : 0)) return true;
         if (Number(draft.unitPrice) !== (Number.isFinite(original.unitPrice) ? original.unitPrice : 0)) return true;
@@ -1094,6 +1105,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setRowDrafts(prev => {
             const current = prev[key] || {
                 siteId: normalizeSiteId(r.siteId),
+                teamId: normalizeTeamId(r.teamId),
                 workerName: r.workerName ?? '',
                 workerTeamName: r.workerTeamName ?? '',
                 workerTeamId: resolveWorkerTeamCanonicalId({
@@ -1125,6 +1137,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const buildReportLevelUpdates = useCallback((original: DailyReportWorkerRow, draft: RowDraft) => {
         const reportLevelUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
 
+        if (draft.teamId !== normalizeTeamId(original.teamId)) {
+            const matchedTeam = teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === draft.teamId);
+            if (matchedTeam?.id) {
+                reportLevelUpdates.teamId = String(matchedTeam.id);
+                reportLevelUpdates.teamName = matchedTeam.name ?? '';
+            }
+        }
+
         if (draft.siteId !== normalizeSiteId(original.siteId)) {
             const matchedSite = siteOptions.find((site) => String(site.id ?? '') === draft.siteId)
                 ?? siteOptions.find((site) => String(site.legacyId ?? '') === draft.siteId);
@@ -1144,7 +1164,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
 
         return reportLevelUpdates;
-    }, [normalizeSiteId, siteOptions]);
+    }, [normalizeSiteId, normalizeTeamId, siteOptions, teams]);
 
     // Worker Change Logic
     // Worker Change Logic
@@ -1557,7 +1577,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         setIsDownloadingExcel(true);
         try {
-            await dailyReportTransferService.exportRowsToExcel(sortedRows, `조회일보목록_${startDate}_${endDate}`);
+            const exportRows = sortedRows.map((row) => ({
+                ...row,
+                workerTeamName: resolveWorkerTeamDisplayName({
+                    workerTeamId: row.workerTeamId,
+                    workerTeamName: row.workerTeamName
+                })
+            }));
+
+            await dailyReportTransferService.exportRowsToExcel(exportRows, `조회일보목록_${startDate}_${endDate}`);
             toast.success('조회 목록 엑셀 다운로드 완료');
         } catch (error) {
             console.error('[DailyReportListV2] Excel download failed', error);
@@ -1565,7 +1593,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         } finally {
             setIsDownloadingExcel(false);
         }
-    }, [endDate, sortedRows, startDate]);
+    }, [endDate, resolveWorkerTeamDisplayName, sortedRows, startDate]);
 
     return (
         <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
@@ -2164,7 +2192,25 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     (r.paymentType ?? '')
                                                 )}
                                             </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">{r.teamName ?? ''}</td>
+                                            <td className="px-2.5 py-2 whitespace-nowrap">
+                                                {isEditMode ? (
+                                                    <select
+                                                        value={draft ? draft.teamId : normalizeTeamId(r.teamId)}
+                                                        onChange={(e) => setRowDraft(r, { teamId: e.target.value })}
+                                                        disabled={saving}
+                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[118px] bg-white"
+                                                    >
+                                                        <option value="">-</option>
+                                                        {availableReportTeams.map((team) => (
+                                                            <option key={String(team.id ?? team.legacyId ?? team.name)} value={normalizeTeamId(team.id ?? team.legacyId ?? '')}>
+                                                                {team.name}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : (
+                                                    (r.teamName ?? '')
+                                                )}
+                                            </td>
                                             <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-200 ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
                                                 {isEditMode ? (
                                                     <>

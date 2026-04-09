@@ -118,6 +118,30 @@ const extractDayOfMonth = (dateValue: unknown): number | null => {
   return d.getDate();
 };
 
+const formatWorkerNameCell = (row: RowState, includeTeam: boolean): string => {
+  const parts = [row.workerName.trim()];
+  if (includeTeam && row.teamName.trim()) {
+    parts.push(row.teamName.trim());
+  }
+  return parts.filter(Boolean).join('\n');
+};
+
+const formatInlineBankInfo = (row: RowState): string => {
+  const bankParts = [row.bankName.trim(), row.bankOwner.trim(), row.bankAccount.trim()].filter(Boolean);
+  const payTypeLabel = row.payType === 'delegate' ? '위임' : '직불';
+  if (bankParts.length === 0) return payTypeLabel;
+  return `${bankParts.join(' / ')} (${payTypeLabel})`;
+};
+
+const formatAddressCell = (row: RowState, includeBankUnderAddress: boolean): string => {
+  const parts = [row.workerAddress.trim()];
+  if (includeBankUnderAddress) {
+    const bankLine = formatInlineBankInfo(row);
+    if (bankLine) parts.push(bankLine);
+  }
+  return parts.filter(Boolean).join('\n');
+};
+
 // --- UI Constants & Classes ---
 const W_INDEX = 'w-[45px]';
 const W_NAME = 'w-[95px]';
@@ -589,60 +613,137 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
   const handleExcelDownload = useCallback(async () => {
     const workbook = new ExcelJS.Workbook();
-    const ws = workbook.addWorksheet('노무내역서');
+    workbook.creator = 'Codex';
+    workbook.lastModifiedBy = 'Codex';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const ws = workbook.addWorksheet('노무내역서', {
+      views: [{ state: 'frozen', ySplit: 4, xSplit: 5 }]
+    });
+    ws.properties.defaultRowHeight = 24;
 
     const [y, m] = (month || '').split('-');
     const lastDay = y && m ? new Date(Number(y), Number(m), 0).getDate() : 31;
+    const showBankDetailsColumn = showBankColumn;
+    const trailingHeaders = showBankDetailsColumn
+      ? ['은행', '예금주', '계좌번호', '지급구분']
+      : ['지급구분'];
+    const totalColumns = 5 + lastDay + 3 + trailingHeaders.length;
+    const afterDays = 5 + lastDay;
+    const daySplitPoint = Math.ceil(lastDay / 2);
+
+    ws.pageSetup = {
+      orientation: 'landscape',
+      paperSize: 9,
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      margins: {
+        left: 0.25,
+        right: 0.25,
+        top: 0.35,
+        bottom: 0.35,
+        header: 0.2,
+        footer: 0.2
+      }
+    };
 
     // --- Title Row ---
     const titleRow = ws.addRow([statementTitle || '노무내역서']);
-    ws.mergeCells(titleRow.number, 1, titleRow.number, 6 + lastDay);
+    ws.mergeCells(titleRow.number, 1, titleRow.number, totalColumns);
     titleRow.getCell(1).font = { bold: true, size: 16 };
     titleRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    titleRow.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
     titleRow.height = 30;
 
     // --- Info Row ---
     const periodStr = y && m ? `${y}-${m}-01 ~ ${y}-${m}-${lastDay}` : '-';
-    const infoRow = ws.addRow(['기간', periodStr, '', '회사명', companyName || '-', '현장명', siteNameInput || '전체 통합']);
-    infoRow.eachCell((cell) => {
-      cell.font = { bold: true, size: 10 };
-      cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-    });
+    const optionLabels = [
+      showTeamUnderName ? '이름하단팀명' : '',
+      showBankUnderAddress ? '주소하단계좌' : '',
+      showBankColumn ? '계좌컬럼' : ''
+    ].filter(Boolean).join(', ') || '기본';
+
+    ws.mergeCells(2, 1, 2, 4);
+    ws.mergeCells(2, 5, 2, 7);
+    ws.mergeCells(2, 8, 2, Math.min(12, totalColumns));
+    ws.mergeCells(2, Math.min(13, totalColumns), 2, totalColumns);
+
+    ws.getCell(2, 1).value = `기간: ${periodStr}`;
+    ws.getCell(2, 5).value = `회사명: ${companyName || '-'}`;
+    ws.getCell(2, 8).value = `현장명: ${siteNameInput || '전체 통합'}`;
+    ws.getCell(2, Math.min(13, totalColumns)).value = `출력옵션: ${optionLabels}`;
+
+    for (let col = 1; col <= totalColumns; col += 1) {
+      const cell = ws.getCell(2, col);
+      cell.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
+      cell.alignment = { vertical: 'middle', horizontal: col === 1 ? 'left' : 'center' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      cell.border = {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' }
+      };
+    }
+    ws.getRow(2).height = 22;
 
     ws.addRow([]);
 
     // --- Header Row ---
     const headerCells: string[] = ['No', '성명', '주민등록번호', '전화번호', '주소'];
     for (let d = 1; d <= lastDay; d++) headerCells.push(String(d));
-    headerCells.push('공수', '단가', '총액', '은행', '예금주', '계좌번호', '지급구분');
+    headerCells.push('공수', '단가', '총액', ...trailingHeaders);
 
     const headerRow = ws.addRow(headerCells);
     headerRow.eachCell((cell) => {
       cell.font = { bold: true, size: 9 };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E8E8' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
       cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
     });
     headerRow.height = 24;
 
     ws.getColumn(1).width = 5;   // No
-    ws.getColumn(2).width = 10;  // 성명
+    ws.getColumn(2).width = showTeamUnderName ? 14 : 10;  // 성명
     ws.getColumn(3).width = 16;  // 주민등록번호
     ws.getColumn(4).width = 14;  // 전화번호
-    ws.getColumn(5).width = 40;  // 주소
+    ws.getColumn(5).width = showBankUnderAddress ? 48 : 40;  // 주소
     for (let d = 1; d <= lastDay; d++) ws.getColumn(5 + d).width = 4;
-    const afterDays = 5 + lastDay;
     ws.getColumn(afterDays + 1).width = 6;  // 공수
     ws.getColumn(afterDays + 2).width = 8; // 단가
     ws.getColumn(afterDays + 3).width = 10; // 총액
-    ws.getColumn(afterDays + 4).width = 7;  // 은행
-    ws.getColumn(afterDays + 5).width = 8;  // 예금주
-    ws.getColumn(afterDays + 6).width = 16; // 계좌번호
-    ws.getColumn(afterDays + 7).width = 7;  // 지급구분
+    if (showBankDetailsColumn) {
+      ws.getColumn(afterDays + 4).width = 9;  // 은행
+      ws.getColumn(afterDays + 5).width = 10; // 예금주
+      ws.getColumn(afterDays + 6).width = 18; // 계좌번호
+      ws.getColumn(afterDays + 7).width = 8;  // 지급구분
+    } else {
+      ws.getColumn(afterDays + 4).width = 8;  // 지급구분
+    }
+
+    for (let d = 1; d <= lastDay; d += 1) {
+      const dayCell = headerRow.getCell(5 + d);
+      dayCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: d <= daySplitPoint ? 'FF334155' : 'FF475569' }
+      };
+      dayCell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    }
+    [1, 2, 3, 4, 5].forEach((col) => {
+      headerRow.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    });
+    for (let col = afterDays + 1; col <= totalColumns; col += 1) {
+      headerRow.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7DD' } };
+    }
 
     const filledRows = rows.filter(r => r.workerName.trim().length > 0);
     let grandTotalDays = 0;
     let grandTotalAmount = 0;
+    const dailyTotals = Array.from({ length: lastDay }, () => 0);
 
     filledRows.forEach((r, idx) => {
       const totalDaysVal = sumDays(r.days);
@@ -654,30 +755,36 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
       const cells: (string | number)[] = [
         idx + 1,
-        r.workerName,
+        formatWorkerNameCell(r, showTeamUnderName),
         r.workerSsn,
         r.workerPhone,
-        r.workerAddress
+        formatAddressCell(r, showBankUnderAddress)
       ];
       for (let d = 0; d < lastDay; d++) {
         const v = parseFloat(r.days[d] || '');
+        if (Number.isFinite(v)) {
+          dailyTotals[d] += v;
+        }
         cells.push(Number.isFinite(v) && v !== 0 ? v : '');
       }
-      cells.push(
-        totalDaysVal || '',
-        safeUnit || '',
-        totalAmountVal || '',
-        r.bankName,
-        r.bankOwner,
-        r.bankAccount,
-        r.payType === 'delegate' ? '위임' : '직불'
-      );
+      cells.push(totalDaysVal || '', safeUnit || '', totalAmountVal || '');
+      if (showBankDetailsColumn) {
+        cells.push(
+          r.bankName,
+          r.bankOwner,
+          r.bankAccount,
+          r.payType === 'delegate' ? '위임' : '직불'
+        );
+      } else {
+        cells.push(r.payType === 'delegate' ? '위임' : '직불');
+      }
 
       const dataRow = ws.addRow(cells);
+      dataRow.height = showTeamUnderName || showBankUnderAddress ? 34 : 24;
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { size: 9 };
         cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-        cell.alignment = { vertical: 'middle' };
+        cell.alignment = { vertical: 'middle', wrapText: colNumber === 2 || colNumber === 5 };
         if (colNumber === 1 || (colNumber >= 6 && colNumber <= 5 + lastDay) || colNumber === afterDays + 1) {
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         }
@@ -685,28 +792,51 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
           cell.numFmt = '#,##0';
         }
+        if (showBankDetailsColumn && colNumber >= afterDays + 4) {
+          cell.alignment = { horizontal: colNumber === totalColumns ? 'center' : 'center', vertical: 'middle', wrapText: true };
+        }
       });
     });
 
     const footerCells: (string | number)[] = ['', '합 계', '', '', ''];
-    for (let d = 0; d < lastDay; d++) footerCells.push('');
-    footerCells.push(grandTotalDays || '', '', grandTotalAmount || '', '', '', '', '');
+    for (let d = 0; d < lastDay; d++) {
+      footerCells.push(dailyTotals[d] > 0 ? dailyTotals[d] : '');
+    }
+    footerCells.push(grandTotalDays || '', '', grandTotalAmount || '');
+    if (showBankDetailsColumn) {
+      footerCells.push('', '', '', '');
+    } else {
+      footerCells.push('');
+    }
 
     const footerRow = ws.addRow(footerCells);
     footerRow.eachCell((cell) => {
       cell.font = { bold: true, size: 10 };
       cell.border = { top: { style: 'medium' }, bottom: { style: 'medium' }, left: { style: 'thin' }, right: { style: 'thin' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
     });
+    footerRow.height = 24;
     const footerAmountCell = footerRow.getCell(afterDays + 3);
     footerAmountCell.numFmt = '#,##0';
     footerAmountCell.alignment = { horizontal: 'right', vertical: 'middle' };
+    const footerTotalDaysCell = footerRow.getCell(afterDays + 1);
+    footerTotalDaysCell.numFmt = '#,##0.0';
+    for (let d = 0; d < lastDay; d += 1) {
+      const cell = footerRow.getCell(6 + d);
+      cell.numFmt = '#,##0.0';
+    }
+
+    ws.autoFilter = {
+      from: { row: headerRow.number, column: 1 },
+      to: { row: headerRow.number, column: totalColumns }
+    };
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const fileName = `노무내역서_${siteNameInput || '전체'}_${month || 'unknown'}.xlsx`;
     saveAs(blob, fileName);
-  }, [rows, month, statementTitle, companyName, siteNameInput]);
+  }, [rows, month, statementTitle, companyName, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName]);
 
   const statementSummary = useMemo(() => {
     let totalDays = 0;
@@ -758,9 +888,92 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return Array.from({ length: secondaryCount }, (_, idx) => primaryDayNumbers.length + idx + 1);
   }, [isSplitView, primaryDayNumbers.length, statementLastDay]);
 
+  const splitRowSectionClass = isSplitView ? 'h-9 min-h-[36px]' : 'h-8 min-h-[32px]';
+  const spanningCellHeightClass = isSplitView ? 'min-h-[72px]' : 'min-h-[32px]';
+  const namePrimaryCellHeightClass = showTeamUnderName ? splitRowSectionClass : spanningCellHeightClass;
+  const addressPrimaryCellHeightClass = showBankUnderAddress ? splitRowSectionClass : spanningCellHeightClass;
+
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
-      <div className="bg-white border-b border-slate-200 shadow-sm z-20 flex-shrink-0">
+    <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 8mm;
+          }
+
+          html, body, #root {
+            width: 100%;
+            height: auto;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .labor-statement-page {
+            background: #ffffff !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+
+          .labor-statement-toolbar {
+            display: none !important;
+          }
+
+          .labor-statement-shell {
+            padding: 0 !important;
+            overflow: visible !important;
+          }
+
+          .labor-statement-preview-frame,
+          .labor-statement-preview-scroll {
+            border: none !important;
+            box-shadow: none !important;
+            background: #ffffff !important;
+            overflow: visible !important;
+          }
+
+          .labor-statement-preview-scroll {
+            padding: 0 !important;
+          }
+
+          .labor-statement-preview-surface {
+            width: max-content;
+            margin: 0 auto !important;
+            transform-origin: top left;
+          }
+
+          .labor-statement-preview-surface.with-bank {
+            zoom: 0.62;
+          }
+
+          .labor-statement-preview-surface.without-bank {
+            zoom: 0.74;
+          }
+
+          .labor-statement-preview-surface table {
+            box-shadow: none !important;
+          }
+
+          .labor-statement-preview-surface .sticky {
+            position: static !important;
+          }
+
+          .labor-statement-preview-surface input,
+          .labor-statement-preview-surface select {
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            appearance: none !important;
+          }
+        }
+      `}</style>
+      <div className="labor-statement-toolbar bg-white border-b border-slate-200 shadow-sm z-20 flex-shrink-0">
         <div className="h-16 px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-3">
@@ -890,9 +1103,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 px-6 pb-6 pt-6 overflow-hidden">
-        <div className="h-full bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
-          <div className="overflow-auto custom-scrollbar flex-1 bg-[#f6f4eb] p-6">
+      <div className="labor-statement-shell flex-1 min-h-0 px-6 pb-6 pt-6 overflow-hidden">
+        <div className="labor-statement-preview-frame h-full bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
+          <div className="labor-statement-preview-scroll overflow-auto custom-scrollbar flex-1 bg-[#f6f4eb] p-6">
+            <div className={`labor-statement-preview-surface ${showBankColumn ? 'with-bank' : 'without-bank'}`}>
             <div className="mb-6 grid min-w-[1480px] grid-cols-[1fr_auto_1fr] items-start gap-4">
               <div />
               <div className="justify-self-center border border-black bg-[#fff9dd] px-12 py-3 text-center text-3xl font-black tracking-tight text-slate-900 shadow-sm">
@@ -960,34 +1174,34 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     <tr className="border-b border-black bg-white text-slate-800">
                       <td className="border-r border-black text-center text-xs font-bold text-slate-700 bg-[#f6f1cf]" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <div className="flex flex-col h-full justify-center">
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
                           <input type="text" value={row.workerName} onChange={e => updateRow(row.id, { workerName: e.target.value })}
-                            className="w-full h-8 min-h-[32px] px-2 text-center text-xs font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 border-b border-transparent" placeholder="이름"
+                            className={`w-full px-2 text-center text-xs font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 ${showTeamUnderName ? `${splitRowSectionClass} border-b border-black` : namePrimaryCellHeightClass}`} placeholder="이름"
                           />
                           {showTeamUnderName && (
                             <input type="text" value={row.teamName} onChange={e => updateRow(row.id, { teamName: e.target.value })}
-                              className="w-full h-6 min-h-[24px] px-2 text-center text-[10px] text-slate-500 bg-slate-50/50 outline-none focus:bg-indigo-50 placeholder-slate-300 border-t border-black" placeholder="팀명"
+                              className={`w-full px-2 text-center text-[10px] text-slate-500 bg-slate-50/50 outline-none focus:bg-indigo-50 placeholder-slate-300 border-t border-black ${splitRowSectionClass}`} placeholder="팀명"
                             />
                           )}
                         </div>
                       </td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <div className="flex flex-col h-full justify-center">
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
                           <input type="text" value={row.workerSsn} onChange={e => updateRow(row.id, { workerSsn: e.target.value })}
-                            className="w-full h-8 px-2 text-center text-xs font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tighter placeholder-slate-300 border-b border-black" placeholder="800101-1..."
+                            className={`w-full px-2 text-center text-xs font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tighter placeholder-slate-300 border-b border-black ${splitRowSectionClass}`} placeholder="800101-1..."
                           />
                           <input type="text" value={row.workerPhone} onChange={e => updateRow(row.id, { workerPhone: e.target.value })}
-                            className="w-full h-8 px-2 text-center text-[10px] font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tight placeholder-slate-300" placeholder="010-0000-0000"
+                            className={`w-full px-2 text-center text-[10px] font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tight placeholder-slate-300 ${splitRowSectionClass}`} placeholder="010-0000-0000"
                           />
                         </div>
                       </td>
                       <td className={`border-r border-black p-0 ${row.payType === 'delegate' && showBankUnderAddress ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
-                        <div className="flex flex-col h-full justify-center">
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
                           <input type="text" value={row.workerAddress} onChange={e => updateRow(row.id, { workerAddress: e.target.value })}
-                            className="w-full h-8 min-h-[32px] px-2 text-left text-[11px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 border-b border-transparent" placeholder="상세주소 입력"
+                            className={`w-full px-2 text-left text-[11px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 ${showBankUnderAddress ? `${splitRowSectionClass} border-b border-black` : addressPrimaryCellHeightClass}`} placeholder="상세주소 입력"
                           />
                           {showBankUnderAddress && (
-                            <div className="flex h-7 items-center divide-x divide-black border-t border-black bg-slate-50/50">
+                            <div className={`flex items-center divide-x divide-black border-t border-black bg-slate-50/50 ${splitRowSectionClass}`}>
                               <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[60px] h-full text-center text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
                               <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full text-center text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
                               <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
@@ -1077,6 +1291,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 )}
               </tfoot>
             </table>
+            </div>
           </div>
         </div>
       </div>

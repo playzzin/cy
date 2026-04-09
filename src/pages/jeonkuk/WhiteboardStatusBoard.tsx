@@ -66,6 +66,13 @@ type WhiteboardStatusViewState = {
     mainCompanyId: string;
 };
 
+type TeamSelectorOption = {
+    id: string;
+    name: string;
+    companyId?: string;
+    isSupport?: boolean;
+};
+
 const WHITEBOARD_STATUS_VIEW_KEY = 'output-management:whiteboard-status:v1';
 
 const normalizeHexColor = (value: string | undefined): string | undefined => {
@@ -188,6 +195,207 @@ const WhiteboardStatusBoard: React.FC = () => {
         };
     }, [defaultVisibleTeams, isSupportTeam, selectableSupportTeams, selectedCompanyId, teams]);
 
+    const resolvedTeamByIdMap = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const id = String(team.id ?? '').trim();
+            const legacyId = String(team.legacyId ?? '').trim();
+            if (id) map.set(id, team);
+            if (legacyId) map.set(legacyId, team);
+        });
+        return map;
+    }, [teams]);
+
+    const resolvedTeamByNameMap = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const key = normalizeName(team.name);
+            if (key && !map.has(key)) {
+                map.set(key, team);
+            }
+        });
+        return map;
+    }, [normalizeName, teams]);
+
+    const resolvedSiteByIdMap = React.useMemo(() => {
+        const map = new Map<string, Site>();
+        sites.forEach((site) => {
+            const id = String(site.id ?? '').trim();
+            const legacyId = String(site.legacyId ?? '').trim();
+            if (id) map.set(id, site);
+            if (legacyId) map.set(legacyId, site);
+        });
+        return map;
+    }, [sites]);
+
+    const resolvedSiteByNameMap = React.useMemo(() => {
+        const map = new Map<string, Site>();
+        sites.forEach((site) => {
+            const key = normalizeName(site.name);
+            if (key && !map.has(key)) {
+                map.set(key, site);
+            }
+        });
+        return map;
+    }, [normalizeName, sites]);
+
+    const resolveDashboardTeam = React.useCallback((teamId?: string | null, teamName?: string | null) => {
+        const normalizedId = String(teamId ?? '').trim();
+        if (normalizedId) {
+            const byId = resolvedTeamByIdMap.get(normalizedId);
+            if (byId) return byId;
+        }
+
+        const normalizedTeamName = normalizeName(teamName);
+        if (normalizedTeamName) {
+            return resolvedTeamByNameMap.get(normalizedTeamName);
+        }
+
+        return undefined;
+    }, [normalizeName, resolvedTeamByIdMap, resolvedTeamByNameMap]);
+
+    const resolveDashboardSite = React.useCallback((siteId?: string | null, siteName?: string | null) => {
+        const normalizedId = String(siteId ?? '').trim();
+        if (normalizedId) {
+            const byId = resolvedSiteByIdMap.get(normalizedId);
+            if (byId) return byId;
+        }
+
+        const normalizedSiteName = normalizeName(siteName);
+        if (normalizedSiteName) {
+            return resolvedSiteByNameMap.get(normalizedSiteName);
+        }
+
+        return undefined;
+    }, [normalizeName, resolvedSiteByIdMap, resolvedSiteByNameMap]);
+
+    const selectedDashboardTeam = React.useMemo(
+        () => resolveDashboardTeam(selectedTeamId),
+        [resolveDashboardTeam, selectedTeamId]
+    );
+
+    const selectedDashboardTeamIdentityKeys = React.useMemo(() => {
+        const keys = new Set<string>();
+        const addId = (value?: string | null) => {
+            const normalized = String(value ?? '').trim();
+            if (normalized) keys.add(`id:${normalized}`);
+        };
+        const addName = (value?: string | null) => {
+            const normalized = normalizeName(value);
+            if (normalized) keys.add(`name:${normalized}`);
+        };
+
+        addId(selectedTeamId);
+        addId(selectedDashboardTeam?.id);
+        addId(selectedDashboardTeam?.legacyId);
+        addName(selectedDashboardTeam?.name);
+        return keys;
+    }, [normalizeName, selectedDashboardTeam, selectedTeamId]);
+
+    const matchesSelectedDashboardTeam = React.useCallback((teamId?: string | null, teamName?: string | null) => {
+        if (!selectedTeamId) return true;
+
+        const candidateKeys = new Set<string>();
+        const addId = (value?: string | null) => {
+            const normalized = String(value ?? '').trim();
+            if (normalized) candidateKeys.add(`id:${normalized}`);
+        };
+        const addName = (value?: string | null) => {
+            const normalized = normalizeName(value);
+            if (normalized) candidateKeys.add(`name:${normalized}`);
+        };
+
+        const resolvedTeam = resolveDashboardTeam(teamId, teamName);
+        addId(teamId);
+        addName(teamName);
+        addId(resolvedTeam?.id);
+        addId(resolvedTeam?.legacyId);
+        addName(resolvedTeam?.name);
+
+        return Array.from(candidateKeys).some((key) => selectedDashboardTeamIdentityKeys.has(key));
+    }, [normalizeName, resolveDashboardTeam, selectedDashboardTeamIdentityKeys, selectedTeamId]);
+
+    const siteModeTeamOptions = React.useMemo<TeamSelectorOption[]>(() => (
+        teams
+            .filter((team) => {
+                if (isSupportTeam(team)) return false;
+                const companyId = String(team.companyId ?? '').trim();
+                if (!companyId) return false;
+                return selectedCompanyId ? companyId === selectedCompanyId : visibleCompanyIdSet.has(companyId);
+            })
+            .map((team) => ({
+                id: String(team.id ?? '').trim(),
+                name: team.name,
+                companyId: String(team.companyId ?? '').trim() || undefined,
+                isSupport: false
+            }))
+            .filter((team) => Boolean(team.id))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+    ), [isSupportTeam, selectedCompanyId, teams, visibleCompanyIdSet]);
+
+    const teamModeTeamOptions = React.useMemo<TeamSelectorOption[]>(() => {
+        const optionMap = new Map<string, TeamSelectorOption>();
+
+        const registerTeam = (teamId?: string | null, teamName?: string | null, siteCompanyId?: string | null) => {
+            const resolvedTeam = resolveDashboardTeam(teamId, teamName);
+            const optionId = String(resolvedTeam?.id ?? teamId ?? '').trim();
+            const optionName = String(resolvedTeam?.name ?? teamName ?? '').trim();
+            if (!optionId || !optionName) return;
+
+            const teamCompanyId = String(resolvedTeam?.companyId ?? '').trim();
+            const normalizedSiteCompanyId = String(siteCompanyId ?? '').trim();
+            const isInScope = selectedCompanyId
+                ? teamCompanyId === selectedCompanyId || normalizedSiteCompanyId === selectedCompanyId
+                : (teamCompanyId ? visibleCompanyIdSet.has(teamCompanyId) : false) ||
+                (normalizedSiteCompanyId ? visibleCompanyIdSet.has(normalizedSiteCompanyId) : false);
+
+            if (!isInScope) return;
+
+            const isInternalVisibleTeam = teamCompanyId ? visibleCompanyIdSet.has(teamCompanyId) && !isSupportTeam(resolvedTeam) : false;
+            optionMap.set(optionId, {
+                id: optionId,
+                name: optionName,
+                companyId: teamCompanyId || undefined,
+                isSupport: !isInternalVisibleTeam
+            });
+        };
+
+        rawReports.forEach((report) => {
+            const targetSite = resolveDashboardSite(report.siteId, report.siteName);
+            const siteCompanyId = String(targetSite?.companyId ?? report.companyId ?? '').trim();
+
+            registerTeam(report.teamId, report.teamName, siteCompanyId);
+            (report.workers ?? []).forEach((worker: any) => {
+                registerTeam(
+                    worker.teamId || report.teamId,
+                    worker.workerTeamName || (!worker.teamId || worker.teamId === report.teamId ? report.teamName : undefined),
+                    siteCompanyId
+                );
+            });
+        });
+
+        return Array.from(optionMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+    }, [isSupportTeam, rawReports, resolveDashboardSite, resolveDashboardTeam, selectedCompanyId, visibleCompanyIdSet]);
+
+    const dashboardTeamSelectorOptions = React.useMemo(() => {
+        if (viewMode === 'site') {
+            return {
+                internal: siteModeTeamOptions,
+                support: [] as TeamSelectorOption[]
+            };
+        }
+
+        return {
+            internal: teamModeTeamOptions.filter((team) => !team.isSupport),
+            support: teamModeTeamOptions.filter((team) => team.isSupport)
+        };
+    }, [siteModeTeamOptions, teamModeTeamOptions, viewMode]);
+
+    const selectedDashboardTeamLabel = React.useMemo(
+        () => [...dashboardTeamSelectorOptions.internal, ...dashboardTeamSelectorOptions.support].find((team) => team.id === selectedTeamId)?.name ?? selectedDashboardTeam?.name ?? '',
+        [dashboardTeamSelectorOptions, selectedDashboardTeam, selectedTeamId]
+    );
+
     const selectedCompany = selectedCompanyId
         ? companies.find(c => c.id === selectedCompanyId)
         : companies.find(c => c.id === mainCompanyId);
@@ -219,7 +427,7 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (!selectedTeamId) return;
 
         const selectableTeamIds = new Set(
-            [...visibleTeamsForSelector.internal, ...visibleTeamsForSelector.support]
+            [...dashboardTeamSelectorOptions.internal, ...dashboardTeamSelectorOptions.support]
                 .map((team) => team.id)
                 .filter((id): id is string => Boolean(id))
         );
@@ -227,7 +435,7 @@ const WhiteboardStatusBoard: React.FC = () => {
         if (!selectableTeamIds.has(selectedTeamId)) {
             setSelectedTeamId('');
         }
-    }, [selectedTeamId, visibleTeamsForSelector]);
+    }, [dashboardTeamSelectorOptions, selectedTeamId]);
 
     useEffect(() => {
         fetchReports();
@@ -591,6 +799,359 @@ const WhiteboardStatusBoard: React.FC = () => {
             });
     }, [rawReports, viewMode, selectedTeamId, selectedCompanyId, sites, teams, sortBy, expandedItems, visibleCompanyIdSet, selectedTeamResponsibleSiteIdSet, cheongyeonCompanyIdSet, isSupportTeam]);
 
+    const dashboardItems = React.useMemo(() => {
+        if (!sites.length && !teams.length) return [];
+
+        const items: BoardItem[] = [];
+        const itemMap = new Map<string, BoardItem>();
+
+        const isWithinCompanyScope = (teamCompanyId?: string | null, siteCompanyId?: string | null) => {
+            const normalizedTeamCompanyId = String(teamCompanyId ?? '').trim();
+            const normalizedSiteCompanyId = String(siteCompanyId ?? '').trim();
+
+            if (selectedCompanyId) {
+                return normalizedTeamCompanyId === selectedCompanyId || normalizedSiteCompanyId === selectedCompanyId;
+            }
+
+            return (normalizedTeamCompanyId ? visibleCompanyIdSet.has(normalizedTeamCompanyId) : false) ||
+                (normalizedSiteCompanyId ? visibleCompanyIdSet.has(normalizedSiteCompanyId) : false);
+        };
+
+        const getOrCreateItem = (nextItem: BoardItem) => {
+            const existing = itemMap.get(nextItem.id);
+            if (existing) return existing;
+            itemMap.set(nextItem.id, nextItem);
+            items.push(nextItem);
+            return nextItem;
+        };
+
+        const getOrCreateDetail = (
+            item: BoardItem,
+            detailId: string,
+            detailName: string,
+            detailCompanyId?: string,
+            responsibleTeamId?: string
+        ) => {
+            if (!item.workDetails) item.workDetails = [];
+            let detail = item.workDetails.find((entry) => entry.targetId === detailId);
+            if (!detail) {
+                detail = {
+                    targetId: detailId,
+                    targetName: detailName,
+                    manDay: 0,
+                    amount: 0,
+                    workerCount: 0,
+                    responsibleTeamId,
+                    companyId: detailCompanyId,
+                    workers: []
+                };
+                item.workDetails.push(detail);
+            }
+            return detail;
+        };
+
+        const appendWorkerLog = (
+            detail: NonNullable<BoardItem['workDetails']>[number],
+            workerName: string,
+            date: string,
+            manDay: number,
+            amount: number
+        ) => {
+            if (!detail.workers) detail.workers = [];
+            let workerEntry = detail.workers.find((entry) => entry.workerName === workerName);
+            if (!workerEntry) {
+                workerEntry = { workerName, manDay: 0, amount: 0, dailyLogs: [] };
+                detail.workers.push(workerEntry);
+            }
+            workerEntry.manDay += manDay;
+            workerEntry.amount += amount;
+            workerEntry.dailyLogs.push({ date, manDay, amount });
+        };
+
+        if (viewMode === 'site') {
+            sites
+                .filter((site) => site.status === 'active')
+                .filter((site) => {
+                    const companyId = String(site.companyId ?? '').trim();
+                    if (selectedCompanyId) return companyId === selectedCompanyId;
+                    return companyId ? visibleCompanyIdSet.has(companyId) : false;
+                })
+                .filter((site) => {
+                    if (!selectedTeamId) return true;
+                    return matchesSelectedDashboardTeam(site.responsibleTeamId, site.responsibleTeamName);
+                })
+                .forEach((site) => {
+                    const siteId = String(site.id ?? '').trim();
+                    if (!siteId) return;
+                    const responsibleTeam = resolveDashboardTeam(site.responsibleTeamId, site.responsibleTeamName);
+                    getOrCreateItem({
+                        id: siteId,
+                        name: site.name,
+                        code: site.code,
+                        responsibleTeamName: responsibleTeam?.name ?? site.responsibleTeamName ?? undefined,
+                        responsibleTeamId: String(responsibleTeam?.id ?? site.responsibleTeamId ?? '').trim() || undefined,
+                        companyId: String(site.companyId ?? '').trim() || undefined,
+                        type: 'site',
+                        color: site.color ?? undefined,
+                        manDay: 0,
+                        totalAmount: 0,
+                        workerCount: 0,
+                        workDetails: [],
+                        reportCount: 0,
+                        hasInternalSupport: false,
+                        hasExternalSupport: false
+                    });
+                });
+        }
+
+        rawReports.forEach((report) => {
+            const targetSite = resolveDashboardSite(report.siteId, report.siteName);
+            const reportWriterTeam = resolveDashboardTeam(report.teamId, report.teamName);
+            const responsibleTeam = resolveDashboardTeam(
+                targetSite?.responsibleTeamId ?? report.responsibleTeamId,
+                targetSite?.responsibleTeamName ?? report.responsibleTeamName
+            );
+            const siteCompanyId = String(targetSite?.companyId ?? report.companyId ?? '').trim();
+            const effectiveSiteId = String(targetSite?.id ?? report.siteId ?? '').trim()
+                || `site:${normalizeName(targetSite?.name ?? report.siteName ?? 'unknown-site')}`;
+            const effectiveSiteName = targetSite?.name || report.siteName || 'Unknown Site';
+            const workers = Array.isArray(report.workers) ? report.workers : [];
+
+            if (viewMode === 'site') {
+                if (!isWithinCompanyScope(reportWriterTeam?.companyId, siteCompanyId)) return;
+
+                const siteResponsibleId = String(responsibleTeam?.id ?? targetSite?.responsibleTeamId ?? report.responsibleTeamId ?? '').trim() || undefined;
+                const siteResponsibleName = responsibleTeam?.name ?? targetSite?.responsibleTeamName ?? report.responsibleTeamName ?? undefined;
+
+                if (selectedTeamId && !matchesSelectedDashboardTeam(siteResponsibleId, siteResponsibleName)) {
+                    return;
+                }
+
+                const siteItem = getOrCreateItem({
+                    id: effectiveSiteId,
+                    name: effectiveSiteName,
+                    code: targetSite?.code,
+                    responsibleTeamName: siteResponsibleName,
+                    responsibleTeamId: siteResponsibleId,
+                    companyId: siteCompanyId || undefined,
+                    type: 'site',
+                    color: targetSite?.color ?? undefined,
+                    manDay: 0,
+                    totalAmount: 0,
+                    workerCount: 0,
+                    workDetails: [],
+                    reportCount: 0,
+                    hasInternalSupport: false,
+                    hasExternalSupport: false
+                });
+
+                siteItem.reportCount = (siteItem.reportCount || 0) + 1;
+
+                if (workers.length > 0) {
+                    workers.forEach((worker: any) => {
+                        const workerTeam = resolveDashboardTeam(
+                            worker.teamId || report.teamId,
+                            worker.workerTeamName || (!worker.teamId || worker.teamId === report.teamId ? report.teamName : undefined)
+                        );
+                        const detailId = String(workerTeam?.id ?? worker.teamId ?? report.teamId ?? '').trim();
+                        const detailName = workerTeam?.name ?? worker.workerTeamName ?? report.teamName ?? 'Unknown Team';
+                        if (!detailId || !detailName) return;
+
+                        const detailCompanyId = String(workerTeam?.companyId ?? '').trim() || undefined;
+                        const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
+
+                        const workerManDay = Number(worker.manDay ?? 0);
+                        const workerAmount = workerManDay * Number(worker.unitPrice ?? 0);
+
+                        detail.manDay += workerManDay;
+                        detail.amount += workerAmount;
+                        detail.workerCount += 1;
+
+                        siteItem.manDay = (siteItem.manDay || 0) + workerManDay;
+                        siteItem.totalAmount = (siteItem.totalAmount || 0) + workerAmount;
+                        siteItem.workerCount = (siteItem.workerCount || 0) + 1;
+
+                        appendWorkerLog(detail, worker.name || 'Unknown Worker', report.date, workerManDay, workerAmount);
+
+                        const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
+                        if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
+                            siteItem.hasExternalSupport = true;
+                        } else if (!isResponsibleTeam) {
+                            siteItem.hasInternalSupport = true;
+                        }
+                    });
+                } else {
+                    const detailId = String(reportWriterTeam?.id ?? report.teamId ?? '').trim();
+                    const detailName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
+                    if (!detailId || !detailName) return;
+
+                    const detailCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                    const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
+
+                    const reportManDay = Number(report.totalManDay ?? 0);
+                    const reportAmount = Number(report.totalAmount ?? 0);
+
+                    detail.manDay += reportManDay;
+                    detail.amount += reportAmount;
+                    detail.workerCount += reportManDay > 0 ? 1 : 0;
+
+                    siteItem.manDay = (siteItem.manDay || 0) + reportManDay;
+                    siteItem.totalAmount = (siteItem.totalAmount || 0) + reportAmount;
+                    siteItem.workerCount = (siteItem.workerCount || 0) + (reportManDay > 0 ? 1 : 0);
+
+                    appendWorkerLog(detail, '작업자 정보 없음', report.date, reportManDay, reportAmount);
+
+                    const isResponsibleTeam = detailId === siteItem.responsibleTeamId;
+                    if (detailCompanyId && siteItem.companyId && detailCompanyId !== siteItem.companyId) {
+                        siteItem.hasExternalSupport = true;
+                    } else if (!isResponsibleTeam) {
+                        siteItem.hasInternalSupport = true;
+                    }
+                }
+
+                return;
+            }
+
+            const reportItemIds = new Set<string>();
+            const appendTeamWork = (
+                teamIdValue: string | undefined,
+                teamNameValue: string,
+                teamCompanyIdValue: string | undefined,
+                workerName: string,
+                manDay: number,
+                amount: number
+            ) => {
+                const nextItemId = teamIdValue || `team:${normalizeName(teamNameValue)}`;
+                if (!nextItemId || !teamNameValue) return;
+                if (!isWithinCompanyScope(teamCompanyIdValue, siteCompanyId)) return;
+                if (selectedTeamId && !matchesSelectedDashboardTeam(teamIdValue ?? nextItemId, teamNameValue)) return;
+
+                const teamItem = getOrCreateItem({
+                    id: nextItemId,
+                    name: teamNameValue,
+                    companyId: teamCompanyIdValue,
+                    type: 'team',
+                    manDay: 0,
+                    totalAmount: 0,
+                    workerCount: 0,
+                    workDetails: [],
+                    reportCount: 0,
+                    hasInternalSupport: false,
+                    hasExternalSupport: false
+                });
+
+                if (!reportItemIds.has(teamItem.id)) {
+                    teamItem.reportCount = (teamItem.reportCount || 0) + 1;
+                    reportItemIds.add(teamItem.id);
+                }
+
+                const detail = getOrCreateDetail(
+                    teamItem,
+                    effectiveSiteId,
+                    effectiveSiteName,
+                    siteCompanyId || undefined,
+                    String(responsibleTeam?.id ?? targetSite?.responsibleTeamId ?? report.responsibleTeamId ?? '').trim() || undefined
+                );
+
+                detail.manDay += manDay;
+                detail.amount += amount;
+                detail.workerCount += 1;
+
+                teamItem.manDay = (teamItem.manDay || 0) + manDay;
+                teamItem.totalAmount = (teamItem.totalAmount || 0) + amount;
+                teamItem.workerCount = (teamItem.workerCount || 0) + 1;
+
+                appendWorkerLog(detail, workerName, report.date, manDay, amount);
+            };
+
+            if (workers.length > 0) {
+                workers.forEach((worker: any) => {
+                    const workerTeam = resolveDashboardTeam(
+                        worker.teamId || report.teamId,
+                        worker.workerTeamName || (!worker.teamId || worker.teamId === report.teamId ? report.teamName : undefined)
+                    );
+                    const workerTeamId = String(workerTeam?.id ?? worker.teamId ?? report.teamId ?? '').trim() || undefined;
+                    const workerTeamName = workerTeam?.name ?? worker.workerTeamName ?? report.teamName ?? 'Unknown Team';
+                    const workerTeamCompanyId = String(workerTeam?.companyId ?? '').trim() || undefined;
+                    const workerManDay = Number(worker.manDay ?? 0);
+                    const workerAmount = workerManDay * Number(worker.unitPrice ?? 0);
+
+                    appendTeamWork(
+                        workerTeamId,
+                        workerTeamName,
+                        workerTeamCompanyId,
+                        worker.name || 'Unknown Worker',
+                        workerManDay,
+                        workerAmount
+                    );
+                });
+            } else {
+                const reportTeamId = String(reportWriterTeam?.id ?? report.teamId ?? '').trim() || undefined;
+                const reportTeamName = reportWriterTeam?.name ?? report.teamName ?? 'Unknown Team';
+                const reportTeamCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                const reportManDay = Number(report.totalManDay ?? 0);
+                const reportAmount = Number(report.totalAmount ?? 0);
+
+                appendTeamWork(
+                    reportTeamId,
+                    reportTeamName,
+                    reportTeamCompanyId,
+                    '작업자 정보 없음',
+                    reportManDay,
+                    reportAmount
+                );
+            }
+        });
+
+        return items
+            .filter((item) => {
+                if (viewMode === 'site' && selectedTeamId) return true;
+                return (item.manDay || 0) > 0;
+            })
+            .map((item) => {
+                if (item.workDetails) {
+                    item.workDetails.sort((a, b) => b.manDay - a.manDay);
+                    item.workDetails.forEach((detail) => {
+                        if (detail.workers) {
+                            detail.workers.sort((left, right) => right.manDay - left.manDay);
+                            detail.workers.forEach((worker) => {
+                                worker.dailyLogs.sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
+                            });
+                        }
+                    });
+                }
+                const totalFromDetails = item.workDetails?.reduce((sum, detail) => sum + detail.manDay, 0) || 0;
+                item.totalManDay = totalFromDetails;
+                if (Math.abs((item.manDay || 0) - totalFromDetails) > 0.1) {
+                    item.manDay = totalFromDetails;
+                }
+                return item;
+            })
+            .sort((a, b) => {
+                const isAExpanded = expandedItems.has(a.id);
+                const isBExpanded = expandedItems.has(b.id);
+                if (isAExpanded && !isBExpanded) return -1;
+                if (!isAExpanded && isBExpanded) return 1;
+
+                if (sortBy === 'name-desc') return b.name.localeCompare(a.name, 'ko');
+                return a.name.localeCompare(b.name, 'ko');
+            });
+    }, [
+        expandedItems,
+        matchesSelectedDashboardTeam,
+        normalizeName,
+        rawReports,
+        resolveDashboardSite,
+        resolveDashboardTeam,
+        selectedCompanyId,
+        selectedTeamId,
+        sites,
+        sortBy,
+        teams,
+        viewMode,
+        visibleCompanyIdSet
+    ]);
+
     const toggleAccordion = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         const newSet = new Set(expandedItems);
@@ -649,23 +1210,23 @@ const WhiteboardStatusBoard: React.FC = () => {
     };
 
     // Calculate Grand Total
-    const grandTotalManDays = filteredItems.reduce((sum, item) => sum + (item.manDay || 0), 0);
-    const totalItems = filteredItems.length;
+    const grandTotalManDays = dashboardItems.reduce((sum, item) => sum + (item.manDay || 0), 0);
+    const totalItems = dashboardItems.length;
     const totalInternalSupportSites =
-        viewMode === 'site' ? filteredItems.filter(item => item.hasInternalSupport).length : 0;
+        viewMode === 'site' ? dashboardItems.filter(item => item.hasInternalSupport).length : 0;
     const totalExternalSupportSites =
-        viewMode === 'site' ? filteredItems.filter(item => item.hasExternalSupport).length : 0;
-    const maxItemManDay = filteredItems.reduce((max, item) => Math.max(max, item.manDay || 0), 0);
+        viewMode === 'site' ? dashboardItems.filter(item => item.hasExternalSupport).length : 0;
+    const maxItemManDay = dashboardItems.reduce((max, item) => Math.max(max, item.manDay || 0), 0);
 
     // 검색 필터링
     const searchFilteredItems = React.useMemo(() => {
-        if (!searchQuery.trim()) return filteredItems;
+        if (!searchQuery.trim()) return dashboardItems;
         const query = searchQuery.toLowerCase();
-        return filteredItems.filter(item =>
+        return dashboardItems.filter(item =>
             item.name.toLowerCase().includes(query) ||
             item.code?.toLowerCase().includes(query)
         );
-    }, [filteredItems, searchQuery]);
+    }, [dashboardItems, searchQuery]);
 
     // 정렬 - 확장된 아이템은 항상 첫 번째로, 시공사 먼저 → 협력사 나중에
     const sortedItems = React.useMemo(() => {
@@ -746,16 +1307,16 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 className="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg px-3 py-2 font-bold focus:outline-none focus:border-indigo-500 ml-2"
                             >
                                 <option value="">전체 팀 (All Teams)</option>
-                                {visibleTeamsForSelector.internal.length > 0 && (
+                                {dashboardTeamSelectorOptions.internal.length > 0 && (
                                     <optgroup label={selectedCompanyId ? '소속팀' : '청연팀'}>
-                                        {visibleTeamsForSelector.internal.map(team => (
+                                        {dashboardTeamSelectorOptions.internal.map(team => (
                                             <option key={team.id} value={team.id}>{team.name}</option>
                                         ))}
                                     </optgroup>
                                 )}
-                                {visibleTeamsForSelector.support.length > 0 && (
+                                {dashboardTeamSelectorOptions.support.length > 0 && (
                                     <optgroup label="지원팀">
-                                        {visibleTeamsForSelector.support.map(team => (
+                                        {dashboardTeamSelectorOptions.support.map(team => (
                                             <option key={team.id} value={team.id}>{team.name}</option>
                                         ))}
                                     </optgroup>
@@ -909,7 +1470,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                             <>
                                 <span className="font-bold text-slate-800 inline-flex items-center gap-1 mr-1">
                                     <FontAwesomeIcon icon={faUserGroup} className="text-slate-400" />
-                                    {teams.find(t => t.id === selectedTeamId)?.name || ''}
+                                    {selectedDashboardTeamLabel || ''}
                                 </span>
                                 {viewMode === 'site' ? (
                                     <span>
@@ -956,7 +1517,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                     style={{ backgroundImage: 'radial-gradient(#4f46e5 1px, transparent 1px)', backgroundSize: '20px 20px' }}>
                 </div>
 
-                {filteredItems.length > 0 ? (
+                {dashboardItems.length > 0 ? (
                     <div className="flex flex-wrap gap-2 w-full px-2">
                         {sortedItems.map(item => {
                             // Check expansion state for dynamic sizing
@@ -1043,7 +1604,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         </span>
                                                     )}
                                                     {item.responsibleTeamName && (() => {
-                                                        const responsibleTeam = teams.find(t => t.id === item.responsibleTeamId);
+                                                        const responsibleTeam = resolveDashboardTeam(item.responsibleTeamId, item.responsibleTeamName);
                                                         const teamColor = responsibleTeam?.color || '#8b5cf6';
                                                         return (
                                                             <span
@@ -1237,7 +1798,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                     if (viewMode === 'site') {
                                                                                         // 현장별 보기 -> 상세는 팀
                                                                                         // Try lookup by ID or Name since targetId can be a Name now
-                                                                                        const detailTeam = teams.find(t => t.id === detail.targetId || t.name === detail.targetId);
+                                                                                        const detailTeam = resolveDashboardTeam(detail.targetId, detail.targetName);
                                                                                         const teamColor = detailTeam?.color || '#8b5cf6';
                                                                                         return (
                                                                                             <span

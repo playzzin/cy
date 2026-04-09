@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faThumbtack, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx-js-style';
-import { dailyReportService } from '../../services/dailyReportService';
+import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
@@ -122,6 +122,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     const [activeIndex, setActiveIndex] = useState(0);
 
     const [historyData, setHistoryData] = useState<PersonnelHistoryRow[]>([]);
+    const [teamScopeRows, setTeamScopeRows] = useState<DailyReportWorkerRow[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
@@ -197,6 +198,17 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         return map;
     }, [teams]);
 
+    const teamByName = useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const nameKey = String(team.name ?? '').replace(/\s+/g, '').trim();
+            if (nameKey && !map.has(nameKey)) {
+                map.set(nameKey, team);
+            }
+        });
+        return map;
+    }, [teams]);
+
     const allowedTeamIds = useMemo(() => {
         const ids = new Set<string>();
         teams.forEach((team) => {
@@ -220,11 +232,32 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     }, [companyById, companyType, teams]);
 
     const teamOptions = useMemo(() => {
+        const scopedSupportTeamIds =
+            companyType === 'partner'
+                ? new Set(
+                    teamScopeRows
+                        .map((row) => {
+                            const rawTeamId = String(row.workerTeamId ?? '').trim();
+                            if (rawTeamId) {
+                                return String(teamById.get(rawTeamId)?.id ?? rawTeamId).trim();
+                            }
+                            const rawTeamName = String(row.workerTeamName ?? '').replace(/\s+/g, '').trim();
+                            return String(teamByName.get(rawTeamName)?.id ?? '').trim();
+                        })
+                        .filter((id) => Boolean(id) && allowedTeamIds.has(id))
+                )
+                : null;
+
         return teams
             .filter((team) => Boolean(team.id) && team.id && allowedTeamIds.has(team.id))
+            .filter((team) => {
+                if (companyType !== 'partner') return true;
+                const canonicalTeamId = String(team.id ?? '').trim();
+                return scopedSupportTeamIds ? scopedSupportTeamIds.has(canonicalTeamId) : false;
+            })
             .slice()
             .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
-    }, [allowedTeamIds, teams]);
+    }, [allowedTeamIds, companyType, teamById, teamByName, teamScopeRows, teams]);
 
     const workerOptions = useMemo(() => {
         const filtered = allWorkers
@@ -315,7 +348,13 @@ const TotalPersonnelHistoryInner: React.FC = () => {
     };
 
     useEffect(() => {
-        if (selectedTeamId && !allowedTeamIds.has(selectedTeamId)) {
+        const selectableTeamIds = new Set(
+            teamOptions
+                .map((team) => String(team.id ?? '').trim())
+                .filter((id) => Boolean(id))
+        );
+
+        if (selectedTeamId && !selectableTeamIds.has(selectedTeamId)) {
             setSelectedTeamId('');
             setSelectedWorkerId('');
             setWorkerSearchTerm('');
@@ -324,7 +363,39 @@ const TotalPersonnelHistoryInner: React.FC = () => {
         if (selectedWorkerId && !workerOptions.some((w) => w.id === selectedWorkerId)) {
             setSelectedWorkerId('');
         }
-    }, [allowedTeamIds, selectedTeamId, selectedWorkerId, workerOptions]);
+    }, [selectedTeamId, selectedWorkerId, teamOptions, workerOptions]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadTeamScopeRows = async () => {
+            if (companyType !== 'partner') {
+                setTeamScopeRows([]);
+                return;
+            }
+
+            try {
+                const rows = await dailyReportService.getReportWorkerRowsByRange({
+                    startDate,
+                    endDate
+                });
+                if (!cancelled) {
+                    setTeamScopeRows(rows);
+                }
+            } catch (error) {
+                console.error('Error fetching support team options:', error);
+                if (!cancelled) {
+                    setTeamScopeRows([]);
+                }
+            }
+        };
+
+        void loadTeamScopeRows();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [companyType, endDate, startDate]);
 
     const commitDateDrafts = () => {
         const nextStartDate = normalizeTypedDateInput(startDateInput) ?? startDate;
@@ -351,6 +422,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 manpowerService.getWorkers(),
                 dailyReportService.getReportWorkerRowsByRange({ startDate: effectiveStartDate, endDate: effectiveEndDate })
             ]);
+            setTeamScopeRows(reportRows);
             const workerById = new Map<string, Worker>();
             workers.forEach((w) => {
                 const id = String(w.id ?? '').trim();
@@ -763,8 +835,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                 onChange={(e) => setCompanyType(e.target.value as CompanyTypeFilter)}
                                 className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm min-w-32"
                             >
-                                <option value="construction">시공팀</option>
-                                <option value="partner">협력사</option>
+                                <option value="construction">청연이엔지</option>
+                                <option value="partner">지원팀(현재협력사)</option>
                             </select>
                         </div>
 

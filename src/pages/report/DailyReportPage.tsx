@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import DailyReportInput from './DailyReportInput';
 import DailyReportListV2 from './DailyReportListV2';
-import OutputManagementTabs, { OutputManagementMassUploadButton } from '../../components/common/OutputManagementTabs';
+import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 
 const DailyReportPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
@@ -50,7 +50,6 @@ const DailyReportPage: React.FC = () => {
             <OutputManagementTabs
                 activeTab={activeTab === 'list-v2' ? 'list-v2' : 'input'}
                 onTabSelect={handleTopTabSelect}
-                rightSlot={<OutputManagementMassUploadButton />}
                 title="출력일보 관리"
             />
 
