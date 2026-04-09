@@ -3,6 +3,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
+    "site": "cyee-9c1e4",
     "public": "build",
     "ignore": [
       "firebase.json",
