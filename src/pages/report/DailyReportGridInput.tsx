@@ -1250,7 +1250,15 @@ const DailyReportGridInput: React.FC = () => {
 
         } catch (error) {
             console.error("AI Analysis Failed", error);
-            Swal.fire('Error', '이미지 분석에 실패했습니다.', 'error');
+            const message = error instanceof Error ? error.message : '이미지 분석에 실패했습니다.';
+            const needsAiSettings = /API Key Missing|API key not valid|403|PERMISSION_DENIED|referer|blocked/i.test(message);
+            Swal.fire(
+                'Error',
+                needsAiSettings
+                    ? `AI 분석에 실패했습니다.\n${message}\n\n/settings/ai 에서 API 키와 페이지 활성화를 확인해주세요.`
+                    : `이미지 분석에 실패했습니다.\n${message}`,
+                'error'
+            );
         } finally {
             setLoading(false);
         }

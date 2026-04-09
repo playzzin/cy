@@ -17,6 +17,7 @@ import {
 import { db } from '../config/firebase';
 import { WorkerSchema, WorkerZod } from '../types/zod/workerSchema';
 import { createConverter } from '../utils/firestoreConverter';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { toast } from '../utils/swal';
 
 const COLLECTION_NAME = 'workers';
@@ -62,7 +63,7 @@ export const workerFirestoreService = {
     async updateWorker(id: string, data: Partial<WorkerZod>): Promise<void> {
         const docRef = doc(db, COLLECTION_NAME, id).withConverter(workerConverter);
         await updateDoc(docRef, {
-            ...data,
+            ...stripUndefinedFields(data as Record<string, unknown>),
             updatedAt: serverTimestamp(),
         });
         toast.updated('근로자');
@@ -88,7 +89,7 @@ export const workerFirestoreService = {
         workerIds.forEach(id => {
             const docRef = doc(db, COLLECTION_NAME, id);
             batch.update(docRef, {
-                ...data,
+                ...stripUndefinedFields(data as Record<string, unknown>),
                 updatedAt: serverTimestamp(),
             });
         });

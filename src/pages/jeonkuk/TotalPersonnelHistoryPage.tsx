@@ -557,7 +557,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 index + 1,
                 row.name,
                 formatResidentNumberForDisplay(row.idNumber),
-                row.totalAmount
+                row.invoiceAmount
             ]);
         });
 

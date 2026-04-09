@@ -17,6 +17,7 @@ import {
 import { db } from '../config/firebase';
 import { CompanySchema, CompanyZod } from '../types/zod/companySchema';
 import { createConverter } from '../utils/firestoreConverter';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { toast } from '../utils/swal';
 
 const COLLECTION_NAME = 'companies';
@@ -71,7 +72,7 @@ export const companyFirestoreService = {
     async updateCompany(id: string, data: Partial<CompanyZod>): Promise<void> {
         const docRef = doc(db, COLLECTION_NAME, id).withConverter(companyConverter);
         await updateDoc(docRef, {
-            ...data,
+            ...stripUndefinedFields(data as Record<string, unknown>),
             updatedAt: serverTimestamp(),
         });
         toast.updated('회사');

@@ -47,6 +47,17 @@ const MENU_TEXT_ALIASES: Record<string, string> = {
     "\uCD9C\uB825\uAD00\uB9AC": "\uCD9C\uB825 \uAD00\uB9AC"
 };
 
+const FORCE_MENU_PATH_TEXTS = new Set([
+    "\uacc4\uc88c\uc870\ud68c",
+    "\uacc4\uc88c\ubc88\ud638\uad00\ub9ac",
+    "\uc791\uc5c5\uc790 \uacc4\uc88c",
+    "\ud300 \uacc4\uc88c",
+    "\ud68c\uc0ac \uacc4\uc88c",
+    "\ub9e4\uc785 \uacc4\uc88c",
+    "\uae30\ud0c0 \uacc4\uc88c",
+    "\ub9e4\uc785/\uae30\ud0c0 \uacc4\uc88c",
+]);
+
 const PATH_TO_MENU_TEXT: Record<string, string> = Object.entries(MENU_PATHS).reduce((acc, [name, path]) => {
     if (!acc[path]) acc[path] = name;
     return acc;
@@ -121,7 +132,13 @@ const normalizeMenuItem = (item: any, parentIdPath: string): MenuItem => {
         .map((child: any) => normalizeMenuItem(child, `${idSeed}`))
         .filter((child: MenuItem) => typeof child.text === 'string' && child.text.trim().length > 0);
 
-    const normalizedPath = rawPath.length > 0 ? rawPath : (normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined);
+    const inferredPath = normalizedText ? (MENU_PATHS[normalizedText] || undefined) : undefined;
+    const normalizedPath =
+        normalizedText && FORCE_MENU_PATH_TEXTS.has(normalizedText)
+            ? inferredPath
+            : rawPath.length > 0
+                ? rawPath
+                : inferredPath;
 
     const next: MenuItem = {
         ...base,

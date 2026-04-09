@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { createConverter } from '../utils/firestoreConverter';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { toast } from '../utils/swal';
 import { AccountDirectorySchema, AccountDirectoryZod } from '../types/zod/accountDirectorySchema';
 
@@ -60,7 +61,7 @@ export const accountDirectoryFirestoreService = {
     async updateEntry(id: string, data: Partial<AccountDirectoryZod>): Promise<void> {
         const docRef = doc(db, COLLECTION_NAME, id).withConverter(accountDirectoryConverter);
         await updateDoc(docRef, {
-            ...data,
+            ...stripUndefinedFields(data as Record<string, unknown>),
             updatedAt: serverTimestamp(),
         });
         toast.updated('계좌');

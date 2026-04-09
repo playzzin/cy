@@ -16,6 +16,7 @@ import {
 import { db } from '../config/firebase';
 import { TeamSchema, TeamZod } from '../types/zod/teamSchema';
 import { createConverter } from '../utils/firestoreConverter';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { toast } from '../utils/swal';
 
 const COLLECTION_NAME = 'teams';
@@ -61,7 +62,7 @@ export const teamFirestoreService = {
     async updateTeam(id: string, data: Partial<TeamZod>): Promise<void> {
         const docRef = doc(db, COLLECTION_NAME, id).withConverter(teamConverter);
         await updateDoc(docRef, {
-            ...data,
+            ...stripUndefinedFields(data as Record<string, unknown>),
             updatedAt: serverTimestamp(),
         });
         toast.updated('팀');

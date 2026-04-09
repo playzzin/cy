@@ -198,16 +198,20 @@ const EmploymentCertificatePage: React.FC = () => {
         documentTitle: `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
     });
 
-    // 대상 근로자는 회사 선택과 무관하게 청연 소속만 노출
-    const cheongyeonCompany = companies.find(c => c.name.includes('청연'));
+    // 대상 근로자는 시공사(다원, 청연 등) 소속인 경우 모두 노출
     const filteredWorkers = workers.filter(w => {
         const companyName = String(w.companyName || '');
         const teamName = String(w.teamName || '');
-        const isCheongyeonWorker =
-            (cheongyeonCompany?.id && w.companyId === cheongyeonCompany.id)
-            || companyName.includes('청연')
-            || teamName.includes('청연');
-        if (!isCheongyeonWorker) return false;
+        
+        // 발급 대상 회사(companies 리스트) 중 하나에 속하는지 확인
+        const isTargetWorker = companies.some(c => {
+            const cleanName = c.name.replace('(주)', '').trim();
+            return (c.id && w.companyId === c.id) || 
+                   (c.name && companyName.includes(cleanName)) ||
+                   (c.name && teamName.includes(cleanName));
+        });
+
+        if (!isTargetWorker) return false;
         if (searchWorkerName.trim() && !w.name.includes(searchWorkerName)) return false;
         return true;
     });
@@ -252,7 +256,7 @@ const EmploymentCertificatePage: React.FC = () => {
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <Input
                                 type="text"
-                                placeholder="청연 소속 근로자 이름 검색 (선택사항)"
+                                placeholder="대상 근로자 이름 검색 (선택사항)"
                                 value={searchWorkerName}
                                 onChange={(e) => setSearchWorkerName(e.target.value)}
                                 style={{ flex: 1 }}
@@ -267,9 +271,9 @@ const EmploymentCertificatePage: React.FC = () => {
                                         onClick={() => {
                                             setSelectedWorker(worker);
                                             setSearchWorkerName(worker.name);
-                                            // Auto-fill position and duties
-                                            setPosition(worker.role || worker.rank || '일용근로자');
-                                            setDuties(worker.role || '건설 관련 업무');
+                                            // Auto-fill position and duties (Requested: Position empty, Duties: '현장직')
+                                            setPosition('');
+                                            setDuties('현장직');
 
                                             // Auto-fill dates
                                             const createdAt = worker.createdAt?.toDate ? worker.createdAt.toDate() : (worker.createdAt as any);
@@ -289,7 +293,7 @@ const EmploymentCertificatePage: React.FC = () => {
                         {/* ... (Empty state) */}
                         {filteredWorkers.length === 0 && (
                             <div style={{ padding: '12px', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>
-                                청연 소속 근로자가 없습니다.
+                                대상 근로자가 없습니다.
                             </div>
                         )}
                         {selectedWorker && (

@@ -328,7 +328,8 @@ const App: React.FC = () => {
               <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
-              <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />
+              <Route path="taxinvoice/account-inquiry" element={<AccountManagementPage />} />
+              <Route path="taxinvoice/bank-inquiry" element={<AccountInquiryPage />} />
               <Route path="kakao-test" element={<KakaoTestPage />} />
               <Route path="kakao-sender" element={<KakaoSenderPage />} />
               <Route path="kakao-message-center" element={<KakaoMessageCenterPage />} />

@@ -15,6 +15,7 @@ import {
     startAfter
 } from 'firebase/firestore';
 import { deleteObject, ref } from 'firebase/storage';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type { Worker };
 
@@ -317,7 +318,7 @@ export const manpowerService = {
         updates.forEach(({ id, updates: workerUpdates }) => {
             const workerRef = doc(db, 'workers', id);
             batch.update(workerRef, {
-                ...workerUpdates,
+                ...stripUndefinedFields(workerUpdates as Record<string, unknown>),
                 updatedAt: Timestamp.now()
             });
         });

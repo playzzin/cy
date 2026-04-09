@@ -154,6 +154,12 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
     };
 
     const runAnalysis = async () => {
+        const apiKey = geminiService.getKey();
+        if (!apiKey) {
+            alert('API 키가 설정되지 않았습니다. /settings/ai 에서 Gemini API 키를 등록해주세요.');
+            return;
+        }
+
         setIsAnalyzing(true);
         const newResults = [...results];
 
@@ -185,7 +191,12 @@ const IdCardAnalysisModal: React.FC<IdCardAnalysisModalProps> = ({ isOpen, onClo
 
             } catch (error: any) {
                 newResults[i].status = 'error';
-                newResults[i].error = error.message || '인식 실패';
+                const message = error?.message || '인식 실패';
+                if (/API Key Missing|API key not valid|403|PERMISSION_DENIED|referer|blocked/i.test(message)) {
+                    newResults[i].error = `${message} (/settings/ai 확인)`;
+                } else {
+                    newResults[i].error = message;
+                }
                 newResults[i].matchType = 'pending';
             }
             setResults([...newResults]);

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding,
@@ -72,6 +73,32 @@ interface EntityGroup<T> {
     missingCount: number;
 }
 
+type UploadTarget = 'workers' | 'teams' | 'companies' | 'custom';
+
+type UploadPreviewRowStatus = 'matched' | 'create' | 'skipped';
+
+interface UploadPreviewRow {
+    keyText: string;
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
+    status: UploadPreviewRowStatus;
+    reason?: string;
+}
+
+interface UploadPreviewSection {
+    target: UploadTarget;
+    label: string;
+    sheetName: string;
+    rows: Record<string, unknown>[];
+    rowCount: number;
+    updateCount: number;
+    createCount: number;
+    skippedCount: number;
+    previewRows: UploadPreviewRow[];
+    mismatchRows: UploadPreviewRow[];
+}
+
 const TEAM_TYPE_ORDER = ['시공팀', '지원팀', '용역팀', '미지정'] as const;
 const COMPANY_TYPE_ORDER = ['시공사', '협력사', '건설사', '기타', '미지정'] as const;
 
@@ -89,6 +116,14 @@ const CUSTOM_CATEGORY_META: Record<CustomCategory, { title: string; description:
 };
 
 const normalizeText = (value: unknown) => String(value ?? '').trim();
+const parseAccountTab = (value: string | null): AccountTab => {
+    const normalized = normalizeText(value).toLowerCase();
+    if (normalized === 'workers') return 'workers';
+    if (normalized === 'teams') return 'teams';
+    if (normalized === 'companies') return 'companies';
+    if (normalized === 'custom' || normalized === 'purchase' || normalized === 'other') return 'custom';
+    return 'overview';
+};
 const toNullableText = (value: unknown) => {
     const normalized = normalizeText(value);
     return normalized.length > 0 ? normalized : undefined;
@@ -221,7 +256,10 @@ const SummaryCard = ({
 
 const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded = false }) => {
     const [loading, setLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<AccountTab>('overview');
+    const [searchParams] = useSearchParams();
+    const requestedTabParam = searchParams.get('tab');
+    const requestedTab = useMemo(() => parseAccountTab(requestedTabParam), [requestedTabParam]);
+    const [activeTab, setActiveTab] = useState<AccountTab>(requestedTab);
     const [searchTerm, setSearchTerm] = useState('');
     const [onlyMissing, setOnlyMissing] = useState(false);
     const [selectedWorkerTeamKey, setSelectedWorkerTeamKey] = useState('all');
@@ -247,6 +285,13 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         purchase: createEmptyCustomDraft('purchase'),
         other: createEmptyCustomDraft('other'),
     });
+
+    const [uploadPreviewFileName, setUploadPreviewFileName] = useState('');
+    const [uploadPreviewSections, setUploadPreviewSections] = useState<UploadPreviewSection[]>([]);
+    const [applyingUpload, setApplyingUpload] = useState(false);
+    useEffect(() => {
+        setActiveTab(requestedTab);
+    }, [requestedTab]);
 
     const setSaving = useCallback((key: string, value: boolean) => {
         setSavingKeys((prev) => ({ ...prev, [key]: value }));
@@ -654,8 +699,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountHolder: toNullableText(target.accountHolder),
             });
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to update worker account:', error);
+            alert('작업자 계좌 저장 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -670,14 +717,16 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setSaving(key, true);
         try {
             await manpowerService.updateWorker(workerId, {
-                bankName: undefined,
-                accountNumber: undefined,
-                accountHolder: undefined,
+                bankName: '',
+                accountNumber: '',
+                accountHolder: '',
             });
             setWorkers((prev) => prev.map((worker) => (worker.id === workerId ? { ...worker, ...EMPTY_ACCOUNT_FIELDS } : worker)));
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to clear worker account:', error);
+            alert('작업자 계좌 삭제 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -709,8 +758,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountHolder: toNullableText(target.accountHolder),
             });
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to update team account:', error);
+            alert('팀 계좌 저장 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -725,14 +776,16 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setSaving(key, true);
         try {
             await teamService.updateTeam(teamId, {
-                bankName: undefined,
-                accountNumber: undefined,
-                accountHolder: undefined,
+                bankName: '',
+                accountNumber: '',
+                accountHolder: '',
             });
             setTeams((prev) => prev.map((team) => (team.id === teamId ? { ...team, ...EMPTY_ACCOUNT_FIELDS } : team)));
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to clear team account:', error);
+            alert('팀 계좌 삭제 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -764,8 +817,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 accountHolder: toNullableText(target.accountHolder),
             });
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to update company account:', error);
+            alert('회사 계좌 저장 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -780,14 +835,16 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         setSaving(key, true);
         try {
             await companyService.updateCompany(companyId, {
-                bankName: undefined,
-                accountNumber: undefined,
-                accountHolder: undefined,
+                bankName: '',
+                accountNumber: '',
+                accountHolder: '',
             });
             setCompanies((prev) => prev.map((company) => (company.id === companyId ? { ...company, ...EMPTY_ACCOUNT_FIELDS } : company)));
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to clear company account:', error);
+            alert('회사 계좌 삭제 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -826,8 +883,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                 status: target.status === 'inactive' ? 'inactive' : 'active',
             });
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to update custom account entry:', error);
+            alert('계좌 저장 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -844,8 +903,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             await accountDirectoryService.deleteEntry(entryId);
             setCustomAccounts((prev) => prev.filter((entry) => entry.id !== entryId));
             clearRowControl(key);
+            await loadData();
         } catch (error) {
             console.error('Failed to delete custom account entry:', error);
+            alert('계좌 삭제 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -886,8 +947,10 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
             const id = await accountDirectoryService.addEntry(payload);
             setCustomAccounts((prev) => sortCustomAccounts([...prev, { ...payload, id }]));
             setCustomDrafts((prev) => ({ ...prev, [category]: createEmptyCustomDraft(category) }));
+            await loadData();
         } catch (error) {
             console.error('Failed to add custom account entry:', error);
+            alert('계좌 추가 중 오류가 발생했습니다.');
         } finally {
             setSaving(key, false);
         }
@@ -914,6 +977,313 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const normalized = normalizeText(value).toLowerCase();
         if (normalized === 'inactive' || normalized.includes('보관')) return 'inactive';
         return 'active';
+    };
+
+    const detectUploadTarget = (
+        sheetName: string,
+        rows: Record<string, unknown>[],
+        fallbackTab: AccountTab
+    ): UploadTarget | null => {
+        const normalizedSheet = normalizeText(sheetName).toLowerCase();
+        const headerKeys = rows.length > 0
+            ? Object.keys(rows[0]).map((key) => normalizeText(key).toLowerCase())
+            : [];
+        const hasHeader = (keyword: string) => headerKeys.some((header) => header.includes(keyword));
+
+        if (normalizedSheet.includes('작업자') || (hasHeader('이름') && hasHeader('팀명'))) return 'workers';
+        if (normalizedSheet.includes('팀') && !normalizedSheet.includes('작업자')) return 'teams';
+        if (normalizedSheet.includes('회사') || hasHeader('회사명')) return 'companies';
+        if (normalizedSheet.includes('매입') || normalizedSheet.includes('기타') || hasHeader('계좌명') || hasHeader('구분코드') || hasHeader('구분명')) {
+            return 'custom';
+        }
+
+        if (fallbackTab === 'workers' || fallbackTab === 'teams' || fallbackTab === 'companies' || fallbackTab === 'custom') {
+            return fallbackTab;
+        }
+        return null;
+    };
+
+    const resolveImportedCustomCategory = (row: Record<string, unknown>, sheetName: string): CustomCategory | null => {
+        const explicit =
+            normalizeImportedCustomCategory(getImportedCellText(row, ['구분코드', 'category'])) ||
+            normalizeImportedCustomCategory(getImportedCellText(row, ['구분명', 'categoryName']));
+        if (explicit) return explicit;
+
+        const normalizedSheet = normalizeText(sheetName).toLowerCase();
+        if (normalizedSheet.includes('매입')) return 'purchase';
+        if (normalizedSheet.includes('기타')) return 'other';
+        return null;
+    };
+
+    const buildUploadPreviewSection = useCallback((target: UploadTarget, rows: Record<string, unknown>[], sheetName: string): UploadPreviewSection => {
+        let updateCount = 0;
+        let createCount = 0;
+        const previewRows: UploadPreviewRow[] = [];
+        const mismatchRows: UploadPreviewRow[] = [];
+
+        if (target === 'workers') {
+            rows.forEach((row) => {
+                const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
+                const importedName = getImportedCellText(row, ['이름', '작업자명']);
+                const importedTeamName = getImportedCellText(row, ['팀명']);
+                const bankName = getImportedCellText(row, ['은행', 'bankName']);
+                const accountNumber = getImportedCellText(row, ['계좌번호', 'accountNumber']);
+                const accountHolder = getImportedCellText(row, ['예금주', 'accountHolder']);
+                const matched =
+                    workers.find((worker) => worker.id === importedId) ||
+                    workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
+
+                if (matched?.id) {
+                    updateCount += 1;
+                    previewRows.push({
+                        keyText: `${importedName || '(이름없음)'} / ${importedTeamName || '-'}`,
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'matched',
+                    });
+                    return;
+                }
+
+                const mismatch: UploadPreviewRow = {
+                    keyText: `${importedName || '(이름없음)'} / ${importedTeamName || '-'}`,
+                    bankName,
+                    accountNumber,
+                    accountHolder,
+                    status: 'skipped',
+                    reason: '대상 작업자 미매칭',
+                };
+                previewRows.push(mismatch);
+                mismatchRows.push(mismatch);
+            });
+        }
+
+        if (target === 'teams') {
+            rows.forEach((row) => {
+                const importedId = getImportedCellText(row, ['id', 'ID', '팀ID']);
+                const importedName = getImportedCellText(row, ['팀명']);
+                const bankName = getImportedCellText(row, ['은행', 'bankName']);
+                const accountNumber = getImportedCellText(row, ['계좌번호', 'accountNumber']);
+                const accountHolder = getImportedCellText(row, ['예금주', 'accountHolder']);
+                const matched =
+                    teams.find((team) => team.id === importedId) ||
+                    teams.find((team) => normalizeText(team.name) === importedName);
+
+                if (matched?.id) {
+                    updateCount += 1;
+                    previewRows.push({
+                        keyText: importedName || importedId || '(팀식별값없음)',
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'matched',
+                    });
+                    return;
+                }
+
+                const mismatch: UploadPreviewRow = {
+                    keyText: importedName || importedId || '(팀식별값없음)',
+                    bankName,
+                    accountNumber,
+                    accountHolder,
+                    status: 'skipped',
+                    reason: '대상 팀 미매칭',
+                };
+                previewRows.push(mismatch);
+                mismatchRows.push(mismatch);
+            });
+        }
+
+        if (target === 'companies') {
+            rows.forEach((row) => {
+                const importedId = getImportedCellText(row, ['id', 'ID', '회사ID']);
+                const importedName = getImportedCellText(row, ['회사명']);
+                const bankName = getImportedCellText(row, ['은행', 'bankName']);
+                const accountNumber = getImportedCellText(row, ['계좌번호', 'accountNumber']);
+                const accountHolder = getImportedCellText(row, ['예금주', 'accountHolder']);
+                const matched =
+                    companies.find((company) => company.id === importedId) ||
+                    companies.find((company) => normalizeText(company.name) === importedName);
+
+                if (matched?.id) {
+                    updateCount += 1;
+                    previewRows.push({
+                        keyText: importedName || importedId || '(회사식별값없음)',
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'matched',
+                    });
+                    return;
+                }
+
+                const mismatch: UploadPreviewRow = {
+                    keyText: importedName || importedId || '(회사식별값없음)',
+                    bankName,
+                    accountNumber,
+                    accountHolder,
+                    status: 'skipped',
+                    reason: '대상 회사 미매칭',
+                };
+                previewRows.push(mismatch);
+                mismatchRows.push(mismatch);
+            });
+        }
+
+        if (target === 'custom') {
+            rows.forEach((row) => {
+                const importedId = getImportedCellText(row, ['id', 'ID', '계좌ID']);
+                const importedName = getImportedCellText(row, ['계좌명', 'name']);
+                const importedCategory = resolveImportedCustomCategory(row, sheetName);
+                const bankName = getImportedCellText(row, ['은행', 'bankName']);
+                const accountNumber = getImportedCellText(row, ['계좌번호', 'accountNumber']);
+                const accountHolder = getImportedCellText(row, ['예금주', 'accountHolder']);
+
+                if (!importedName || !importedCategory) {
+                    const mismatch: UploadPreviewRow = {
+                        keyText: importedName || importedId || '(계좌명없음)',
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'skipped',
+                        reason: !importedName ? '계좌명 누락' : '구분(매입/기타) 판별 실패',
+                    };
+                    previewRows.push(mismatch);
+                    mismatchRows.push(mismatch);
+                    return;
+                }
+
+                const matched =
+                    customAccounts.find((entry) => entry.id === importedId) ||
+                    customAccounts.find((entry) => entry.category === importedCategory && normalizeText(entry.name) === importedName);
+
+                if (matched?.id) {
+                    updateCount += 1;
+                    previewRows.push({
+                        keyText: `${importedCategory === 'purchase' ? '매입' : '기타'} / ${importedName}`,
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'matched',
+                    });
+                } else {
+                    createCount += 1;
+                    previewRows.push({
+                        keyText: `${importedCategory === 'purchase' ? '매입' : '기타'} / ${importedName}`,
+                        bankName,
+                        accountNumber,
+                        accountHolder,
+                        status: 'create',
+                        reason: '신규 생성 예정',
+                    });
+                }
+            });
+        }
+
+        const label =
+            target === 'workers'
+                ? '작업자 계좌'
+                : target === 'teams'
+                    ? '팀 계좌'
+                    : target === 'companies'
+                        ? '회사 계좌'
+                        : '매입/기타 계좌';
+
+        return {
+            target,
+            label,
+            sheetName,
+            rows,
+            rowCount: rows.length,
+            updateCount,
+            createCount,
+            skippedCount: Math.max(0, rows.length - updateCount - createCount),
+            previewRows,
+            mismatchRows,
+        };
+    }, [companies, customAccounts, teams, workers]);
+
+    const clearUploadPreview = () => {
+        setUploadPreviewFileName('');
+        setUploadPreviewSections([]);
+    };
+
+    const handleDownloadSampleWorkbook = () => {
+        const workbook = XLSX.utils.book_new();
+
+        const workerSample = XLSX.utils.json_to_sheet([
+            {
+                id: 'worker-id-sample',
+                이름: '홍길동',
+                팀명: '샘플팀',
+                팀유형: '시공팀',
+                회사명: '샘플회사',
+                재직상태: '재직',
+                급여방식: '월급제',
+                은행: '국민은행',
+                계좌번호: '12345678901234',
+                예금주: '홍길동',
+            },
+        ]);
+        const teamSample = XLSX.utils.json_to_sheet([
+            {
+                id: 'team-id-sample',
+                팀명: '샘플팀',
+                팀유형: '시공팀',
+                소속사: '샘플회사',
+                팀장: '팀장명',
+                은행: '국민은행',
+                계좌번호: '1111222233334444',
+                예금주: '샘플팀',
+            },
+        ]);
+        const companySample = XLSX.utils.json_to_sheet([
+            {
+                id: 'company-id-sample',
+                회사명: '샘플회사',
+                회사유형: '협력사',
+                대표자: '대표자명',
+                사업자번호: '123-45-67890',
+                은행: '국민은행',
+                계좌번호: '9999888877776666',
+                예금주: '샘플회사',
+            },
+        ]);
+        const purchaseSample = XLSX.utils.json_to_sheet([
+            {
+                id: '',
+                구분코드: 'purchase',
+                구분명: '매입계좌번호',
+                계좌명: '샘플 매입계좌',
+                은행: '국민은행',
+                계좌번호: '100200300400',
+                예금주: '샘플매입',
+                메모: '신규면 id 비워도 생성',
+                상태: '사용중',
+            },
+        ]);
+        const otherSample = XLSX.utils.json_to_sheet([
+            {
+                id: '',
+                구분코드: 'other',
+                구분명: '기타계좌번호',
+                계좌명: '샘플 기타계좌',
+                은행: '국민은행',
+                계좌번호: '500600700800',
+                예금주: '샘플기타',
+                메모: '신규면 id 비워도 생성',
+                상태: '사용중',
+            },
+        ]);
+
+        XLSX.utils.book_append_sheet(workbook, workerSample, '작업자계좌');
+        XLSX.utils.book_append_sheet(workbook, teamSample, '팀계좌');
+        XLSX.utils.book_append_sheet(workbook, companySample, '회사계좌');
+        XLSX.utils.book_append_sheet(workbook, purchaseSample, '매입계좌');
+        XLSX.utils.book_append_sheet(workbook, otherSample, '기타계좌');
+
+        const today = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(workbook, `계좌번호관리_샘플양식_${today}.xlsx`);
     };
 
     const handleDownloadTemplate = () => {
@@ -991,7 +1361,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
     };
 
     const handleUploadClick = () => {
-        if (activeTab === 'overview') return;
         fileInputRef.current?.click();
     };
 
@@ -999,172 +1368,179 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
         const file = event.target.files?.[0];
         if (!file) return;
 
-        setLoading(true);
         try {
             const buffer = await file.arrayBuffer();
             const workbook = XLSX.read(buffer, { type: 'array' });
-            const sheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[sheetName];
-            const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
+            const nextSections: UploadPreviewSection[] = [];
 
-            if (rows.length === 0) {
-                alert('업로드할 데이터가 없습니다.');
+            workbook.SheetNames.forEach((sheetName) => {
+                const worksheet = workbook.Sheets[sheetName];
+                const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, { defval: '', raw: false });
+                if (rows.length === 0) return;
+
+                const target = detectUploadTarget(sheetName, rows, activeTab);
+                if (!target) return;
+
+                nextSections.push(buildUploadPreviewSection(target, rows, sheetName));
+            });
+
+            if (nextSections.length === 0) {
+                alert('인식 가능한 업로드 시트가 없습니다. 샘플(전체) 양식을 사용해 주세요.');
                 return;
             }
 
-            if (activeTab === 'workers') {
-                const updates: Array<{ id: string; updates: Partial<Worker> }> = [];
-
-                rows.forEach((row) => {
-                    const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
-                    const importedName = getImportedCellText(row, ['이름', '작업자명']);
-                    const importedTeamName = getImportedCellText(row, ['팀명']);
-                    const target =
-                        workers.find((worker) => worker.id === importedId) ||
-                        workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
-
-                    if (!target?.id) return;
-
-                    updates.push({
-                        id: target.id,
-                        updates: {
-                            bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
-                            accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
-                            accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
-                        },
-                    });
-                });
-
-                if (updates.length === 0) {
-                    alert('작업자 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
-                    return;
-                }
-
-                await manpowerService.updateWorkersBatch(updates);
-                await loadData();
-                alert(`작업자 계좌 ${updates.length}건을 반영했습니다.`);
-                return;
-            }
-
-            if (activeTab === 'teams') {
-                let updatedCount = 0;
-
-                for (const row of rows) {
-                    const importedId = getImportedCellText(row, ['id', 'ID', '팀ID']);
-                    const importedName = getImportedCellText(row, ['팀명']);
-                    const target = teams.find((team) => team.id === importedId) || teams.find((team) => normalizeText(team.name) === importedName);
-                    if (!target?.id) continue;
-
-                    await teamService.updateTeam(target.id, {
-                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
-                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
-                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
-                    });
-                    updatedCount += 1;
-                }
-
-                if (updatedCount === 0) {
-                    alert('팀 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
-                    return;
-                }
-
-                await loadData();
-                alert(`팀 계좌 ${updatedCount}건을 반영했습니다.`);
-                return;
-            }
-
-            if (activeTab === 'companies') {
-                let updatedCount = 0;
-
-                for (const row of rows) {
-                    const importedId = getImportedCellText(row, ['id', 'ID', '회사ID']);
-                    const importedName = getImportedCellText(row, ['회사명']);
-                    const target =
-                        companies.find((company) => company.id === importedId) ||
-                        companies.find((company) => normalizeText(company.name) === importedName);
-                    if (!target?.id) continue;
-
-                    await companyService.updateCompany(target.id, {
-                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
-                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
-                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
-                    });
-                    updatedCount += 1;
-                }
-
-                if (updatedCount === 0) {
-                    alert('회사 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
-                    return;
-                }
-
-                await loadData();
-                alert(`회사 계좌 ${updatedCount}건을 반영했습니다.`);
-                return;
-            }
-
-            if (activeTab === 'custom') {
-                let updatedCount = 0;
-                let createdCount = 0;
-                const createdCountByCategory: Record<CustomCategory, number> = {
-                    purchase: 0,
-                    other: 0,
-                };
-
-                for (const row of rows) {
-                    const importedId = getImportedCellText(row, ['id', 'ID', '계좌ID']);
-                    const importedName = getImportedCellText(row, ['계좌명', 'name']);
-                    const importedCategory =
-                        normalizeImportedCustomCategory(getImportedCellText(row, ['구분코드', 'category'])) ||
-                        normalizeImportedCustomCategory(getImportedCellText(row, ['구분명', 'categoryName']));
-
-                    if (!importedName || !importedCategory) continue;
-
-                    const target =
-                        customAccounts.find((entry) => entry.id === importedId) ||
-                        customAccounts.find((entry) => entry.category === importedCategory && normalizeText(entry.name) === importedName);
-
-                    const payload: Partial<AccountDirectory> = {
-                        category: importedCategory,
-                        name: importedName,
-                        bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
-                        accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
-                        accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
-                        note: toNullableText(getImportedCellText(row, ['메모', 'note'])),
-                        status: normalizeImportedCustomStatus(getImportedCellText(row, ['상태', 'status'])),
-                    };
-
-                    if (target?.id) {
-                        await accountDirectoryService.updateEntry(target.id, payload);
-                        updatedCount += 1;
-                    } else {
-                        await accountDirectoryService.addEntry({
-                            category: importedCategory,
-                            name: importedName,
-                            bankName: payload.bankName,
-                            accountNumber: payload.accountNumber,
-                            accountHolder: payload.accountHolder,
-                            note: payload.note,
-                            status: payload.status === 'inactive' ? 'inactive' : 'active',
-                            sortOrder: customAccounts.filter((entry) => entry.category === importedCategory).length + createdCountByCategory[importedCategory],
-                        });
-                        createdCountByCategory[importedCategory] += 1;
-                        createdCount += 1;
-                    }
-                }
-
-                if (updatedCount === 0 && createdCount === 0) {
-                    alert('매입/기타 계좌 업로드 대상이 없습니다. 다운로드한 양식을 사용했는지 확인해주세요.');
-                    return;
-                }
-
-                await loadData();
-                alert(`매입/기타 계좌 업데이트 ${updatedCount}건, 신규 ${createdCount}건을 반영했습니다.`);
-            }
+            setUploadPreviewFileName(file.name);
+            setUploadPreviewSections(nextSections);
         } catch (error) {
             console.error('Failed to upload account workbook:', error);
             alert('엑셀 업로드 중 오류가 발생했습니다. 양식과 컬럼명을 확인해주세요.');
         } finally {
             event.target.value = '';
+        }
+    };
+
+    const handleApplyUploadPreview = async () => {
+        if (uploadPreviewSections.length === 0) return;
+
+        setApplyingUpload(true);
+        setLoading(true);
+        try {
+            let workerUpdated = 0;
+            let teamUpdated = 0;
+            let companyUpdated = 0;
+            let customUpdated = 0;
+            let customCreated = 0;
+
+            for (const section of uploadPreviewSections) {
+                if (section.target === 'workers') {
+                    const updates: Array<{ id: string; updates: Partial<Worker> }> = [];
+
+                    section.rows.forEach((row) => {
+                        const importedId = getImportedCellText(row, ['id', 'ID', '작업자ID']);
+                        const importedName = getImportedCellText(row, ['이름', '작업자명']);
+                        const importedTeamName = getImportedCellText(row, ['팀명']);
+                        const target =
+                            workers.find((worker) => worker.id === importedId) ||
+                            workers.find((worker) => normalizeText(worker.name) === importedName && normalizeText(worker.teamName) === importedTeamName);
+                        if (!target?.id) return;
+
+                        updates.push({
+                            id: target.id,
+                            updates: {
+                                bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                                accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                                accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                            },
+                        });
+                    });
+
+                    if (updates.length > 0) {
+                        await manpowerService.updateWorkersBatch(updates);
+                        workerUpdated += updates.length;
+                    }
+                    continue;
+                }
+
+                if (section.target === 'teams') {
+                    for (const row of section.rows) {
+                        const importedId = getImportedCellText(row, ['id', 'ID', '팀ID']);
+                        const importedName = getImportedCellText(row, ['팀명']);
+                        const target = teams.find((team) => team.id === importedId) || teams.find((team) => normalizeText(team.name) === importedName);
+                        if (!target?.id) continue;
+
+                        await teamService.updateTeam(target.id, {
+                            bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                            accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                            accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                        });
+                        teamUpdated += 1;
+                    }
+                    continue;
+                }
+
+                if (section.target === 'companies') {
+                    for (const row of section.rows) {
+                        const importedId = getImportedCellText(row, ['id', 'ID', '회사ID']);
+                        const importedName = getImportedCellText(row, ['회사명']);
+                        const target =
+                            companies.find((company) => company.id === importedId) ||
+                            companies.find((company) => normalizeText(company.name) === importedName);
+                        if (!target?.id) continue;
+
+                        await companyService.updateCompany(target.id, {
+                            bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                            accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                            accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                        });
+                        companyUpdated += 1;
+                    }
+                    continue;
+                }
+
+                if (section.target === 'custom') {
+                    const createdCountByCategory: Record<CustomCategory, number> = { purchase: 0, other: 0 };
+
+                    for (const row of section.rows) {
+                        const importedId = getImportedCellText(row, ['id', 'ID', '계좌ID']);
+                        const importedName = getImportedCellText(row, ['계좌명', 'name']);
+                        const importedCategory = resolveImportedCustomCategory(row, section.sheetName);
+                        if (!importedName || !importedCategory) continue;
+
+                        const target =
+                            customAccounts.find((entry) => entry.id === importedId) ||
+                            customAccounts.find((entry) => entry.category === importedCategory && normalizeText(entry.name) === importedName);
+
+                        const payload: Partial<AccountDirectory> = {
+                            category: importedCategory,
+                            name: importedName,
+                            bankName: toNullableText(getImportedCellText(row, ['은행', 'bankName'])),
+                            accountNumber: toNullableText(getImportedCellText(row, ['계좌번호', 'accountNumber'])),
+                            accountHolder: toNullableText(getImportedCellText(row, ['예금주', 'accountHolder'])),
+                            note: toNullableText(getImportedCellText(row, ['메모', 'note'])),
+                            status: normalizeImportedCustomStatus(getImportedCellText(row, ['상태', 'status'])),
+                        };
+
+                        if (target?.id) {
+                            await accountDirectoryService.updateEntry(target.id, payload);
+                            customUpdated += 1;
+                        } else {
+                            await accountDirectoryService.addEntry({
+                                category: importedCategory,
+                                name: importedName,
+                                bankName: payload.bankName,
+                                accountNumber: payload.accountNumber,
+                                accountHolder: payload.accountHolder,
+                                note: payload.note,
+                                status: payload.status === 'inactive' ? 'inactive' : 'active',
+                                sortOrder:
+                                    customAccounts.filter((entry) => entry.category === importedCategory).length +
+                                    createdCountByCategory[importedCategory],
+                            });
+                            createdCountByCategory[importedCategory] += 1;
+                            customCreated += 1;
+                        }
+                    }
+                }
+            }
+
+            await loadData();
+            clearUploadPreview();
+
+            alert(
+                [
+                    `업로드 반영 완료`,
+                    `- 작업자: ${workerUpdated}건`,
+                    `- 팀: ${teamUpdated}건`,
+                    `- 회사: ${companyUpdated}건`,
+                    `- 매입/기타 업데이트: ${customUpdated}건`,
+                    `- 매입/기타 신규: ${customCreated}건`,
+                ].join('\n')
+            );
+        } catch (error) {
+            console.error('Failed to apply upload preview:', error);
+            alert('업로드 반영 중 오류가 발생했습니다.');
+        } finally {
+            setApplyingUpload(false);
             setLoading(false);
         }
     };
@@ -1205,37 +1581,133 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                     </div>
                 </div>
 
-                {activeTab !== 'overview' && (
-                    <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                            <div className="text-sm font-semibold text-slate-800">현재 탭 엑셀 업로드 / 다운로드</div>
-                            <div className="mt-1 text-xs text-slate-500">
-                                다운로드한 파일을 그대로 수정한 뒤 다시 업로드하면 일괄 반영됩니다.
-                            </div>
+                <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <div className="text-sm font-semibold text-slate-800">계좌 엑셀 업로드 / 다운로드</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                            현재 탭 양식 다운로드 또는 샘플(전체) 다운로드 후 수정 → 업로드 → 미리보기 확인 후 반영하세요.
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                accept=".xlsx,.xls,.csv"
-                                onChange={handleUploadFile}
-                                className="hidden"
-                            />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            onChange={handleUploadFile}
+                            className="hidden"
+                        />
+                        <button
+                            type="button"
+                            onClick={handleDownloadTemplate}
+                            disabled={activeTab === 'overview'}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={faDownload} />
+                            현재 탭 다운로드
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleDownloadSampleWorkbook}
+                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                        >
+                            <FontAwesomeIcon icon={faDownload} />
+                            샘플(전체) 다운로드
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleUploadClick}
+                            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                        >
+                            <FontAwesomeIcon icon={faUpload} />
+                            업로드
+                        </button>
+                    </div>
+                </div>
+
+                {uploadPreviewSections.length > 0 && (
+                    <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4">
+                        <div>
+                            <div className="text-sm font-semibold text-slate-800">업로드 미리보기</div>
+                            <div className="mt-1 text-xs text-slate-600">파일: {uploadPreviewFileName}</div>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                            {uploadPreviewSections.map((section, idx) => (
+                                <div key={`${section.sheetName}-${section.target}-${idx}`} className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm text-slate-700">
+                                    <div className="font-semibold text-slate-800">{section.label} · 시트: {section.sheetName}</div>
+                                    <div className="mt-1 text-xs text-slate-600">
+                                        전체 {section.rowCount}건 / 업데이트 {section.updateCount}건 / 신규 {section.createCount}건 / 건너뜀 {section.skippedCount}건
+                                    </div>
+
+                                    <div className="mt-2 overflow-auto rounded-lg border border-slate-200">
+                                        <table className="min-w-full text-xs">
+                                            <thead className="bg-slate-100 text-slate-700">
+                                                <tr>
+                                                    <th className="px-2 py-1.5 text-left font-semibold">식별값</th>
+                                                    <th className="px-2 py-1.5 text-left font-semibold">은행</th>
+                                                    <th className="px-2 py-1.5 text-left font-semibold">계좌번호</th>
+                                                    <th className="px-2 py-1.5 text-left font-semibold">예금주</th>
+                                                    <th className="px-2 py-1.5 text-left font-semibold">상태</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {section.previewRows.slice(0, 10).map((row, rowIdx) => (
+                                                    <tr key={`${section.sheetName}-${row.keyText}-${rowIdx}`} className="border-t border-slate-100">
+                                                        <td className="px-2 py-1.5">{row.keyText}</td>
+                                                        <td className="px-2 py-1.5">{row.bankName || '-'}</td>
+                                                        <td className="px-2 py-1.5 font-mono">{row.accountNumber || '-'}</td>
+                                                        <td className="px-2 py-1.5">{row.accountHolder || '-'}</td>
+                                                        <td className="px-2 py-1.5">
+                                                            {row.status === 'matched' && <span className="rounded bg-emerald-100 px-2 py-0.5 text-emerald-700">업데이트</span>}
+                                                            {row.status === 'create' && <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-700">신규</span>}
+                                                            {row.status === 'skipped' && <span className="rounded bg-rose-100 px-2 py-0.5 text-rose-700">불일치</span>}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {section.previewRows.length > 10 && (
+                                        <div className="mt-1 text-[11px] text-slate-500">상세 미리보기는 상위 10행만 표시됩니다.</div>
+                                    )}
+
+                                    {section.mismatchRows.length > 0 && (
+                                        <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 p-2">
+                                            <div className="text-xs font-semibold text-rose-700">불일치 행 목록 ({section.mismatchRows.length}건)</div>
+                                            <div className="mt-1 space-y-1 text-xs text-rose-700">
+                                                {section.mismatchRows.slice(0, 10).map((row, mismatchIdx) => (
+                                                    <div key={`${section.sheetName}-mismatch-${mismatchIdx}`} className="rounded border border-rose-100 bg-white px-2 py-1">
+                                                        <span className="font-semibold">{row.keyText}</span>
+                                                        <span className="ml-2">{row.reason || '미매칭'}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            {section.mismatchRows.length > 10 && (
+                                                <div className="mt-1 text-[11px] text-rose-600">불일치 목록은 상위 10건만 표시됩니다.</div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
                             <button
                                 type="button"
-                                onClick={handleDownloadTemplate}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                                onClick={handleApplyUploadPreview}
+                                disabled={loading || applyingUpload}
+                                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                                <FontAwesomeIcon icon={faDownload} />
-                                다운로드
+                                <FontAwesomeIcon icon={faFloppyDisk} />
+                                {applyingUpload ? '반영 중...' : '미리보기 반영'}
                             </button>
                             <button
                                 type="button"
-                                onClick={handleUploadClick}
-                                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                onClick={clearUploadPreview}
+                                disabled={loading || applyingUpload}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                             >
-                                <FontAwesomeIcon icon={faUpload} />
-                                업로드
+                                취소
                             </button>
                         </div>
                     </div>

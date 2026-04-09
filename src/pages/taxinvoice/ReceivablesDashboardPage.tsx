@@ -253,7 +253,7 @@ const ReceivablesDashboardPage: React.FC = () => {
                     </button>
 
                     <button
-                        onClick={() => navigate('/payroll/taxinvoice/account-inquiry')}
+                        onClick={() => navigate('/payroll/taxinvoice/bank-inquiry')}
                         className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-all hover:border-green-300"
                     >
                         <div className="flex items-center gap-4">
