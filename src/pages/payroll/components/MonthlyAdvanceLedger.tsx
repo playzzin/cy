@@ -139,6 +139,7 @@ interface Props {
     payrollConfig: any | null;
     advanceItemLabels?: Partial<AdvanceItemLabelsConfig>;
     withholdingThreshold: number;
+    applyUtilities?: boolean;
     applyInsurance?: boolean;
     applyBusinessIncome?: boolean;
     applyDailyFee?: boolean;
@@ -212,6 +213,33 @@ const SIDE_NUMBER_FIELDS: LedgerSideNumberField[] = [
     'other',
 ];
 
+const UTILITY_SIDE_NUMBER_FIELDS: LedgerSideNumberField[] = [
+    'lodging',
+    'electricity',
+    'gas',
+    'water',
+    'internet',
+    'management',
+    'fine',
+    'other',
+];
+
+const maskUtilitiesInManualInput = (input: LedgerManualInput): LedgerManualInput => {
+    const nextInvoice = { ...input.invoice };
+    const nextLabor = { ...input.labor };
+
+    UTILITY_SIDE_NUMBER_FIELDS.forEach((field) => {
+        nextInvoice[field] = 0;
+        nextLabor[field] = 0;
+    });
+
+    return {
+        ...input,
+        invoice: nextInvoice,
+        labor: nextLabor,
+    };
+};
+
 const normalizeManualInput = (
     input: LedgerManualInput | undefined,
     defaultAssignment?: 'corporate' | 'labor'
@@ -240,6 +268,9 @@ const isManualInputEffectivelyEmpty = (
         return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
     });
 
+    const hasAnyValue = !isSideInputEmpty(input.invoice) || !isSideInputEmpty(input.labor) || memo.length > 0 || hasAssignment;
+    if (!hasAnyValue) return true;
+
     const baselineAssignment = resolveAssignmentType(defaultAssignment, 'corporate');
     const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
     const hasCustomAssignment = currentAssignment !== baselineAssignment;
@@ -254,13 +285,16 @@ const isManualInputEffectivelyEmpty = (
 };
 
 const toSafeAmount = (value: string): number => {
-    const parsed = Number(value);
+    const normalized = String(value ?? '').replace(/,/g, '').trim();
+    const parsed = Number(normalized);
     if (!Number.isFinite(parsed) || parsed <= 0) return 0;
     return Math.floor(parsed);
 };
 
 const floorWon = (value: number): number => Math.floor(Number.isFinite(value) ? value : 0);
 const formatAmount = (value: number): string => (value > 0 ? value.toLocaleString('ko-KR') : '-');
+const formatInputAmount = (value: number): string => (value > 0 ? value.toLocaleString('ko-KR') : '');
+const formatNetAmount = (value: number): string => (Number.isFinite(value) ? value.toLocaleString('ko-KR') : '-');
 const formatManDay = (value: number): string => (value > 0 ? value.toFixed(1) : '-');
 const getSalaryModelOrder = (salaryModel?: string): number => {
     const normalized = (salaryModel ?? '').trim();
@@ -293,10 +327,9 @@ const LedgerInputCell: React.FC<{
         <div className="flex flex-col gap-0.5 group">
             <div className="flex items-center gap-1">
                 <input
-                    type="number"
-                    min={0}
-                    step={1000}
-                    value={value === 0 ? '' : String(value)}
+                    type="text"
+                    inputMode="numeric"
+                    value={formatInputAmount(value)}
                     onChange={(e) => onChange(toSafeAmount(e.target.value))}
                     className={`w-full ${inputBg} border border-transparent hover:border-slate-300 focus:border-blue-400 focus:bg-white rounded px-1.5 text-right text-[12px] font-mono outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none transition-all ${className}`}
                     placeholder={placeholder}
@@ -331,6 +364,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     payrollConfig,
     advanceItemLabels,
     withholdingThreshold = 7,
+    applyUtilities = false,
     applyInsurance = false,
     applyBusinessIncome = false,
     applyDailyFee = false,
@@ -753,7 +787,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
 
         return rows
             .map((row) => {
-                const manual = inputsByRowKey[row.rowKey] ?? createEmptyManualInput();
+                const baseManual = inputsByRowKey[row.rowKey] ?? createEmptyManualInput();
+                const manual = applyUtilities ? baseManual : maskUtilitiesInManualInput(baseManual);
                 const invoiceDeductionTotal = sumSideDeductions(manual.invoice);
                 const laborDeductionTotal = sumSideDeductions(manual.labor);
                 const utilityTotal = invoiceDeductionTotal + laborDeductionTotal;
@@ -994,8 +1029,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     }
                 });
 
-                const corporateNet = Math.max(0, floorWon(corporateBaseBeforeUtility - utilityAppliedToCorporate));
-                const personalNet = Math.max(0, floorWon(personalBaseBeforeUtility - utilityShiftedToPersonal));
+                const corporateNet = floorWon(corporateBaseBeforeUtility - utilityAppliedToCorporate);
+                const personalNet = floorWon(personalBaseBeforeUtility - utilityShiftedToPersonal);
 
                 return {
                     ...row,
@@ -1033,6 +1068,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
     }, [
         applyBusinessIncome,
         applyDailyFee,
+        applyUtilities,
         applyInsurance,
         inputsByRowKey,
         isInsuranceEligibleForRowEntry,
@@ -1904,8 +1940,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                                         <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-green-200 font-bold">{formatAmount(row.businessTotal)}</td>
                                                     </>
                                                 )}
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-emerald-200 font-bold align-top">{formatAmount(row.corporateNet)}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-lime-200 font-bold align-top">{formatAmount(row.personalNet)}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-emerald-200 font-bold align-top">{formatNetAmount(row.corporateNet)}</td>
+                                                <td rowSpan={2} className="border border-slate-300 px-2 text-right bg-lime-200 font-bold align-top">{formatNetAmount(row.personalNet)}</td>
                                                 <td rowSpan={2} className="border border-slate-300 px-2 bg-lime-100 align-top">
                                                     <input
                                                         type="text"
@@ -2101,8 +2137,8 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                     <td className="border border-slate-400 px-2 py-2 text-right text-red-600">{formatAmount(totals.businessTotal)}</td>
                                 </>
                             )}
-                            <td className="border border-slate-400 px-2 py-2 text-right text-emerald-700">{formatAmount(totals.corporateNet)}</td>
-                            <td className="border border-slate-400 px-2 py-2 text-right text-lime-700">{formatAmount(totals.personalNet)}</td>
+                            <td className="border border-slate-400 px-2 py-2 text-right text-emerald-700">{formatNetAmount(totals.corporateNet)}</td>
+                            <td className="border border-slate-400 px-2 py-2 text-right text-lime-700">{formatNetAmount(totals.personalNet)}</td>
                             <td className="border border-slate-400 px-2 py-2 text-center text-slate-500">-</td>
                         </tr>
                     </tfoot>
