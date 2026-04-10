@@ -70,6 +70,8 @@ const getThisYearMonth = (): string => {
 };
 
 const MIN_ROW_COUNT = 20;
+const PRIMARY_DAY_COUNT = 16;
+const SECONDARY_DAY_COUNT = 15;
 
 const createEmptyRow = (id: number): RowState => ({
   id,
@@ -97,7 +99,8 @@ const monthToPeriod = (month: string): { start: string; end: string } => {
     return { start: '', end: '' };
   }
   const start = `${yStr}-${mStr}-01`;
-  const end = new Date(y, m, 0).toISOString().slice(0, 10);
+  const endDay = new Date(y, m, 0).getDate();
+  const end = `${yStr}-${mStr}-${String(endDay).padStart(2, '0')}`;
   return { start, end };
 };
 
@@ -446,7 +449,11 @@ const DailyWageStatementPage: React.FC = () => {
 
   const dayColWidthExpr = useMemo(() => {
     const fixedPx = showBankColumn ? 750 : 530;
-    return `calc((100% - ${fixedPx}px) / 15)`;
+    return `calc((100% - ${fixedPx}px) / ${PRIMARY_DAY_COUNT})`;
+  }, [showBankColumn]);
+
+  const printScale = useMemo(() => {
+    return showBankColumn ? 0.84 : 0.92;
   }, [showBankColumn]);
 
   const clearAllRows = () => {
@@ -1147,14 +1154,71 @@ const DailyWageStatementPage: React.FC = () => {
         .labor-statement-generator .control-box { height: 100%; }
 
         @media print {
+          @page {
+            size: A4 landscape;
+            margin: 6mm;
+          }
+
+          html, body, #root {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 100% !important;
+            background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .labor-statement-print-root,
+          .labor-statement-print-root * {
+            visibility: visible !important;
+          }
+
+          .labor-statement-print-root {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            zoom: var(--print-scale, 0.84);
+          }
+
+          @supports not (zoom: 1) {
+            .labor-statement-print-root {
+              transform: scale(var(--print-scale, 0.84));
+              transform-origin: top left;
+              width: calc(100% / var(--print-scale, 0.84)) !important;
+            }
+          }
+
           .labor-statement-generator .no-print { display: none; }
           .labor-statement-generator { -webkit-print-color-adjust: exact; padding: 0; background: #fff; }
           .labor-statement-generator .cell-delegate { background-color: #ffff00 !important; -webkit-print-color-adjust: exact; }
           .labor-statement-generator.hide-bank-col .bank-col { display: none !important; }
           .labor-statement-generator .table-scroll { overflow: visible; }
-          .labor-statement-generator #mainContainer { max-width: 1500px; margin: 0 auto; }
+          .labor-statement-generator #mainContainer { max-width: none; width: 100%; margin: 0 auto; }
           .labor-statement-generator { --day-col-width: 25px; }
           .labor-statement-generator col.day-col { width: 25px !important; }
+          .labor-statement-generator .custom-table {
+            width: 100% !important;
+            table-layout: fixed !important;
+            font-size: 10px !important;
+          }
+          .labor-statement-generator .custom-table th,
+          .labor-statement-generator .custom-table td {
+            padding: 2px 3px !important;
+            line-height: 1.15 !important;
+          }
+          .labor-statement-generator input[type="text"],
+          .labor-statement-generator input[type="number"],
+          .labor-statement-generator input[type="month"] {
+            height: 24px !important;
+            font-size: 10px !important;
+            border: none !important;
+            background: transparent !important;
+          }
         }
       `}</style>
 
@@ -1290,7 +1354,11 @@ const DailyWageStatementPage: React.FC = () => {
         </div>
       </div>
 
-      <div id="mainContainer" className="w-full">
+      <div
+        id="mainContainer"
+        className="w-full labor-statement-print-root"
+        style={{ ['--print-scale' as string]: String(printScale) }}
+      >
         <div className="mb-6 flex flex-col gap-4 lg:grid lg:grid-cols-[350px_1fr_350px] lg:items-end">
           <div className="hidden lg:block" />
           <div className="text-center">
@@ -1337,7 +1405,7 @@ const DailyWageStatementPage: React.FC = () => {
               <col style={{ width: 'var(--col-worker)' }} />
               <col style={{ width: 'var(--col-ssn)' }} />
               <col style={{ width: 'var(--col-addr)' }} />
-              {Array.from({ length: 15 }, (_, i) => (
+              {Array.from({ length: PRIMARY_DAY_COUNT }, (_, i) => (
                 <col key={`d1-${i}`} style={{ width: dayColWidthExpr }} className="day-col" />
               ))}
               <col style={{ width: 'var(--col-day-total)' }} />
@@ -1354,7 +1422,7 @@ const DailyWageStatementPage: React.FC = () => {
                   <span className="text-[9px] font-normal text-gray-600">전화번호</span>
                 </th>
                 <th rowSpan={2}>주 소</th>
-                {Array.from({ length: 15 }, (_, i) => (
+                {Array.from({ length: PRIMARY_DAY_COUNT }, (_, i) => (
                   <th key={`h1-${i}`} className="header-blue">
                     {String(i + 1).padStart(2, '0')}
                   </th>
@@ -1372,9 +1440,9 @@ const DailyWageStatementPage: React.FC = () => {
                 </th>
               </tr>
               <tr className="header-yellow">
-                {Array.from({ length: 15 }, (_, i) => (
+                {Array.from({ length: SECONDARY_DAY_COUNT }, (_, i) => (
                   <th key={`h2-${i}`} className="header-red">
-                    {String(i + 16).padStart(2, '0')}
+                    {String(i + PRIMARY_DAY_COUNT + 1).padStart(2, '0')}
                   </th>
                 ))}
                 <th>노무비 총액</th>
@@ -1429,7 +1497,7 @@ const DailyWageStatementPage: React.FC = () => {
                         />
                       </td>
 
-                      {Array.from({ length: 15 }, (_, i) => (
+                      {Array.from({ length: PRIMARY_DAY_COUNT }, (_, i) => (
                         <td key={`d-${r.id}-${i}`} className="p-0">
                           <input
                             type="text"
@@ -1510,13 +1578,13 @@ const DailyWageStatementPage: React.FC = () => {
                     </tr>
 
                     <tr data-row-id={r.id}>
-                      {Array.from({ length: 15 }, (_, i) => (
+                      {Array.from({ length: SECONDARY_DAY_COUNT }, (_, i) => (
                         <td key={`d2-${r.id}-${i}`} className="p-0">
                           <input
                             type="text"
-                            className={`day-input day-${i + 16}`}
-                            value={r.days[i + 15]}
-                            onChange={(e) => updateRowDay(r.id, i + 15, e.target.value)}
+                            className={`day-input day-${i + PRIMARY_DAY_COUNT + 1}`}
+                            value={r.days[i + PRIMARY_DAY_COUNT]}
+                            onChange={(e) => updateRowDay(r.id, i + PRIMARY_DAY_COUNT, e.target.value)}
                           />
                         </td>
                       ))}
@@ -1541,7 +1609,7 @@ const DailyWageStatementPage: React.FC = () => {
                   합계
                 </td>
 
-                {Array.from({ length: 15 }, (_, i) => (
+                {Array.from({ length: PRIMARY_DAY_COUNT }, (_, i) => (
                   <td key={`sum-d1-${i}`} className="p-0">
                     <input type="text" className="day-input font-bold footer-summary-input" readOnly value={formatDaysTotal(statementSummary.dayTotals[i] ?? 0)} />
                   </td>
@@ -1559,13 +1627,13 @@ const DailyWageStatementPage: React.FC = () => {
               </tr>
 
               <tr className="total-row">
-                {Array.from({ length: 15 }, (_, i) => (
+                {Array.from({ length: SECONDARY_DAY_COUNT }, (_, i) => (
                   <td key={`sum-d2-${i}`} className="p-0">
                     <input
                       type="text"
                       className="day-input font-bold footer-summary-input"
                       readOnly
-                      value={formatDaysTotal(statementSummary.dayTotals[i + 15] ?? 0)}
+                      value={formatDaysTotal(statementSummary.dayTotals[i + PRIMARY_DAY_COUNT] ?? 0)}
                     />
                   </td>
                 ))}

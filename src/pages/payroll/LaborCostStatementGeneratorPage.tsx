@@ -67,6 +67,16 @@ const getThisYearMonth = (): string => {
   return new Date().toISOString().slice(0, 7);
 };
 
+const getMonthLastDay = (month: string): number => {
+  const [yearText, monthText] = String(month || '').split('-');
+  const year = Number(yearText);
+  const monthNumber = Number(monthText);
+  if (!year || !monthNumber) {
+    return 31;
+  }
+  return new Date(year, monthNumber, 0).getDate();
+};
+
 const createEmptyRow = (id: number): RowState => ({
   id,
   workerId: null,
@@ -94,12 +104,13 @@ const monthToPeriod = (month: string): { start: string; end: string } => {
     return { start: '', end: '' };
   }
   const start = `${yStr}-${mStr}-01`;
-  const end = new Date(y, m, 0).toISOString().slice(0, 10);
+  const endDay = new Date(y, m, 0).getDate();
+  const end = `${yStr}-${mStr}-${String(endDay).padStart(2, '0')}`;
   return { start, end };
 };
 
-const sumDays = (days: string[]): number => {
-  return days.reduce((acc, raw) => {
+const sumDaysForMonth = (days: string[], lastDay: number): number => {
+  return days.slice(0, Math.max(lastDay, 0)).reduce((acc, raw) => {
     const v = parseFloat(String(raw).trim());
     return acc + (Number.isFinite(v) ? v : 0);
   }, 0);
@@ -142,22 +153,23 @@ const formatAddressCell = (row: RowState, includeBankUnderAddress: boolean): str
   return parts.filter(Boolean).join('\n');
 };
 
+const getExcelDataRowHeight = (row: RowState, includeTeamUnderName: boolean, includeBankUnderAddress: boolean): number => {
+  const nameLines = formatWorkerNameCell(row, includeTeamUnderName).split('\n').filter(Boolean).length;
+  const addressLines = formatAddressCell(row, includeBankUnderAddress).split('\n').filter(Boolean).length;
+  const lineCount = Math.max(nameLines, addressLines, 1);
+  if (lineCount >= 3) return 48;
+  if (lineCount === 2) return 38;
+  return 24;
+};
+
 // --- UI Constants & Classes ---
 const W_INDEX = 'w-[45px]';
-const W_NAME = 'w-[95px]';
-const W_SSN = 'w-[125px]';
-const W_ADDRESS = 'w-[320px]';
-const W_DAY = 'w-[32px]';
-const W_TOTAL = 'w-[65px]';
-const W_UNIT_PRICE = 'w-[100px]';
-const W_AMOUNT = 'w-[120px]';
-const W_BANK = 'w-[280px]';
 
-const statementCellClass = 'border border-slate-900 align-middle text-center tabular-nums';
-const statementFixedHeaderClass = `${statementCellClass} bg-[#f1f5f9] px-2 py-2 text-[11px] font-bold text-slate-800`;
-const statementPrimaryDayHeaderClass = `${statementCellClass} bg-[#334155] px-1 py-1.5 text-[10px] font-bold text-white border-slate-700`;
-const statementSecondaryDayHeaderClass = `${statementCellClass} bg-[#475569] px-1 py-1.5 text-[10px] font-bold text-white border-slate-700`;
-const statementSummaryHeaderClass = `${statementCellClass} bg-[#f8fafc] px-2 py-2 text-[11px] font-extrabold text-slate-900`;
+const statementCellClass = 'border border-black align-middle text-center tabular-nums';
+const statementFixedHeaderClass = `${statementCellClass} bg-[#fffacd] px-2 py-2 text-[11px] font-bold text-black`;
+const statementPrimaryDayHeaderClass = `${statementCellClass} bg-[#008080] px-1 py-1.5 text-[10px] font-bold text-white`;
+const statementSecondaryDayHeaderClass = `${statementCellClass} bg-[#a52a2a] px-1 py-1.5 text-[10px] font-bold text-white`;
+const statementSummaryHeaderClass = `${statementCellClass} bg-[#fffacd] px-2 py-2 text-[11px] font-extrabold text-black`;
 
 const getStatementHeaderCellClass = (
   tone: 'index' | 'name' | 'ssn' | 'address' | 'summary' | 'rate' | 'amount' | 'bank'
@@ -178,7 +190,7 @@ const getStatementHeaderCellClass = (
 };
 
 const getStatementDayHeaderClass = (dayNumber: number): string => (
-  dayNumber <= 16 ? statementPrimaryDayHeaderClass : statementSecondaryDayHeaderClass
+  dayNumber <= 15 ? statementPrimaryDayHeaderClass : statementSecondaryDayHeaderClass
 );
 
 // --- Component ---
@@ -228,8 +240,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const [constructorCompany, setConstructorCompany] = useState<Company | null>(null);
 
   // --- Helper for row total calculation ---
-  const getRowTotalAmount = useCallback((r: RowState): number => {
-    const totalDays = sumDays(r.days);
+  const getRowTotalAmount = useCallback((r: RowState, lastDay: number): number => {
+    const totalDays = sumDaysForMonth(r.days, lastDay);
     const unit = parseFloat(String(r.unitPrice).replace(/,/g, '').trim());
     const unitPrice = Number.isFinite(unit) ? unit : 0;
     return Math.round(totalDays * unitPrice);
@@ -619,12 +631,12 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     workbook.modified = new Date();
 
     const ws = workbook.addWorksheet('노무내역서', {
-      views: [{ state: 'frozen', ySplit: 4, xSplit: 5 }]
+      views: [{ state: 'frozen', ySplit: 4, xSplit: 5, showGridLines: false }]
     });
     ws.properties.defaultRowHeight = 24;
 
     const [y, m] = (month || '').split('-');
-    const lastDay = y && m ? new Date(Number(y), Number(m), 0).getDate() : 31;
+    const lastDay = getMonthLastDay(month);
     const showBankDetailsColumn = showBankColumn;
     const trailingHeaders = showBankDetailsColumn
       ? ['은행', '예금주', '계좌번호', '지급구분']
@@ -649,6 +661,9 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         footer: 0.2
       }
     };
+    ws.headerFooter.oddHeader = `&C&"Malgun Gothic,Bold"${statementTitle || '노무내역서'}`;
+    ws.headerFooter.oddFooter = `&L출력일 ${new Date().toLocaleDateString('ko-KR')}&R&P / &N`;
+    (ws.pageSetup as ExcelJS.PageSetup & { printTitlesRow?: string }).printTitlesRow = '$1:$4';
 
     // --- Title Row ---
     const titleRow = ws.addRow([statementTitle || '노무내역서']);
@@ -659,7 +674,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     titleRow.height = 30;
 
     // --- Info Row ---
-    const periodStr = y && m ? `${y}-${m}-01 ~ ${y}-${m}-${lastDay}` : '-';
+    const periodStr = y && m ? `${y}-${m}-01 ~ ${y}-${m}-${String(lastDay).padStart(2, '0')}` : '-';
     const optionLabels = [
       showTeamUnderName ? '이름하단팀명' : '',
       showBankUnderAddress ? '주소하단계좌' : '',
@@ -705,6 +720,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
     });
     headerRow.height = 24;
+    ws.views = [{ state: 'frozen', ySplit: headerRow.number, xSplit: 5, showGridLines: false }];
 
     ws.getColumn(1).width = 5;   // No
     ws.getColumn(2).width = showTeamUnderName ? 14 : 10;  // 성명
@@ -746,7 +762,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const dailyTotals = Array.from({ length: lastDay }, () => 0);
 
     filledRows.forEach((r, idx) => {
-      const totalDaysVal = sumDays(r.days);
+      const totalDaysVal = sumDaysForMonth(r.days, lastDay);
       const unitPriceVal = parseFloat(String(r.unitPrice).replace(/,/g, '').trim());
       const safeUnit = Number.isFinite(unitPriceVal) ? unitPriceVal : 0;
       const totalAmountVal = Math.round(totalDaysVal * safeUnit);
@@ -780,25 +796,55 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       }
 
       const dataRow = ws.addRow(cells);
-      dataRow.height = showTeamUnderName || showBankUnderAddress ? 34 : 24;
+      const rowFill = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF8FAFC';
+      dataRow.height = getExcelDataRowHeight(r, showTeamUnderName, showBankUnderAddress);
       dataRow.eachCell((cell, colNumber) => {
         cell.font = { size: 9 };
         cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         cell.alignment = { vertical: 'middle', wrapText: colNumber === 2 || colNumber === 5 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowFill } };
         if (colNumber === 1 || (colNumber >= 6 && colNumber <= 5 + lastDay) || colNumber === afterDays + 1) {
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+        if (colNumber === 2) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        }
+        if (colNumber === 5) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
         }
         if (colNumber === afterDays + 2 || colNumber === afterDays + 3) {
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
           cell.numFmt = '#,##0';
         }
+        if (colNumber >= 6 && colNumber <= 5 + lastDay) {
+          cell.numFmt = '#,##0.0';
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: {
+              argb: idx % 2 === 0
+                ? (colNumber - 5 <= daySplitPoint ? 'FFF8FBFF' : 'FFF7FAFC')
+                : (colNumber - 5 <= daySplitPoint ? 'FFF1F7FE' : 'FFEFF4F8')
+            }
+          };
+        }
+        if (colNumber === afterDays + 1) {
+          cell.numFmt = '#,##0.0';
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7DD' } };
+          cell.font = { size: 9, bold: true };
+        }
+        if (colNumber === afterDays + 2 || colNumber === afterDays + 3) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7DD' } };
+          cell.font = { size: 9, bold: colNumber === afterDays + 3 };
+        }
         if (showBankDetailsColumn && colNumber >= afterDays + 4) {
           cell.alignment = { horizontal: colNumber === totalColumns ? 'center' : 'center', vertical: 'middle', wrapText: true };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: idx % 2 === 0 ? 'FFF7FDF9' : 'FFEEF8F1' } };
         }
       });
     });
 
-    const footerCells: (string | number)[] = ['', '합 계', '', '', ''];
+    const footerCells: (string | number)[] = ['날짜별 공수합계', '', '', '', ''];
     for (let d = 0; d < lastDay; d++) {
       footerCells.push(dailyTotals[d] > 0 ? dailyTotals[d] : '');
     }
@@ -810,13 +856,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }
 
     const footerRow = ws.addRow(footerCells);
+    ws.mergeCells(footerRow.number, 1, footerRow.number, 5);
     footerRow.eachCell((cell) => {
       cell.font = { bold: true, size: 10 };
       cell.border = { top: { style: 'medium' }, bottom: { style: 'medium' }, left: { style: 'thin' }, right: { style: 'thin' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
     });
-    footerRow.height = 24;
+    footerRow.height = 26;
     const footerAmountCell = footerRow.getCell(afterDays + 3);
     footerAmountCell.numFmt = '#,##0';
     footerAmountCell.alignment = { horizontal: 'right', vertical: 'middle' };
@@ -826,11 +873,16 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       const cell = footerRow.getCell(6 + d);
       cell.numFmt = '#,##0.0';
     }
+    ws.getCell(footerRow.number, 1).alignment = { horizontal: 'center', vertical: 'middle' };
 
     ws.autoFilter = {
       from: { row: headerRow.number, column: 1 },
       to: { row: headerRow.number, column: totalColumns }
     };
+    const printAreaEndColumn = ws.getColumn(totalColumns).letter;
+    if (printAreaEndColumn) {
+      ws.pageSetup.printArea = `A1:${printAreaEndColumn}${footerRow.number}`;
+    }
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -839,17 +891,18 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [rows, month, statementTitle, companyName, siteNameInput, showBankColumn, showBankUnderAddress, showTeamUnderName]);
 
   const statementSummary = useMemo(() => {
+    const visibleLastDay = getMonthLastDay(month);
     let totalDays = 0;
     let totalAmount = 0;
-    const dailyTotals = Array(31).fill(0);
+    const dailyTotals = Array(visibleLastDay).fill(0);
 
     rows.forEach(r => {
-      const d = sumDays(r.days);
+      const d = sumDaysForMonth(r.days, visibleLastDay);
       const p = parseFloat(String(r.unitPrice).replace(/,/g, ''));
       totalDays += d;
 
       r.days.forEach((val, idx) => {
-        if (idx < 31) {
+        if (idx < visibleLastDay) {
           const num = parseFloat(val);
           if (Number.isFinite(num)) {
             dailyTotals[idx] += num;
@@ -860,7 +913,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       if (Number.isFinite(p)) totalAmount += Math.round(d * p);
     });
     return { totalDays, totalAmount, dailyTotals };
-  }, [rows]);
+  }, [month, rows]);
 
   const statementPeriod = useMemo(() => {
     const monthPeriod = monthToPeriod(month);
@@ -873,8 +926,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const statementLastDay = useMemo(() => {
     const endDay = extractDayOfMonth(statementPeriod.end);
     if (endDay && endDay > 0) return endDay;
-    const fallbackPeriod = monthToPeriod(month);
-    return extractDayOfMonth(fallbackPeriod.end) ?? 31;
+    return getMonthLastDay(month);
   }, [month, statementPeriod.end]);
 
   const primaryDayNumbers = useMemo(() => {
@@ -888,10 +940,52 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return Array.from({ length: secondaryCount }, (_, idx) => primaryDayNumbers.length + idx + 1);
   }, [isSplitView, primaryDayNumbers.length, statementLastDay]);
 
-  const splitRowSectionClass = isSplitView ? 'h-9 min-h-[36px]' : 'h-8 min-h-[32px]';
-  const spanningCellHeightClass = isSplitView ? 'min-h-[72px]' : 'min-h-[32px]';
+  const splitRowSectionClass = isSplitView ? 'h-[30px] min-h-[30px]' : 'h-[30px] min-h-[30px]';
+  const spanningCellHeightClass = isSplitView ? 'min-h-[60px]' : 'min-h-[30px]';
   const namePrimaryCellHeightClass = showTeamUnderName ? splitRowSectionClass : spanningCellHeightClass;
   const addressPrimaryCellHeightClass = showBankUnderAddress ? splitRowSectionClass : spanningCellHeightClass;
+  const widthClassByColumn = useMemo(() => {
+    if (showBankColumn) {
+      return {
+        name: 'w-[60px]',
+        ssn: 'w-[105px]',
+        address: 'w-[300px]',
+        day: 'w-[25px]',
+        total: 'w-[42px]',
+        unitPrice: 'w-[80px]',
+        amount: 'w-[120px]',
+        bank: 'w-[220px]'
+      };
+    }
+
+    return {
+      name: 'w-[85px]',
+      ssn: 'w-[120px]',
+      address: 'w-[360px]',
+      day: 'w-[34px]',
+      total: 'w-[60px]',
+      unitPrice: 'w-[100px]',
+      amount: 'w-[140px]',
+      bank: 'w-0'
+    };
+  }, [showBankColumn]);
+
+  const previewSurfaceMinWidth = useMemo(() => {
+    const visibleDayCount = isSplitView ? primaryDayNumbers.length : statementLastDay;
+    const fixedWidth = showBankColumn
+      ? (45 + 60 + 105 + 300 + 42 + 80 + 120 + 220)
+      : (45 + 85 + 120 + 360 + 60 + 100 + 140);
+    const dayWidth = showBankColumn ? 25 : 34;
+    return fixedWidth + visibleDayCount * dayWidth;
+  }, [isSplitView, primaryDayNumbers.length, showBankColumn, statementLastDay]);
+
+  const printScale = useMemo(() => {
+    const safeA4WidthPx = 1060;
+    const baseScale = Math.min(1, safeA4WidthPx / Math.max(previewSurfaceMinWidth, 1));
+    const safetyScale = showBankColumn ? 0.97 : 0.98;
+    const computed = Number((baseScale * safetyScale).toFixed(2));
+    return Math.max(0.42, computed);
+  }, [isSplitView, previewSurfaceMinWidth, showBankColumn]);
 
   return (
     <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
@@ -899,7 +993,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         @media print {
           @page {
             size: A4 landscape;
-            margin: 8mm;
+            margin: 6mm;
           }
 
           html, body, #root {
@@ -910,6 +1004,22 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .labor-statement-print-root,
+          .labor-statement-print-root * {
+            visibility: visible !important;
+          }
+
+          .labor-statement-print-root {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
           }
 
           .labor-statement-page {
@@ -924,6 +1034,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
           .labor-statement-shell {
             padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
             overflow: visible !important;
           }
 
@@ -937,28 +1049,90 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
           .labor-statement-preview-scroll {
             padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+          }
+
+          .labor-statement-print-sheet {
+            width: 100%;
+            max-width: 285mm;
+            max-width: calc(297mm - 12mm);
+            min-height: 0 !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
+            background: #ffffff !important;
+          }
+
+          .labor-statement-print-root table {
+            border-color: #000000 !important;
           }
 
           .labor-statement-preview-surface {
-            width: max-content;
+            width: max-content !important;
+            min-width: max-content !important;
             margin: 0 auto !important;
             transform-origin: top left;
+            zoom: var(--statement-print-scale, 0.74);
           }
 
-          .labor-statement-preview-surface.with-bank {
-            zoom: 0.62;
+          .labor-statement-print-header {
+            display: flex !important;
+            justify-content: center !important;
+            align-items: flex-end !important;
+            margin: 0 0 2.5mm !important;
+            min-width: 0 !important;
           }
 
-          .labor-statement-preview-surface.without-bank {
-            zoom: 0.74;
+          .labor-statement-print-header > div:first-child {
+            display: none !important;
+          }
+
+          .labor-statement-print-header > div:last-child {
+            display: none !important;
+          }
+
+          .labor-statement-print-header > div:nth-child(2) {
+            padding: 0 !important;
+            border: none !important;
+            background: transparent !important;
+            font-size: 22px !important;
+            line-height: 1.1 !important;
+            box-shadow: none !important;
+          }
+
+          .labor-statement-print-header table {
+            box-shadow: none !important;
+          }
+
+          .labor-statement-print-sheet > table {
+            margin-top: 0 !important;
           }
 
           .labor-statement-preview-surface table {
             box-shadow: none !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
           }
 
           .labor-statement-preview-surface .sticky {
             position: static !important;
+          }
+
+          .labor-statement-preview-surface thead,
+          .labor-statement-preview-surface tbody,
+          .labor-statement-preview-surface tfoot,
+          .labor-statement-preview-surface tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid-page !important;
+          }
+
+          .labor-statement-preview-surface th,
+          .labor-statement-preview-surface td {
+            line-height: 1.2 !important;
+            padding-top: 1px !important;
+            padding-bottom: 1px !important;
           }
 
           .labor-statement-preview-surface input,
@@ -970,6 +1144,26 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
             appearance: none !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+          }
+
+          .labor-statement-print-root input[type='radio'] {
+            display: none !important;
+          }
+
+          .labor-statement-preview-surface tbody td > div {
+            min-height: auto !important;
+          }
+
+          .labor-statement-preview-surface tbody input {
+            height: 7mm !important;
+            min-height: 7mm !important;
+          }
+
+          .labor-statement-preview-surface tfoot td,
+          .labor-statement-preview-surface thead th {
+            font-size: 10px !important;
           }
         }
       `}</style>
@@ -1103,67 +1297,74 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="labor-statement-shell flex-1 min-h-0 px-6 pb-6 pt-6 overflow-hidden">
+      <div className="labor-statement-shell flex-1 min-h-0 px-2 pb-2 pt-2 overflow-hidden">
         <div className="labor-statement-preview-frame h-full bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
-          <div className="labor-statement-preview-scroll overflow-auto custom-scrollbar flex-1 bg-[#f6f4eb] p-6">
-            <div className={`labor-statement-preview-surface ${showBankColumn ? 'with-bank' : 'without-bank'}`}>
-            <div className="mb-6 grid min-w-[1480px] grid-cols-[1fr_auto_1fr] items-start gap-4">
-              <div />
-              <div className="justify-self-center border border-black bg-[#fff9dd] px-12 py-3 text-center text-3xl font-black tracking-tight text-slate-900 shadow-sm">
-                <div>{statementTitle || '노무내역서'}</div>
+          <div className="labor-statement-preview-scroll overflow-auto custom-scrollbar flex-1 bg-[#f6f4eb] p-2">
+            <div
+              className={`labor-statement-preview-surface w-full ${showBankColumn ? 'with-bank' : 'without-bank'}`}
+              style={{ ['--statement-print-scale' as string]: String(printScale) }}
+            >
+              <div className="labor-statement-print-root labor-statement-print-sheet">
+            <div className="labor-statement-print-header mb-6 flex flex-col gap-4 lg:grid lg:grid-cols-[350px_1fr_350px] lg:items-end" style={{ width: '100%', minWidth: `${previewSurfaceMinWidth}px` }}>
+              <div className="hidden lg:block" />
+              <div className="text-center">
+                <h1 className="text-3xl font-bold underline decoration-4 underline-offset-8 bg-yellow-50 inline-block px-6 py-2 border border-black shadow-sm">
+                  {statementTitle || '노무내역서'}
+                </h1>
               </div>
-              <div className="justify-self-end">
-                <table className="border-collapse border border-slate-900 bg-white text-[11px] shadow-sm">
+              <div className="lg:justify-self-end">
+                <table className="border-collapse border border-black text-xs w-[350px] bg-yellow-50 shadow-sm">
                   <tbody>
                     <tr>
-                      <th className="border border-slate-900 bg-slate-100 px-3 py-1.5 font-bold text-slate-700 w-[70px] text-center">기간</th>
-                      <td className="border border-slate-900 px-4 py-1.5 font-extrabold text-slate-900 bg-white min-w-[200px] text-center" colSpan={3}>{`${statementPeriod.start} ~ ${statementPeriod.end}`}</td>
+                      <th className="border border-black bg-yellow-100 p-1 w-12" rowSpan={2}>기<br />간</th>
+                      <td className="border border-black p-1 text-center w-28">{statementPeriod.start}</td>
+                      <th className="border border-black bg-yellow-100 p-1 w-16">회사명</th>
+                      <td className="border border-black p-1 text-center">{companyName || '-'}</td>
                     </tr>
                     <tr>
-                      <th className="border border-slate-900 bg-slate-100 px-3 py-1.5 font-bold text-slate-700 w-[70px] text-center">회사명</th>
-                      <td className="border border-slate-900 px-4 py-1.5 font-extrabold text-slate-900 bg-white min-w-[120px] text-center">{companyName || '-'}</td>
-                      <th className="border border-slate-900 bg-slate-100 px-3 py-1.5 font-bold text-slate-700 w-[70px] text-center">현장명</th>
-                      <td className="border border-slate-900 px-4 py-1.5 font-extrabold text-slate-900 bg-white min-w-[120px] text-center">{siteNameInput || '전체 통합'}</td>
+                      <td className="border border-black p-1 text-center">{statementPeriod.end}</td>
+                      <th className="border border-black bg-yellow-100 p-1">팀명</th>
+                      <td className="border border-black p-1 text-center">{siteNameInput || '전체 통합'}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             </div>
 
-            <table className="min-w-max border-collapse border-2 border-slate-900 bg-white shadow-xl table-fixed">
+            <table className="border-collapse border border-black bg-white shadow-sm table-fixed w-full" style={{ width: '100%', minWidth: `${previewSurfaceMinWidth}px` }}>
               <thead className="sticky top-0 z-10 text-[11px] font-bold">
                 <tr>
                   <th className={`${getStatementHeaderCellClass('index')} ${W_INDEX}`} rowSpan={isSplitView ? 2 : 1}>No</th>
-                  <th className={`${getStatementHeaderCellClass('name')} ${W_NAME}`} rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('name')} ${widthClassByColumn.name}`} rowSpan={isSplitView ? 2 : 1}>
                     <div className="flex flex-col items-center justify-center p-1">
                       <span>성명</span>
                       {showTeamUnderName && <span className="text-[9px] font-medium text-slate-500 mt-0.5">(소속팀)</span>}
                     </div>
                   </th>
-                  <th className={`${getStatementHeaderCellClass('ssn')} ${W_SSN}`} rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('ssn')} ${widthClassByColumn.ssn}`} rowSpan={isSplitView ? 2 : 1}>
                     <div className="flex flex-col items-center justify-center p-1">
                       <span>주민등록번호</span>
                       <span className="text-[9px] font-medium text-slate-500">(연락처)</span>
                     </div>
                   </th>
-                  <th className={`${getStatementHeaderCellClass('address')} ${W_ADDRESS}`} rowSpan={isSplitView ? 2 : 1}>
+                  <th className={`${getStatementHeaderCellClass('address')} ${widthClassByColumn.address}`} rowSpan={isSplitView ? 2 : 1}>
                     <div className="flex flex-col items-center justify-center p-1">
                       <span>주소</span>
                       {showBankUnderAddress && <span className="text-[9px] font-medium text-slate-500 mt-0.5">(개인 계좌정보)</span>}
                     </div>
                   </th>
                   {primaryDayNumbers.map((dayNumber) => (
-                    <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${W_DAY}`}>{String(dayNumber).padStart(2, '0')}</th>
+                    <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${widthClassByColumn.day}`}>{String(dayNumber).padStart(2, '0')}</th>
                   ))}
-                  <th className={`${getStatementHeaderCellClass('summary')} ${W_TOTAL}`} rowSpan={isSplitView ? 2 : 1}>출역합계</th>
-                  <th className={`${getStatementHeaderCellClass('rate')} ${W_UNIT_PRICE}`} rowSpan={isSplitView ? 2 : 1}>단가</th>
-                  <th className={`${getStatementHeaderCellClass('amount')} ${W_AMOUNT}`} rowSpan={isSplitView ? 2 : 1}>인건비총액</th>
-                  {showBankColumn && <th className={`${getStatementHeaderCellClass('bank')} ${W_BANK}`} rowSpan={isSplitView ? 2 : 1}>계좌번호 / 지급구분</th>}
+                  <th className={`${getStatementHeaderCellClass('summary')} ${widthClassByColumn.total}`} rowSpan={isSplitView ? 2 : 1}>출역합계</th>
+                  <th className={`${getStatementHeaderCellClass('rate')} ${widthClassByColumn.unitPrice}`} rowSpan={isSplitView ? 2 : 1}>단가</th>
+                  <th className={`${getStatementHeaderCellClass('amount')} ${widthClassByColumn.amount}`} rowSpan={isSplitView ? 2 : 1}>인건비총액</th>
+                  {showBankColumn && <th className={`${getStatementHeaderCellClass('bank')} ${widthClassByColumn.bank}`} rowSpan={isSplitView ? 2 : 1}>계좌번호 / 지급구분</th>}
                 </tr>
                 {isSplitView && (
                   <tr>
                     {secondaryDayNumbers.map((dayNumber) => (
-                      <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${W_DAY}`}>{String(dayNumber).padStart(2, '0')}</th>
+                      <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${widthClassByColumn.day}`}>{String(dayNumber).padStart(2, '0')}</th>
                     ))}
                   </tr>
                 )}
@@ -1172,39 +1373,39 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 {rows.map((row, idx) => (
                   <React.Fragment key={row.id}>
                     <tr className="border-b border-black bg-white text-slate-800">
-                      <td className="border-r border-black text-center text-xs font-bold text-slate-700 bg-[#f6f1cf]" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
+                      <td className="border-r border-black text-center text-xs font-bold text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass} ${showTeamUnderName ? 'divide-y divide-black' : ''}`}>
                           <input type="text" value={row.workerName} onChange={e => updateRow(row.id, { workerName: e.target.value })}
-                            className={`w-full px-2 text-center text-xs font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 ${showTeamUnderName ? `${splitRowSectionClass} border-b border-black` : namePrimaryCellHeightClass}`} placeholder="이름"
+                            className={`w-full px-2 text-center text-[10px] font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${showTeamUnderName ? splitRowSectionClass : namePrimaryCellHeightClass}`} placeholder="이름"
                           />
                           {showTeamUnderName && (
                             <input type="text" value={row.teamName} onChange={e => updateRow(row.id, { teamName: e.target.value })}
-                              className={`w-full px-2 text-center text-[10px] text-slate-500 bg-slate-50/50 outline-none focus:bg-indigo-50 placeholder-slate-300 border-t border-black ${splitRowSectionClass}`} placeholder="팀명"
+                              className={`w-full px-2 text-center text-[10px] text-slate-500 bg-slate-50/50 outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${splitRowSectionClass}`} placeholder="팀명"
                             />
                           )}
                         </div>
                       </td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass} divide-y divide-black`}>
                           <input type="text" value={row.workerSsn} onChange={e => updateRow(row.id, { workerSsn: e.target.value })}
-                            className={`w-full px-2 text-center text-xs font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tighter placeholder-slate-300 border-b border-black ${splitRowSectionClass}`} placeholder="800101-1..."
+                            className={`w-full px-2 text-center text-[10px] font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tighter placeholder-slate-300 leading-tight ${splitRowSectionClass}`} placeholder="800101-1..."
                           />
                           <input type="text" value={row.workerPhone} onChange={e => updateRow(row.id, { workerPhone: e.target.value })}
-                            className={`w-full px-2 text-center text-[10px] font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tight placeholder-slate-300 ${splitRowSectionClass}`} placeholder="010-0000-0000"
+                            className={`w-full px-2 text-center text-[10px] font-semibold text-slate-700 bg-transparent outline-none focus:bg-indigo-50 tracking-tight placeholder-slate-300 leading-tight ${splitRowSectionClass}`} placeholder="010-0000-0000"
                           />
                         </div>
                       </td>
                       <td className={`border-r border-black p-0 ${row.payType === 'delegate' && showBankUnderAddress ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
-                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass}`}>
+                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass} ${showBankUnderAddress ? 'divide-y divide-black' : ''}`}>
                           <input type="text" value={row.workerAddress} onChange={e => updateRow(row.id, { workerAddress: e.target.value })}
-                            className={`w-full px-2 text-left text-[11px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 ${showBankUnderAddress ? `${splitRowSectionClass} border-b border-black` : addressPrimaryCellHeightClass}`} placeholder="상세주소 입력"
+                            className={`w-full px-2 text-left text-[10px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${showBankUnderAddress ? splitRowSectionClass : addressPrimaryCellHeightClass}`} placeholder="상세주소 입력"
                           />
                           {showBankUnderAddress && (
-                            <div className={`flex items-center divide-x divide-black border-t border-black bg-slate-50/50 ${splitRowSectionClass}`}>
-                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[60px] h-full text-center text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
-                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full text-center text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
-                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
+                            <div className={`flex items-center divide-x divide-slate-700 bg-slate-50/50 ${splitRowSectionClass}`}>
+                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
+                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
+                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
                             </div>
                           )}
                         </div>
@@ -1220,18 +1421,18 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                                 newDays[dayIndex] = e.target.value;
                                 updateRow(row.id, { days: newDays });
                               }}
-                              className={`w-full h-9 text-center text-xs font-bold outline-none focus:bg-sky-100 transition-colors ${value ? 'text-slate-800 bg-white' : 'text-slate-300'}`}
+                              className={`w-full h-[30px] px-1 text-center text-[10px] font-bold leading-tight outline-none focus:bg-sky-100 transition-colors ${value ? 'text-slate-800 bg-white' : 'text-slate-300'}`}
                             />
                           </td>
                         );
                       })}
-                      <td className="border-r border-black text-center text-xs font-black text-slate-800 bg-[#fff9dd]" rowSpan={isSplitView ? 2 : 1}>{sumDays(row.days).toFixed(1)}</td>
+                      <td className="border-r border-black text-center text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{sumDaysForMonth(row.days, statementLastDay).toFixed(1)}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
                         <input type="text" value={row.unitPrice} onChange={e => updateRow(row.id, { unitPrice: e.target.value })}
-                          className="w-full h-full min-h-[36px] px-2 text-right text-xs font-bold text-slate-800 bg-transparent outline-none focus:bg-indigo-50"
+                          className="w-full h-full min-h-[30px] px-2 text-right text-[10px] font-bold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 leading-tight"
                         />
                       </td>
-                      <td className="border-r border-black text-right px-2 text-xs font-black text-slate-900 bg-[#fff9dd]" rowSpan={isSplitView ? 2 : 1}>{getRowTotalAmount(row).toLocaleString()}</td>
+                      <td className="border-r border-black text-right px-2 text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{getRowTotalAmount(row, statementLastDay).toLocaleString()}</td>
                       {showBankColumn && (
                         <td className={`border-black p-1 border-l ${row.payType === 'delegate' ? 'bg-yellow-200' : ''}`} rowSpan={isSplitView ? 2 : 1}>
                           <div className="flex flex-col gap-1 h-full justify-center">
@@ -1239,10 +1440,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                               <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct'} onChange={() => updateRow(row.id, { payType: 'direct' })} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
                               <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'delegate'} onChange={() => updateRow(row.id, { payType: 'delegate', bankName: masterBank, bankOwner: masterOwner, bankAccount: masterAccount })} className="accent-red-600" /><span className="font-bold text-red-600">위임</span></label>
                             </div>
-                            <div className="flex h-7 items-center divide-x divide-black border border-black rounded bg-white/50">
-                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[50px] text-center text-[10px] outline-none bg-transparent" placeholder="은행" />
-                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[60px] text-center text-[10px] outline-none bg-transparent" placeholder="예금주" />
-                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 px-2 text-[10px] outline-none bg-transparent" placeholder="계좌번호" />
+                            <div className="flex h-[30px] items-center divide-x divide-black border border-black rounded bg-white/50">
+                              <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[50px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="은행" />
+                              <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="예금주" />
+                              <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none bg-transparent" placeholder="계좌번호" />
                             </div>
                           </div>
                         </td>
@@ -1261,7 +1462,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                                   newDays[dayIndex] = e.target.value;
                                   updateRow(row.id, { days: newDays });
                                 }}
-                                className={`w-full h-9 text-center text-xs font-bold outline-none focus:bg-sky-100 transition-colors ${value ? 'text-slate-800 bg-white' : 'text-slate-300'}`}
+                                className={`w-full h-[30px] px-1 text-center text-[10px] font-bold leading-tight outline-none focus:bg-sky-100 transition-colors ${value ? 'text-slate-800 bg-white' : 'text-slate-300'}`}
                               />
                             </td>
                           );
@@ -1271,26 +1472,27 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   </React.Fragment>
                 ))}
               </tbody>
-              <tfoot className="border-t-2 border-black bg-[#f7b4b4] font-bold text-slate-900">
+              <tfoot className="border-t-2 border-black bg-[#fca5a5] font-bold text-[#7f1d1d]">
                 <tr>
-                  <td colSpan={4} className="border border-black p-2 text-center text-sm font-black" rowSpan={isSplitView ? 2 : 1}>합계</td>
+                  <td colSpan={4} className="border border-black p-2 text-center text-sm font-black" rowSpan={isSplitView ? 2 : 1}>날짜별 공수합계</td>
                   {primaryDayNumbers.map((dayNumber) => (
-                    <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-slate-900 bg-[#f7b4b4]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
+                    <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
                   ))}
-                  <td className="border border-black p-2 text-center text-sm font-black bg-[#f7b4b4]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalDays.toFixed(1)}</td>
-                  <td className="border border-black p-2 text-center bg-[#f7b4b4]" rowSpan={isSplitView ? 2 : 1}></td>
-                  <td className="border border-black p-2 text-right text-sm font-black bg-[#f7b4b4]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalAmount.toLocaleString()}</td>
+                  <td className="border border-black p-2 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalDays.toFixed(1)}</td>
+                  <td className="border border-black p-2 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}></td>
+                  <td className="border border-black p-2 text-right text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalAmount.toLocaleString()}</td>
                   {showBankColumn && <td className="border border-black p-2" rowSpan={isSplitView ? 2 : 1}></td>}
                 </tr>
                 {isSplitView && (
                   <tr>
                     {secondaryDayNumbers.map((dayNumber) => (
-                      <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-slate-900 bg-[#f7b4b4]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
+                      <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
                     ))}
                   </tr>
                 )}
               </tfoot>
             </table>
+              </div>
             </div>
           </div>
         </div>
