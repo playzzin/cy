@@ -45,6 +45,7 @@ import TaxAdvanceTeamPayslipPage from './pages/payroll/TaxAdvanceTeamPayslipPage
 import WagePaymentPage from './pages/payroll/WagePaymentPage';
 import DailyWageDraftPage from './pages/payroll/DailyWageDraftPage';
 import DailyWageStatementPage from './pages/payroll/DailyWageStatementPage';
+import DailyAdvanceWorkbookPage from './pages/payroll/DailyAdvanceWorkbookPage';
 import MonthlyWageDraftPage from './pages/payroll/MonthlyWageDraftPage';
 import SupportTeamPaymentPage from './pages/payroll/SupportTeamPaymentPage';
 import SupportClaimPage from './pages/payroll/SupportClaimPage';
@@ -66,10 +67,11 @@ import SupportRateManagementPage from './pages/support/SupportRateManagementPage
 import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
 import TeamBasedPaymentDraftPageV2 from './pages/payroll/TeamBasedPaymentDraftPageV2';
 import EmploymentCertificatePage from './pages/hr/EmploymentCertificatePage';
+import TerminationCertificatePage from './pages/hr/TerminationCertificatePage';
 import DailyReportStatisticsPage from './pages/report/DailyReportStatisticsPage';
 import OfficeManagementPage from './pages/office/OfficeManagementPage';
 
-import Login from './components/auth/Login';
+import { Login } from './components/auth/index';
 import IntegratedDatabase from './pages/database/ManpowerDatabase';
 import ManualPage from './pages/manual';
 import ProfilePage from './pages/profile/ProfilePage';
@@ -304,6 +306,7 @@ const App: React.FC = () => {
               <Route path="wage-payment" element={<WagePaymentPage />} />
               <Route path="daily-wage" element={<DailyWageDraftPage />} />
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />
+              <Route path="daily-advance-workbook" element={<DailyAdvanceWorkbookPage />} />
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
               <Route path="support-team" element={<SupportTeamPaymentPage />} />
@@ -402,6 +405,7 @@ const App: React.FC = () => {
             <Route path="/support/cards" element={<CardManagerPage />} />
 
             <Route path="/hr/certificate" element={<EmploymentCertificatePage />} />
+            <Route path="/hr/termination-certificate" element={<TerminationCertificatePage />} />
             {/* Payroll Management */}
             <Route path="/payroll/payslip" element={<PayslipPage />} />
 

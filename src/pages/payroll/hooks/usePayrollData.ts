@@ -453,9 +453,13 @@ export const usePayrollData = (
       const advanceByWorkerTeamNameKey = new Map<string, AdvancePayment[]>();
       const advanceListByWorkerId = new Map<string, AdvancePayment[]>();
       advances.forEach((item) => {
-        const workerId = resolveWorkerCanonicalId(item.workerId);
-        const teamId = resolveTeamCanonicalId(item.teamId);
-        if (!workerId) return;
+          const rawWorkerId = String(item.workerId ?? '').trim();
+
+          const workerId = resolveWorkerCanonicalId(item.workerId);
+          const teamId = resolveTeamCanonicalId(item.teamId);
+          if (!workerId) {
+            return;
+          }
         const normalizedItem =
           workerId === String(item.workerId ?? '').trim() && teamId === String(item.teamId ?? '').trim()
             ? item
@@ -782,6 +786,7 @@ export const usePayrollData = (
           amount: agg.totalAmount,
           date: agg.month,
           type: '월급',
+          assignmentType: selectedAdvanceRecord?.assignmentType ?? manual?.assignmentType ?? 'labor',
           manual,
         };
       });

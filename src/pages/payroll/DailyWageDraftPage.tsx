@@ -45,15 +45,27 @@ type DraftRowTotals = {
 
 type ViewMode = 'daily' | 'monthly';
 
-const DailyWageDraftPage: React.FC = () => {
+type DailyWageDraftPageProps = {
+    embedded?: boolean;
+    dateOverride?: string;
+    monthOverride?: string;
+    viewModeOverride?: ViewMode;
+};
+
+const DailyWageDraftPage: React.FC<DailyWageDraftPageProps> = ({
+    embedded = false,
+    dateOverride,
+    monthOverride,
+    viewModeOverride,
+}) => {
     const navigate = useNavigate();
 
     const today = new Date().toISOString().split('T')[0];
     const currentMonth = today.slice(0, 7);
 
-    const [selectedDate, setSelectedDate] = useState<string>(today);
-    const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
-    const [viewMode, setViewMode] = useState<ViewMode>('daily');
+    const [selectedDate, setSelectedDate] = useState<string>(dateOverride || today);
+    const [selectedMonth, setSelectedMonth] = useState<string>(monthOverride || currentMonth);
+    const [viewMode, setViewMode] = useState<ViewMode>(viewModeOverride || 'daily');
 
     // 팀(현장) 검색어 상태 추가
     const [teamSearch, setTeamSearch] = useState<string>('');
@@ -83,6 +95,7 @@ const DailyWageDraftPage: React.FC = () => {
 
     // Lock parent scroll for internal scrolling
     useEffect(() => {
+        if (embedded) return;
         const mainContent = document.getElementById('main-content');
         if (mainContent) {
             const originalOverflow = mainContent.style.overflow;
@@ -91,7 +104,7 @@ const DailyWageDraftPage: React.FC = () => {
                 mainContent.style.overflow = originalOverflow;
             };
         }
-    }, []);
+    }, [embedded]);
 
     const normalizeTeamName = useCallback((value: string): string => {
         return value.replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
@@ -113,6 +126,25 @@ const DailyWageDraftPage: React.FC = () => {
     const getThisYearMonth = useCallback((): string => {
         return new Date().toISOString().slice(0, 7);
     }, []);
+
+    useEffect(() => {
+        if (!dateOverride) return;
+        setSelectedDate(dateOverride);
+        const nextMonth = toYearMonth(dateOverride);
+        if (nextMonth) {
+            setSelectedMonth(nextMonth);
+        }
+    }, [dateOverride, toYearMonth]);
+
+    useEffect(() => {
+        if (!monthOverride) return;
+        setSelectedMonth(monthOverride);
+    }, [monthOverride]);
+
+    useEffect(() => {
+        if (!viewModeOverride) return;
+        setViewMode(viewModeOverride);
+    }, [viewModeOverride]);
 
     const openLaborCostStatement = useCallback(
         (yearMonth: string) => {
@@ -483,7 +515,12 @@ const DailyWageDraftPage: React.FC = () => {
     const tableColSpan = showAccountColumns ? 11 : 8;
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-4 md:p-6 max-w-[1600px] w-full mx-auto overflow-hidden">
+        <div
+            className={`flex-1 min-h-0 flex flex-col overflow-hidden ${
+                embedded ? 'w-full max-w-none p-0' : 'max-w-[1600px] w-full mx-auto p-4 md:p-6'
+            }`}
+        >
+            {!embedded && (
             <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm px-6 py-4 mb-4">
                 <div className="flex items-center gap-3">
                     <div className="bg-blue-100 text-blue-600 p-2 rounded-xl">
@@ -495,8 +532,9 @@ const DailyWageDraftPage: React.FC = () => {
                     </div>
                 </div>
             </div>
+            )}
 
-            <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 mb-6">
+            <div className={`flex-shrink-0 bg-white border shadow-sm p-4 ${embedded ? 'rounded-xl border-[#d5ccb0] mb-4' : 'border-slate-200 rounded-2xl mb-6'}`}>
                 <div className="flex flex-wrap gap-3 items-center justify-between">
                     <div className="flex flex-wrap items-end gap-3">
                         <div>
@@ -524,7 +562,7 @@ const DailyWageDraftPage: React.FC = () => {
                                 </button>
                             </div>
                         </div>
-                        <div className={viewMode === 'monthly' ? 'hidden' : ''}>
+                        {!embedded && <div className={viewMode === 'monthly' ? 'hidden' : ''}>
                             <div className="text-xs text-slate-500 mb-1">날짜</div>
                             <input
                                 type="date"
@@ -537,8 +575,8 @@ const DailyWageDraftPage: React.FC = () => {
                                 }}
                                 className="h-9 border border-slate-300 rounded-lg px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                             />
-                        </div>
-                        <div className={`flex gap-2 self-end ${viewMode === 'monthly' ? 'hidden' : ''}`}>
+                        </div>}
+                        {!embedded && <div className={`flex gap-2 self-end ${viewMode === 'monthly' ? 'hidden' : ''}`}>
                             <button
                                 type="button"
                                 onClick={() => {
@@ -564,10 +602,18 @@ const DailyWageDraftPage: React.FC = () => {
                             >
                                 오늘
                             </button>
-                        </div>
+                        </div>}
+                        {embedded && (
+                            <div className="flex items-end">
+                                <div className="rounded-lg border border-[#d5ccb0] bg-[#faf8ef] px-3 py-2 text-xs text-slate-600">
+                                    <div className="font-semibold text-[#4A452A]">{'\uC0C1\uB2E8 \uC870\uD68C \uAE30\uC900 \uC5F0\uB3D9'}</div>
+                                    <div className="mt-1">{viewMode === 'monthly' ? selectedMonth : selectedDate}</div>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    {viewMode === 'monthly' && (
+                    {!embedded && viewMode === 'monthly' && (
                         <div className="flex items-end gap-2">
                             <div>
                                 <div className="text-xs text-slate-500 mb-1">조회 월</div>
@@ -684,7 +730,7 @@ const DailyWageDraftPage: React.FC = () => {
                     </div>
                 )}
 
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
+                <div className={`bg-white shadow-sm p-4 mb-4 ${embedded ? 'rounded-xl border border-[#d5ccb0]' : 'rounded-2xl border border-slate-200'}`}>
                     <div className="flex flex-col lg:flex-row gap-3 lg:items-end lg:justify-between">
                         <div className="flex flex-wrap items-end gap-3">
                             <div>
@@ -764,7 +810,7 @@ const DailyWageDraftPage: React.FC = () => {
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+            <div className={`flex-1 min-h-0 bg-white shadow-sm border flex flex-col overflow-hidden ${embedded ? 'rounded-xl border-[#d5ccb0]' : 'rounded-2xl border-slate-200'}`}>
                 <div className="flex-1 overflow-auto">
                     <table className="w-full text-sm border-separate border-spacing-0">
                         <thead className="bg-slate-50 text-slate-600 sticky top-0 z-40">

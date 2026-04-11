@@ -559,7 +559,7 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                             <ToolbarCardHeader>
                                 <div>
                                     <ToolbarCardTitle>정산 규칙 토글</ToolbarCardTitle>
-                                    <ToolbarCardDescription>보험, 사업소득, 공과금, 일급제 수수료 적용 상태를 카드형 스위치로 즉시 제어합니다.</ToolbarCardDescription>
+                                    <ToolbarCardDescription>보험, 사업소득, 일급제 수수료 적용 상태를 카드형 스위치로 즉시 제어합니다.</ToolbarCardDescription>
                                 </div>
                             </ToolbarCardHeader>
                             <ToolbarCardBody>
@@ -596,18 +596,6 @@ export const PayrollToolbar: React.FC<PayrollToolbarProps> = ({
                                             applyInsurance: insuranceApplied,
                                             applyBusinessIncome: value,
                                             applyUtilities: utilitiesApplied,
-                                            applyDailyFee: dailyFeeApplied,
-                                            applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
-                                        })}
-                                    />
-                                    <ModernSwitch
-                                        label="공과금 적용"
-                                        checked={utilitiesApplied}
-                                        compact
-                                        onChange={(value: boolean) => applyCalculatedDeductions({
-                                            applyInsurance: insuranceApplied,
-                                            applyBusinessIncome: businessIncomeApplied,
-                                            applyUtilities: value,
                                             applyDailyFee: dailyFeeApplied,
                                             applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
                                         })}

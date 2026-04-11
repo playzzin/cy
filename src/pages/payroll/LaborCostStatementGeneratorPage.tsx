@@ -1,14 +1,15 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Calendar, Building2, User, CreditCard, Download,
   RotateCcw, Save, Search, Settings, FileText,
-  ChevronLeft, ChevronRight, Calculator, Printer,
+  ChevronLeft, ChevronRight, Calculator, Printer, Copy,
   Users, Briefcase, MinusCircle, PlusCircle, Check,
   MoreHorizontal, Filter, Table
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import html2canvas from 'html2canvas';
 
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
@@ -944,6 +945,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   const spanningCellHeightClass = isSplitView ? 'min-h-[60px]' : 'min-h-[30px]';
   const namePrimaryCellHeightClass = showTeamUnderName ? splitRowSectionClass : spanningCellHeightClass;
   const addressPrimaryCellHeightClass = showBankUnderAddress ? splitRowSectionClass : spanningCellHeightClass;
+  const footerSingleRowHeightClass = 'h-[30px] min-h-[30px]';
+  const footerSpanningRowHeightClass = isSplitView ? 'h-[60px] min-h-[60px]' : 'h-[30px] min-h-[30px]';
   const widthClassByColumn = useMemo(() => {
     if (showBankColumn) {
       return {
@@ -986,6 +989,93 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const computed = Number((baseScale * safetyScale).toFixed(2));
     return Math.max(0.42, computed);
   }, [isSplitView, previewSurfaceMinWidth, showBankColumn]);
+
+  const printRootRef = useRef<HTMLDivElement>(null);
+  const [copying, setCopying] = useState(false);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    const el = printRootRef.current;
+    if (!el) return;
+    setCopying(true);
+    try {
+      const canvas = await html2canvas(el, {
+        scale: 3,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        windowWidth: el.scrollWidth,
+        windowHeight: el.scrollHeight,
+        onclone: (_doc: Document, cloned: HTMLElement) => {
+          const replaceControlWithText = (node: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
+            const text = node instanceof HTMLInputElement
+              ? (node.type === 'checkbox' || node.type === 'radio')
+                ? ''
+                : node.value
+              : node instanceof HTMLSelectElement
+                ? (node.selectedOptions[0]?.text ?? node.value)
+                : node.value;
+
+            if (node instanceof HTMLInputElement && (node.type === 'checkbox' || node.type === 'radio')) {
+              node.style.display = 'none';
+              return;
+            }
+
+            const span = document.createElement('span');
+            span.textContent = text;
+            span.className = node.className;
+            span.style.display = 'block';
+            span.style.width = `${Math.max(node.clientWidth, 1)}px`;
+            span.style.height = `${Math.max(node.clientHeight, 1)}px`;
+            span.style.lineHeight = node.clientHeight > 0 ? `${node.clientHeight}px` : 'normal';
+            span.style.whiteSpace = 'nowrap';
+            span.style.overflow = 'hidden';
+            span.style.textOverflow = 'ellipsis';
+            span.style.border = 'none';
+            span.style.outline = 'none';
+            span.style.boxShadow = 'none';
+            span.style.background = 'transparent';
+            node.replaceWith(span);
+          };
+
+          // sticky 포지션 해제 (html2canvas가 sticky를 잘못 처리)
+          cloned.querySelectorAll<HTMLElement>('[class*="sticky"]').forEach(node => {
+            node.style.position = 'relative';
+          });
+
+          // input/select를 텍스트로 치환해 캡처 누락 방지
+          cloned.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea').forEach(node => {
+            replaceControlWithText(node);
+          });
+
+          // 계좌영역은 캡처본에서 테두리 제거
+          cloned.querySelectorAll<HTMLElement>('[data-capture-bank-flat="true"]').forEach(wrapper => {
+            wrapper.style.border = 'none';
+            wrapper.style.background = 'transparent';
+            wrapper.style.borderRadius = '0';
+            wrapper.querySelectorAll<HTMLElement>('*').forEach(child => {
+              child.style.borderLeft = 'none';
+              child.style.borderRight = 'none';
+            });
+          });
+        },
+      } as Parameters<typeof html2canvas>[1]);
+      canvas.toBlob(async (blob) => {
+        if (!blob) { setCopying(false); return; }
+        try {
+          await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': blob }),
+          ]);
+        } catch {
+          // fallback: download
+          saveAs(blob, 'labor-statement.png');
+        }
+        setCopying(false);
+      }, 'image/png');
+    } catch {
+      setCopying(false);
+    }
+  }, []);
 
   return (
     <div className="labor-statement-page flex flex-col h-full bg-[#f8fafc] text-slate-800 font-sans">
@@ -1213,6 +1303,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             <button onClick={handleClearAll} title="초기화" className="p-2.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
               <RotateCcw className="w-5 h-5" />
             </button>
+            <button
+              onClick={handleCopyToClipboard}
+              disabled={copying}
+              className="flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition-all shadow-md active:scale-95"
+            >
+              <Copy className="w-4 h-4" />
+              <span>{copying ? '복사 중…' : '화면복사'}</span>
+            </button>
             <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-bold transition-all shadow-md active:scale-95">
               <Printer className="w-4 h-4" /> <span>인쇄 / PDF</span>
             </button>
@@ -1304,7 +1402,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               className={`labor-statement-preview-surface w-full ${showBankColumn ? 'with-bank' : 'without-bank'}`}
               style={{ ['--statement-print-scale' as string]: String(printScale) }}
             >
-              <div className="labor-statement-print-root labor-statement-print-sheet">
+              <div ref={printRootRef} className="labor-statement-print-root labor-statement-print-sheet">
             <div className="labor-statement-print-header mb-6 flex flex-col gap-4 lg:grid lg:grid-cols-[350px_1fr_350px] lg:items-end" style={{ width: '100%', minWidth: `${previewSurfaceMinWidth}px` }}>
               <div className="hidden lg:block" />
               <div className="text-center">
@@ -1402,7 +1500,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                             className={`w-full px-2 text-left text-[10px] font-semibold text-slate-800 bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${showBankUnderAddress ? splitRowSectionClass : addressPrimaryCellHeightClass}`} placeholder="상세주소 입력"
                           />
                           {showBankUnderAddress && (
-                            <div className={`flex items-center divide-x divide-slate-700 bg-slate-50/50 ${splitRowSectionClass}`}>
+                            <div data-capture-bank-flat="true" className={`flex items-center divide-x divide-slate-700 bg-slate-50/50 ${splitRowSectionClass}`}>
                               <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="은행" />
                               <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[70px] h-full px-2 text-center text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="예금주" />
                               <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none placeholder-slate-400 bg-transparent font-bold" placeholder="계좌번호" />
@@ -1440,7 +1538,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                               <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'direct'} onChange={() => updateRow(row.id, { payType: 'direct' })} className="accent-blue-600" /><span className="font-medium text-slate-700">직불</span></label>
                               <label className="flex items-center gap-1 cursor-pointer"><input type="radio" checked={row.payType === 'delegate'} onChange={() => updateRow(row.id, { payType: 'delegate', bankName: masterBank, bankOwner: masterOwner, bankAccount: masterAccount })} className="accent-red-600" /><span className="font-bold text-red-600">위임</span></label>
                             </div>
-                            <div className="flex h-[30px] items-center divide-x divide-black border border-black rounded bg-white/50">
+                            <div data-capture-bank-flat="true" className="flex h-[30px] items-center divide-x divide-black border border-black rounded bg-white/50">
                               <input type="text" value={row.bankName} onChange={e => updateRow(row.id, { bankName: e.target.value })} className="w-[50px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="은행" />
                               <input type="text" value={row.bankOwner} onChange={e => updateRow(row.id, { bankOwner: e.target.value })} className="w-[60px] h-full px-2 text-center text-[10px] leading-tight outline-none bg-transparent" placeholder="예금주" />
                               <input type="text" value={row.bankAccount} onChange={e => updateRow(row.id, { bankAccount: e.target.value })} className="flex-1 h-full px-2 text-[10px] leading-tight outline-none bg-transparent" placeholder="계좌번호" />
@@ -1474,19 +1572,39 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               </tbody>
               <tfoot className="border-t-2 border-black bg-[#fca5a5] font-bold text-[#7f1d1d]">
                 <tr>
-                  <td colSpan={4} className="border border-black p-2 text-center text-sm font-black" rowSpan={isSplitView ? 2 : 1}>날짜별 공수합계</td>
+                  <td colSpan={4} className="border border-black p-0 text-center text-sm font-black" rowSpan={isSplitView ? 2 : 1}>
+                    <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>날짜별 공수합계</div>
+                  </td>
                   {primaryDayNumbers.map((dayNumber) => (
-                    <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
+                    <td key={dayNumber} className="border border-black p-0 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">
+                      <div className={`flex items-center justify-center px-1 ${footerSingleRowHeightClass}`}>
+                        {statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}
+                      </div>
+                    </td>
                   ))}
-                  <td className="border border-black p-2 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalDays.toFixed(1)}</td>
-                  <td className="border border-black p-2 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}></td>
-                  <td className="border border-black p-2 text-right text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>{statementSummary.totalAmount.toLocaleString()}</td>
-                  {showBankColumn && <td className="border border-black p-2" rowSpan={isSplitView ? 2 : 1}></td>}
+                  <td className="border border-black p-0 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
+                    <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>{statementSummary.totalDays.toFixed(1)}</div>
+                  </td>
+                  <td className="border border-black p-0 text-center bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
+                    <div className={`${footerSpanningRowHeightClass}`}></div>
+                  </td>
+                  <td className="border border-black p-0 text-right text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
+                    <div className={`flex items-center justify-end px-2 ${footerSpanningRowHeightClass}`}>{statementSummary.totalAmount.toLocaleString()}</div>
+                  </td>
+                  {showBankColumn && (
+                    <td className="border border-black p-0" rowSpan={isSplitView ? 2 : 1}>
+                      <div className={`${footerSpanningRowHeightClass}`}></div>
+                    </td>
+                  )}
                 </tr>
                 {isSplitView && (
                   <tr>
                     {secondaryDayNumbers.map((dayNumber) => (
-                      <td key={dayNumber} className="border border-black p-1 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">{statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}</td>
+                      <td key={dayNumber} className="border border-black p-0 text-center text-[10px] text-[#7f1d1d] bg-[#fca5a5]">
+                        <div className={`flex items-center justify-center px-1 ${footerSingleRowHeightClass}`}>
+                          {statementSummary.dailyTotals[dayNumber - 1] > 0 ? statementSummary.dailyTotals[dayNumber - 1].toFixed(1) : ''}
+                        </div>
+                      </td>
                     ))}
                   </tr>
                 )}

@@ -441,6 +441,28 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === canonicalId)?.name ?? '';
     }, [normalizeTeamId, resolveWorkerTeamCanonicalId, teams]);
 
+    const resolveResponsibleTeamCanonicalId = useCallback((params: { responsibleTeamId?: string | null; responsibleTeamName?: string | null }) => {
+        const nameKey = normalizeTeamNameKey(params.responsibleTeamName);
+        if (nameKey) {
+            const byName = teamNameCanonicalIdMap.get(nameKey);
+            if (byName) return byName;
+        }
+
+        const byId = normalizeTeamId(params.responsibleTeamId);
+        if (byId) return byId;
+        return '';
+    }, [normalizeTeamId, teamNameCanonicalIdMap]);
+
+    const resolveResponsibleTeamDisplayName = useCallback((params: { responsibleTeamId?: string | null; responsibleTeamName?: string | null }) => {
+        const rawName = String(params.responsibleTeamName ?? '').trim();
+        if (rawName) return rawName;
+
+        const canonicalId = resolveResponsibleTeamCanonicalId(params);
+        if (!canonicalId) return '';
+
+        return teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === canonicalId)?.name ?? '';
+    }, [normalizeTeamId, resolveResponsibleTeamCanonicalId, teams]);
+
     const normalizeSiteId = useCallback((id?: string | null) => {
         const raw = id ? String(id) : '';
         if (!raw) return '';
@@ -458,7 +480,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             case 'paymentType':
                 return row.paymentType ?? '';
             case 'teamName':
-                return row.teamName ?? '';
+                return resolveResponsibleTeamDisplayName({
+                    responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+                    responsibleTeamName: row.responsibleTeamName ?? row.teamName
+                });
             case 'workerName':
                 return row.workerName ?? '';
             case 'workerTeamName':
@@ -477,15 +502,34 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             default:
                 return '';
         }
-    }, [resolveWorkerTeamDisplayName]);
+    }, [resolveWorkerTeamDisplayName, resolveResponsibleTeamDisplayName]);
 
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
+        const wantTeamNameKey = criteria.teamId
+            ? normalizeTeamNameKey(
+                teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === wantTeam)?.name
+                ?? criteria.teamId
+            )
+            : '';
         const wantSite = criteria.siteId ? normalizeSiteId(criteria.siteId) : '';
         const wantWorkerTeam = criteria.workerTeamId ? normalizeTeamId(criteria.workerTeamId) : '';
 
         return rows.filter(r => {
-            if (wantTeam && normalizeTeamId(r.teamId) !== wantTeam) return false;
+            if (wantTeam) {
+                const rowResponsibleTeamId = resolveResponsibleTeamCanonicalId({
+                    responsibleTeamId: r.responsibleTeamId ?? r.teamId,
+                    responsibleTeamName: r.responsibleTeamName ?? r.teamName
+                });
+                const rowResponsibleTeamNameKey = normalizeTeamNameKey(resolveResponsibleTeamDisplayName({
+                    responsibleTeamId: r.responsibleTeamId ?? r.teamId,
+                    responsibleTeamName: r.responsibleTeamName ?? r.teamName
+                }));
+
+                if (rowResponsibleTeamId !== wantTeam && (!wantTeamNameKey || rowResponsibleTeamNameKey !== wantTeamNameKey)) {
+                    return false;
+                }
+            }
             if (wantSite && normalizeSiteId(r.siteId) !== wantSite) return false;
             
             // 소속팀 필터: workerTeamId 우선, 없으면 workerTeamName으로 팀 ID 매핑
@@ -498,7 +542,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             }
             return true;
         });
-    }, [rows, normalizeTeamId, normalizeSiteId, resolveWorkerTeamCanonicalId]);
+    }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, teams]);
 
     // 1. Available Sites (Filtered by Report Team ONLY) - Worker Team selection does NOT constrain sites
     const availableSites = useMemo(() => {
@@ -516,7 +560,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [getFiltered, sites, selectedTeamId, rows.length]);
 
-    // 2. Available Report Teams (Filtered by Site ONLY) - Worker Team selection does NOT constrain report teams
+    // 2. Available Responsible Teams (Filtered by Site ONLY)
     const availableReportTeams = useMemo(() => {
         if (rows.length === 0) {
             return teams
@@ -525,12 +569,44 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
 
         const filtered = getFiltered({ siteId: selectedSiteId });
-        const teamIds = new Set(filtered.map(r => r.teamId ? String(r.teamId) : null).filter((id): id is string => !!id));
-        return teams
-            .filter(t => teamIds.has(String(t.id)) || (t.legacyId ? teamIds.has(String(t.legacyId)) : false))
-            .slice()
+        const foundTeamIds = new Set<string>();
+        const foundTeamNames = new Set<string>();
+
+        filtered.forEach((row) => {
+            const responsibleTeamId = resolveResponsibleTeamCanonicalId({
+                responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+                responsibleTeamName: row.responsibleTeamName ?? row.teamName
+            });
+            const responsibleTeamName = resolveResponsibleTeamDisplayName({
+                responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+                responsibleTeamName: row.responsibleTeamName ?? row.teamName
+            });
+
+            if (responsibleTeamId) foundTeamIds.add(responsibleTeamId);
+            if (responsibleTeamName) foundTeamNames.add(responsibleTeamName);
+        });
+
+        const matchedTeams = teams.filter((team) => {
+            const canonicalId = normalizeTeamId(team.id ?? team.legacyId ?? '');
+            return (canonicalId && foundTeamIds.has(canonicalId)) || foundTeamNames.has(team.name ?? '');
+        });
+
+        const matchedTeamNames = new Set(matchedTeams.map((team) => team.name ?? ''));
+        const virtualTeams: Team[] = [];
+
+        foundTeamNames.forEach((name) => {
+            if (!matchedTeamNames.has(name)) {
+                virtualTeams.push({
+                    id: name,
+                    name,
+                    active: true,
+                } as any);
+            }
+        });
+
+        return [...matchedTeams, ...virtualTeams]
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
-    }, [getFiltered, teams, selectedSiteId, rows.length]);
+    }, [getFiltered, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, teams, selectedSiteId, rows.length]);
 
     // 3. Available Worker Teams (Filtered by Site & Report Team)
     const availableWorkerTeams = useMemo(() => {
@@ -1746,9 +1822,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             onChange={(e) => setSelectedTeamId(e.target.value)}
                             className="px-3 py-2 border-slate-300 rounded-lg text-sm min-w-[120px]"
                         >
-                            <option value="">전체 현장담당팀</option>
+                            <option value="">전체 현장소속팀</option>
                             {availableReportTeams.map((t) => (
-                                <option key={String(t.id)} value={String(t.id)}>{t.name}</option>
+                                <option key={String(t.id ?? t.legacyId ?? t.name)} value={String(t.id ?? t.legacyId ?? t.name)}>{t.name}</option>
                             ))}
                         </select>
 
@@ -1847,11 +1923,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         조회목록 엑셀다운로드
                     </button>
 
-                    {dirtyRowCount > 0 && (
+                    {isEditMode && (
                         <button
                             onClick={handleSaveAllDirtyRows}
-                            disabled={isLoading}
-                            className="bg-red-500 hover:bg-red-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-2 animate-pulse"
+                            disabled={isLoading || dirtyRowCount === 0}
+                            className={`px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 ml-2 border transition-colors ${dirtyRowCount > 0
+                                ? 'bg-red-500 hover:bg-red-600 text-white border-red-500 animate-pulse'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                }`}
                             title="변경된 모든 항목 저장"
                         >
                             <FontAwesomeIcon icon={faSave} />
@@ -1871,7 +1950,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 {isEditMode && (
                     <div className="w-full flex items-center gap-2 text-xs text-slate-500">
                         <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-600 font-semibold">수정중</span>
-                        <span>급여방식, 공수, 단가, 비고를 수정한 뒤 각 행 오른쪽 저장 또는 상단 전체 저장을 사용하세요.</span>
+                        <span>조회된 행은 모두 바로 수정할 수 있고, 변경분은 각 행 저장 또는 상단 전체 저장으로 반영됩니다.</span>
                     </div>
                 )}
             </div>
@@ -2208,7 +2287,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         ))}
                                                     </select>
                                                 ) : (
-                                                    (r.teamName ?? '')
+                                                    resolveResponsibleTeamDisplayName({
+                                                        responsibleTeamId: r.responsibleTeamId ?? r.teamId,
+                                                        responsibleTeamName: r.responsibleTeamName ?? r.teamName
+                                                    })
                                                 )}
                                             </td>
                                             <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-200 ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>

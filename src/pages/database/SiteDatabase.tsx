@@ -66,7 +66,9 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         const rawPartnerId = site.partnerId ? String(site.partnerId).trim() : '';
         const rawCompanyId = site.companyId ? String(site.companyId).trim() : '';
 
-        const targetCompanyIdRaw = rawPartnerId || rawCompanyId;
+        // 담당팀은 우선 시공사 소속 팀을 기준으로 보고,
+        // 시공사가 비어 있을 때만 협력사 팀을 후보로 사용한다.
+        const targetCompanyIdRaw = rawCompanyId || rawPartnerId;
         const targetCompanyId = targetCompanyIdRaw ? (companyUuidByAnyId.get(targetCompanyIdRaw) ?? targetCompanyIdRaw) : '';
         if (!targetCompanyId) return teams;
 

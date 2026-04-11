@@ -68,6 +68,13 @@ const PERSONAL_ACCOMMODATION_FIELDS: readonly PersonalAccommodationField[] = [
 const normalizeDeductionLabel = (label: string): string =>
     String(label ?? '').replace(/\s+/g, '').trim();
 
+const normalizeCompanyNameKey = (value?: string | null): string =>
+    String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*소속팀\s*$/, '')
+        .trim()
+        .toLowerCase();
+
 type PersonalAccommodationAggregate = Record<string, Record<PersonalAccommodationField, number>>;
 type WorkerPaymentSummary = {
     laborManDay: number;
@@ -897,7 +904,9 @@ const AdvancePaymentPage: React.FC = () => {
                     .map((c) => c.id)
                     .filter((id): id is string => Boolean(id))
             );
-            const constructionCompanyNameSet = new Set(constructionCompanies.map((c) => c.name));
+            const constructionCompanyNameKeySet = new Set(
+                constructionCompanies.map((c) => normalizeCompanyNameKey(c.name))
+            );
             const constructionCompanyNameById = new Map(
                 constructionCompanies
                     .map((c) => (c.id ? ([c.id, c.name] as const) : null))
@@ -906,7 +915,7 @@ const AdvancePaymentPage: React.FC = () => {
 
             const allowedTeams = teamList.filter((team) => {
                 if (team.companyId) return constructionCompanyIdSet.has(team.companyId);
-                if (team.companyName) return constructionCompanyNameSet.has(team.companyName);
+                if (team.companyName) return constructionCompanyNameKeySet.has(normalizeCompanyNameKey(team.companyName));
                 return false;
             });
 
@@ -914,19 +923,29 @@ const AdvancePaymentPage: React.FC = () => {
                 id: team.id || '',
                 name: team.name,
                 companyName:
-                    team.companyName ||
+                    (normalizeCompanyNameKey(team.companyName)
+                        ? String(team.companyName).replace(/\s*소속팀\s*$/, '').trim()
+                        : '') ||
                     (team.companyId ? constructionCompanyNameById.get(team.companyId) : undefined) ||
                     '기타'
             }));
             setTeams(formattedTeams);
 
-            const uniqueCompanies = Array.from(new Set(formattedTeams.map((t) => t.companyName))).sort((a, b) =>
-                a.localeCompare(b, 'ko-KR')
-            );
+            const uniqueCompanies = Array.from(
+                new Set(
+                    formattedTeams
+                        .map((t) => String(t.companyName ?? '').trim())
+                        .filter((name) => name.length > 0)
+                )
+            ).sort((a, b) => a.localeCompare(b, 'ko-KR'));
             setCompanies(uniqueCompanies);
 
             if (uniqueCompanies.length > 0) {
-                setSelectedCompany((prev) => (uniqueCompanies.includes(prev) ? prev : uniqueCompanies[0]));
+                setSelectedCompany((prev) => {
+                    const prevKey = normalizeCompanyNameKey(prev);
+                    const matched = uniqueCompanies.find((name) => normalizeCompanyNameKey(name) === prevKey);
+                    return matched ?? uniqueCompanies[0];
+                });
             } else {
                 setSelectedCompany('');
             }
@@ -940,7 +959,10 @@ const AdvancePaymentPage: React.FC = () => {
 
     // Filter Teams by Company, 팀명 검색어, 그리고 이름순 정렬
     const filteredTeams = teams
-        .filter(team => team.companyName === selectedCompany)
+        .filter((team) => {
+            if (!selectedCompany) return true;
+            return normalizeCompanyNameKey(team.companyName) === normalizeCompanyNameKey(selectedCompany);
+        })
         .filter(team => !teamSearch.trim() || normalizeTeamName(team.name).includes(normalizeTeamName(teamSearch)))
         .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
 

@@ -1603,7 +1603,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [insuranceApplied, setInsuranceApplied] = useState<boolean>(false);
     const [insuranceTeamSiteOnly, setInsuranceTeamSiteOnly] = useState<boolean>(false);
     const [businessIncomeApplied, setBusinessIncomeApplied] = useState<boolean>(false);
-    const [utilitiesApplied, setUtilitiesApplied] = useState<boolean>(false);
+    const [utilitiesApplied, setUtilitiesApplied] = useState<boolean>(true);
     const [dailyFeeApplied, setDailyFeeApplied] = useState<boolean>(false);
     const [copying, setCopying] = useState(false);
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -2166,6 +2166,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
             });
 
+            const hasAnyValue = !isSideEmpty(input.invoice) || !isSideEmpty(input.labor) || memo.length > 0 || hasAssignment;
+            if (!hasAnyValue) return true;
+
             const baselineAssignment = resolveAssignmentType(baselineInput?.assignmentType, 'corporate');
             const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
             const hasCustomAssignment = currentAssignment !== baselineAssignment;
@@ -2559,6 +2562,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         applyInsuranceTeamSiteOnly: boolean;
         immediate?: boolean;
     }) => {
+        const effectiveApplyUtilities = true;
         const config = payrollConfigRef.current;
         if ((params.applyInsurance || params.applyBusinessIncome || params.applyDailyFee) && !config) {
             alert('설정(4대보험/세율)을 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
@@ -2654,7 +2658,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         }
                     }
 
-                    const utilityLines = params.applyUtilities && utilityInput
+                    const utilityLines = effectiveApplyUtilities && utilityInput
                         ? buildUtilityDeductionLinesRef.current(utilityInput)
                         : [];
                     const dailyFeeLines = buildDailyFeeDeductionLines({
@@ -2673,7 +2677,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
                     });
 
-                    const nextDeductionBreakdown = (params.applyUtilities || params.applyDailyFee)
+                    const nextDeductionBreakdown = (effectiveApplyUtilities || params.applyDailyFee)
                         ? mergeDeductionBreakdownWithLinesRef.current(rebasedDeductionBreakdown, deductionAppliedLines)
                         : sourceDeductionBreakdown;
 
@@ -2751,7 +2755,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 setInsuranceApplied(params.applyInsurance);
                 setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
                 setBusinessIncomeApplied(params.applyBusinessIncome);
-                setUtilitiesApplied(params.applyUtilities);
+                setUtilitiesApplied(effectiveApplyUtilities);
                 setDailyFeeApplied(params.applyDailyFee);
 
                 requestAnimationFrame(() => {
@@ -4646,6 +4650,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     payrollConfig={payrollConfig}
                     advanceItemLabels={payrollConfig?.advanceItemLabels}
                     withholdingThreshold={WITHHOLDING_MAX_MAN_DAY}
+                    applyUtilities={utilitiesApplied}
                     applyInsurance={insuranceApplied}
                     applyBusinessIncome={businessIncomeApplied}
                     applyDailyFee={dailyFeeApplied}
@@ -4653,7 +4658,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     isInsuranceEligibleEntry={isLedgerInsuranceEligibleEntry}
                     clientCompanyNameById={companyNameById}
                     onInputsChange={setLedgerInputs}
-                    initialInputs={ledgerInputs}
+                    initialInputs={loadedLedgerInputsFromAdvance}
                     visibleSections={ledgerVisibleSections}
                 />
             )}

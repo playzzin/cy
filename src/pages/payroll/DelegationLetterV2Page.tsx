@@ -511,7 +511,11 @@ const DelegationLetterV2Page: React.FC = () => {
             <style>{`
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
-                    html, body { width: 100%; height: auto; }
+                    html, body, #root {
+                        width: 100% !important;
+                        min-height: 100% !important;
+                        height: auto !important;
+                    }
                     body {
                         margin: 0;
                         padding: 0;
@@ -543,9 +547,12 @@ const DelegationLetterV2Page: React.FC = () => {
                     }
 
                     .delegation-letter {
-                        width: 100% !important;
+                        width: 210mm !important;
                         min-height: auto !important;
                         padding: 0 !important;
+                        margin: 0 auto !important;
+                        background: white !important;
+                        box-shadow: none !important;
                         box-sizing: border-box !important;
                     }
 
@@ -553,10 +560,14 @@ const DelegationLetterV2Page: React.FC = () => {
                         box-sizing: border-box;
                         width: 210mm !important;
                         height: 297mm !important;
-                        padding: 15mm !important;
-                        overflow: visible !important;
+                        min-height: 297mm !important;
+                        padding: 14mm 14mm 12mm !important;
+                        overflow: hidden !important;
                         background: white !important;
-                        break-inside: avoid;
+                        display: flex !important;
+                        flex-direction: column !important;
+                        justify-content: space-between !important;
+                        break-inside: avoid-page;
                         page-break-inside: avoid;
                         page-break-after: always;
                     }
@@ -565,12 +576,47 @@ const DelegationLetterV2Page: React.FC = () => {
                         page-break-after: auto;
                     }
 
-                    .delegation-workers-table { page-break-inside: auto; }
+                    .delegation-letter-body {
+                        flex: 1 1 auto;
+                        min-height: 0;
+                        display: flex;
+                        flex-direction: column;
+                    }
+
+                    .delegation-workers-table {
+                        width: 100%;
+                        table-layout: fixed;
+                        border-collapse: collapse;
+                        page-break-inside: auto;
+                    }
                     .delegation-workers-table thead { display: table-header-group; }
                     .delegation-workers-table tfoot { display: table-footer-group; }
-                    .delegation-workers-table tr { break-inside: avoid; page-break-inside: avoid; }
+                    .delegation-workers-table tr {
+                        break-inside: avoid-page;
+                        page-break-inside: avoid;
+                    }
                     .delegation-workers-table th,
-                    .delegation-workers-table td { vertical-align: middle !important; }
+                    .delegation-workers-table td {
+                        vertical-align: middle !important;
+                        line-height: 1.28 !important;
+                        word-break: break-word !important;
+                        overflow-wrap: anywhere !important;
+                    }
+                    .delegation-signature-cell {
+                        position: relative;
+                        height: 7mm !important;
+                        padding: 0 !important;
+                        overflow: hidden !important;
+                    }
+                    .delegation-signature-cell > div,
+                    .delegation-signature-cell img {
+                        width: 100%;
+                        height: 100%;
+                    }
+                    .delegation-footer-date {
+                        margin-top: auto !important;
+                        padding-top: 6mm !important;
+                    }
                     .delegation-letter-page img {
                         max-width: 100% !important;
                         max-height: 100% !important;
@@ -1115,65 +1161,59 @@ const DelegationLetterV2Page: React.FC = () => {
                     className="bg-white shadow-2xl mx-auto box-border delegation-letter"
                 >
                     <style>{`
-                        @media print {
-                            body {
-                                background-color: white !important;
-                                overflow: visible !important;
-                                -webkit-print-color-adjust: exact !important;
-                                print-color-adjust: exact !important;
-                            }
-                            #root, .print-area-wrapper {
-                                width: 100% !important;
-                                margin: 0 !important;
-                                padding: 0 !important;
-                                display: block !important;
-                                overflow: visible !important;
-                            }
-                            /* Hide everything except the print area */
-                            body > *:not(#root) { display: none !important; }
-                            .delegation-letter {
-                                width: 100% !important;
-                                box-shadow: none !important;
-                                margin: 0 !important;
-                                padding: 0 !important;
-                            }
-                            
-                            /* Ensure fixed size container for printing */
-                            .delegation-letter-page {
-                                position: relative;
-                                width: 210mm !important;
-                                height: 297mm !important;
-                                padding: 15mm !important;
-                                margin: 0 auto !important;
-                                background-color: white !important;
-                                overflow: visible !important;
-                                break-inside: avoid;
-                                page-break-inside: avoid;
-                                page-break-after: always;
-                            }
-                            .delegation-workers-table th,
-                            .delegation-workers-table td {
-                                vertical-align: middle !important;
-                            }
-                            .delegation-letter-page img {
-                                max-width: 100% !important;
-                                max-height: 100% !important;
-                                object-fit: contain !important;
-                            }
-                        }
-                        
-                        /* A4 Preview Styles */
                         .delegation-letter-page {
                             width: 210mm;
                             height: 297mm;
+                            min-height: 297mm;
                             position: relative;
                             background-color: white;
-                            padding: 15mm;
+                            padding: 14mm 14mm 12mm;
                             box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
                             margin: 0 auto 20px auto;
                             box-sizing: border-box;
                             overflow: hidden;
+                            display: flex;
+                            flex-direction: column;
+                            justify-content: space-between;
                             page-break-after: always;
+                        }
+
+                        .delegation-letter-body {
+                            flex: 1 1 auto;
+                            min-height: 0;
+                            display: flex;
+                            flex-direction: column;
+                        }
+
+                        .delegation-workers-table {
+                            width: 100%;
+                            table-layout: fixed;
+                            border-collapse: collapse;
+                        }
+
+                        .delegation-workers-table th,
+                        .delegation-workers-table td {
+                            vertical-align: middle;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
+                        }
+
+                        .delegation-signature-cell {
+                            position: relative;
+                            height: 28px;
+                            padding: 0 !important;
+                            overflow: hidden;
+                        }
+
+                        .delegation-signature-cell > div,
+                        .delegation-signature-cell img {
+                            width: 100%;
+                            height: 100%;
+                        }
+
+                        .delegation-footer-date {
+                            margin-top: auto;
+                            padding-top: 6mm;
                         }
 
                         @media print {
@@ -1269,7 +1309,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                             {worker.address || ''}
                                         </td>
                                         <td className="border-r border-black p-1 px-2 text-right font-bold text-[12px]">{worker.amount.toLocaleString()}</td>
-                                        <td className="p-1 relative h-[32px] overflow-hidden"></td>
+                                        <td className="delegation-signature-cell"></td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -1297,7 +1337,7 @@ const DelegationLetterV2Page: React.FC = () => {
                         return (
                             <React.Fragment key={`page-${pageIndex}`}>
                                 <div className="delegation-letter-page flex flex-col justify-between" onClick={() => setMeasureTick(t => t + 1)}>
-                                    <div>
+                                    <div className="delegation-letter-body">
                                         {pageIndex === 0 && (
                                             <>
                                                 {/* Title Header */}
@@ -1369,7 +1409,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                             )}
                                         </div>
 
-                                        <table className="w-full border-collapse border-[1.5px] border-black text-[10px] table-fixed">
+                                        <table className="w-full border-collapse border-[1.5px] border-black text-[10px] delegation-workers-table table-fixed">
                                             <thead>
                                                 <tr className="border-b-[1.5px] border-black bg-gray-100">
                                                     <th className="border-r border-black p-1 w-7 text-center font-bold">No.</th>
@@ -1396,7 +1436,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                                             <td className="border-r border-black p-1 px-1.5 text-right font-bold text-[11px] tracking-wide">
                                                                 {worker.amount.toLocaleString()}
                                                             </td>
-                                                            <td className="p-1 relative h-[28px] overflow-hidden align-middle">
+                                                            <td className="delegation-signature-cell align-middle">
                                                                 {worker.signatureUrl ? (
                                                                     <div className="absolute inset-0 flex items-center justify-center p-0.5">
                                                                         <img src={worker.signatureUrl} alt={`Sign ${worker.workerName}`} className="max-h-full max-w-full object-contain pointer-events-none opacity-90 mix-blend-multiply" />
@@ -1427,7 +1467,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                     </div>
 
                                     {isLastPage && (
-                                        <div className="text-center mt-auto pt-[6mm]">
+                                        <div className="delegation-footer-date text-center">
                                             <span className="font-bold text-[13px] tracking-[0.2em]">{formatDate(documentDate)}</span>
                                         </div>
                                     )}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -22,7 +22,10 @@ import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReportWorker, DailyReport } from '../../services/dailyReportService';
+import { dailyReportTransferService } from '../../services/dailyReportTransferService';
+import { resetCollection } from '../../services/backupService';
 import { useAuth } from '../../contexts/AuthContext';
+import { normalizeLooseDateText } from '../../utils/dateNormalization';
 import Swal from 'sweetalert2';
 
 interface LogItem {
@@ -64,29 +67,7 @@ const SHEET_CONFIG: { [key in SheetType]: { name: string; icon: any; keywords: s
 };
 
 const formatExcelDate = (val: any): string => {
-    if (!val) return '';
-
-    // 1. If it's a number (Excel Serial Date)
-    if (typeof val === 'number') {
-        if (val > 20000) { // Approx year 1954
-            const date = new Date(Math.round((val - 25569) * 86400 * 1000));
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        }
-    }
-
-    // 2. If it's a string
-    const str = String(val).trim();
-    const ymdMatch = str.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:\s.*)?$/);
-    if (ymdMatch) {
-        const y = ymdMatch[1];
-        const m = String(ymdMatch[2]).padStart(2, '0');
-        const d = String(ymdMatch[3]).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-    }
-    return str;
+    return normalizeLooseDateText(val);
 };
 
 type TemplateSheetType = 'Company' | 'Team' | 'Site' | 'Worker' | 'DailyReport';
@@ -1606,6 +1587,9 @@ const IntegratedMassUploader: React.FC = () => {
         Worker: [],
         DailyReport: []
     });
+    const [isResettingData, setIsResettingData] = useState(false);
+    const [previewPage, setPreviewPage] = useState(1);
+    const [previewPageSize, setPreviewPageSize] = useState(100);
 
     const [logs, setLogs] = useState<LogItem[]>([
         { step: 'Company', status: 'pending', message: '회사 데이터 대기 중...' },
@@ -1701,6 +1685,7 @@ const IntegratedMassUploader: React.FC = () => {
                 setMappingAnalysis(mappingResults);
 
                 setStage('preview');
+                setPreviewPage(1);
 
                 // Find first non-empty tab
                 const firstDataTab = (Object.keys(newData) as SheetType[]).find(k => newData[k].length > 0);
@@ -2800,7 +2785,387 @@ const IntegratedMassUploader: React.FC = () => {
         setStage('upload');
         setPreviewData({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
         setPreviewAnalysis({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
+        setMappingAnalysis({ Company: [], Team: [], Site: [], Worker: [], DailyReport: [] });
         setShowOnlyIssues(false);
+        setPreviewPage(1);
+    };
+
+    const handleResetIntegratedData = async () => {
+        const confirmed = await Swal.fire({
+            icon: 'warning',
+            title: '통합 데이터 초기화',
+            html: '<div class="text-sm text-slate-600 text-left leading-6">회사, 팀, 현장, 작업자, 출력일보 데이터를 모두 삭제합니다.<br />계속하려면 <strong>통합초기화</strong>를 입력하세요.</div>',
+            input: 'text',
+            inputPlaceholder: '통합초기화',
+            showCancelButton: true,
+            confirmButtonText: '초기화',
+            cancelButtonText: '취소',
+            preConfirm: (value) => {
+                if (String(value ?? '').trim() !== '통합초기화') {
+                    Swal.showValidationMessage("'통합초기화'를 입력하세요.");
+                }
+                return value;
+            }
+        });
+        if (!confirmed.isConfirmed) return;
+
+        const updateResetProgress = (message: string) => {
+            if (!Swal.isVisible()) return;
+            Swal.update({
+                html: `<div class="text-sm text-slate-600 leading-6">${message}</div>`
+            });
+        };
+
+        setIsResettingData(true);
+        Swal.fire({
+            title: '초기화 중',
+            html: '<div class="text-sm text-slate-600 leading-6">출력일보 데이터를 정리하고 있습니다.</div>',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        try {
+            updateResetProgress('출력일보 데이터를 초기화하고 있습니다.');
+            const dailyReportResult = await dailyReportTransferService.resetDb();
+
+            updateResetProgress('작업자 데이터를 초기화하고 있습니다.');
+            const workerCount = await resetCollection('workers');
+
+            updateResetProgress('현장 데이터를 초기화하고 있습니다.');
+            const siteCount = await resetCollection('sites');
+
+            updateResetProgress('팀 데이터를 초기화하고 있습니다.');
+            const teamCount = await resetCollection('teams');
+
+            updateResetProgress('회사 데이터를 초기화하고 있습니다.');
+            const companyCount = await resetCollection('companies');
+
+            handleCancel();
+            Swal.close();
+
+            await Swal.fire({
+                icon: 'success',
+                title: '초기화 완료',
+                html: '<div class="text-sm text-slate-600 text-left leading-6">'
+                    + `회사 ${companyCount.toLocaleString()}건<br />`
+                    + `팀 ${teamCount.toLocaleString()}건<br />`
+                    + `현장 ${siteCount.toLocaleString()}건<br />`
+                    + `작업자 ${workerCount.toLocaleString()}건<br />`
+                    + `출력일보 ${dailyReportResult.reports.toLocaleString()}건<br />`
+                    + `일보상세 ${dailyReportResult.legacyRows.toLocaleString()}건`
+                    + '</div>'
+            });
+        } catch (error) {
+            console.error('[IntegratedMassUploader] reset failed', error);
+            Swal.close();
+            await Swal.fire('오류', '통합 데이터 초기화에 실패했습니다.', 'error');
+        } finally {
+            setIsResettingData(false);
+        }
+    };
+
+    const previewPageSizeOptions = [50, 100, 200, 500];
+
+    const renderPreviewTableArea = () => {
+        const rawRows = previewData[activeTab] || [];
+        const annotations = previewAnalysis[activeTab] || [];
+        const mapping = mappingAnalysis[activeTab] || [];
+        const isDailyReportTab = activeTab === 'DailyReport';
+        const normalizeDailyReportKeyPart = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
+        const buildDailyReportKeyFromRow = (row: any): DailyReportKey | '' => {
+            const date = getCellString(formatExcelDate(row?.['날짜'] ?? row?.['작업일']));
+            const siteName = normalizeDailyReportKeyPart(row?.['현장명'] ?? row?.['현장']);
+            const teamName = normalizeDailyReportKeyPart(row?.['팀명'] ?? row?.['팀'] ?? row?.['해당팀'] ?? row?.['현장담당']);
+            if (!date || !siteName || !teamName) return '';
+            return `${date}_${siteName}_${teamName}` as DailyReportKey;
+        };
+        const mappingByKey = new Map<string, MappedRow>(mapping.map((m) => [m.key, m] as const));
+        const rawHeaderSet = new Set<string>();
+
+        rawRows.forEach((row) => {
+            Object.keys(row || {}).forEach((header) => {
+                if (!/^__EMPTY/i.test(header)) {
+                    rawHeaderSet.add(header);
+                }
+            });
+        });
+
+        const dailyPreferredHeaders = ['날짜', '현장명', '팀명', '해당팀', '이름', '직종', '공수', '급여방식', '단가', '현장구분', '결제구분', '작업내용'];
+        const preferredHeaders = isDailyReportTab
+            ? dailyPreferredHeaders
+            : (TEMPLATE_FIELDS[activeTab as TemplateSheetType]?.fields ?? []).map((field) => field.label);
+        const rawHeaders = Array.from(rawHeaderSet);
+        const baseHeaders = [
+            ...preferredHeaders.filter((header) => rawHeaderSet.has(header)),
+            ...rawHeaders.filter((header) => !preferredHeaders.includes(header))
+        ];
+        const headers = ['행', '검사상태', 'DB상태', '처리예정', '문제/변경사유', ...baseHeaders];
+
+        const combinedRows = rawRows.map((row, index) => {
+            const annotation = annotations[index];
+            const derivedKey = annotation?.key || (isDailyReportTab ? buildDailyReportKeyFromRow(row) : '');
+            const mappingItem = isDailyReportTab
+                ? (derivedKey ? mappingByKey.get(derivedKey) : undefined)
+                : mapping[index] ?? (derivedKey ? mappingByKey.get(derivedKey) : undefined);
+            const reasonSet = new Set<string>();
+
+            (annotation?.reasons ?? []).forEach((reason) => reasonSet.add(reason));
+            (mappingItem?.changes ?? []).forEach((change) => reasonSet.add(change));
+            if (mappingItem?.status === 'CONFLICT' && reasonSet.size === 0) {
+                reasonSet.add('DB 데이터와 충돌합니다.');
+            }
+            if (mappingItem?.action === 'SKIP' && mappingItem?.status !== 'UNCHANGED' && reasonSet.size === 0) {
+                reasonSet.add('검토가 필요한 항목이라 건너뜁니다.');
+            }
+
+            const hasProblem = annotation?.status === 'INVALID'
+                || annotation?.status === 'DUPLICATE'
+                || annotation?.status === 'SKIP'
+                || mappingItem?.status === 'CONFLICT'
+                || (mappingItem?.action === 'SKIP' && mappingItem?.status !== 'UNCHANGED');
+
+            return {
+                index,
+                row,
+                key: derivedKey,
+                annotation,
+                mappingItem,
+                reasons: Array.from(reasonSet),
+                hasProblem
+            };
+        });
+
+        const visibleRows = showOnlyIssues
+            ? combinedRows.filter((item) => item.hasProblem)
+            : combinedRows;
+        const invalidCount = combinedRows.filter((item) => item.annotation?.status === 'INVALID').length;
+        const duplicateCount = combinedRows.filter((item) => item.annotation?.status === 'DUPLICATE').length;
+        const skipCount = combinedRows.filter((item) => item.annotation?.status === 'SKIP').length;
+        const conflictCount = combinedRows.filter((item) => item.mappingItem?.status === 'CONFLICT' || (item.mappingItem?.action === 'SKIP' && item.mappingItem?.status !== 'UNCHANGED')).length;
+        const totalPages = Math.max(1, Math.ceil(Math.max(visibleRows.length, 1) / previewPageSize));
+        const currentPage = Math.min(previewPage, totalPages);
+        const startIndex = visibleRows.length === 0 ? 0 : (currentPage - 1) * previewPageSize;
+        const endIndex = visibleRows.length === 0 ? 0 : Math.min(startIndex + previewPageSize, visibleRows.length);
+        const pagedRows = visibleRows.slice(startIndex, endIndex);
+        const issueHighlights = combinedRows.filter((item) => item.hasProblem).slice(0, 12);
+        const issueSummaryItems = [
+            { label: '필수값 오류', count: invalidCount, className: 'bg-red-100 text-red-700' },
+            { label: '파일 중복', count: duplicateCount, className: 'bg-amber-100 text-amber-700' },
+            { label: '건너뜀', count: skipCount, className: 'bg-slate-200 text-slate-700' },
+            { label: 'DB 충돌', count: conflictCount, className: 'bg-rose-100 text-rose-700' }
+        ].filter((item) => item.count > 0);
+
+        const getPreviewStatusMeta = (status?: PreviewRowStatus) => {
+            if (status === 'INVALID') return { label: '필수값 오류', className: 'bg-red-100 text-red-700' };
+            if (status === 'DUPLICATE') return { label: '파일 중복', className: 'bg-amber-100 text-amber-700' };
+            if (status === 'SKIP') return { label: '건너뜀', className: 'bg-slate-200 text-slate-700' };
+            return { label: '정상', className: 'bg-emerald-100 text-emerald-700' };
+        };
+
+        const getMappingStatusMeta = (status?: MappingStatus) => {
+            if (status === 'NEW') return { label: '신규', className: 'bg-green-100 text-green-700' };
+            if (status === 'UPDATE') return { label: '업데이트', className: 'bg-blue-100 text-blue-700' };
+            if (status === 'UNCHANGED') return { label: '동일', className: 'bg-gray-100 text-gray-600' };
+            if (status === 'CONFLICT') return { label: '충돌', className: 'bg-red-100 text-red-700' };
+            return { label: '-', className: 'bg-slate-100 text-slate-500' };
+        };
+
+        const getPlannedActionLabel = (item: { mappingItem?: MappedRow; annotation?: PreviewAnnotatedRow }) => {
+            if (item.mappingItem?.status === 'CONFLICT') return '충돌';
+            if (item.mappingItem?.action === 'SKIP' || item.mappingItem?.status === 'UNCHANGED') return '스킵';
+            if (item.mappingItem?.action === 'CREATE') return '생성';
+            if (item.mappingItem?.action === 'UPDATE') return '덮어쓰기';
+            if (item.mappingItem?.action === 'MERGE') return dailyReportExistingMode === 'overwrite' ? '덮어쓰기' : '병합';
+            if (item.annotation?.status === 'INVALID' || item.annotation?.status === 'DUPLICATE' || item.annotation?.status === 'SKIP') return '검토 필요';
+            return '생성';
+        };
+
+        if (rawRows.length === 0) {
+            return (
+                <div className="p-12 text-center text-slate-400">
+                    <FontAwesomeIcon icon={faFileExcel} className="text-4xl mb-4 opacity-30" />
+                    <p>데이터가 없습니다.</p>
+                </div>
+            );
+        }
+
+        return (
+            <>
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 border-b border-slate-200 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex flex-wrap gap-3">
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 min-w-[120px]">
+                            <div className="text-[11px] font-bold text-slate-500">전체 행</div>
+                            <div className="text-lg font-extrabold text-slate-800">{rawRows.length.toLocaleString()}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 min-w-[120px]">
+                            <div className="text-[11px] font-bold text-slate-500">현재 표시</div>
+                            <div className="text-lg font-extrabold text-slate-800">{visibleRows.length.toLocaleString()}</div>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 min-w-[160px]">
+                            <div className="text-[11px] font-bold text-slate-500">현재 범위</div>
+                            <div className="text-sm font-bold text-slate-800">
+                                {visibleRows.length === 0 ? '0건' : `${startIndex + 1}-${endIndex} / ${visibleRows.length.toLocaleString()}건`}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <div className="text-xs text-slate-500 font-medium">
+                            전체 내역은 페이지로 나눠서 모두 확인할 수 있습니다.
+                        </div>
+                        <label className="flex items-center gap-2 text-sm text-slate-600">
+                            <span className="font-bold">페이지당</span>
+                            <select
+                                value={previewPageSize}
+                                onChange={(e) => {
+                                    setPreviewPageSize(Number(e.target.value));
+                                    setPreviewPage(1);
+                                }}
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700"
+                            >
+                                {previewPageSizeOptions.map((size) => (
+                                    <option key={size} value={size}>{size}건</option>
+                                ))}
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
+                {issueSummaryItems.length > 0 && (
+                    <div className="px-6 py-4 bg-rose-50/60 border-b border-slate-200">
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                            <span className="text-sm font-bold text-slate-700">문제 요약</span>
+                            {issueSummaryItems.map((item) => (
+                                <span key={item.label} className={`px-2.5 py-1 rounded-full text-xs font-bold ${item.className}`}>
+                                    {item.label} {item.count.toLocaleString()}건
+                                </span>
+                            ))}
+                        </div>
+                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {issueHighlights.map((item) => (
+                                <div key={`${item.key || 'row'}-${item.index}`} className="rounded-lg border border-rose-100 bg-white px-4 py-3 shadow-sm">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="text-xs font-bold text-rose-700">행 {item.index + 2}</div>
+                                        {item.key && <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{item.key}</div>}
+                                    </div>
+                                    <div className="mt-2 space-y-1">
+                                        {item.reasons.slice(0, 3).map((reason) => (
+                                            <div key={reason} className="text-xs text-slate-600 leading-5">• {reason}</div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                <div className="p-0 overflow-x-auto max-h-[500px]">
+                    {visibleRows.length === 0 ? (
+                        <div className="p-12 text-center text-slate-400">
+                            <FontAwesomeIcon icon={faFileExcel} className="text-4xl mb-4 opacity-30" />
+                            <p>{showOnlyIssues ? '문제행이 없습니다.' : '데이터가 없습니다.'}</p>
+                        </div>
+                    ) : (
+                        <table className="w-full text-sm text-left text-slate-600">
+                            <thead className="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0">
+                                <tr>
+                                    {headers.map((header, idx) => (
+                                        <th key={idx} className="px-4 py-3 border-b border-slate-200 whitespace-nowrap">
+                                            {header}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {pagedRows.map((item) => {
+                                    const previewStatusMeta = getPreviewStatusMeta(item.annotation?.status);
+                                    const mappingStatusMeta = getMappingStatusMeta(item.mappingItem?.status);
+                                    const plannedActionLabel = getPlannedActionLabel(item);
+                                    return (
+                                        <tr key={`${item.key || 'row'}-${item.index}`} className={`${item.hasProblem ? 'bg-rose-50/40' : 'bg-white'} border-b hover:bg-slate-50`}>
+                                            <td className="px-4 py-4 whitespace-nowrap font-bold text-slate-700">{item.index + 2}</td>
+                                            <td className="px-4 py-4 whitespace-nowrap">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${previewStatusMeta.className}`}>
+                                                    {previewStatusMeta.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-4 whitespace-nowrap">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${mappingStatusMeta.className}`}>
+                                                    {mappingStatusMeta.label}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-4 whitespace-nowrap">
+                                                <span className="text-xs font-bold text-slate-700">{plannedActionLabel}</span>
+                                            </td>
+                                            <td className="px-4 py-4 min-w-[280px] max-w-[360px]">
+                                                <div className="text-xs text-slate-600 leading-5">
+                                                    {item.reasons.length > 0 ? item.reasons.map((reason) => (
+                                                        <div key={reason}>{reason}</div>
+                                                    )) : <span className="text-slate-400">변경사항 없음</span>}
+                                                </div>
+                                            </td>
+                                            {baseHeaders.map((header) => (
+                                                <td key={header} className="px-4 py-4 whitespace-nowrap">
+                                                    {String(item.row?.[header] ?? '')}
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                <div className="px-6 py-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-200 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        {visibleRows.length === 0
+                            ? '표시할 항목이 없습니다.'
+                            : `${startIndex + 1}-${endIndex} / ${visibleRows.length.toLocaleString()}건 표시`}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setPreviewPage(1)}
+                            disabled={currentPage === 1 || visibleRows.length === 0}
+                            className="px-3 py-1.5 rounded-md border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            처음
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPreviewPage((page) => Math.max(1, page - 1))}
+                            disabled={currentPage === 1 || visibleRows.length === 0}
+                            className="px-3 py-1.5 rounded-md border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            이전
+                        </button>
+                        <span className="px-2 text-slate-600 font-bold">
+                            {currentPage} / {totalPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setPreviewPage((page) => Math.min(totalPages, page + 1))}
+                            disabled={currentPage === totalPages || visibleRows.length === 0}
+                            className="px-3 py-1.5 rounded-md border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            다음
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPreviewPage(totalPages)}
+                            disabled={currentPage === totalPages || visibleRows.length === 0}
+                            className="px-3 py-1.5 rounded-md border border-slate-300 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            마지막
+                        </button>
+                    </div>
+                </div>
+            </>
+        );
     };
 
     return (
@@ -2831,10 +3196,14 @@ const IntegratedMassUploader: React.FC = () => {
                         </button>
                         <button
                             type="button"
-                            onClick={handleCancel}
-                            className="px-6 py-3 rounded-lg bg-red-600 text-white font-bold hover:bg-red-700 transition-colors flex items-center gap-2"
+                            onClick={() => { void handleResetIntegratedData(); }}
+                            disabled={isResettingData}
+                            className={`px-6 py-3 rounded-lg text-white font-bold transition-colors flex items-center gap-2 ${isResettingData
+                                ? 'bg-red-400 cursor-not-allowed'
+                                : 'bg-red-600 hover:bg-red-700'
+                                }`}
                         >
-                            <FontAwesomeIcon icon={faTimes} /> 데이터 초기화
+                            <FontAwesomeIcon icon={isResettingData ? faSpinner : faTimes} spin={isResettingData} /> 데이터 초기화
                         </button>
                     </div>
                     <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4 max-w-4xl mx-auto">
@@ -2924,7 +3293,10 @@ const IntegratedMassUploader: React.FC = () => {
                             )}
                             <button
                                 type="button"
-                                onClick={() => setShowOnlyIssues((v) => !v)}
+                                onClick={() => {
+                                    setShowOnlyIssues((v) => !v);
+                                    setPreviewPage(1);
+                                }}
                                 className={`px-4 py-2 rounded-lg transition-colors text-sm font-bold ${showOnlyIssues ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'}`}
                             >
                                 {showOnlyIssues ? '문제행만 보기: ON' : '문제행만 보기: OFF'}
@@ -3002,7 +3374,10 @@ const IntegratedMassUploader: React.FC = () => {
                                 return (
                                     <button
                                         key={type}
-                                        onClick={() => setActiveTab(type)}
+                                        onClick={() => {
+                                            setActiveTab(type);
+                                            setPreviewPage(1);
+                                        }}
                                         className={`flex-1 py-4 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${activeTab === type
                                             ? 'border-blue-500 text-blue-600 bg-blue-50'
                                             : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
@@ -3025,130 +3400,7 @@ const IntegratedMassUploader: React.FC = () => {
                     </div>
 
                     {/* Table Area */}
-                    <div className="p-0 overflow-x-auto max-h-[500px]">
-                        {(() => {
-                            const mapping = mappingAnalysis[activeTab] || [];
-                            const isDailyReportTab = activeTab === 'DailyReport';
-                            const normalizeDailyReportKeyPart = (val: unknown): string => getCellString(val).replace(/\s+/g, ' ');
-                            const buildDailyReportKeyFromRow = (row: any): DailyReportKey | '' => {
-                                const date = getCellString(formatExcelDate(row?.['날짜'] ?? row?.['작업일']));
-                                const siteName = normalizeDailyReportKeyPart(row?.['현장명'] ?? row?.['현장']);
-                                const teamName = normalizeDailyReportKeyPart(row?.['팀명'] ?? row?.['팀'] ?? row?.['해당팀'] ?? row?.['현장담당']);
-                                if (!date || !siteName || !teamName) return '';
-                                return `${date}_${siteName}_${teamName}` as DailyReportKey;
-                            };
-
-                            const mappingByKey = new Map<string, MappedRow>(mapping.map((m) => [m.key, m] as const));
-                            const issueKeySet = showOnlyIssues
-                                ? new Set(
-                                    mapping
-                                        .filter((m) => m.status === 'CONFLICT' || (m.action === 'SKIP' && m.status !== 'UNCHANGED'))
-                                        .map((m) => m.key)
-                                )
-                                : undefined;
-
-                            const filteredMapping = isDailyReportTab
-                                ? (previewData.DailyReport ?? [])
-                                    .map((row: any) => {
-                                        const key = buildDailyReportKeyFromRow(row);
-                                        const base = key ? mappingByKey.get(key) : undefined;
-                                        return {
-                                            row,
-                                            status: base?.status ?? ('NEW' as MappingStatus),
-                                            existingData: base?.existingData,
-                                            changes: base?.changes ?? [],
-                                            action: base?.action ?? ('CREATE' as ActionType),
-                                            key: key || ''
-                                        } as MappedRow;
-                                    })
-                                    .filter((m) => {
-                                        if (!issueKeySet) return true;
-                                        if (!m.key) return false;
-                                        return issueKeySet.has(m.key);
-                                    })
-                                : (showOnlyIssues
-                                    ? mapping.filter((m) => m.status === 'CONFLICT' || (m.action === 'SKIP' && m.status !== 'UNCHANGED'))
-                                    : mapping);
-
-                            const dailyPreferredHeaders = ['날짜', '현장명', '팀명', '해당팀', '이름', '직종', '공수', '급여방식', '단가', '현장구분', '결제구분', '작업내용'];
-                            const candidateHeaders = Object.keys((filteredMapping[0]?.row ?? mapping[0]?.row) || {}).filter((h) => !/^__EMPTY/i.test(h));
-                            const baseHeaders = isDailyReportTab
-                                ? [...dailyPreferredHeaders.filter((h) => candidateHeaders.includes(h)), ...candidateHeaders.filter((h) => !dailyPreferredHeaders.includes(h))]
-                                : candidateHeaders;
-                            const headers = ['DB상태', '처리예정', '변경사항', ...baseHeaders];
-
-                            if (!filteredMapping || filteredMapping.length === 0) {
-                                return (
-                                    <div className="p-12 text-center text-slate-400">
-                                        <FontAwesomeIcon icon={faFileExcel} className="text-4xl mb-4 opacity-30" />
-                                        <p>{showOnlyIssues ? '문제행이 없습니다.' : '데이터가 없습니다.'}</p>
-                                    </div>
-                                );
-                            }
-
-                            return (
-                                <table className="w-full text-sm text-left text-slate-600">
-                                    <thead className="text-xs text-slate-700 uppercase bg-slate-50 sticky top-0">
-                                        <tr>
-                                            {headers.map((header, idx) => (
-                                                <th key={idx} className="px-6 py-3 border-b border-slate-200 whitespace-nowrap">
-                                                    {header}
-                                                </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filteredMapping.slice(0, 50).map((item: MappedRow, idx: number) => {
-                                            const statusLabel = item.status === 'NEW' ? '신규 ✨' :
-                                                item.status === 'UPDATE' ? '업데이트 🔄' :
-                                                    item.status === 'UNCHANGED' ? '동일 ⏸️' : '충돌 ⚠️';
-                                            const statusClass = item.status === 'NEW' ? 'bg-green-100 text-green-700' :
-                                                item.status === 'UPDATE' ? 'bg-blue-100 text-blue-700' :
-                                                    item.status === 'UNCHANGED' ? 'bg-gray-100 text-gray-600' :
-                                                        'bg-red-100 text-red-700';
-                                            const plannedActionLabel = (() => {
-                                                if (item.status === 'CONFLICT') return '충돌';
-                                                if (item.action === 'SKIP' || item.status === 'UNCHANGED') return '스킵';
-                                                if (item.action === 'CREATE') return '생성';
-                                                if (item.action === 'UPDATE') return '덮어쓰기';
-                                                if (item.action === 'MERGE') return (dailyReportExistingMode === 'overwrite' ? '덮어쓰기' : '병합');
-                                                return '-';
-                                            })();
-
-                                            return (
-                                                <tr key={idx} className="bg-white border-b hover:bg-slate-50">
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${statusClass}`}>
-                                                            {statusLabel}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4 whitespace-nowrap">
-                                                        <span className="text-xs font-bold text-slate-700">{plannedActionLabel}</span>
-                                                    </td>
-                                                    <td className="px-6 py-4 max-w-[300px]">
-                                                        <div className="text-xs text-slate-600">
-                                                            {item.changes.map((change, cidx) => (
-                                                                <div key={cidx} className="mb-1">{change}</div>
-                                                            ))}
-                                                            {item.changes.length === 0 && <span className="text-slate-400">변경사항 없음</span>}
-                                                        </div>
-                                                    </td>
-                                                    {baseHeaders.map((h) => (
-                                                        <td key={h} className="px-6 py-4 whitespace-nowrap">
-                                                            {String(item.row?.[h] ?? '')}
-                                                        </td>
-                                                    ))}
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            );
-                        })()}
-                    </div>
-                    <div className="p-3 bg-slate-50 text-xs text-slate-500 text-center border-t border-slate-200">
-                        * 상위 50개 항목만 표시됩니다.
-                    </div>
+                    {renderPreviewTableArea()}
                 </div>
             )}
 

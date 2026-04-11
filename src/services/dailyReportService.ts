@@ -15,6 +15,7 @@ import {
     doc,
     getDoc,
 } from 'firebase/firestore';
+import { normalizeLooseDateString, normalizeLooseDateText } from '../utils/dateNormalization';
 
 export type { DailyReport, DailyReportWorker };
 
@@ -47,10 +48,35 @@ export interface DailyReportWorkerRow {
 
 const normalizeReport = (report: Partial<DailyReport> & { date: string; teamId: string; siteId: string }): DailyReport => ({
     ...report,
+    date: normalizeLooseDateText(report.date),
     workers: report.workers ?? [],
     totalManDay: report.totalManDay ?? 0,
     totalAmount: report.totalAmount ?? 0,
 }) as DailyReport;
+
+const filterReportsByParams = (reports: DailyReport[], params: {
+    startDate?: string;
+    endDate?: string;
+    teamId?: string;
+    siteId?: string;
+}): DailyReport[] => {
+    const normalizedStartDate = normalizeLooseDateString(params.startDate);
+    const normalizedEndDate = normalizeLooseDateString(params.endDate);
+
+    return reports.filter((report) => {
+        const normalizedReportDate = normalizeLooseDateString(report.date);
+        if (!normalizedReportDate) return false;
+        if (normalizedStartDate && normalizedReportDate < normalizedStartDate) return false;
+        if (normalizedEndDate && normalizedReportDate > normalizedEndDate) return false;
+        if (params.teamId && report.teamId !== params.teamId) return false;
+        if (params.siteId && report.siteId !== params.siteId) return false;
+        return true;
+    }).sort((a, b) => {
+        const dateCompare = String(b.date ?? '').localeCompare(String(a.date ?? ''));
+        if (dateCompare !== 0) return dateCompare;
+        return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+    });
+};
 
 export const dailyReportService = {
     addReport: async (report: DailyReportInput): Promise<string> => {
@@ -64,11 +90,15 @@ export const dailyReportService = {
         const oldSnap = await getDoc(doc(db, 'daily_reports', id));
         if (!oldSnap.exists()) throw new Error('Report not found');
         const oldData = normalizeReport(oldSnap.data() as any);
+        const normalizedUpdates = {
+            ...updates,
+            ...(updates.date !== undefined ? { date: normalizeLooseDateText(updates.date) } : {})
+        };
 
         await dailyReportService._updateStats(oldData, -1);
-        await dailyReportFirestoreService.updateReport(id, updates);
+        await dailyReportFirestoreService.updateReport(id, normalizedUpdates);
 
-        const newData = normalizeReport({ ...oldData, ...updates } as any);
+        const newData = normalizeReport({ ...oldData, ...normalizedUpdates } as any);
         await dailyReportService._updateStats(newData, 1);
     },
 
@@ -136,28 +166,14 @@ export const dailyReportService = {
             : paramsOrDate;
 
         const normalized = {
-            startDate: params.startDate ?? params.endDate,
-            endDate: params.endDate ?? params.startDate,
+            startDate: normalizeLooseDateText(params.startDate ?? params.endDate ?? ''),
+            endDate: normalizeLooseDateText(params.endDate ?? params.startDate ?? ''),
             teamId: params.teamId,
             siteId: params.siteId,
         };
 
-        if (!normalized.startDate && !normalized.endDate) {
-            const all = await dailyReportService.getAllReports();
-            return all.filter(report => {
-                if (normalized.teamId && report.teamId !== normalized.teamId) return false;
-                if (normalized.siteId && report.siteId !== normalized.siteId) return false;
-                return true;
-            });
-        }
-
-        const reports = await dailyReportFirestoreService.getReportsByRange({
-            startDate: normalized.startDate || '',
-            endDate: normalized.endDate || '',
-            teamId: normalized.teamId,
-            siteId: normalized.siteId,
-        });
-        return reports.map(report => normalizeReport(report as any));
+        const all = await dailyReportService.getAllReports();
+        return filterReportsByParams(all, normalized);
     },
 
     getReportsList: async (): Promise<DailyReport[]> => {
