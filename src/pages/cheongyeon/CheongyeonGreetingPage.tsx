@@ -17,8 +17,10 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { motion } from 'framer-motion';
 import ceoCharacter from '../../assets/ceo_character.png';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 
 const CheongyeonGreetingPage: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
     const containerVariants = {
         hidden: { opacity: 0 },
         visible: {
@@ -38,18 +40,22 @@ const CheongyeonGreetingPage: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 text-white overflow-hidden">
-            {/* Unicorn Studio Background */}
-            <div className="fixed inset-0 z-0">
-                <iframe
-                    src="https://www.unicorn.studio/embed/KmzUSKuMzQYJD0VFBPSC?scale=1&dpi=1.5"
-                    title="Unicorn Studio Background"
-                    className="w-full h-full border-0"
-                    style={{ pointerEvents: 'none' }}
-                    loading="lazy"
-                />
-                <div className="absolute inset-0 bg-gradient-to-b from-slate-950/30 via-slate-950/60 to-slate-950/90" />
-            </div>
+        <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} overflow-hidden`}>
+            {/* Background */}
+            {isDarkMode ? (
+                <div className="fixed inset-0 z-0">
+                    <iframe
+                        src="https://www.unicorn.studio/embed/KmzUSKuMzQYJD0VFBPSC?scale=1&dpi=1.5"
+                        title="Unicorn Studio Background"
+                        className="w-full h-full border-0"
+                        style={{ pointerEvents: 'none' }}
+                        loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-b from-slate-950/30 via-slate-950/60 to-slate-950/90" />
+                </div>
+            ) : (
+                <div className="fixed inset-0 z-0 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30" />
+            )}
 
             {/* Content */}
             <div className="relative z-10">

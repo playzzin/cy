@@ -126,12 +126,18 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud68c\uc0ac \ub4f1\ub85d": "/database/company-db",
     "\ud68c\uc0ac \uc870\uc9c1\ub3c4": "/company/organization",
     "\ud504\ub9ac\ub79c\uc11c \uad00\ub9ac": "/manpower/freelancer",
-    "\ud68c\uc0ac\uc18c\uac1c": "/cheongyeon/home", // New mapping
+    "\ud68c\uc0ac\uc18c\uac1c": "/dashboard2", // Canonical company intro landing route
     "\uc778\uc0ac\ub9d0": "/cheongyeon/greeting",
     "\ub300\ud45c \uc778\uc0ac\ub9d0": "/cheongyeon/greeting", // New alias
     "\uc870\uc9c1\ub3c4": "/cheongyeon/organization",
     "\uc624\uc2dc\ub294 \uae38": "/cheongyeon/directions",
     "\uae30\uc220\ube44\uc804": "/cheongyeon/tech-vision",
+        "회사연혁": "/cheongyeon/history",
+        "회사 연혁": "/cheongyeon/history",
+        "연혁": "/cheongyeon/history",
+    "\uacac\uc801\ubb38\uc758": "/estimate/request",
+    "\uacac\uc801 \ubb38\uc758": "/estimate/request",
+    "\uacac\uc801 \ubb38\uc758\ud558\uae30": "/estimate/request",
     "\ud68c\uc0ac \ub300\ub7c9 \ub4f1\ub85d": "/database/smart-company-registration",
     "\ud68c\uc0acDB": "/database/company-db",
     "DB \uad6c\uc870\ub3c4": "/jeonkuk/db-structure",

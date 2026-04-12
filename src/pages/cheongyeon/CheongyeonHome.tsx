@@ -1,12 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRight, faPlay, faHelmetSafety, faChartLine, faNetworkWired, faUsers, faCalendarDays, faBuilding, faHandshake } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRight, faPlay, faHelmetSafety, faChartLine, faNetworkWired, faUsers, faCalendarDays, faBuilding, faHandshake, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router-dom';
-import { motion, Variants } from 'framer-motion';
+import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
 import { storage } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { useSiteMode } from '../../contexts/SiteModeContext';
+import logoConstruction from '../../assets/logo_construction.jpg';
+import ceoPortrait from '../../assets/ceo_portrait.png';
 
 type SiteWorkerHighlight = {
     id: string;
@@ -24,6 +27,13 @@ type SiteHighlight = {
     totalWorkers: number;
     teamNames: string[];
     workers: SiteWorkerHighlight[];
+};
+
+type HeroSlide = {
+    stage: string;
+    title: string;
+    description: string;
+    image: string;
 };
 
 const toDateNumber = (date: string): number => Number(String(date || '').replace(/-/g, '')) || 0;
@@ -100,11 +110,11 @@ const getRecent30DayWindow = (): { start: string; end: string; dateKeys: string[
 
 const toMonthKey = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
-const getRecent12MonthWindow = (): { start: string; end: string; monthKeys: string[] } => {
+const getCurrentYearMonthWindow = (): { start: string; end: string; monthKeys: string[] } => {
     const now = new Date();
-    const startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-    const monthKeys = Array.from({ length: 12 }).map((_, idx) => {
-        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + idx, 1);
+    const startDate = new Date(now.getFullYear(), 0, 1);
+    const monthKeys = Array.from({ length: now.getMonth() + 1 }).map((_, idx) => {
+        const monthDate = new Date(now.getFullYear(), idx, 1);
         return toMonthKey(monthDate);
     });
     return {
@@ -240,6 +250,39 @@ const statSectionVariant: Variants = {
     },
 };
 
+const HERO_SLIDES: HeroSlide[] = [
+    {
+        stage: '1단계 기획',
+        title: '현장 분석과 공정 설계를 먼저 완성합니다',
+        description: '현장 조건, 동선, 위험요소를 사전에 정리해 공정 손실을 줄이고 실행 가능성이 높은 시공 플랜을 수립합니다.',
+        image: '/assets/images/dashboard/slider1.png',
+    },
+    {
+        stage: '2단계 시공',
+        title: '숙련 인력과 표준 공정으로 정확하게 시공합니다',
+        description: '시스템 동바리·비계 시공 표준을 기반으로 품질과 속도를 동시에 확보하며 일정 변동에도 유연하게 대응합니다.',
+        image: '/assets/images/dashboard/slider2.png',
+    },
+    {
+        stage: '3단계 운영',
+        title: '일일 데이터 기반으로 현장을 지속 관리합니다',
+        description: '출력일보, 인력, 공수, 현장 지표를 연결해 이슈를 빠르게 파악하고 다음 작업을 안정적으로 이어갑니다.',
+        image: '/assets/images/dashboard/slider3.png',
+    },
+    {
+        stage: '4단계 품질',
+        title: '품질·안전 기준을 단계별로 점검해 리스크를 낮춥니다',
+        description: '시공 품질, 안전 수칙, 현장 이슈를 동시 관리해 공정 중단을 최소화하고 안정적인 진행률을 유지합니다.',
+        image: logoConstruction,
+    },
+    {
+        stage: '5단계 성과',
+        title: '완료 이후에도 데이터로 성과를 분석하고 개선합니다',
+        description: '프로젝트 종료 후 주요 지표를 정리해 다음 현장 계획에 반영하고 운영 효율을 지속적으로 고도화합니다.',
+        image: ceoPortrait,
+    },
+];
+
 type AnimatedBarShapeProps = {
     x?: number;
     y?: number;
@@ -275,6 +318,7 @@ const AnimatedBarShape: React.FC<AnimatedBarShapeProps> = ({
 };
 
 const CheongyeonHome: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
     const [playCount, setPlayCount] = useState(0);
     const [isIntro, setIsIntro] = useState(false); // 처음부터 컨텐츠 표시 (어두운 배경)
     const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -286,15 +330,9 @@ const CheongyeonHome: React.FC = () => {
     const [loadingStats, setLoadingStats] = useState(true);
     const [monthlyTrend, setMonthlyTrend] = useState<MonthlyTrendRow[]>([]);
     const [dailyTrend, setDailyTrend] = useState<DailyTrendRow[]>([]);
-    const [activeYesterdayMetric, setActiveYesterdayMetric] = useState<keyof DailyStatRow>('totalManDay');
-    const [activeYearMetric, setActiveYearMetric] = useState<keyof DailyStatRow>('totalManDay');
-    const [manDayViewMode, setManDayViewMode] = useState<'daily' | 'monthly'>('daily');
-    const [siteViewMode, setSiteViewMode] = useState<'daily' | 'monthly'>('daily');
-    const [workerListScope, setWorkerListScope] = useState<'yesterday' | 'yearToDate' | null>(null);
-    const [workerNamesByScope, setWorkerNamesByScope] = useState<{ yesterday: string[]; yearToDate: string[] }>({
-        yesterday: [],
-        yearToDate: [],
-    });
+    const [trendMode, setTrendMode] = useState<'daily' | 'monthly'>('daily');
+    const [summaryScope, setSummaryScope] = useState<'yesterday' | 'yearToDate'>('yesterday');
+    const [activeHeroIndex, setActiveHeroIndex] = useState(0);
     const [animatedStats, setAnimatedStats] = useState<{ yesterday: DailyStatRow; yearToDate: DailyStatRow }>({
         yesterday: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
         yearToDate: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
@@ -431,7 +469,7 @@ const CheongyeonHome: React.FC = () => {
                 yesterday.setDate(yesterday.getDate() - 1);
                 const yesterdayStr = toDateString(yesterday);
                 const { start: ytdStart, end: ytdEnd, label: ytdLabel } = getCurrentYearRange();
-                const { start: trendStart, end: trendEnd, monthKeys } = getRecent12MonthWindow();
+                const { start: trendStart, end: trendEnd, monthKeys } = getCurrentYearMonthWindow();
                 const { start: dailyStart, end: dailyEnd, dateKeys } = getRecent30DayWindow();
 
                 const [yReports, ytdReports, trendReports, dailyReports] = await Promise.all([
@@ -449,10 +487,6 @@ const CheongyeonHome: React.FC = () => {
                 });
                 setMonthlyTrend(buildMonthlyTrend(trendReports, monthKeys));
                 setDailyTrend(buildDailyTrend(dailyReports, dateKeys));
-                setWorkerNamesByScope({
-                    yesterday: extractWorkerNames(yReports),
-                    yearToDate: extractWorkerNames(ytdReports),
-                });
             } catch (err) {
                 console.error('Failed to load dashboard stats:', err);
             } finally {
@@ -531,40 +565,45 @@ const CheongyeonHome: React.FC = () => {
         return Math.round(value).toLocaleString();
     };
 
-    const activeYesterdayMetricConfig = STAT_METRICS.find((metric) => metric.key === activeYesterdayMetric) || STAT_METRICS[1];
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setTrendMode((prev) => (prev === 'daily' ? 'monthly' : 'daily'));
+            setSummaryScope((prev) => (prev === 'yesterday' ? 'yearToDate' : 'yesterday'));
+        }, 7000);
 
-    const handleYesterdayMetricClick = (metricKey: keyof DailyStatRow) => {
-        setActiveYesterdayMetric(metricKey);
-        if (metricKey === 'totalManDay') setManDayViewMode('daily');
-        if (metricKey === 'siteCount') setSiteViewMode('daily');
-        if (metricKey === 'totalWorkers') {
-            setWorkerListScope('yesterday');
-            return;
-        }
-        setWorkerListScope(null);
-    };
+        return () => window.clearInterval(intervalId);
+    }, []);
 
-    const handleYearMetricClick = (metricKey: keyof DailyStatRow) => {
-        setActiveYearMetric(metricKey);
-        if (metricKey === 'totalManDay') setManDayViewMode('monthly');
-        if (metricKey === 'siteCount') setSiteViewMode('monthly');
-        if (metricKey === 'totalWorkers') {
-            setWorkerListScope('yearToDate');
-            return;
-        }
-        setWorkerListScope(null);
-    };
-
-    const manDayGraphData = manDayViewMode === 'daily'
+    const manDayGraphData = trendMode === 'daily'
         ? dailyTrend.map((row) => ({ label: row.dateLabel, value: row.totalManDay }))
         : monthlyTrend.map((row) => ({ label: row.monthLabel, value: row.manDay }));
 
-    const siteGraphData = siteViewMode === 'daily'
+    const siteGraphData = trendMode === 'daily'
         ? dailyTrend.map((row) => ({ label: row.dateLabel, value: row.siteCount }))
         : monthlyTrend.map((row) => ({ label: row.monthLabel, value: row.siteCount }));
 
+    const activeSummaryStats = summaryScope === 'yesterday' ? animatedStats.yesterday : animatedStats.yearToDate;
+
+    useEffect(() => {
+        const id = window.setInterval(() => {
+            setActiveHeroIndex((prev) => (prev + 1) % HERO_SLIDES.length);
+        }, 5500);
+
+        return () => window.clearInterval(id);
+    }, []);
+
+    const handlePrevHero = () => {
+        setActiveHeroIndex((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+    };
+
+    const handleNextHero = () => {
+        setActiveHeroIndex((prev) => (prev + 1) % HERO_SLIDES.length);
+    };
+
+    const activeHero = HERO_SLIDES[activeHeroIndex];
+
     return (
-        <div className="relative min-h-screen bg-slate-900 overflow-x-hidden">
+        <div className={`relative min-h-screen ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'} overflow-x-hidden`}>
             {/* Video Background (Absolute within main content) */}
             <div className="absolute inset-0 z-0 pointer-events-none">
                 {videoUrl && (
@@ -586,41 +625,92 @@ const CheongyeonHome: React.FC = () => {
             </div>
 
             {/* 1. Recent Daily Report Highlights */}
-            <section className={`relative z-10 px-8 pt-28 pb-20 max-w-[1800px] mx-auto transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
-                <div className="mb-10 max-w-5xl animate-slideUp">
-                    <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5 backdrop-blur-md border border-white/10 w-fit">
-                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                        <span className="text-amber-400 text-sm font-medium tracking-wide uppercase">CHEONGYEON ENG SIGNATURE</span>
+            <section className={`relative z-10 w-full px-0 pt-2 pb-20 transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                <div className="mb-10 w-full animate-slideUp">
+                    <div className="rounded-none border-y border-white/15 bg-slate-900/45 backdrop-blur-md overflow-hidden md:rounded-none">
+                        <div className="relative aspect-[16/8] md:aspect-[16/6] xl:aspect-[16/5.2]">
+                            <AnimatePresence mode="wait">
+                                <motion.img
+                                    key={`${activeHero.stage}-${activeHero.image}`}
+                                    src={activeHero.image}
+                                    alt={activeHero.stage}
+                                    className="absolute inset-0 h-full w-full object-cover"
+                                    initial={{ opacity: 0, scale: 1.08, x: 18 }}
+                                    animate={{ opacity: 1, scale: 1, x: 0 }}
+                                    exit={{ opacity: 0, scale: 1.03, x: -18 }}
+                                    transition={{ duration: 0.7, ease: 'easeOut' }}
+                                />
+                            </AnimatePresence>
+
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/78 via-black/48 to-black/20" />
+
+                            <div className="absolute inset-0 flex flex-col justify-end p-5 md:p-8 lg:p-10">
+                                <AnimatePresence mode="wait">
+                                    <motion.div
+                                        key={`hero-copy-${activeHeroIndex}`}
+                                        className="max-w-4xl"
+                                        initial={{ opacity: 0, y: 18, filter: 'blur(8px)' }}
+                                        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                                        exit={{ opacity: 0, y: -10, filter: 'blur(8px)' }}
+                                        transition={{ duration: 0.45, ease: 'easeOut' }}
+                                    >
+                                        <div className="inline-flex items-center rounded-full border border-white/30 bg-black/35 px-3 py-1 text-xs font-semibold text-amber-200">
+                                            {activeHero.stage}
+                                        </div>
+                                        <h1 className="mt-3 text-2xl md:text-4xl xl:text-5xl font-bold text-white leading-tight break-keep">
+                                            {activeHero.title}
+                                        </h1>
+                                        <p className="mt-3 text-sm md:text-base xl:text-lg text-slate-200 leading-relaxed break-keep">
+                                            {activeHero.description}
+                                        </p>
+                                    </motion.div>
+                                </AnimatePresence>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={handlePrevHero}
+                                className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full border border-white/35 bg-black/30 text-white hover:bg-black/45"
+                                aria-label="이전 슬라이드"
+                            >
+                                <FontAwesomeIcon icon={faChevronLeft} />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleNextHero}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full border border-white/35 bg-black/30 text-white hover:bg-black/45"
+                                aria-label="다음 슬라이드"
+                            >
+                                <FontAwesomeIcon icon={faChevronRight} />
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-2 bg-black/40">
+                            {HERO_SLIDES.map((slide, index) => (
+                                <button
+                                    key={slide.stage}
+                                    type="button"
+                                    onClick={() => setActiveHeroIndex(index)}
+                                    className={`relative overflow-hidden rounded-xl border text-left transition-all ${
+                                        activeHeroIndex === index
+                                            ? 'border-amber-400/70 ring-1 ring-amber-400/60'
+                                            : 'border-white/15 hover:border-white/40'
+                                    }`}
+                                >
+                                    <div className="relative h-20 md:h-24">
+                                        <img src={slide.image} alt={slide.stage} className="h-full w-full object-cover" />
+                                        <div className={`absolute inset-0 transition-colors ${activeHeroIndex === index ? 'bg-black/30' : 'bg-black/58'}`} />
+                                        <div className="absolute inset-x-0 bottom-0 p-2">
+                                            <div className="text-[11px] text-amber-200 font-semibold">{slide.stage}</div>
+                                            <div className="text-xs text-white truncate">{slide.title}</div>
+                                        </div>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
-                    <h1 className="mt-6 text-4xl md:text-6xl font-bold text-white leading-tight font-display tracking-tight drop-shadow-2xl">
-                        청연ENG 시스템 동바리·비계 시공
-                        <span className="block text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-600 mt-2">
-                            자재임대와 건설인력 네트워크의 중심
-                        </span>
-                    </h1>
-
-                    <p className="mt-5 text-lg text-slate-300 max-w-4xl leading-relaxed font-light break-keep">
-                        청연ENG는 시스템 동바리·비계 시공 전문성과 자재임대 운영 역량,
-                        그리고 전국 단위 건설인력 네트워크를 결합해 대형 현장부터 긴급 공정까지 안정적으로 수행합니다.
-                        정밀한 현장 운영과 신뢰 기반 협업으로, 공사의 시작부터 완성까지 압도적인 실행력을 제공합니다.
-                    </p>
-
                     <div className="flex flex-wrap items-center gap-4 mt-7">
-                        <button
-                            className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-full font-bold text-base transition-all shadow-lg shadow-amber-500/30 flex items-center gap-2 group"
-                            onClick={() => navigate('/cheongyeon/greeting')}
-                        >
-                            대표 인사말
-                            <FontAwesomeIcon icon={faArrowRight} className="transition-transform group-hover:translate-x-1" />
-                        </button>
-                        <button
-                            className="px-6 py-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 text-white rounded-full font-medium text-base transition-all flex items-center gap-2 group"
-                            onClick={() => navigate('/site/management')}
-                        >
-                            현장 관리 열기
-                            <FontAwesomeIcon icon={faArrowRight} className="transition-transform group-hover:translate-x-1" />
-                        </button>
                         <button
                             className="px-6 py-3 bg-transparent border border-amber-400/60 text-amber-200 rounded-full font-medium text-base transition-all flex items-center gap-2 group hover:bg-amber-500/10 hover:text-amber-300"
                             onClick={handleReplayIntro}
@@ -725,110 +815,38 @@ const CheongyeonHome: React.FC = () => {
                     viewport={{ once: true, amount: 0.2 }}
                     className="flex items-center gap-3 mb-4"
                 >
-                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                    <span className="text-amber-300 text-sm font-semibold tracking-widest uppercase">
-                        어제 출력 실적 {dashboardStats ? `(${dashboardStats.yesterdayLabel})` : ''}
+                    <span className={`w-2 h-2 rounded-full animate-pulse ${trendMode === 'daily' ? 'bg-amber-500' : 'bg-cyan-400'}`} />
+                    <span className={`text-sm font-semibold tracking-widest uppercase ${trendMode === 'daily' ? 'text-amber-300' : 'text-cyan-300'}`}>
+                        {trendMode === 'daily' ? '최근 한달 일자별 지표' : `올해 1월 ~ 현재월 월별 지표 (${new Date().getFullYear()}년)`}
                     </span>
                 </motion.div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                     {loadingStats
-                        ? Array.from({ length: 4 }).map((_, i) => (
+                        ? Array.from({ length: 3 }).map((_, i) => (
                             <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
                         ))
-                        : STAT_METRICS.map((metric, idx) => (
-                            <motion.button
-                                key={`y-${metric.key}`}
-                                type="button"
-                                onClick={() => handleYesterdayMetricClick(metric.key)}
+                        : STAT_METRICS.map((metric) => (
+                            <motion.div
+                                key={`summary-${metric.key}`}
                                 variants={statSectionVariant}
                                 initial="hidden"
                                 whileInView="visible"
                                 viewport={{ once: true, amount: 0.2 }}
-                                className={`rounded-2xl bg-white/5 backdrop-blur-md border transition-all p-5 flex items-center gap-4 text-left ${activeYesterdayMetric === metric.key ? 'border-white/40 shadow-lg shadow-white/10' : 'border-white/10 hover:border-amber-500/40'}`}
+                                className="rounded-2xl bg-white/5 backdrop-blur-md border border-white/20 p-5 flex items-center gap-4 text-left"
                             >
                                 <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${metric.color} flex items-center justify-center text-white text-xl flex-shrink-0 shadow-lg`}>
                                     <FontAwesomeIcon icon={metric.icon} />
                                 </div>
                                 <div>
                                     <div className="text-2xl font-bold text-white">
-                                        {formatStatValue(animatedStats.yesterday[metric.key], metric.decimals || 0)}{metric.unit}
+                                        {formatStatValue(activeSummaryStats[metric.key], metric.decimals || 0)}{metric.unit}
                                     </div>
                                     <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
                                 </div>
-                            </motion.button>
+                            </motion.div>
                         ))}
                 </div>
-
-                <motion.div
-                    variants={statSectionVariant}
-                    initial="hidden"
-                    whileInView="visible"
-                    viewport={{ once: true, amount: 0.2 }}
-                    className="flex items-center gap-3 mb-4"
-                >
-                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                    <span className="text-cyan-300 text-sm font-semibold tracking-widest uppercase">
-                        올해 출력 실적 {dashboardStats ? `(${dashboardStats.yearToDateLabel} 누적)` : ''}
-                    </span>
-                </motion.div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                    {loadingStats
-                        ? Array.from({ length: 4 }).map((_, i) => (
-                            <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
-                        ))
-                        : STAT_METRICS.map((metric, idx) => (
-                            <motion.button
-                                key={`ytd-${metric.key}`}
-                                type="button"
-                                onClick={() => handleYearMetricClick(metric.key)}
-                                variants={statSectionVariant}
-                                initial="hidden"
-                                whileInView="visible"
-                                viewport={{ once: true, amount: 0.2 }}
-                                className={`rounded-2xl bg-white/5 backdrop-blur-md border transition-all p-5 flex items-center gap-4 text-left ${activeYearMetric === metric.key ? 'border-white/40 shadow-lg shadow-white/10' : 'border-white/10 hover:border-cyan-500/40'}`}
-                            >
-                                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${metric.color} flex items-center justify-center text-white text-xl flex-shrink-0 shadow-lg`}>
-                                    <FontAwesomeIcon icon={metric.icon} />
-                                </div>
-                                <div>
-                                    <div className="text-2xl font-bold text-white">
-                                        {formatStatValue(animatedStats.yearToDate[metric.key], metric.decimals || 0)}{metric.unit}
-                                    </div>
-                                    <div className="text-xs text-slate-400 mt-0.5">{metric.label}</div>
-                                </div>
-                            </motion.button>
-                        ))}
-                </div>
-
-                {workerListScope ? (
-                    <motion.div
-                        variants={statSectionVariant}
-                        initial="hidden"
-                        whileInView="visible"
-                        viewport={{ once: true, amount: 0.2 }}
-                        className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
-                    >
-                        <h4 className="text-sm text-amber-200 font-semibold mb-3">
-                            {workerListScope === 'yesterday' ? '어제 출력 인원 명단' : '올해 출력 인원 명단'}
-                        </h4>
-                        <div className="text-xs text-slate-400 mb-4">
-                            총 {workerNamesByScope[workerListScope].length.toLocaleString()}명
-                        </div>
-                        <div className="max-h-72 overflow-y-auto pr-1 flex flex-wrap gap-2">
-                            {workerNamesByScope[workerListScope].length > 0 ? (
-                                workerNamesByScope[workerListScope].map((name) => (
-                                    <span key={`${workerListScope}-${name}`} className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 border border-slate-600 text-slate-100 text-sm">
-                                        {name}
-                                    </span>
-                                ))
-                            ) : (
-                                <div className="text-sm text-slate-500">출력 인원 기록이 없습니다.</div>
-                            )}
-                        </div>
-                    </motion.div>
-                ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <motion.div
                         variants={statSectionVariant}
@@ -839,7 +857,7 @@ const CheongyeonHome: React.FC = () => {
                         className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
                     >
                         <h4 className="text-sm text-amber-200 font-semibold mb-3">
-                            {manDayViewMode === 'daily' ? '최근 한달 일자별 투입 공수' : '최근 1년 월별 투입 공수'}
+                            {trendMode === 'daily' ? '최근 한달 일자별 투입 공수' : '올해 1월부터 현재월까지 월별 투입 공수'}
                         </h4>
                         <div className="h-56">
                             <ResponsiveContainer width="100%" height="100%">
@@ -858,11 +876,11 @@ const CheongyeonHome: React.FC = () => {
                                     <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                                     <Tooltip
                                         formatter={(value?: number) => [`${formatStatValue(Number(value ?? 0), 1)}`, '투입 공수']}
-                                        labelFormatter={(label: string) => manDayViewMode === 'daily' ? `${label}` : `${label}월`}
+                                        labelFormatter={(label: string) => trendMode === 'daily' ? `${label}` : `${label}월`}
                                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                                     />
                                     <Bar
-                                        key={`manDay-${manDayViewMode}`}
+                                        key={`manDay-${trendMode}`}
                                         dataKey="value"
                                         fill="#06b6d4"
                                         radius={[6, 6, 0, 0]}
@@ -883,7 +901,7 @@ const CheongyeonHome: React.FC = () => {
                         className="rounded-2xl bg-white/5 border border-white/10 p-5 backdrop-blur-md"
                     >
                         <h4 className="text-sm text-cyan-200 font-semibold mb-3">
-                            {siteViewMode === 'daily' ? '최근 한달 일자별 출력 현장 수' : '최근 1년 월별 출력 현장 수'}
+                            {trendMode === 'daily' ? '최근 한달 일자별 출력 현장 수' : '올해 1월부터 현재월까지 월별 출력 현장 수'}
                         </h4>
                         <div className="h-56">
                             <ResponsiveContainer width="100%" height="100%">
@@ -902,11 +920,11 @@ const CheongyeonHome: React.FC = () => {
                                     <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                                     <Tooltip
                                         formatter={(value?: number) => [`${Number(value ?? 0).toLocaleString()}개 현장`, '현장 수']}
-                                        labelFormatter={(label: string) => siteViewMode === 'daily' ? `${label}` : `${label}월`}
+                                        labelFormatter={(label: string) => trendMode === 'daily' ? `${label}` : `${label}월`}
                                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                                     />
                                     <Bar
-                                        key={`site-${siteViewMode}`}
+                                        key={`site-${trendMode}`}
                                         dataKey="value"
                                         fill="#06b6d4"
                                         radius={[6, 6, 0, 0]}
@@ -918,7 +936,6 @@ const CheongyeonHome: React.FC = () => {
                         </div>
                     </motion.div>
                 </div>
-                )}
             </section>
 
             {/* 2. Feature Cards Section */}

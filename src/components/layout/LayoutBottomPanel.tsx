@@ -4,14 +4,14 @@ import { faXmark, faCalculator, faNoteSticky, faUserGear } from '@fortawesome/fr
 import Calculator from '../tools/Calculator';
 import QuickMemoEditor from '../tools/QuickMemo';
 
-interface BottomPanelProps {
+interface LayoutBottomPanelProps {
     isOpen: boolean;
     togglePanel: (type: 'bottom') => void;
     currentSite?: string;
     changeSite?: (site: string) => void;
 }
 
-const BottomPanel: React.FC<BottomPanelProps> = ({
+const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
     isOpen,
     togglePanel
 }) => {
@@ -86,4 +86,4 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
     );
 };
 
-export default BottomPanel;
+export default LayoutBottomPanel;

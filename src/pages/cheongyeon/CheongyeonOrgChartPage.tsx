@@ -19,6 +19,8 @@ import {
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { Site, siteService } from '../../services/siteService';
 import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
+import { useSiteMode } from '../../contexts/SiteModeContext';
+import './CheongyeonOrgChartPage.css';
 
 type DepartmentKey = 'construction' | 'sales' | 'finance' | 'materials';
 
@@ -49,7 +51,7 @@ type DepartmentCardConfig = {
     value: string;
 };
 
-const PYRAMID_ROW_SIZES = [1, 2, 3, 4];
+const TEAM_GRID_COLUMNS = 4;
 const TEAM_SLOT_LEADERS: Array<string | undefined> = [
     '이재욱',
     '김봉수',
@@ -68,6 +70,8 @@ const isCheongyeonName = (value?: string) => {
     return normalized.includes('청연') || normalized.includes('cheongyeon');
 };
 
+const normalizeName = (value?: string) => String(value ?? '').replace(/\s+/g, '').trim().toLowerCase();
+
 const getTeamWorkers = (team: OrgNode) => team.children.filter((child) => child.type === 'worker');
 
 const findWorkerByName = (team: OrgNode, targetName?: string) => {
@@ -75,12 +79,28 @@ const findWorkerByName = (team: OrgNode, targetName?: string) => {
         return undefined;
     }
 
-    return getTeamWorkers(team).find((worker) => worker.name === targetName);
+    const normalizedTarget = normalizeName(targetName);
+    return getTeamWorkers(team).find((worker) => normalizeName(worker.name) === normalizedTarget);
+};
+
+const getWorkerProfileImageUrl = (worker?: OrgNode) => {
+    if (!worker) return '';
+
+    return String(
+        worker.data?.profileImageUrl ??
+        worker.data?.ProfileImageUrl ??
+        worker.data?.photoURL ??
+        worker.data?.photoUrl ??
+        worker.data?.imageUrl ??
+        worker.data?.ImageUrl ??
+        ''
+    ).trim();
 };
 
 const getTeamLeader = (team: OrgNode) => {
     const leaderId = String(team.data?.leaderId ?? '');
     const leaderName = String(team.data?.leaderName ?? '');
+    const normalizedLeaderName = normalizeName(leaderName);
 
     return getTeamWorkers(team).find((worker) => {
         const rank = String(worker.data?.rank ?? '');
@@ -89,7 +109,7 @@ const getTeamLeader = (team: OrgNode) => {
 
         return (
             (leaderId && worker.id === leaderId) ||
-            (leaderName && worker.name === leaderName) ||
+            (normalizedLeaderName && normalizeName(worker.name) === normalizedLeaderName) ||
             /(팀장|소장|반장|부장|이사)/.test(profile)
         );
     });
@@ -188,6 +208,7 @@ const pyramidItemVariants: Variants = {
 };
 
 const CheongyeonOrgChartPage: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
     const { treeData, loading } = useOrganizationTree();
     const [selectedSlot, setSelectedSlot] = useState<number>(1);
     const [isConstructionOpen, setIsConstructionOpen] = useState(false);
@@ -275,9 +296,9 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
             if (preferredLeaderName) {
                 const matchedIndex = remainingTeams.findIndex((team) => {
-                    const directLeaderName = String(team.data?.leaderName ?? '').trim();
+                    const directLeaderName = normalizeName(team.data?.leaderName);
                     return (
-                        directLeaderName === preferredLeaderName ||
+                        directLeaderName === normalizeName(preferredLeaderName) ||
                         Boolean(findWorkerByName(team, preferredLeaderName))
                     );
                 });
@@ -309,11 +330,10 @@ const CheongyeonOrgChartPage: React.FC = () => {
                         leader?.name ??
                         source?.data?.leaderName ??
                         (source ? '현장 리더 확인 필요' : '배치 예정'),
-                    leaderImageUrl: String(
-                        preferredLeader?.data?.profileImageUrl ??
-                        leader?.data?.profileImageUrl ??
-                        ''
-                    ),
+                    leaderImageUrl:
+                        getWorkerProfileImageUrl(preferredLeader) ||
+                        getWorkerProfileImageUrl(leader) ||
+                        '',
                     memberCount: members.length,
                     siteNames: source ? getTeamSiteNames(source, sites) : [],
                     statusLabel: source ? getStatusLabel(source.data?.status) : '확장 예정',
@@ -325,13 +345,15 @@ const CheongyeonOrgChartPage: React.FC = () => {
         [sites, slottedConstructionTeams]
     );
 
-    const pyramidRows = useMemo(() => {
+    const teamGridRows = useMemo(() => {
         let cursor = 0;
-        return PYRAMID_ROW_SIZES.map((size) => {
-            const row = teamSlots.slice(cursor, cursor + size);
-            cursor += size;
-            return row;
-        });
+        const rows: TeamSlot[][] = [];
+        while (cursor < teamSlots.length) {
+            const row = teamSlots.slice(cursor, cursor + TEAM_GRID_COLUMNS);
+            rows.push(row);
+            cursor += TEAM_GRID_COLUMNS;
+        }
+        return rows;
     }, [teamSlots]);
 
     const selectedTeam = teamSlots.find((slot) => slot.slot === selectedSlot) ?? teamSlots[0];
@@ -369,7 +391,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 highlights: [
                     `${formatNumber(totalMembers)}명 투입`,
                     `${formatNumber(uniqueSiteCount)}개 현장`,
-                    '1~10팀 피라미드 운영',
+                    '1~10팀 4열 배열 운영',
                 ],
                 members: [
                     { name: '청연 1팀~10팀', role: `전체 ${formatNumber(totalMembers)}명 운영` },
@@ -436,7 +458,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
     if (loading || sitesLoading) {
         return (
-            <div className="flex min-h-screen flex-col items-center justify-center bg-slate-950 text-slate-300">
+            <div className={`flex min-h-screen flex-col items-center justify-center ${isDarkMode ? 'bg-slate-950 text-slate-300' : 'bg-slate-50 text-slate-600'}`}>
                 <div className="relative mb-8 h-20 w-20">
                     <div className="absolute inset-0 rounded-full border border-cyan-400/30" />
                     <div className="absolute inset-2 rounded-full border-2 border-t-cyan-300 border-r-transparent border-b-transparent border-l-transparent animate-spin" />
@@ -451,14 +473,16 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
     return (
         <div
-            className="min-h-screen bg-[#08111f] text-slate-100"
+            className={`org-chart-page min-h-screen ${isDarkMode ? 'is-dark bg-[#08111f] text-slate-100' : 'is-light bg-slate-50 text-slate-900'}`}
             style={{ fontFamily: "'Pretendard Variable','Pretendard','SUIT Variable','Noto Sans KR',sans-serif" }}
         >
-            <div className="pointer-events-none fixed inset-0 overflow-hidden">
-                <div className="absolute left-[-10%] top-[-18%] h-[32rem] w-[32rem] rounded-full bg-cyan-500/12 blur-[160px]" />
-                <div className="absolute bottom-[-20%] right-[-6%] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[180px]" />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.08),transparent_32%),linear-gradient(to_bottom,rgba(8,17,31,0.18),rgba(8,17,31,0.94))]" />
-            </div>
+            {isDarkMode && (
+                <div className="pointer-events-none fixed inset-0 overflow-hidden">
+                    <div className="absolute left-[-10%] top-[-18%] h-[32rem] w-[32rem] rounded-full bg-cyan-500/12 blur-[160px]" />
+                    <div className="absolute bottom-[-20%] right-[-6%] h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[180px]" />
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(14,165,233,0.08),transparent_32%),linear-gradient(to_bottom,rgba(8,17,31,0.18),rgba(8,17,31,0.94))]" />
+                </div>
+            )}
 
             <main className="relative z-10 mx-auto flex w-full max-w-[1520px] flex-col gap-8 px-4 py-6 md:px-8 md:py-8 xl:px-10">
                 <motion.section
@@ -475,12 +499,12 @@ const CheongyeonOrgChartPage: React.FC = () => {
                             </div>
                             <div className="space-y-3">
                                 <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">
-                                    CEO 중심의 피라미드 조직도로
-                                    <br className="hidden md:block" /> 청연 운영 라인을 재정렬했습니다.
+                                    CEO 중심의 운영 조직도로
+                                    <br className="hidden md:block" /> 청연 시공 라인을 재정렬했습니다.
                                 </h1>
                                 <p className="max-w-3xl text-sm leading-7 text-slate-300 md:text-base">
                                     최상단은 CEO, 그 아래는 시공팀 · 영업팀 · 경리팀 · 자재팀으로 분기하고,
-                                    시공팀은 현장 운영 흐름이 한눈에 보이도록 1팀부터 10팀까지 피라미드 구조로 배치했습니다.
+                                    시공팀은 빠르게 스캔할 수 있도록 1팀부터 10팀까지 4개씩 정렬되는 그리드 구조로 배치했습니다.
                                 </p>
                             </div>
                         </div>
@@ -584,13 +608,13 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                         <div className="space-y-2">
                                             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/80">
                                                 <FontAwesomeIcon icon={faHardHat} />
-                                                Construction Pyramid
+                                                Construction Grid
                                             </div>
                                             <h2 className="text-2xl font-black tracking-tight text-white md:text-3xl">
-                                                시공팀 1~10 운영 피라미드
+                                                시공팀 1~10 운영 그리드
                                             </h2>
                                             <p className="max-w-3xl text-sm leading-7 text-slate-300">
-                                                상단에서 하단으로 갈수록 현장 운영 라인이 넓어지도록 배치했습니다.
+                                                시공팀 카드를 4개씩 정렬해 한 번에 비교하기 쉽게 구성했습니다.
                                                 팀 카드를 누르면 현재 연결된 실제 팀 정보와 인원 구성을 오른쪽에서 확인할 수 있습니다.
                                             </p>
                                         </div>
@@ -605,18 +629,18 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
                                     <div className="relative mt-10 space-y-4">
                                         <div className="pointer-events-none absolute left-1/2 top-[-12px] hidden h-[calc(100%-4rem)] w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/25 via-white/0 to-white/0 xl:block" />
-                                        {pyramidRows.map((row, rowIndex) => (
+                                        {teamGridRows.map((row, rowIndex) => (
                                             <motion.div
                                                 key={`row-${rowIndex}`}
                                                 variants={pyramidItemVariants}
-                                                className="flex flex-wrap justify-center gap-4"
+                                                className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
                                             >
                                                 {row.map((slot) => (
                                                     <motion.button
                                                         key={slot.slot}
                                                         type="button"
                                                         onClick={() => setSelectedSlot(slot.slot)}
-                                                        className="w-full max-w-[220px] text-left focus:outline-none"
+                                                        className="w-full text-left focus:outline-none"
                                                         variants={pyramidItemVariants}
                                                     >
                                                         <motion.div
@@ -678,7 +702,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
                                     {extraTeamCount > 0 && (
                                         <div className="mt-8 rounded-2xl border border-amber-300/15 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
-                                            10팀 이후 추가로 연결된 시공팀이 {formatNumber(extraTeamCount)}개 있습니다. 현재 화면은 요청 기준에 맞춰 1팀부터 10팀까지만 피라미드에 노출합니다.
+                                            10팀 이후 추가로 연결된 시공팀이 {formatNumber(extraTeamCount)}개 있습니다. 현재 화면은 요청 기준에 맞춰 1팀부터 10팀까지만 4열 구조로 노출합니다.
                                         </div>
                                     )}
                                 </motion.div>
@@ -697,10 +721,10 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                     </div>
                                     <div className="space-y-3">
                                         <h2 className="text-2xl font-black tracking-tight text-white">
-                                            시공팀 카드를 누르면 팀 피라미드가 펼쳐집니다.
+                                            시공팀 카드를 누르면 팀 그리드가 펼쳐집니다.
                                         </h2>
                                         <p className="max-w-3xl text-sm leading-7 text-slate-300">
-                                            시공팀을 클릭하면 청연 1팀부터 10팀까지가 순차적으로 나타나고,
+                                            시공팀을 클릭하면 청연 1팀부터 10팀까지가 4열 그리드로 나타나고,
                                             선택한 팀의 전체 인원과 현장 연결 정보도 함께 전환됩니다.
                                         </p>
                                     </div>
@@ -1017,18 +1041,21 @@ const LeaderAvatar = ({
     name: string;
     size: 'sm' | 'lg';
 }) => {
+    const [hasImageError, setHasImageError] = useState(false);
     const dimensions = size === 'lg' ? 'h-16 w-16 rounded-2xl' : 'h-11 w-11 rounded-xl';
     const labelSize = size === 'lg' ? 'text-lg' : 'text-sm';
     const resolvedImageUrl = String(imageUrl ?? '').trim();
+    const shouldRenderImage = Boolean(resolvedImageUrl) && !hasImageError;
 
     return (
         <div className={`overflow-hidden border border-white/10 bg-slate-900/80 ${dimensions}`}>
-            {resolvedImageUrl ? (
+            {shouldRenderImage ? (
                 <img
                     src={resolvedImageUrl}
                     alt={name}
                     className="h-full w-full object-cover"
                     loading="lazy"
+                    onError={() => setHasImageError(true)}
                 />
             ) : (
                 <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/30 to-blue-500/20 font-black text-white ${labelSize}`}>

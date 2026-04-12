@@ -143,7 +143,7 @@ const ToolCard: React.FC<ToolCardProps> = ({ title, description, icon, color, on
             <div className={`absolute top-0 right-0 w-32 h-32 bg-${color}-500/10 rounded-full blur-3xl -mr-10 -mt-10 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'}`} />
 
             <div className="relative z-10 flex flex-col h-full">
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br from-${color}-500/20 to-${color}-600/10 flex items-center justify-center mb-4 text-${color}-400 transition-colors ${isSelected ? `ring-2 ring-${color}-500/50` : `group-hover:text-${color}-300`}`}>
+                <div className={`w-12 h-12 rounded-xl bg-${color}-500/15 flex items-center justify-center mb-4 text-${color}-400 transition-colors ${isSelected ? `ring-2 ring-${color}-500/50` : `group-hover:text-${color}-300`}`}>
                     <FontAwesomeIcon icon={icon} className="text-xl" />
                 </div>
 
@@ -198,7 +198,7 @@ const DesignManagementPage: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-cyan-500/30 overflow-x-hidden">
-            {/* Background Mesh Gradient */}
+            {/* Background Mesh */}
             <div className="fixed inset-0 z-0 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-900/20 blur-[100px]" />
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-900/20 blur-[100px]" />
@@ -219,7 +219,7 @@ const DesignManagementPage: React.FC = () => {
                                 통합 현장 관리 플랫폼 V12
                             </span>
                         </div>
-                        <h1 className="text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400 mb-4">
+                        <h1 className="text-5xl font-extrabold text-white mb-4">
                             설계 및 현장 관리 센터
                         </h1>
                         <p className="text-lg text-slate-400 max-w-lg">
@@ -268,10 +268,10 @@ const DesignManagementPage: React.FC = () => {
                                 <div className="relative z-10 flex flex-col md:flex-row gap-8 items-start">
                                     <div className="flex-1">
                                         <div className="flex items-center gap-4 mb-6">
-                                            <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br from-${selectedMenu.color}-500/20 to-${selectedMenu.color}-600/10 flex items-center justify-center text-${selectedMenu.color}-400 text-3xl border border-${selectedMenu.color}-500/20`}>
+                                            <div className={`w-16 h-16 rounded-2xl bg-${selectedMenu.color}-500/15 flex items-center justify-center text-${selectedMenu.color}-400 text-3xl border border-${selectedMenu.color}-500/20`}>
                                                 <FontAwesomeIcon icon={selectedMenu.icon} />
                                             </div>
-                                            <h2 className={`text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-${selectedMenu.color}-200`}>
+                                            <h2 className={`text-4xl font-extrabold text-white`}>
                                                 {selectedMenu.title}
                                             </h2>
                                         </div>
@@ -304,7 +304,7 @@ const DesignManagementPage: React.FC = () => {
 
                                     {/* Abstract Graphic Area for the detail panel */}
                                     <div className="hidden lg:flex w-[400px] h-[300px] bg-slate-900/60 rounded-2xl border border-slate-700 items-center justify-center p-6 relative overflow-hidden">
-                                        <div className={`absolute top-0 right-0 w-full h-full bg-gradient-to-bl from-${selectedMenu.color}-500/10 to-transparent`} />
+                                        <div className={`absolute top-0 right-0 w-full h-full bg-${selectedMenu.color}-500/5`} />
                                         <div className="text-center relative z-10">
                                             <p className="text-slate-500 text-sm tracking-widest uppercase mb-4">Module Visualizer</p>
                                             <div className={`text-9xl text-${selectedMenu.color}-500/20`}>
@@ -336,7 +336,7 @@ const DesignManagementPage: React.FC = () => {
                                 initial={{ opacity: 0 }} 
                                 animate={{ opacity: 1 }} 
                                 exit={{ opacity: 0 }}
-                                className="w-full h-px bg-gradient-to-r from-transparent via-slate-700 to-transparent mb-12" 
+                                className="w-full h-px bg-slate-700/70 mb-12" 
                             />
                         )}
                     </AnimatePresence>

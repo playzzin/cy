@@ -141,7 +141,9 @@ import CheongyeonGreetingPage from './pages/cheongyeon/CheongyeonGreetingPage';
 import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPage';
 import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
+import CheongyeonHistoryPage from './pages/cheongyeon/CheongyeonHistoryPage';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
+import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 import AccountManagementPage from './pages/database/AccountManagementPage';
 import ConstructionCompanyDatabase from './pages/database/ConstructionCompanyDatabase';
 import WorkerDatabaseInput from './pages/database/WorkerDatabaseInput';
@@ -234,6 +236,7 @@ const App: React.FC = () => {
             <Route path="/dashboard-v2" element={<DashboardExecutiveView />} />
             {/* 청연사이트 전용 대시보드 */}
             <Route path="/dashboard2" element={<CheongyeonHome />} />
+            <Route path="/cheongyeon/home" element={<Navigate to="/dashboard2" replace />} />
 
             {/* Reports */}
             {/* Daily Reports */}
@@ -480,10 +483,12 @@ const App: React.FC = () => {
             <Route path="/cheongyeon/greeting" element={<CheongyeonGreetingPage />} />
             <Route path="/cheongyeon/directions" element={<CheongyeonDirectionsPage />} />
             <Route path="/cheongyeon/tech-vision" element={<CheongyeonTechVisionPage />} />
+            <Route path="/cheongyeon/history" element={<CheongyeonHistoryPage />} />
 
             {/* Company */}
             <Route path="/company/management" element={<CompanyManagementPage />} />
             <Route path="/company/registration" element={<CompanyRegistrationPage />} />
+            <Route path="/estimate/request" element={<EstimateRequestPage />} />
 
             {/* Gallery */}
             <Route path="/gallery/projects" element={<ProjectGalleryPage />} />

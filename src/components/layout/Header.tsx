@@ -8,14 +8,29 @@ import {
     faUser,
     faRightFromBracket,
     faShieldHalved,
-    faIdBadge
+    faIdBadge,
+    faSun,
+    faMoon
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { resolveIcon } from '../../constants/iconMap';
 import { userService } from '../../services/userService';
 import PositionPanel from './PositionPanel';
-import { PositionItem, SiteDataType } from '../../types/menu';
+import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
+
+interface CheongyeonNavChild {
+    label: string;
+    path: string;
+    sourceGroup?: string;
+}
+
+interface CheongyeonNavSection {
+    key: string;
+    label: string;
+    path: string;
+    children: CheongyeonNavChild[];
+}
 
 interface HeaderProps {
     toggleSidebar: () => void;
@@ -29,7 +44,10 @@ interface HeaderProps {
     siteData: SiteDataType | null;
     currentSite: string;
     changeSite: (siteKey: string) => void;
+    menuPaths: { [key: string]: string };
     logoUrl?: string;
+    isDarkMode?: boolean;
+    toggleDarkMode?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -44,11 +62,16 @@ const Header: React.FC<HeaderProps> = ({
     siteData,
     currentSite,
     changeSite,
-    logoUrl
+    menuPaths,
+    logoUrl,
+    isDarkMode = true,
+    toggleDarkMode
 }) => {
     const { currentUser, logout } = useAuth();
     const navigate = useNavigate();
+    const location = useLocation();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [activeTopNavKey, setActiveTopNavKey] = useState<string | null>(null);
     const profileRef = useRef<HTMLDivElement>(null);
     const positionPanelRef = useRef<HTMLDivElement>(null);
 
@@ -62,6 +85,11 @@ const Header: React.FC<HeaderProps> = ({
                 if (isPositionPanelOpen) {
                     togglePanel('position');
                 }
+            }
+
+            const navContainer = document.querySelector('.cheongyeon-top-nav');
+            if (navContainer && !navContainer.contains(event.target as Node)) {
+                setActiveTopNavKey(null);
             }
         };
 
@@ -93,7 +121,85 @@ const Header: React.FC<HeaderProps> = ({
     };
 
     const isCheongyeon = currentSite === 'test';
-    const headerStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' } : {};
+    const headerStyle = isCheongyeon
+        ? isDarkMode
+            ? { backgroundColor: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' }
+            : { backgroundColor: '#ffffff', color: '#1e293b', borderBottom: '1px solid #e2e8f0' }
+        : {};
+
+    const shouldOpenInNewTab = (path: string | undefined): boolean => {
+        if (!path) return false;
+        const [, search] = path.split('?');
+        if (!search) return false;
+        const params = new URLSearchParams(search);
+        return params.get('newTab') === '1' || params.get('newTab') === 'true';
+    };
+
+    const resolvePath = (menuItem?: MenuItem | null): string => {
+        if (!menuItem) return '';
+        return menuItem.path || menuPaths[menuItem.text] || '';
+    };
+
+    const collectChildLinks = (children: (string | MenuItem)[] = [], parentText?: string): CheongyeonNavChild[] => {
+        const result: CheongyeonNavChild[] = [];
+
+        children.forEach((child) => {
+            if (typeof child === 'string') {
+                const path = menuPaths[child] || '';
+                if (!path) return;
+                result.push({ label: child, path, sourceGroup: parentText });
+                return;
+            }
+
+            const directPath = resolvePath(child);
+            if (directPath) {
+                result.push({ label: child.text, path: directPath, sourceGroup: parentText });
+            }
+
+            if (child.sub && child.sub.length > 0) {
+                result.push(...collectChildLinks(child.sub, child.text));
+            }
+        });
+
+        const dedup = new Map<string, CheongyeonNavChild>();
+        result.forEach((item) => {
+            const key = `${item.label}|${item.path}`;
+            if (!dedup.has(key)) dedup.set(key, item);
+        });
+
+        return Array.from(dedup.values());
+    };
+
+    const cheongyeonTopNav: CheongyeonNavSection[] = Array.isArray(currentSiteData?.menu)
+        ? currentSiteData.menu
+            .filter((item: MenuItem) => !item.hide)
+            .map((item: MenuItem, index: number) => {
+                const children = collectChildLinks(item.sub || [], item.text);
+                const path = resolvePath(item) || children[0]?.path || '';
+                return {
+                    key: `${item.id || item.text || index}`,
+                    label: item.text,
+                    path,
+                    children,
+                };
+            })
+            .filter((item: CheongyeonNavSection) => !!item.path || item.children.length > 0)
+        : [];
+
+    const handleTopNavRoute = (path: string) => {
+        if (!path) return;
+        setActiveTopNavKey(null);
+        if (shouldOpenInNewTab(path)) {
+            window.open(path, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        navigate(path);
+    };
+
+    const isTopNavActive = (section: CheongyeonNavSection) => {
+        if (section.path && location.pathname === section.path) return true;
+        return section.children.some((child) => location.pathname.startsWith(child.path));
+    };
 
     return (
         <header id="main-header" style={headerStyle} className={isCheongyeon ? 'cheongyeon-header' : ''}>
@@ -115,7 +221,59 @@ const Header: React.FC<HeaderProps> = ({
                     <span>{currentSiteData.name}</span>
                 </div>
             </div>
+
+            {isCheongyeon && (
+                <nav
+                    className="cheongyeon-top-nav"
+                    onMouseLeave={() => setActiveTopNavKey(null)}
+                >
+                    {cheongyeonTopNav.map((section) => (
+                        <div
+                            key={section.key}
+                            className="cheongyeon-top-nav-item"
+                            onMouseEnter={() => setActiveTopNavKey(section.key)}
+                        >
+                            <button
+                                type="button"
+                                className={`cheongyeon-top-nav-link ${isTopNavActive(section) ? 'active' : ''}`}
+                                onClick={() => handleTopNavRoute(section.path)}
+                            >
+                                {section.label}
+                            </button>
+
+                            {activeTopNavKey === section.key && section.children.length > 0 && (
+                                <div className="cheongyeon-top-nav-dropdown">
+                                    <div className="cheongyeon-top-nav-dropdown-grid">
+                                        {section.children.map((child) => (
+                                            <button
+                                                key={`${child.label}|${child.path}`}
+                                                type="button"
+                                                className={`cheongyeon-top-nav-sub-item ${location.pathname.startsWith(child.path) ? 'active' : ''}`}
+                                                onClick={() => handleTopNavRoute(child.path)}
+                                            >
+                                                <span className="cheongyeon-top-nav-sub-title">{child.label}</span>
+                                                <span className="cheongyeon-top-nav-sub-desc">{child.sourceGroup || section.label}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </nav>
+            )}
+
             <div className="header-right-group">
+                {isCheongyeon && toggleDarkMode && (
+                    <button
+                        className="header-btn cheongyeon-theme-toggle"
+                        onClick={toggleDarkMode}
+                        title={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
+                        style={{ color: isDarkMode ? '#fbbf24' : '#64748b' }}
+                    >
+                        <FontAwesomeIcon icon={isDarkMode ? faSun : faMoon} />
+                    </button>
+                )}
                 <button className="header-btn" onClick={() => togglePanel('bottom')} title="빠른 실행">
                     <FontAwesomeIcon icon={faUserGear} />
                 </button>

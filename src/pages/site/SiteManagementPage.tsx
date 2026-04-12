@@ -692,7 +692,7 @@ export const SiteManagementPage: React.FC = () => {
                     현장 목록을 불러오는 중...
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">
                     {filteredSites.map(site => (
                         (() => {
                             const siteSummary = getSiteSummary(site);
@@ -705,18 +705,18 @@ export const SiteManagementPage: React.FC = () => {
                             animate={{ opacity: 1, y: 0 }}
                             whileHover={{ y: -5, transition: { duration: 0.2 } }}
                             onClick={() => setSelectedSite(site)}
-                            className="bg-slate-800 rounded-2xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
+                            className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
                         >
-                            <div className="aspect-square w-full bg-slate-700 relative overflow-hidden">
+                            <div className="aspect-[4/3] w-full bg-slate-700 relative overflow-hidden">
                                 {site.imageUrl ? (
                                     <img src={site.imageUrl} alt={site.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
-                                        <FontAwesomeIcon icon={faBuilding} size="3x" />
+                                        <FontAwesomeIcon icon={faBuilding} size="2x" />
                                     </div>
                                 )}
                                 <div className="absolute top-3 right-3">
-                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold shadow-sm backdrop-blur-sm ${site.status === 'active'
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm backdrop-blur-sm ${site.status === 'active'
                                         ? 'bg-green-500/80 text-white'
                                         : 'bg-slate-600/80 text-slate-200'
                                         }`}>
@@ -725,39 +725,39 @@ export const SiteManagementPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="p-5 flex-1 flex flex-col">
+                            <div className="p-3.5 flex-1 flex flex-col">
                                 <div className="flex items-center justify-between gap-2 mb-1">
-                                    <h3 className="text-lg font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-1">
+                                    <h3 className="text-sm font-bold text-slate-100 group-hover:text-blue-400 transition-colors line-clamp-2 leading-5">
                                         {site.name}
                                     </h3>
-                                    <span className="px-2.5 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold whitespace-nowrap">
+                                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold whitespace-nowrap">
                                         총공수 {totalManDayText}
                                     </span>
                                 </div>
-                                <p className="text-xs text-slate-500 mb-4 font-mono bg-slate-900 inline-block px-1.5 py-0.5 rounded self-start border border-slate-700">
+                                <p className="text-[10px] text-slate-500 mb-3 font-mono bg-slate-900 inline-block px-1.5 py-0.5 rounded self-start border border-slate-700">
                                     {site.code}
                                 </p>
 
-                                <div className="space-y-2 mt-auto">
-                                    <div className="flex items-center gap-2 text-sm text-slate-400">
-                                        <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
+                                <div className="space-y-1.5 mt-auto">
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 leading-4">
+                                        <div className="w-3.5 text-center text-slate-500"><FontAwesomeIcon icon={faHardHat} /></div>
                                         <span>
                                             담당팀: {site.responsibleTeamName || '미지정'}
                                             {' '}| 시공사: {getContractorDisplayName(site)}
                                         </span>
                                     </div>
-                                    <div className="flex items-start gap-2 text-sm text-slate-400">
-                                        <div className="w-4 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>
+                                    <div className="flex items-start gap-2 text-xs text-slate-400 leading-4">
+                                        <div className="w-3.5 mt-0.5 text-center text-slate-500"><FontAwesomeIcon icon={faMapMarkerAlt} /></div>
                                         <span className="line-clamp-2">{site.address || '주소 없음'}</span>
                                     </div>
-                                    <div className="flex items-center gap-2 text-sm text-slate-400">
-                                        <div className="w-4 text-center text-slate-500"><FontAwesomeIcon icon={faCalendarAlt} /></div>
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 leading-4">
+                                        <div className="w-3.5 text-center text-slate-500"><FontAwesomeIcon icon={faCalendarAlt} /></div>
                                         <span>{periodText}</span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-slate-800 px-5 py-3 border-t border-slate-700 flex justify-between items-center text-xs text-slate-500">
+                            <div className="bg-slate-800 px-3.5 py-2 border-t border-slate-700 flex justify-between items-center text-[10px] text-slate-500">
                                 <span>클릭하여 상세 정보 보기</span>
                                 <FontAwesomeIcon icon={faChartPie} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
                             </div>

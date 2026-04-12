@@ -9,7 +9,7 @@ import Header from './Header';
 import Sidebar from './Sidebar';
 // import RightPanel from './RightPanel';
 
-import BottomPanel from './BottomPanel';
+import BottomPanel from './LayoutBottomPanel';
 import AdminPanel from './AdminPanel';
 
 // 타입 인터페이스 정의
@@ -68,6 +68,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [activeNestedMenuItems, setActiveNestedMenuItems] = useState<{ [key: string]: boolean }>({});
     const [isAdmin, setIsAdmin] = useState(false);
     const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+    const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+        return localStorage.getItem('cy-cheongyeon-theme') !== 'light';
+    });
 
     // Dynamic Menu State
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
@@ -419,6 +422,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     const menuPaths = MENU_PATHS;
 
+    const toggleDarkMode = () => {
+        setIsDarkMode(prev => {
+            const next = !prev;
+            localStorage.setItem('cy-cheongyeon-theme', next ? 'dark' : 'light');
+            return next;
+        });
+    };
+
     const shouldOpenInNewTab = (path: string | undefined): boolean => {
         if (!path) return false;
         const [, search] = path.split('?');
@@ -445,7 +456,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         currentSite,
         effectiveSite,
         currentSiteData: (currentSiteData as SiteData | null),
-        changeSite
+        changeSite,
+        isDarkMode,
+        toggleDarkMode
     };
 
     if (!siteData) {
@@ -465,7 +478,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     if (currentSite === 'test' && currentSiteData) {
         return (
             <SiteModeProvider {...siteModeValue}>
-                <div className={`app cheongyeon-mode ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+                <div className={`app cheongyeon-mode ${isDarkMode ? '' : 'cy-light'} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
                     <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
                     {/* Same Header as Admin ERP */}
@@ -481,6 +494,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         siteData={siteData}
                         currentSite={currentSite}
                         changeSite={changeSite}
+                        menuPaths={menuPaths}
+                        isDarkMode={isDarkMode}
+                        toggleDarkMode={toggleDarkMode}
                     />
 
                     {/* Same Sidebar as Admin ERP (Left Side) */}
@@ -560,6 +576,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     siteData={siteData}
                     currentSite={currentSite}
                     changeSite={changeSite}
+                    menuPaths={menuPaths}
                 />
 
                 <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import styled from 'styled-components';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -39,7 +39,22 @@ type EstimateFormValues = z.infer<typeof estimateSchema>;
 const EstimateRequestPage: React.FC = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => localStorage.getItem('cy-cheongyeon-theme') !== 'light');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const syncTheme = () => {
+      setIsDarkMode(localStorage.getItem('cy-cheongyeon-theme') !== 'light');
+    };
+
+    syncTheme();
+    window.addEventListener('storage', syncTheme);
+    window.addEventListener('focus', syncTheme);
+    return () => {
+      window.removeEventListener('storage', syncTheme);
+      window.removeEventListener('focus', syncTheme);
+    };
+  }, []);
 
   const {
     register,
@@ -124,8 +139,8 @@ const EstimateRequestPage: React.FC = () => {
         icon: 'success',
         title: '접수 완료',
         html: `견적 문의가 성공적으로 접수되었습니다.<br/>빠른 시일 내에 연락 드리겠습니다.`,
-        background: '#111827',
-        color: '#e5e7eb',
+        background: isDarkMode ? '#111827' : '#ffffff',
+        color: isDarkMode ? '#e5e7eb' : '#1e293b',
         confirmButtonColor: '#2563eb'
       });
 
@@ -138,8 +153,8 @@ const EstimateRequestPage: React.FC = () => {
         icon: 'error',
         title: '오류 발생',
         text: '접수 중 문제가 발생했습니다. 관리자에게 문의해주세요.',
-        background: '#111827',
-        color: '#e5e7eb',
+        background: isDarkMode ? '#111827' : '#ffffff',
+        color: isDarkMode ? '#e5e7eb' : '#1e293b',
         confirmButtonColor: '#ef4444'
       });
     } finally {
@@ -148,7 +163,7 @@ const EstimateRequestPage: React.FC = () => {
   };
 
   return (
-    <Container>
+    <Container $isDarkMode={isDarkMode}>
       <PageHeader>
         <HeaderTitle>초간편 견적 상담</HeaderTitle>
         <HeaderSubtitle>시스템동바리 및 시스템비계 시공/임대 단가, 즉시 산출해 드립니다.</HeaderSubtitle>
@@ -340,19 +355,24 @@ export default EstimateRequestPage;
 
 // --- Styled Components ---
 
-const Container = styled.div`
-  --bg-start: #020617;
-  --bg-end: #111827;
-  --surface: rgba(15, 23, 42, 0.82);
-  --surface-border: rgba(148, 163, 184, 0.22);
-  --surface-elevated: #0f172a;
-  --text-strong: #f8fafc;
-  --text: #dbe4f0;
-  --text-muted: #94a3b8;
-  --input-bg: rgba(15, 23, 42, 0.86);
-  --input-border: #334155;
+const Container = styled.div<{ $isDarkMode: boolean }>`
+  --bg-start: ${({ $isDarkMode }) => ($isDarkMode ? '#020617' : '#f8fafc')};
+  --bg-end: ${({ $isDarkMode }) => ($isDarkMode ? '#111827' : '#eef2ff')};
+  --surface: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.94)')};
+  --surface-border: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(148, 163, 184, 0.22)' : 'rgba(148, 163, 184, 0.35)')};
+  --surface-elevated: ${({ $isDarkMode }) => ($isDarkMode ? '#0f172a' : '#ffffff')};
+  --text-strong: ${({ $isDarkMode }) => ($isDarkMode ? '#f8fafc' : '#0f172a')};
+  --text: ${({ $isDarkMode }) => ($isDarkMode ? '#dbe4f0' : '#1e293b')};
+  --text-muted: ${({ $isDarkMode }) => ($isDarkMode ? '#94a3b8' : '#64748b')};
+  --input-bg: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(15, 23, 42, 0.86)' : '#ffffff')};
+  --input-border: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#cbd5e1')};
   --input-focus: #38bdf8;
   --danger: #ef4444;
+  --icon-color: ${({ $isDarkMode }) => ($isDarkMode ? '#7dd3fc' : '#0284c7')};
+  --chip-bg: ${({ $isDarkMode }) => ($isDarkMode ? '#111827' : '#f1f5f9')};
+  --chip-border: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#cbd5e1')};
+  --chip-text: ${({ $isDarkMode }) => ($isDarkMode ? '#cbd5e1' : '#334155')};
+  --divider: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#e2e8f0')};
 
   max-width: 900px;
   margin: 0 auto;
@@ -426,7 +446,7 @@ const FormGroup = styled.div`
 const Label = styled.label`
   font-size: 0.9rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text);
 `;
 
 const Required = styled.span`
@@ -443,7 +463,7 @@ const InputWrapper = styled.div`
 const InputIcon = styled.div`
   position: absolute;
   left: 1rem;
-  color: #7dd3fc;
+  color: var(--icon-color);
   font-size: 0.9rem;
 `;
 
@@ -523,12 +543,12 @@ const RadioLabel = styled.label`
 
   .radio-text {
     padding: 0.6rem 1.25rem;
-    background-color: #111827;
-    border: 1px solid #334155;
+    background-color: var(--chip-bg);
+    border: 1px solid var(--chip-border);
     border-radius: 20px;
     font-size: 0.9rem;
     font-weight: 500;
-    color: #cbd5e1;
+    color: var(--chip-text);
     transition: all 0.2s;
   }
 
@@ -560,28 +580,28 @@ const ErrorText = styled.span`
 
 const Divider = styled.hr`
   border: 0;
-  border-top: 1px solid #334155;
+  border-top: 1px solid var(--divider);
   margin: 2.5rem 0;
 `;
 
 const FileUploadZone = styled.div<{ $isSubmitting: boolean }>`
-  border: 2px dashed #334155;
+  border: 2px dashed var(--input-border);
   border-radius: 12px;
   padding: 2.5rem 1rem;
   text-align: center;
-  background-color: rgba(2, 6, 23, 0.4);
+  background-color: color-mix(in srgb, var(--surface-elevated) 82%, transparent);
   cursor: ${({ $isSubmitting }) => ($isSubmitting ? 'not-allowed' : 'pointer')};
   transition: all 0.2s ease;
   opacity: ${({ $isSubmitting }) => ($isSubmitting ? 0.6 : 1)};
 
   &:hover {
-    border-color: ${({ $isSubmitting }) => ($isSubmitting ? '#334155' : '#38bdf8')};
-    background-color: ${({ $isSubmitting }) => ($isSubmitting ? 'rgba(2, 6, 23, 0.4)' : 'rgba(14, 165, 233, 0.12)')};
+    border-color: ${({ $isSubmitting }) => ($isSubmitting ? 'var(--input-border)' : '#38bdf8')};
+    background-color: ${({ $isSubmitting }) => ($isSubmitting ? 'color-mix(in srgb, var(--surface-elevated) 82%, transparent)' : 'rgba(14, 165, 233, 0.12)')};
   }
 
   .upload-icon {
     font-size: 2.5rem;
-    color: #7dd3fc;
+    color: var(--icon-color);
     margin-bottom: 1rem;
   }
 
@@ -615,9 +635,9 @@ const FileItem = styled.div`
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  background-color: rgba(15, 23, 42, 0.8);
+  background-color: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
   border-radius: 8px;
-  border: 1px solid #334155;
+  border: 1px solid var(--input-border);
 
   .file-info {
     display: flex;
@@ -626,7 +646,7 @@ const FileItem = styled.div`
   }
 
   .file-icon {
-    color: #7dd3fc;
+    color: var(--icon-color);
     margin-right: 0.75rem;
   }
 
@@ -650,7 +670,7 @@ const FileItem = styled.div`
 const RemoveButton = styled.button`
   background: none;
   border: none;
-  color: #cbd5e1;
+  color: var(--text-muted);
   cursor: pointer;
   padding: 0.25rem;
   font-size: 1rem;

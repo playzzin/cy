@@ -7,6 +7,8 @@ export interface SiteModeContextType {
     effectiveSite: string;
     currentSiteData: SiteData | null;
     changeSite: (siteKey: string) => void;
+    isDarkMode: boolean;
+    toggleDarkMode: () => void;
 }
 
 const SiteModeContext = createContext<SiteModeContextType | null>(null);
@@ -17,11 +19,13 @@ export function SiteModeProvider({
     currentSite,
     effectiveSite,
     currentSiteData,
-    changeSite
+    changeSite,
+    isDarkMode,
+    toggleDarkMode
 }: SiteModeContextType & { children: React.ReactNode }) {
     return (
         <SiteModeContext.Provider
-            value={{ siteData, currentSite, effectiveSite, currentSiteData, changeSite }}
+            value={{ siteData, currentSite, effectiveSite, currentSiteData, changeSite, isDarkMode, toggleDarkMode }}
         >
             {children}
         </SiteModeContext.Provider>

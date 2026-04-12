@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { useNavigate } from 'react-router-dom';
 import {
     faNetworkWired,
     faChartPie,
@@ -11,8 +12,11 @@ import {
     faTruckFast,
     faBuilding
 } from '@fortawesome/free-solid-svg-icons';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 
 const CheongyeonTechVisionPage: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
+    const navigate = useNavigate();
     const targetRef = useRef<HTMLDivElement>(null);
     const { scrollYProgress } = useScroll({
         target: targetRef,
@@ -42,12 +46,14 @@ const CheongyeonTechVisionPage: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 overflow-x-hidden text-white font-sans selection:bg-amber-500/30">
+        <div className={`min-h-screen ${isDarkMode ? 'bg-slate-950 text-white' : 'bg-slate-50 text-slate-900'} overflow-x-hidden font-sans selection:bg-amber-500/30`}>
             {/* Background Gradients */}
-            <div className="fixed inset-0 pointer-events-none">
-                <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-900/10 to-transparent" />
-                <div className="absolute bottom-0 left-0 w-full h-[500px] bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent" />
-            </div>
+            {isDarkMode && (
+                <div className="fixed inset-0 pointer-events-none">
+                    <div className="absolute top-0 left-0 w-full h-[500px] bg-gradient-to-b from-blue-900/10 to-transparent" />
+                    <div className="absolute bottom-0 left-0 w-full h-[500px] bg-gradient-to-t from-slate-900 via-slate-900/80 to-transparent" />
+                </div>
+            )}
 
             {/* 1. Hero Section */}
             <div className="relative min-h-[90vh] flex flex-col justify-center items-center text-center px-4">
@@ -281,7 +287,11 @@ const CheongyeonTechVisionPage: React.FC = () => {
                             데이터에 기반한 정확한 산출로 거품 없는 견적을 제시합니다.<br />
                             성공적인 프로젝트를 위한 최고의 파트너가 되어드리겠습니다.
                         </p>
-                        <button className="px-10 py-5 bg-white text-amber-700 rounded-full font-bold text-lg hover:bg-slate-100 transition-colors shadow-2xl hover:shadow-orange-900/50 hover:-translate-y-1 transform duration-200">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/estimate/request')}
+                            className="px-10 py-5 bg-white text-amber-700 rounded-full font-bold text-lg hover:bg-slate-100 transition-colors shadow-2xl hover:shadow-orange-900/50 hover:-translate-y-1 transform duration-200"
+                        >
                             견적 문의하기 <FontAwesomeIcon icon={faArrowRight} className="ml-2" />
                         </button>
                     </motion.div>

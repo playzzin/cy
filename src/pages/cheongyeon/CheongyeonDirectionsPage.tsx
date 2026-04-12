@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faLocationDot, faTrainSubway, faBus, faCarSide, faRoute } from '@fortawesome/free-solid-svg-icons';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 
 declare global {
     interface Window {
@@ -111,8 +112,9 @@ const KakaoMapView: React.FC = () => {
 };
 
 const CheongyeonDirectionsPage: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
     return (
-        <div className="flex flex-col h-full bg-slate-950 text-slate-50">
+        <div className={`flex flex-col h-full ${isDarkMode ? 'bg-slate-950 text-slate-50' : 'bg-white text-slate-900'}`}>
             <style>{`
                 .cheongyeon-route-hero {
                     position: relative;

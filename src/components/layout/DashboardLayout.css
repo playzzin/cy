@@ -249,6 +249,281 @@ a {
     color: #cbd5e1;
 }
 
+.cheongyeon-top-nav {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    gap: 8px;
+    height: 100%;
+    margin: 0 24px;
+}
+
+.cheongyeon-top-nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 100%;
+}
+
+.cheongyeon-top-nav-link {
+    height: 100%;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: #dbeafe;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.cheongyeon-top-nav-link:hover,
+.cheongyeon-top-nav-link.active {
+    color: #f8fafc;
+    border-bottom-color: #22d3ee;
+}
+
+.cheongyeon-top-nav-dropdown {
+    position: absolute;
+    top: calc(100% - 1px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 320px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 14px;
+    box-shadow: 0 18px 45px rgba(2, 6, 23, 0.45);
+    padding: 14px;
+    z-index: 1200;
+    animation: cheongyeonNavDrop 0.18s ease-out;
+}
+
+.cheongyeon-top-nav-dropdown-grid {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr);
+    gap: 8px;
+}
+
+.cheongyeon-top-nav-sub-item {
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    background: rgba(30, 41, 59, 0.45);
+    padding: 10px 12px;
+    transition: all 0.2s ease;
+}
+
+.cheongyeon-top-nav-sub-item:hover,
+.cheongyeon-top-nav-sub-item.active {
+    border-color: rgba(34, 211, 238, 0.45);
+    background: rgba(8, 47, 73, 0.55);
+}
+
+.cheongyeon-top-nav-sub-title {
+    color: #e2e8f0;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.cheongyeon-top-nav-sub-desc {
+    color: #94a3b8;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+@keyframes cheongyeonNavDrop {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(-6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+@media (max-width: 1280px) {
+    .cheongyeon-top-nav {
+        margin: 0 12px;
+    }
+
+    .cheongyeon-top-nav-link {
+        padding: 0 12px;
+        font-size: 14px;
+    }
+
+    .cheongyeon-top-nav-dropdown {
+        min-width: 300px;
+    }
+}
+
+@media (max-width: 1100px) {
+    .cheongyeon-top-nav {
+        display: none;
+    }
+}
+
+/* =========================================
+   청연 라이트 모드 (cy-light)
+   ========================================= */
+.app.cheongyeon-mode.cy-light {
+    background-color: #f8fafc !important;
+    color: #1f2937 !important;
+}
+
+.app.cheongyeon-mode.cy-light #main-header {
+    background-color: #ffffff !important;
+    color: #1f2937 !important;
+    border-bottom: 1px solid #e5e7eb !important;
+}
+
+.app.cheongyeon-mode.cy-light #sidebar {
+    background-color: #1e293b !important;
+    color: #f8fafc !important;
+}
+
+.app.cheongyeon-mode.cy-light #main-content {
+    background-color: #f8fafc !important;
+    color: #1f2937 !important;
+}
+
+/* 라이트모드: 컨텐츠 내 흰 배경 영역 원래대로 */
+.app.cheongyeon-mode.cy-light #main-content .bg-white,
+.app.cheongyeon-mode.cy-light #main-content [style*="background-color: white"],
+.app.cheongyeon-mode.cy-light #main-content [style*="background: white"],
+.app.cheongyeon-mode.cy-light #main-content [style*="background-color: #fff"],
+.app.cheongyeon-mode.cy-light #main-content [style*="background-color: #ffffff"] {
+    background-color: #ffffff !important;
+    color: #1f2937 !important;
+    border-color: #e5e7eb !important;
+}
+
+.app.cheongyeon-mode.cy-light #main-content .bg-gray-50,
+.app.cheongyeon-mode.cy-light #main-content .bg-gray-100 {
+    background-color: #f8fafc !important;
+    color: #1f2937 !important;
+}
+
+.app.cheongyeon-mode.cy-light #main-content .text-gray-500,
+.app.cheongyeon-mode.cy-light #main-content .text-gray-600,
+.app.cheongyeon-mode.cy-light #main-content .text-gray-700,
+.app.cheongyeon-mode.cy-light #main-content .text-gray-800,
+.app.cheongyeon-mode.cy-light #main-content .text-gray-900,
+.app.cheongyeon-mode.cy-light #main-content [style*="color: #333"],
+.app.cheongyeon-mode.cy-light #main-content [style*="color: black"],
+.app.cheongyeon-mode.cy-light #main-content [style*="color: rgb(51, 51, 51)"],
+.app.cheongyeon-mode.cy-light #main-content [style*="color: rgb(0, 0, 0)"] {
+    color: inherit !important;
+}
+
+.app.cheongyeon-mode.cy-light #main-content .border-gray-100,
+.app.cheongyeon-mode.cy-light #main-content .border-gray-200,
+.app.cheongyeon-mode.cy-light #main-content .border-gray-300 {
+    border-color: #e5e7eb !important;
+}
+
+/* 라이트모드: 상단 네비 색상 */
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-link {
+    color: #1f2937 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-link:hover,
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-link.active {
+    color: #0ea5e9 !important;
+    border-bottom-color: #0ea5e9 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-dropdown {
+    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+    border: 1px solid #e5e7eb !important;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1) !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-item {
+    background-color: #ffffff !important;
+    border-color: #e5e7eb !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-item:hover,
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-item.active {
+    border-color: #0ea5e9 !important;
+    background-color: #f0f9ff !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-title {
+    color: #1f2937 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-desc {
+    color: #6b7280 !important;
+}
+
+/* 라이트모드: Tailwind 다크 slate 배경 → 밝은 색으로 재정의 */
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-slate-9"] {
+    background-color: #f8fafc !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-slate-8"] {
+    background-color: #f1f5f9 !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-slate-7"] {
+    background-color: #e5e7eb !important;
+}
+/* bg-[#08111f] 등 임의 어두운 배경 → 라이트 */
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-[#0"] {
+    background-color: #f8fafc !important;
+}
+/* 라이트모드: 어두운 배경 위의 투명 흰 색상 카드 → 불투명 흰 카드 */
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-white/"] {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+}
+/* 라이트모드: Tailwind 밝은 텍스트 → 어두운 텍스트 */
+.app.cheongyeon-mode.cy-light #main-content [class~="text-white"],
+.app.cheongyeon-mode.cy-light #main-content [class*="text-slate-50"] {
+    color: #111827 !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="text-slate-1"] {
+    color: #1f2937 !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="text-slate-2"] {
+    color: #374151 !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="text-slate-3"] {
+    color: #4b5563 !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="text-slate-4"] {
+    color: #6b7280 !important;
+}
+/* 라이트모드: 어두운 테두리 → 밝은 테두리 */
+.app.cheongyeon-mode.cy-light #main-content [class*="border-slate-8"] {
+    border-color: #e5e7eb !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="border-slate-7"] {
+    border-color: #d1d5db !important;
+}
+.app.cheongyeon-mode.cy-light #main-content [class*="border-white/"] {
+    border-color: rgba(15, 23, 42, 0.12) !important;
+}
+/* 라이트모드: 어두운 배경 그라디언트 오버레이 → 비표시 */
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-gradient-to-b from-slate-9"],
+.app.cheongyeon-mode.cy-light #main-content [class*="bg-gradient-to-t from-slate-9"] {
+    opacity: 0.25 !important;
+}
+/* 라이트모드: 유니콘 스튜디오 iframe (배경 애니메이션) → 숨김 */
+.app.cheongyeon-mode.cy-light #main-content iframe[src*="unicorn.studio"] {
+    display: none !important;
+}
+/* 라이트모드: 상단 고정 배경 glow 효과 → 숨김 */
+.app.cheongyeon-mode.cy-light #main-content [class*="blur-"][class*="bg-cyan-"],
+.app.cheongyeon-mode.cy-light #main-content [class*="blur-"][class*="bg-fuchsia-"] {
+    opacity: 0.2 !important;
+}
+
 /* =========================================
    4. Sidebar
    ========================================= */
@@ -894,6 +1169,26 @@ a {
 
     .app.mobile-open .backdrop {
         display: block;
+    }
+}
+
+/* Cheongyeon mode: hide left menu on desktop only, keep tablet/mobile menu visible */
+@media (min-width: 1025px) {
+    .app.cheongyeon-mode #sidebar {
+        transform: translateX(-100%) !important;
+        pointer-events: none;
+    }
+
+    .app.cheongyeon-mode #main-header {
+        padding-left: 15px !important;
+    }
+
+    .app.cheongyeon-mode #main-content {
+        margin-left: 0 !important;
+    }
+
+    .app.cheongyeon-mode #sidebar-toggle {
+        display: none !important;
     }
 }
 
