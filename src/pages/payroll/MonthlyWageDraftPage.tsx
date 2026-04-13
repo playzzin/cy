@@ -3363,6 +3363,26 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return map;
     }, [normalizeBankKey]);
 
+    const bankNameKeyEntries = useMemo(() => {
+        const entries: Array<{ nameKey: string; code: string }> = [];
+        Object.entries(BANK_CODES).forEach(([k, v]) => {
+            const code = String(k ?? '').trim();
+            const name = String(v ?? '').trim();
+            if (!/^\d{3}$/.test(code)) return;
+            const normalizedName = normalizeBankKey(name);
+            if (!normalizedName) return;
+            entries.push({ nameKey: normalizedName, code });
+
+            const withoutBank = normalizeBankKey(name.replace(/은행|증권|중앙회|저축은행/g, ''));
+            if (withoutBank && withoutBank !== normalizedName) {
+                entries.push({ nameKey: withoutBank, code });
+            }
+        });
+
+        entries.sort((a, b) => b.nameKey.length - a.nameKey.length);
+        return entries;
+    }, [normalizeBankKey]);
+
     const resolveBankCode = useCallback((bankName?: string, bankCode?: string): string => {
         const explicitCode = String(bankCode ?? '').trim();
         if (/^\d{3}$/.test(explicitCode)) return explicitCode;
@@ -3373,8 +3393,125 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const normalizedName = normalizeBankKey(bankName);
         if (!normalizedName) return '';
 
-        return bankCodeByName.get(normalizedName) ?? '';
-    }, [bankCodeByName, normalizeBankKey]);
+        const exact = bankCodeByName.get(normalizedName);
+        if (exact) return exact;
+
+        const candidateCodes = new Set<string>();
+        bankNameKeyEntries.forEach(({ nameKey, code }) => {
+            if (!nameKey) return;
+            if (normalizedName.includes(nameKey) || nameKey.includes(normalizedName)) {
+                candidateCodes.add(code);
+            }
+        });
+
+        if (candidateCodes.size === 1) {
+            return Array.from(candidateCodes)[0];
+        }
+
+        if (candidateCodes.size > 1) {
+            const ranked = Array.from(candidateCodes)
+                .map((code) => {
+                    const officialName = String(BANK_CODES[code] ?? '');
+                    const officialKey = normalizeBankKey(officialName);
+
+                    let score = 0;
+                    if (/은행|뱅크/.test(officialName)) score += 40;
+                    if (/저축은행/.test(officialName)) score -= 15;
+                    if (/증권|선물/.test(officialName)) score -= 20;
+
+                    if (officialKey === normalizedName) score += 50;
+                    else if (officialKey.startsWith(normalizedName)) score += 20;
+                    else if (officialKey.includes(normalizedName)) score += 10;
+
+                    return { code, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+                return ranked[0].code;
+            }
+        }
+
+        return '';
+    }, [bankCodeByName, bankNameKeyEntries, normalizeBankKey]);
+
+    const analyzeBankMapping = useCallback((bankName?: string, bankCode?: string): {
+        code: string;
+        reason: string;
+        candidates: string[];
+    } => {
+        const explicitCode = String(bankCode ?? '').trim();
+        if (/^\d{3}$/.test(explicitCode)) {
+            return { code: explicitCode, reason: '', candidates: [] };
+        }
+
+        const rawBankName = String(bankName ?? '').trim();
+        if (/^\d{3}$/.test(rawBankName)) {
+            return { code: rawBankName, reason: '', candidates: [] };
+        }
+
+        const normalizedName = normalizeBankKey(bankName);
+        if (!normalizedName) {
+            return {
+                code: '',
+                reason: '은행명이 비어있거나 형식이 올바르지 않습니다.',
+                candidates: []
+            };
+        }
+
+        const exact = bankCodeByName.get(normalizedName);
+        if (exact) {
+            return { code: exact, reason: '', candidates: [] };
+        }
+
+        const candidateCodes = new Set<string>();
+        bankNameKeyEntries.forEach(({ nameKey, code }) => {
+            if (!nameKey) return;
+            if (normalizedName.includes(nameKey) || nameKey.includes(normalizedName)) {
+                candidateCodes.add(code);
+            }
+        });
+
+        if (candidateCodes.size === 1) {
+            return { code: Array.from(candidateCodes)[0], reason: '', candidates: [] };
+        }
+
+        if (candidateCodes.size > 1) {
+            const ranked = Array.from(candidateCodes)
+                .map((code) => {
+                    const officialName = String(BANK_CODES[code] ?? '');
+                    const officialKey = normalizeBankKey(officialName);
+
+                    let score = 0;
+                    if (/은행|뱅크/.test(officialName)) score += 40;
+                    if (/저축은행/.test(officialName)) score -= 15;
+                    if (/증권|선물/.test(officialName)) score -= 20;
+
+                    if (officialKey === normalizedName) score += 50;
+                    else if (officialKey.startsWith(normalizedName)) score += 20;
+                    else if (officialKey.includes(normalizedName)) score += 10;
+
+                    return { code, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+                return { code: ranked[0].code, reason: '', candidates: [] };
+            }
+
+            return {
+                code: '',
+                reason: '유사 은행 후보가 여러 개여서 자동 매핑을 보류했습니다.',
+                candidates: ranked.slice(0, 4).map((r) => `${r.code}:${BANK_CODES[r.code]}`),
+            };
+        }
+
+        return {
+            code: '',
+            reason: '등록된 은행명/별칭과 일치하는 코드가 없습니다.',
+            candidates: []
+        };
+    }, [bankCodeByName, bankNameKeyEntries, normalizeBankKey]);
 
 
 
@@ -3516,17 +3653,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
         }
 
-        // 열 너비 설정
         ws['!cols'] = [
-            { wch: 8 },  // A: 은행코드
-            { wch: 20 }, // B: 계좌번호
-            { wch: 15 }, // C: 이체금액
-            { wch: 12 }, // D: 받는분 통장 표시
-            { wch: 18 }, // E: 내 통장 메모
+            { wch: 8 },
+            { wch: 20 },
+            { wch: 15 },
+            { wch: 12 },
+            { wch: 18 },
         ];
 
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "국민은행용");
+        XLSX.utils.book_append_sheet(wb, ws, '국민은행용');
 
         const fileName = `월급제_국민은행용_${rangeLabel || currentYearMonth}.xlsx`;
         XLSX.writeFile(wb, fileName);
@@ -3585,24 +3721,106 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             let memo = kbMemoSuffix;
             if (memo.includes('{이름}')) {
                 memo = memo.replace('{이름}', item.workerName);
-            } else if (memo.startsWith(' ')) { // Legacy prefix
+            } else if (memo.startsWith(' ')) {
                 memo = item.workerName + memo;
             } else if (!memo) {
                 memo = item.workerName;
             }
 
-            let bankCode = resolveBankCode(item.bankName, item.bankCode);
-            let accountNumber = item.accountNumber;
+            const analysis = analyzeBankMapping(item.bankName, item.bankCode);
+            const rawBankName = String(item.bankName ?? '').trim();
+            const bankCodeDisplay = analysis.code || rawBankName || '(은행명없음)';
 
             return {
-                은행코드: bankCode,
-                계좌번호: accountNumber,
+                은행코드: analysis.code,
+                은행코드표시: bankCodeDisplay,
+                은행코드미매핑: !analysis.code,
+                은행코드수정요망: !analysis.code,
+                은행코드사유: analysis.reason,
+                은행코드후보: analysis.candidates.join(', '),
+                계좌번호: item.accountNumber,
                 이체금액: amount,
                 받는분통장표시: kbReceiverDisplay,
                 내통장메모: memo
             };
         }).filter((row) => Number.isFinite(row.이체금액) && row.이체금액 > 0);
     };
+
+    const bankMappingDiagnostics = useMemo(() => {
+        const grouped = new Map<string, {
+            inputNames: Set<string>;
+            count: number;
+            mappedCount: number;
+            codes: Set<string>;
+            reasons: Map<string, number>;
+            candidates: Set<string>;
+        }>();
+
+        filteredPaymentData.forEach((item) => {
+            const rawName = String(item.bankName ?? '').trim();
+            const normalizedName = normalizeBankKey(rawName) || '(빈값)';
+            const analysis = analyzeBankMapping(item.bankName, item.bankCode);
+
+            if (!grouped.has(normalizedName)) {
+                grouped.set(normalizedName, {
+                    inputNames: new Set<string>(),
+                    count: 0,
+                    mappedCount: 0,
+                    codes: new Set<string>(),
+                    reasons: new Map<string, number>(),
+                    candidates: new Set<string>(),
+                });
+            }
+
+            const bucket = grouped.get(normalizedName)!;
+            bucket.count += 1;
+            bucket.inputNames.add(rawName || '(미입력)');
+
+            if (analysis.code) {
+                bucket.mappedCount += 1;
+                bucket.codes.add(analysis.code);
+            } else {
+                const reason = analysis.reason || '미매핑 사유 없음';
+                bucket.reasons.set(reason, (bucket.reasons.get(reason) || 0) + 1);
+                analysis.candidates.forEach((c) => bucket.candidates.add(c));
+            }
+        });
+
+        return Array.from(grouped.entries())
+            .map(([normalized, bucket]) => {
+                const unmappedCount = bucket.count - bucket.mappedCount;
+                const topReason = Array.from(bucket.reasons.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+                const suggestedAction = !unmappedCount
+                    ? '정상'
+                    : topReason.includes('여러 개')
+                        ? '은행명을 더 구체적으로 입력하세요. (예: 신한은행, 카카오뱅크)'
+                        : topReason.includes('비어')
+                            ? '은행명을 입력하세요.'
+                            : '공식 은행명으로 수정하거나 3자리 은행코드를 직접 입력하세요.';
+
+                return {
+                    normalized,
+                    inputNames: Array.from(bucket.inputNames).slice(0, 4).join(', '),
+                    count: bucket.count,
+                    mappedCount: bucket.mappedCount,
+                    unmappedCount,
+                    codes: Array.from(bucket.codes).join(', '),
+                    reason: topReason,
+                    candidates: Array.from(bucket.candidates).join(', '),
+                    suggestedAction,
+                };
+            })
+            .sort((a, b) => {
+                if (a.unmappedCount !== b.unmappedCount) return b.unmappedCount - a.unmappedCount;
+                return a.normalized.localeCompare(b.normalized, 'ko');
+            });
+    }, [analyzeBankMapping, filteredPaymentData, normalizeBankKey]);
+
+    const bankDiagnosticSummary = useMemo(() => {
+        const total = bankMappingDiagnostics.reduce((sum, row) => sum + row.count, 0);
+        const unmapped = bankMappingDiagnostics.reduce((sum, row) => sum + row.unmappedCount, 0);
+        return { total, unmapped };
+    }, [bankMappingDiagnostics]);
 
 
     const handleDownloadIndividualPayslip = useCallback(() => {
@@ -4011,6 +4229,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             >
                                 일괄적용
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowBankCodes(true)}
+                                className="bg-blue-600 text-white px-3.5 py-2 rounded text-base hover:bg-blue-700"
+                                title="은행 코드 매핑표/미매핑 사유 확인"
+                            >
+                                은행 매핑 진단
+                            </button>
                         </div>
                     </div>
                     <div className="text-base flex items-center gap-2.5">
@@ -4175,7 +4401,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                 <td className="px-2 py-1.5 text-right font-bold text-brand-600 border-b border-slate-100">{totalAmountForDisplay.toLocaleString()}</td>
                                                 {showAccountColumns && (
                                                     <>
-                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.bankCode ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.bankCode || '-'}</td>
+                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.bankCode ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
+                                                            {resolveBankCode(item.bankName, item.bankCode) || `미매핑(${item.bankName || '은행명없음'})`}
+                                                        </td>
                                                         <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.bankName ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.bankName || '(미입력)'}</td>
                                                         <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.accountNumber ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountNumber || '(미입력)'}</td>
                                                         <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.accountHolder ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountHolder || '(미입력)'}</td>
@@ -4763,7 +4991,16 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 <tbody>
                                     {getKBPreviewData().map((row, idx) => (
                                         <tr key={idx} className="hover:bg-slate-800/60">
-                                            <td className="border border-slate-700 px-3 py-2">{row.은행코드}</td>
+                                            <td className={`border border-slate-700 px-3 py-2 ${row.은행코드미매핑 ? 'text-rose-300 font-semibold' : ''}`}>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span>{row.은행코드표시}</span>
+                                                    {row.은행코드수정요망 && (
+                                                        <span className="inline-flex items-center rounded bg-rose-500/30 px-1.5 py-0.5 text-[10px] font-bold text-rose-100">
+                                                            수정요망
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
                                             <td className="border border-slate-700 px-3 py-2">{row.계좌번호}</td>
                                             <td className="border border-slate-700 px-3 py-2 text-right font-medium text-amber-300">{row.이체금액.toLocaleString()}</td>
                                             <td className="border border-slate-700 px-3 py-2">{row.받는분통장표시}</td>
@@ -4801,9 +5038,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
             {showBankCodes && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[85vh] flex flex-col">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-6xl w-full mx-4 max-h-[85vh] flex flex-col">
                         <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-blue-50">
-                            <h3 className="text-lg font-bold text-slate-800">📊 은행코드표</h3>
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">📊 은행 매핑 진단표</h3>
+                                <p className="text-xs text-slate-600 mt-0.5">
+                                    전체 입력 {bankDiagnosticSummary.total}건 · 미매핑 {bankDiagnosticSummary.unmapped}건
+                                </p>
+                            </div>
                             <button
                                 onClick={() => setShowBankCodes(false)}
                                 className="text-slate-400 hover:text-slate-600 text-2xl"
@@ -4811,33 +5053,72 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 ×
                             </button>
                         </div>
-                        <div className="flex-1 overflow-auto p-4 space-y-4 text-xs">
+
+                        <div className="flex-1 overflow-auto p-4 space-y-5 text-xs">
                             <div>
-                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-blue-100 px-2 py-1 rounded">🏦 은행</h4>
-                                <p className="text-slate-500 text-xs mb-2">대표 은행명 또는 별칭을 입력하면 코드가 자동 매핑됩니다.</p>
+                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-blue-100 px-2 py-1 rounded">🏦 공식 은행코드 매핑표</h4>
+                                <p className="text-slate-500 text-xs mb-2">기준 데이터: BANK_CODES 상수</p>
+                                <table className="w-full text-xs border-collapse">
+                                    <thead className="bg-slate-100 sticky top-0">
+                                        <tr>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">코드</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">은행명</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {Object.entries(BANK_CODES)
+                                            .sort(([a], [b]) => Number(a) - Number(b))
+                                            .map(([code, name]) => (
+                                                <tr key={`${code}-${name}`}>
+                                                    <td className="border px-2 py-1 font-mono">{code}</td>
+                                                    <td className="border px-2 py-1">{name}</td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
                             </div>
-                            <table className="w-full text-xs border-collapse">
-                                <thead className="bg-slate-100 sticky top-0">
-                                    <tr>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">코드</th>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">은행명</th>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">별칭</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {Object.entries(BANK_CODES)
-                                        .filter(([name]) => name.length <= 6) // 대표명만 대략 노출
-                                        .slice(0, 30)
-                                        .map(([name, code]) => (
-                                            <tr key={`${code}-${name}`}>
-                                                <td className="border px-2 py-1 font-mono">{code}</td>
-                                                <td className="border px-2 py-1">{name}</td>
-                                                <td className="border px-2 py-1 text-slate-500">자동인식</td>
+
+                            <div>
+                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-amber-100 px-2 py-1 rounded">🛠 입력 은행명 진단 (미매핑 사유)</h4>
+                                <table className="w-full text-xs border-collapse">
+                                    <thead className="bg-slate-100 sticky top-0">
+                                        <tr>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">입력 은행명</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-right font-bold">건수</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">매핑 코드</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">미매핑 사유</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">후보</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">권장 조치</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bankMappingDiagnostics.length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="border px-2 py-4 text-center text-slate-500">진단할 데이터가 없습니다.</td>
+                                            </tr>
+                                        )}
+                                        {bankMappingDiagnostics.map((row) => (
+                                            <tr key={row.normalized} className={row.unmappedCount > 0 ? 'bg-rose-50/50' : ''}>
+                                                <td className="border px-2 py-1">
+                                                    <div className="font-medium">{row.inputNames}</div>
+                                                    <div className="text-slate-400">정규화키: {row.normalized}</div>
+                                                </td>
+                                                <td className="border px-2 py-1 text-right tabular-nums">{row.count}</td>
+                                                <td className="border px-2 py-1 font-mono">
+                                                    {row.codes || '-'}
+                                                </td>
+                                                <td className={`border px-2 py-1 ${row.unmappedCount > 0 ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+                                                    {row.reason || '-'}
+                                                </td>
+                                                <td className="border px-2 py-1 text-slate-600">{row.candidates || '-'}</td>
+                                                <td className="border px-2 py-1 text-slate-700">{row.suggestedAction}</td>
                                             </tr>
                                         ))}
-                                </tbody>
-                            </table>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
+
                         <div className="p-4 border-t border-slate-200 bg-blue-50">
                             <button
                                 onClick={() => setShowBankCodes(false)}

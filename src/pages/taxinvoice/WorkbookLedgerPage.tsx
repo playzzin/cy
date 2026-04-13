@@ -296,8 +296,8 @@ const normalizeBankName = (value: unknown) => (
 const KB_BANK_CODE_BY_NAME = new Map<string, string>([
     ['한국은행', '001'],
     ['산업은행', '002'], ['kdb', '002'],
-    ['기업은행', '003'], ['ibk', '003'], ['ibk기업은행', '003'], ['ibk기업', '003'],
-    ['국민은행', '004'], ['kb국민', '004'], ['kb국민은행', '004'], ['kb', '004'],
+    ['기업은행', '003'], ['기업', '003'], ['ibk', '003'], ['ibk기업은행', '003'], ['ibk기업', '003'],
+    ['국민은행', '004'], ['국민', '004'], ['kb국민', '004'], ['kb국민은행', '004'], ['kb', '004'],
     ['수협은행', '007'], ['수협', '007'], ['sh수협', '007'],
     ['수출입은행', '008'],
     ['농협은행', '011'], ['nh농협은행', '011'], ['nh농협', '011'], ['농협', '011'],
@@ -2535,48 +2535,91 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }), { supplyAmount: 0, taxAmount: 0, totalAmount: 0, settledAmount: 0, outstandingAmount: 0 });
     }, [summaryRows]);
 
-    const resolveSummaryKbBankCode = useCallback((bankName: unknown) => {
+    const analyzeSummaryKbBank = useCallback((bankName: unknown) => {
         const normalized = String(bankName ?? '')
             .toLowerCase()
             .replace(/\s+/g, '')
             .trim();
-        if (!normalized) return '';
+        const raw = String(bankName ?? '').trim();
+        if (!normalized) {
+            return {
+                code: '',
+                display: raw || '(은행명없음)',
+                needsFix: true,
+                reason: '은행명이 비어있거나 형식이 올바르지 않습니다.'
+            };
+        }
 
         // 이미 3자리 숫자 코드으로 저장된 경우 그대로 반환
-        if (/^\d{3}$/.test(normalized)) return normalized;
+        if (/^\d{3}$/.test(normalized)) {
+            return {
+                code: normalized,
+                display: normalized,
+                needsFix: false,
+                reason: ''
+            };
+        }
 
-        const bankCodeEntries: Array<[string, string]> = [
-            ['한국은행', '001'],
-            ['산업은행', '002'], ['kdb', '002'],
-            ['기업은행', '003'], ['ibk', '003'], ['ibk기업은행', '003'], ['ibk기업', '003'],
-            ['국민은행', '004'], ['kb국민', '004'], ['kb국민은행', '004'], ['kb', '004'],
-            ['수협은행', '007'], ['수협', '007'], ['sh수협', '007'],
-            ['수출입은행', '008'],
-            ['농협은행', '011'], ['nh농협은행', '011'], ['nh농협', '011'], ['농협', '011'],
-            ['지역농협', '012'], ['농축협', '012'],
-            ['우리은행', '020'], ['우리', '020'],
-            ['sc제일은행', '023'], ['제일은행', '023'],
-            ['한국씨티은행', '027'], ['씨티은행', '027'], ['씨티', '027'],
-            ['대구은행', '031'], ['im뱅크', '031'], ['dgb', '031'],
-            ['부산은행', '032'], ['bnk부산', '032'],
-            ['광주은행', '034'],
-            ['제주은행', '035'],
-            ['전북은행', '037'],
-            ['경남은행', '039'], ['bnk경남', '039'],
-            ['새마을금고', '045'], ['mg새마을', '045'],
-            ['신협', '048'],
-            ['상호저축은행', '050'], ['저축은행', '050'],
-            ['우체국', '071'], ['우체국예금', '071'],
-            ['하나은행', '081'], ['keb하나', '081'], ['하나', '081'],
-            ['신한은행', '088'], ['신한', '088'],
-            ['케이뱅크', '089'], ['k뱅크', '089'],
-            ['카카오뱅크', '090'], ['카카오', '090'],
-            ['토스뱅크', '092'], ['토스', '092'],
-        ];
+        const candidates = Array.from(KB_BANK_CODE_BY_NAME.entries())
+            .filter(([name]) => {
+                const key = normalizeBankName(name);
+                if (!key) return false;
+                return normalized.includes(key) || key.includes(normalized);
+            })
+            .map(([name, code]) => ({ name, code }));
 
-        const matched = bankCodeEntries.find(([name]) => normalized.includes(name.toLowerCase().replace(/\s+/g, '')));
-        return matched?.[1] ?? '';
+        if (candidates.length === 1) {
+            return {
+                code: candidates[0].code,
+                display: candidates[0].code,
+                needsFix: false,
+                reason: ''
+            };
+        }
+
+        if (candidates.length > 1) {
+            const ranked = candidates
+                .map((candidate) => {
+                    const key = normalizeBankName(candidate.name);
+                    let score = 0;
+                    if (/은행|뱅크/.test(candidate.name)) score += 40;
+                    if (/저축은행/.test(candidate.name)) score -= 15;
+                    if (/증권|선물/.test(candidate.name)) score -= 20;
+                    if (key === normalized) score += 50;
+                    else if (key.startsWith(normalized)) score += 20;
+                    else if (key.includes(normalized)) score += 10;
+                    return { ...candidate, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+                return {
+                    code: ranked[0].code,
+                    display: ranked[0].code,
+                    needsFix: false,
+                    reason: ''
+                };
+            }
+
+            return {
+                code: '',
+                display: raw || '(은행명없음)',
+                needsFix: true,
+                reason: `유사 후보 다수: ${ranked.slice(0, 4).map((r) => `${r.name}(${r.code})`).join(', ')}`
+            };
+        }
+
+        return {
+            code: '',
+            display: raw || '(은행명없음)',
+            needsFix: true,
+            reason: '등록된 은행명/별칭과 일치하는 코드가 없습니다.'
+        };
     }, []);
+
+    const resolveSummaryKbBankCode = useCallback((bankName: unknown) => {
+        return analyzeSummaryKbBank(bankName).code;
+    }, [analyzeSummaryKbBank]);
 
     const kbPreviewRows = useMemo(() => {
         if (summaryFilter.mode !== '미지급금') return [];
@@ -2587,17 +2630,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             .filter((row) => row.outstandingAmount > 0)
             .map((row) => {
                 const account = purchaseAccountsByName.get(normalizeText(row.partnerName));
-                const bankCode = resolveSummaryKbBankCode(account?.bankName);
+                const analysis = analyzeSummaryKbBank(account?.bankName);
                 const accountNumber = normalizeText(account?.accountNumber);
                 return {
-                    bankCode,
+                    bankCode: analysis.code,
+                    bankCodeDisplay: analysis.display,
+                    bankCodeNeedsFix: analysis.needsFix,
+                    bankCodeReason: analysis.reason,
                     accountNumber,
                     amount: row.outstandingAmount,
                     receiverDisplay: kbReceiverDisplay.slice(0, 10),
                     memoDisplay: `${row.partnerName}${kbMemoSuffix}`.slice(0, 14)
                 };
             });
-    }, [kbMemoSuffix, kbReceiverDisplay, purchaseAccountsByName, resolveSummaryKbBankCode, selectedSummaryRowIds, summaryFilter.mode, summaryRows]);
+    }, [analyzeSummaryKbBank, kbMemoSuffix, kbReceiverDisplay, purchaseAccountsByName, selectedSummaryRowIds, summaryFilter.mode, summaryRows]);
 
     const handleOpenKbPreview = useCallback(() => {
         if (summaryFilter.mode !== '미지급금') {
@@ -4864,7 +4910,21 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                     <tbody>
                                         {kbPreviewRows.map((row, index) => (
                                             <tr key={`${row.accountNumber}-${index}`} style={{ background: index % 2 === 0 ? 'rgba(15, 23, 42, 0.45)' : 'rgba(30, 41, 59, 0.45)' }}>
-                                                <td style={{ border: '1px solid #334155', padding: '8px 12px', color: row.bankCode ? '#e2e8f0' : '#f87171' }}>{row.bankCode || '?'}</td>
+                                                <td style={{ border: '1px solid #334155', padding: '8px 12px', color: row.bankCode ? '#e2e8f0' : '#f87171' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                                        <span>{row.bankCodeDisplay}</span>
+                                                        {row.bankCodeNeedsFix && (
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 9999, padding: '2px 7px', fontSize: 10, fontWeight: 800, background: 'rgba(239, 68, 68, 0.24)', color: '#fecaca' }}>
+                                                                수정요망
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {row.bankCodeNeedsFix && row.bankCodeReason && (
+                                                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.35, color: '#fca5a5' }}>
+                                                            {row.bankCodeReason}
+                                                        </div>
+                                                    )}
+                                                </td>
                                                 <td style={{ border: '1px solid #334155', padding: '8px 12px', fontFamily: 'monospace', color: row.accountNumber ? '#e2e8f0' : '#f87171' }}>{row.accountNumber || '계좌 없음'}</td>
                                                 <td style={{ border: '1px solid #334155', padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#fbbf24' }}>{row.amount.toLocaleString()}</td>
                                                 <td style={{ border: '1px solid #334155', padding: '8px 12px' }}>{row.receiverDisplay}</td>
