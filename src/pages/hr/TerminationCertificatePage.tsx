@@ -52,6 +52,9 @@ const Label = styled.label`
 `;
 
 const Input = styled.input`
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -65,6 +68,9 @@ const Input = styled.input`
 `;
 
 const Select = styled.select`
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -137,6 +143,31 @@ const HelperText = styled.p`
   font-size: 12px;
   color: #64748b;
   line-height: 1.5;
+`;
+
+const DateRangeRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+`;
+
+const DateField = styled.div`
+  min-width: 0;
+
+  .react-datepicker-wrapper,
+  .react-datepicker__input-container {
+    display: block;
+    width: 100%;
+  }
+`;
+
+const RangeDivider = styled.span`
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
 `;
 
 const sanitizeCertificateName = (name?: string | null) => String(name || '').replace(/\d+/g, '').trim();
@@ -328,8 +359,8 @@ const TerminationCertificatePage: React.FC = () => {
 
         <FormGroup>
           <Label>용역 기간</Label>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
+          <DateRangeRow>
+            <DateField>
               <DatePicker
                 selected={serviceStartDate}
                 onChange={(date: Date | null) => setServiceStartDate(date)}
@@ -337,9 +368,9 @@ const TerminationCertificatePage: React.FC = () => {
                 locale={ko}
                 customInput={<Input placeholder="시작일 선택" />}
               />
-            </div>
-            <span>~</span>
-            <div style={{ flex: 1 }}>
+            </DateField>
+            <RangeDivider>~</RangeDivider>
+            <DateField>
               <DatePicker
                 selected={serviceEndDate}
                 onChange={(date: Date | null) => setServiceEndDate(date)}
@@ -347,8 +378,8 @@ const TerminationCertificatePage: React.FC = () => {
                 locale={ko}
                 customInput={<Input placeholder="종료일 선택" />}
               />
-            </div>
-          </div>
+            </DateField>
+          </DateRangeRow>
         </FormGroup>
 
         <FormGroup>

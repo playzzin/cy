@@ -356,22 +356,25 @@ export default EstimateRequestPage;
 // --- Styled Components ---
 
 const Container = styled.div<{ $isDarkMode: boolean }>`
-  --bg-start: ${({ $isDarkMode }) => ($isDarkMode ? '#020617' : '#f8fafc')};
-  --bg-end: ${({ $isDarkMode }) => ($isDarkMode ? '#111827' : '#eef2ff')};
-  --surface: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(15, 23, 42, 0.82)' : 'rgba(255, 255, 255, 0.94)')};
-  --surface-border: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(148, 163, 184, 0.22)' : 'rgba(148, 163, 184, 0.35)')};
+  --bg-start: ${({ $isDarkMode }) => ($isDarkMode ? '#0b1220' : '#f3f6fb')};
+  --bg-end: ${({ $isDarkMode }) => ($isDarkMode ? '#121b2f' : '#e8eef8')};
+  --surface: ${({ $isDarkMode }) => ($isDarkMode ? '#111a2b' : '#ffffff')};
+  --surface-border: ${({ $isDarkMode }) => ($isDarkMode ? '#25324a' : '#d6dfec')};
   --surface-elevated: ${({ $isDarkMode }) => ($isDarkMode ? '#0f172a' : '#ffffff')};
   --text-strong: ${({ $isDarkMode }) => ($isDarkMode ? '#f8fafc' : '#0f172a')};
-  --text: ${({ $isDarkMode }) => ($isDarkMode ? '#dbe4f0' : '#1e293b')};
-  --text-muted: ${({ $isDarkMode }) => ($isDarkMode ? '#94a3b8' : '#64748b')};
-  --input-bg: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(15, 23, 42, 0.86)' : '#ffffff')};
+  --text: ${({ $isDarkMode }) => ($isDarkMode ? '#e2e8f0' : '#1e293b')};
+  --text-muted: ${({ $isDarkMode }) => ($isDarkMode ? '#94a3b8' : '#475569')};
+  --input-bg: ${({ $isDarkMode }) => ($isDarkMode ? '#0f172a' : '#ffffff')};
   --input-border: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#cbd5e1')};
-  --input-focus: #38bdf8;
+  --input-disabled: ${({ $isDarkMode }) => ($isDarkMode ? '#1e293b' : '#e2e8f0')};
+  --input-focus: ${({ $isDarkMode }) => ($isDarkMode ? '#22d3ee' : '#2563eb')};
   --danger: #ef4444;
-  --icon-color: ${({ $isDarkMode }) => ($isDarkMode ? '#7dd3fc' : '#0284c7')};
-  --chip-bg: ${({ $isDarkMode }) => ($isDarkMode ? '#111827' : '#f1f5f9')};
+  --icon-color: ${({ $isDarkMode }) => ($isDarkMode ? '#7dd3fc' : '#2563eb')};
+  --chip-bg: ${({ $isDarkMode }) => ($isDarkMode ? '#111827' : '#f8fafc')};
   --chip-border: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#cbd5e1')};
-  --chip-text: ${({ $isDarkMode }) => ($isDarkMode ? '#cbd5e1' : '#334155')};
+  --chip-text: ${({ $isDarkMode }) => ($isDarkMode ? '#dbeafe' : '#334155')};
+  --radio-active-bg: ${({ $isDarkMode }) => ($isDarkMode ? 'rgba(34, 211, 238, 0.18)' : 'rgba(37, 99, 235, 0.1)')};
+  --radio-active-text: ${({ $isDarkMode }) => ($isDarkMode ? '#e0f2fe' : '#1d4ed8')};
   --divider: ${({ $isDarkMode }) => ($isDarkMode ? '#334155' : '#e2e8f0')};
 
   max-width: 900px;
@@ -379,9 +382,9 @@ const Container = styled.div<{ $isDarkMode: boolean }>`
   padding: 2rem 1rem 2.5rem;
   min-height: calc(100vh - 48px);
   background:
-    radial-gradient(circle at 10% 10%, rgba(14, 165, 233, 0.14), transparent 40%),
-    radial-gradient(circle at 90% 0%, rgba(99, 102, 241, 0.16), transparent 38%),
-    linear-gradient(165deg, var(--bg-start), var(--bg-end));
+    radial-gradient(circle at 12% 12%, rgba(56, 189, 248, 0.08), transparent 38%),
+    radial-gradient(circle at 88% 0%, rgba(37, 99, 235, 0.08), transparent 36%),
+    linear-gradient(180deg, var(--bg-start), var(--bg-end));
   font-family: 'Pretendard', -apple-system, sans-serif;
 `;
 
@@ -396,7 +399,6 @@ const HeaderTitle = styled.h1`
   color: var(--text-strong);
   margin-bottom: 0.75rem;
   letter-spacing: -0.025em;
-  text-shadow: 0 2px 18px rgba(14, 165, 233, 0.2);
 `;
 
 const HeaderSubtitle = styled.p`
@@ -408,9 +410,9 @@ const HeaderSubtitle = styled.p`
 const FormCard = styled.form`
   background: var(--surface);
   border-radius: 16px;
-  box-shadow: 0 16px 44px -16px rgba(2, 6, 23, 0.85);
+  box-shadow: 0 18px 40px -20px rgba(2, 6, 23, 0.75);
   border: 1px solid var(--surface-border);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(4px);
   padding: 2.5rem;
   
   @media (max-width: 768px) {
@@ -421,7 +423,7 @@ const FormCard = styled.form`
 const SectionTitle = styled.h2`
   font-size: 1.25rem;
   font-weight: 700;
-  color: var(--text);
+  color: var(--text-strong);
   margin-bottom: 1.5rem;
   display: flex;
   align-items: center;
@@ -485,12 +487,13 @@ const Input = styled.input<{ $hasError?: boolean }>`
   }
 
   &::placeholder {
-    color: #64748b;
+    color: var(--text-muted);
   }
 
   &:disabled {
-    background-color: rgba(51, 65, 85, 0.55);
+    background-color: var(--input-disabled);
     cursor: not-allowed;
+    color: var(--text-muted);
   }
 `;
 
@@ -514,10 +517,11 @@ const TextArea = styled.textarea<{ $hasError?: boolean }>`
   }
 
   &::placeholder {
-    color: #64748b;
+    color: var(--text-muted);
   }
 
   &:disabled {
+    background-color: var(--input-disabled);
     cursor: not-allowed;
     opacity: 0.7;
   }
@@ -553,11 +557,11 @@ const RadioLabel = styled.label`
   }
 
   input:checked ~ .radio-text {
-    background: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(14, 165, 233, 0.2));
+    background: var(--radio-active-bg);
     border-color: #38bdf8;
-    color: #e0f2fe;
+    color: var(--radio-active-text);
     font-weight: 600;
-    box-shadow: 0 0 0 1px #38bdf8 inset;
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.65) inset;
   }
 
   input:focus-visible ~ .radio-text {
@@ -635,7 +639,7 @@ const FileItem = styled.div`
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  background-color: color-mix(in srgb, var(--surface-elevated) 88%, transparent);
+  background-color: color-mix(in srgb, var(--surface-elevated) 90%, transparent);
   border-radius: 8px;
   border: 1px solid var(--input-border);
 
@@ -692,7 +696,7 @@ const RemoveButton = styled.button`
 const SubmitButton = styled.button`
   width: 100%;
   padding: 1.25rem;
-  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 60%, #4338ca 100%);
+  background: #2563eb;
   color: white;
   border: none;
   border-radius: 12px;
@@ -701,11 +705,12 @@ const SubmitButton = styled.button`
   cursor: pointer;
   margin-top: 2rem;
   transition: all 0.2s ease;
-  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.35);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.32);
 
   &:hover:not(:disabled) {
+    background: #1d4ed8;
     transform: translateY(-2px);
-    box-shadow: 0 12px 24px rgba(14, 165, 233, 0.34);
+    box-shadow: 0 12px 24px rgba(37, 99, 235, 0.36);
   }
 
   &:active:not(:disabled) {

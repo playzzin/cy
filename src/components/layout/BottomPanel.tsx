@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faCalculator, faNoteSticky, faUserGear } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faCalculator, faNoteSticky, faUserGear, faCamera } from '@fortawesome/free-solid-svg-icons';
 import Calculator from '../tools/Calculator';
 import QuickMemoEditor from '../tools/QuickMemo';
+import QuickCameraCapture from '../tools/QuickCameraCapture';
 
 interface BottomPanelProps {
     isOpen: boolean;
@@ -18,7 +19,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
     const LABEL_QUICK = '\ube60\ub978 \uc2e4\ud589';
     const LABEL_MEMO = '\uba54\ubaa8\uc7a5';
     const LABEL_CALC = '\uacc4\uc0b0\uae30';
-    const [activeTab, setActiveTab] = useState<'memo' | 'calculator'>('memo');
+    const LABEL_CAMERA = '\uce74\uba54\ub77c';
+    const [activeTab, setActiveTab] = useState<'memo' | 'calculator' | 'camera'>('memo');
 
     useEffect(() => {
         if (!isOpen) {
@@ -74,6 +76,17 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                             <FontAwesomeIcon icon={faCalculator} />
                             {LABEL_CALC}
                         </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('camera')}
+                            className={`flex-1 sm:flex-none justify-center items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'camera'
+                                ? 'bg-sky-600 text-white shadow-lg shadow-sky-500/30'
+                                : 'text-gray-400 hover:text-white hover:bg-white/10'
+                                }`}
+                        >
+                            <FontAwesomeIcon icon={faCamera} />
+                            {LABEL_CAMERA}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -81,6 +94,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
             <div className="panel-content p-4 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
                 {activeTab === 'memo' && <QuickMemoEditor />}
                 {activeTab === 'calculator' && <Calculator />}
+                {activeTab === 'camera' && <QuickCameraCapture />}
             </div>
         </aside>
     );
