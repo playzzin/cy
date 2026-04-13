@@ -29,7 +29,7 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
     }, [isOpen]);
 
     return (
-        <aside id="bottom-panel" className={`panel ${isOpen ? 'open' : ''}`}>
+        <aside id="bottom-panel" data-capture-exclude="true" className={`panel ${isOpen ? 'open' : ''}`}>
             <div className="flex flex-col border-b border-white/10">
                 <div className="flex justify-between items-center px-4 py-3">
                     <div className="flex items-center gap-2">

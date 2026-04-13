@@ -97,6 +97,7 @@ const copyBlobToClipboard = async (blob: Blob): Promise<boolean> => {
 const QuickCameraCapture: React.FC = () => {
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionRect, setSelectionRect] = useState<Rect | null>(null);
+    const [cursorPoint, setCursorPoint] = useState<{ x: number; y: number } | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [message, setMessage] = useState<string>('영역 선택 후 클립보드에 바로 복사할 수 있습니다.');
     const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
@@ -110,6 +111,7 @@ const QuickCameraCapture: React.FC = () => {
         draggingRef.current = false;
         dragStartRef.current = null;
         setSelectionRect(null);
+        setCursorPoint(null);
     };
 
     const startSelection = () => {
@@ -118,6 +120,7 @@ const QuickCameraCapture: React.FC = () => {
         draggingRef.current = false;
         dragStartRef.current = null;
         setSelectionRect(null);
+        setCursorPoint(null);
         setIsSelecting(true);
     };
 
@@ -195,6 +198,9 @@ const QuickCameraCapture: React.FC = () => {
                 scrollY: -window.scrollY,
                 windowWidth: document.documentElement.clientWidth,
                 windowHeight: document.documentElement.clientHeight,
+                ignoreElements: (element: Element) => {
+                    return !!element.closest('[data-capture-exclude="true"]');
+                },
                 logging: false
             });
 
@@ -271,6 +277,7 @@ const QuickCameraCapture: React.FC = () => {
         if (!isSelecting || isProcessing) return;
         e.preventDefault();
         const start = clampPointToViewport(e.clientX, e.clientY);
+        setCursorPoint(start);
         dragStartRef.current = start;
         draggingRef.current = true;
         setSelectionRect({ left: start.x, top: start.y, width: 0, height: 0 });
@@ -293,9 +300,42 @@ const QuickCameraCapture: React.FC = () => {
     useEffect(() => {
         if (!isSelecting) return;
 
+        const excludedRoots = Array.from(document.querySelectorAll<HTMLElement>('[data-capture-exclude="true"]'));
+        const prevInlineStyles = excludedRoots.map((el) => ({
+            el,
+            opacity: el.style.opacity,
+            pointerEvents: el.style.pointerEvents,
+            filter: el.style.filter,
+            transform: el.style.transform,
+            transition: el.style.transition
+        }));
+
+        excludedRoots.forEach((el) => {
+            el.style.transition = 'opacity 120ms ease, filter 120ms ease, transform 120ms ease';
+            el.style.opacity = '0.08';
+            el.style.pointerEvents = 'none';
+            el.style.filter = 'grayscale(0.4) blur(1px)';
+            el.style.transform = 'translateY(2px) scale(0.995)';
+        });
+
+        return () => {
+            prevInlineStyles.forEach(({ el, opacity, pointerEvents, filter, transform, transition }) => {
+                el.style.opacity = opacity;
+                el.style.pointerEvents = pointerEvents;
+                el.style.filter = filter;
+                el.style.transform = transform;
+                el.style.transition = transition;
+            });
+        };
+    }, [isSelecting]);
+
+    useEffect(() => {
+        if (!isSelecting) return;
+
         const handlePointerMove = (e: PointerEvent) => {
-            if (!draggingRef.current || !dragStartRef.current) return;
             const point = clampPointToViewport(e.clientX, e.clientY);
+            setCursorPoint(point);
+            if (!draggingRef.current || !dragStartRef.current) return;
             setSelectionRect(buildRect(dragStartRef.current, point));
         };
 
@@ -498,18 +538,38 @@ const QuickCameraCapture: React.FC = () => {
             >
                 {selectionRect && (
                     <div
-                        className="absolute border-2 border-sky-400 bg-sky-300/20"
+                        className="absolute border-[3px] border-black bg-sky-300/18 shadow-[0_0_0_1px_rgba(255,255,255,0.9)]"
                         style={{
                             left: selectionRect.left,
                             top: selectionRect.top,
                             width: selectionRect.width,
                             height: selectionRect.height
                         }}
-                    />
+                    >
+                        <span className="absolute -left-1.5 -top-1.5 h-3 w-3 rounded-full border border-white bg-black" />
+                        <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rounded-full border border-white bg-black" />
+                        <span className="absolute -left-1.5 -bottom-1.5 h-3 w-3 rounded-full border border-white bg-black" />
+                        <span className="absolute -right-1.5 -bottom-1.5 h-3 w-3 rounded-full border border-white bg-black" />
+                    </div>
                 )}
                 <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded-md bg-black/70 px-3 py-1.5 text-xs text-white">
                     마우스로 영역을 드래그한 뒤 놓으면 자동 복사됩니다. (ESC 취소)
                 </div>
+                {cursorPoint && (
+                    <div
+                        className="pointer-events-none absolute"
+                        style={{
+                            left: cursorPoint.x,
+                            top: cursorPoint.y,
+                            transform: 'translate(-50%, -50%)'
+                        }}
+                    >
+                        <span className="absolute -left-[9px] -top-[9px] h-[18px] w-[18px] rounded-full border-[3px] border-black bg-white/70" />
+                        <span className="absolute -left-[2px] -top-[10px] h-[20px] w-1 rounded bg-black" />
+                        <span className="absolute -left-[10px] -top-[2px] h-1 w-[20px] rounded bg-black" />
+                        <span className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-black" />
+                    </div>
+                )}
             </div>,
             document.body
         )}
