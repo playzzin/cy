@@ -153,6 +153,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             { text: "디자인 관리", icon: "fa-palette" },
             { text: "회사소개", icon: "fa-building" },
             { text: "대표 인사말", icon: "fa-user-tie" },
+            { text: "오시는 길", icon: "fa-route", path: "/cheongyeon/directions" },
             { text: "프로젝트", icon: "fa-project-diagram", path: "/gallery/projects" },
             { text: "조직도", icon: "fa-sitemap", path: "/cheongyeon/organization" }
         ]

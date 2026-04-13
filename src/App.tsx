@@ -142,6 +142,7 @@ import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPag
 import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
 import CheongyeonHistoryPage from './pages/cheongyeon/CheongyeonHistoryPage';
+import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
 import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 import AccountManagementPage from './pages/database/AccountManagementPage';
@@ -483,6 +484,7 @@ const App: React.FC = () => {
             <Route path="/cheongyeon/greeting" element={<CheongyeonGreetingPage />} />
             <Route path="/cheongyeon/directions" element={<CheongyeonDirectionsPage />} />
             <Route path="/cheongyeon/tech-vision" element={<CheongyeonTechVisionPage />} />
+            <Route path="/cheongyeon/philosophy" element={<CheongyeonPhilosophyPage />} />
             <Route path="/cheongyeon/history" element={<CheongyeonHistoryPage />} />
 
             {/* Company */}

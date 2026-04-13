@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import styled from 'styled-components';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
+import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCopy, faSearch, faCheckSquare, faSquare, faFilter, faIdCard, faImage, faDownload } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
@@ -283,6 +284,13 @@ const copyHtmlToClipboard = async (html: string) => {
     }
 };
 
+const normalizeText = (value?: string | null) => String(value ?? '').trim().toLowerCase();
+
+const isCheongyeonCompanyName = (value?: string | null) => {
+    const normalized = normalizeText(value).replace(/\s+/g, '');
+    return normalized.includes('청연');
+};
+
 const WorkerSummaryPage: React.FC = () => {
     const summaryRef = React.useRef<HTMLTableElement>(null);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -301,19 +309,46 @@ const WorkerSummaryPage: React.FC = () => {
         const loadData = async () => {
             try {
                 setLoading(true);
-                const [allWorkers, allTeams] = await Promise.all([
+                const [allWorkers, allTeams, allCompanies] = await Promise.all([
                     manpowerService.getWorkers(),
-                    teamService.getTeams()
+                    teamService.getTeams(),
+                    companyService.getCompanies()
                 ]);
 
                 // Active workers only
                 const activeWorkers = allWorkers.filter(w => w.status !== '퇴사' && w.status !== 'inactive' && w.status !== '출입금지');
 
+                const cheongyeonCompanies = allCompanies.filter((company) => isCheongyeonCompanyName(company.name));
+                const cheongyeonCompanyIds = new Set(
+                    cheongyeonCompanies
+                        .map((company) => String(company.id ?? '').trim())
+                        .filter((id) => id.length > 0)
+                );
+                const cheongyeonCompanyNames = new Set(
+                    cheongyeonCompanies
+                        .map((company) => normalizeText(company.name))
+                        .filter((name) => name.length > 0)
+                );
+                const allowedTeams = allTeams
+                    .filter((team) => {
+                        const teamCompanyId = String(team.companyId ?? '').trim();
+                        const teamCompanyName = normalizeText(team.companyName);
+
+                        if (teamCompanyId && cheongyeonCompanyIds.has(teamCompanyId)) return true;
+                        if (teamCompanyName && cheongyeonCompanyNames.has(teamCompanyName)) return true;
+                        return isCheongyeonCompanyName(team.companyName);
+                    })
+                    .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
+
                 setWorkers(activeWorkers);
-                setTeams(allTeams);
+                setTeams(allowedTeams);
+                setSelectedTeam((prev) => {
+                    if (!prev) return '';
+                    return allowedTeams.some((team) => String(team.id ?? '') === prev) ? prev : '';
+                });
 
                 // Default select first team if available
-                if (allTeams.length > 0) {
+                if (allowedTeams.length > 0) {
                     // setSelectedTeam(allTeams[0].id || '');
                 }
             } catch (error) {
@@ -333,11 +368,18 @@ const WorkerSummaryPage: React.FC = () => {
 
         if (selectedTeam) {
             const targetTeam = teams.find(t => t.id === selectedTeam);
-            const targetTeamName = targetTeam?.name;
+            const teamIdCandidates = new Set(
+                [
+                    String(selectedTeam),
+                    String(targetTeam?.id ?? ''),
+                    String(targetTeam?.legacyId ?? '')
+                ].map((value) => value.trim()).filter((value) => value.length > 0)
+            );
+            const targetTeamName = normalizeText(targetTeam?.name);
 
             result = result.filter(w =>
-                w.teamId === selectedTeam ||
-                (targetTeamName && w.teamName === targetTeamName)
+                teamIdCandidates.has(String(w.teamId ?? '').trim()) ||
+                (targetTeamName.length > 0 && normalizeText(w.teamName) === targetTeamName)
             );
         }
 

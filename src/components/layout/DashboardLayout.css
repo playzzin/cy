@@ -276,28 +276,64 @@ a {
     letter-spacing: 0.01em;
     color: #dbeafe;
     border-bottom: 2px solid transparent;
-    transition: all 0.2s ease;
+    transition: color 0.22s ease, border-color 0.22s ease, transform 0.22s ease;
+    position: relative;
+}
+
+.cheongyeon-top-nav-link::after {
+    content: '';
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 10px;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #22d3ee, #0ea5e9);
+    transform: scaleX(0.2);
+    transform-origin: center;
+    opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease;
 }
 
 .cheongyeon-top-nav-link:hover,
 .cheongyeon-top-nav-link.active {
     color: #f8fafc;
     border-bottom-color: #22d3ee;
+    transform: translateY(-1px);
+}
+
+.cheongyeon-top-nav-link:hover::after,
+.cheongyeon-top-nav-link.active::after {
+    opacity: 1;
+    transform: scaleX(1);
 }
 
 .cheongyeon-top-nav-dropdown {
     position: absolute;
-    top: calc(100% - 1px);
+    top: calc(100% + 2px);
     left: 50%;
     transform: translateX(-50%);
-    min-width: 320px;
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 14px;
-    box-shadow: 0 18px 45px rgba(2, 6, 23, 0.45);
-    padding: 14px;
+    min-width: 300px;
+    background: rgba(15, 23, 42, 0.97);
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    border-radius: 12px;
+    box-shadow: 0 14px 34px rgba(2, 6, 23, 0.42);
+    padding: 12px;
     z-index: 1200;
-    animation: cheongyeonNavDrop 0.18s ease-out;
+    animation: cheongyeonNavDrop 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cheongyeon-top-nav-dropdown::before {
+    content: '';
+    position: absolute;
+    top: -6px;
+    left: calc(50% - 8px);
+    width: 16px;
+    height: 16px;
+    background: rgba(15, 23, 42, 0.97);
+    border-top: 1px solid rgba(148, 163, 184, 0.26);
+    border-left: 1px solid rgba(148, 163, 184, 0.26);
+    transform: rotate(45deg);
 }
 
 .cheongyeon-top-nav-dropdown-grid {
@@ -310,19 +346,20 @@ a {
     text-align: left;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0;
     width: 100%;
-    border-radius: 10px;
+    border-radius: 9px;
     border: 1px solid transparent;
-    background: rgba(30, 41, 59, 0.45);
-    padding: 10px 12px;
-    transition: all 0.2s ease;
+    background: rgba(30, 41, 59, 0.36);
+    padding: 11px 12px;
+    transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
 }
 
 .cheongyeon-top-nav-sub-item:hover,
 .cheongyeon-top-nav-sub-item.active {
     border-color: rgba(34, 211, 238, 0.45);
     background: rgba(8, 47, 73, 0.55);
+    transform: translateY(-1px);
 }
 
 .cheongyeon-top-nav-sub-title {
@@ -340,12 +377,42 @@ a {
 @keyframes cheongyeonNavDrop {
     from {
         opacity: 0;
-        transform: translateX(-50%) translateY(-6px);
+        transform: translateX(-50%) translateY(-10px) scale(0.98);
     }
     to {
         opacity: 1;
-        transform: translateX(-50%) translateY(0);
+        transform: translateX(-50%) translateY(0) scale(1);
     }
+}
+
+.cheongyeon-header-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    background: rgba(15, 23, 42, 0.32);
+    overflow: hidden;
+    transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.cheongyeon-header-logo:hover {
+    transform: translateY(-1px);
+    border-color: rgba(34, 211, 238, 0.55);
+    background: rgba(8, 47, 73, 0.45);
+}
+
+.cheongyeon-header-logo-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.cheongyeon-header-logo-icon {
+    font-size: 18px;
+    color: #22d3ee;
 }
 
 @media (max-width: 1280px) {
@@ -439,10 +506,20 @@ a {
     border-bottom-color: #0ea5e9 !important;
 }
 
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-link::after {
+    background: linear-gradient(90deg, #06b6d4, #0284c7);
+}
+
 .app.cheongyeon-mode.cy-light .cheongyeon-top-nav-dropdown {
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%) !important;
+    background: #ffffff !important;
     border: 1px solid #e5e7eb !important;
     box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1) !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-top-nav-dropdown::before {
+    background: #ffffff !important;
+    border-top: 1px solid #e5e7eb !important;
+    border-left: 1px solid #e5e7eb !important;
 }
 
 .app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-item {
@@ -462,6 +539,20 @@ a {
 
 .app.cheongyeon-mode.cy-light .cheongyeon-top-nav-sub-desc {
     color: #6b7280 !important;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header-logo {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header-logo:hover {
+    border-color: #0ea5e9;
+    background: #eff6ff;
+}
+
+.app.cheongyeon-mode.cy-light .cheongyeon-header-logo-icon {
+    color: #0284c7;
 }
 
 /* 라이트모드: Tailwind 다크 slate 배경 → 밝은 색으로 재정의 */

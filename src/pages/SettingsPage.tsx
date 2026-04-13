@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import UserAndRoleManagementSection from './settings/UserAndRoleManagementSection';
 import DataManagementSection from './settings/DataManagementSection';
 
-import SystemConfigurationSection from './settings/SystemConfigurationSection';
+import SystemBrandingSection from './settings/SystemBrandingSection';
 
 const SettingsPage: React.FC = () => {
     return (
@@ -37,7 +37,7 @@ const SettingsPage: React.FC = () => {
                             </Link>
                         </div>
                     </section>
-                    <SystemConfigurationSection />
+                    <SystemBrandingSection />
                     <UserAndRoleManagementSection />
                     <DataManagementSection />
                 </div>

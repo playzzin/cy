@@ -72,8 +72,23 @@ const Header: React.FC<HeaderProps> = ({
     const location = useLocation();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [activeTopNavKey, setActiveTopNavKey] = useState<string | null>(null);
+    const topNavCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const profileRef = useRef<HTMLDivElement>(null);
     const positionPanelRef = useRef<HTMLDivElement>(null);
+
+    const clearTopNavCloseTimer = () => {
+        if (topNavCloseTimerRef.current) {
+            clearTimeout(topNavCloseTimerRef.current);
+            topNavCloseTimerRef.current = null;
+        }
+    };
+
+    const scheduleTopNavClose = () => {
+        clearTopNavCloseTimer();
+        topNavCloseTimerRef.current = setTimeout(() => {
+            setActiveTopNavKey(null);
+        }, 180);
+    };
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -96,6 +111,7 @@ const Header: React.FC<HeaderProps> = ({
         document.addEventListener('mousedown', handleClickOutside);
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+            clearTopNavCloseTimer();
         };
     }, [isPositionPanelOpen, togglePanel]);
 
@@ -208,6 +224,28 @@ const Header: React.FC<HeaderProps> = ({
                     <FontAwesomeIcon icon={faBars} />
                 </button>
 
+                {isCheongyeon && (
+                    <button
+                        type="button"
+                        className="cheongyeon-header-logo"
+                        onClick={() => navigate('/dashboard2')}
+                        aria-label="청연 메인으로 이동"
+                    >
+                        {logoUrl ? (
+                            <img
+                                src={logoUrl}
+                                alt="청연 로고"
+                                className="cheongyeon-header-logo-image"
+                            />
+                        ) : (
+                            <FontAwesomeIcon
+                                icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
+                                className="cheongyeon-header-logo-icon"
+                            />
+                        )}
+                    </button>
+                )}
+
                 <div className="mobile-logo-area">
                     {logoUrl ? (
                         <img 
@@ -225,13 +263,17 @@ const Header: React.FC<HeaderProps> = ({
             {isCheongyeon && (
                 <nav
                     className="cheongyeon-top-nav"
-                    onMouseLeave={() => setActiveTopNavKey(null)}
+                    onMouseEnter={clearTopNavCloseTimer}
+                    onMouseLeave={scheduleTopNavClose}
                 >
                     {cheongyeonTopNav.map((section) => (
                         <div
                             key={section.key}
                             className="cheongyeon-top-nav-item"
-                            onMouseEnter={() => setActiveTopNavKey(section.key)}
+                            onMouseEnter={() => {
+                                clearTopNavCloseTimer();
+                                setActiveTopNavKey(section.key);
+                            }}
                         >
                             <button
                                 type="button"
@@ -242,7 +284,7 @@ const Header: React.FC<HeaderProps> = ({
                             </button>
 
                             {activeTopNavKey === section.key && section.children.length > 0 && (
-                                <div className="cheongyeon-top-nav-dropdown">
+                                <div className="cheongyeon-top-nav-dropdown" onMouseEnter={clearTopNavCloseTimer} onMouseLeave={scheduleTopNavClose}>
                                     <div className="cheongyeon-top-nav-dropdown-grid">
                                         {section.children.map((child) => (
                                             <button
@@ -252,7 +294,6 @@ const Header: React.FC<HeaderProps> = ({
                                                 onClick={() => handleTopNavRoute(child.path)}
                                             >
                                                 <span className="cheongyeon-top-nav-sub-title">{child.label}</span>
-                                                <span className="cheongyeon-top-nav-sub-desc">{child.sourceGroup || section.label}</span>
                                             </button>
                                         ))}
                                     </div>

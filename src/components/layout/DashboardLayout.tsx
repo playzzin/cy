@@ -213,8 +213,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         };
     }, [currentUser, siteData]); // Re-run when siteData is loaded
 
-    // Real-time System Config Listener (Logo, Favicon)
-    const [systemConfig, setSystemConfig] = useState<{ logoUrl?: string, faviconUrl?: string }>({});
+    // Real-time System Config Listener (ERP/SITE logo & favicon)
+    const [systemConfig, setSystemConfig] = useState<{
+        logoUrl?: string;
+        faviconUrl?: string;
+        erpLogoUrl?: string;
+        siteLogoUrl?: string;
+        erpFaviconUrl?: string;
+        siteFaviconUrl?: string;
+    }>({});
 
     useEffect(() => {
         const setupConfigListener = async () => {
@@ -226,21 +233,12 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     const data = docSnap.data();
                     setSystemConfig({
                         logoUrl: data.logoUrl,
-                        faviconUrl: data.faviconUrl
+                        faviconUrl: data.faviconUrl,
+                        erpLogoUrl: data.erpLogoUrl,
+                        siteLogoUrl: data.siteLogoUrl,
+                        erpFaviconUrl: data.erpFaviconUrl,
+                        siteFaviconUrl: data.siteFaviconUrl,
                     });
-
-                    // Update browser favicon
-                    if (data.faviconUrl) {
-                        const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
-                        if (link) {
-                            link.href = data.faviconUrl;
-                        } else {
-                            const newLink = document.createElement('link');
-                            newLink.rel = 'icon';
-                            newLink.href = data.faviconUrl;
-                            document.head.appendChild(newLink);
-                        }
-                    }
                 }
             });
 
@@ -256,6 +254,28 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             if (unsubscribe) unsubscribe();
         };
     }, []);
+
+    const activeLogoUrl = currentSite === 'test'
+        ? (systemConfig.siteLogoUrl || systemConfig.logoUrl)
+        : (systemConfig.erpLogoUrl || systemConfig.logoUrl);
+
+    useEffect(() => {
+        const faviconUrl = currentSite === 'test'
+            ? (systemConfig.siteFaviconUrl || systemConfig.faviconUrl)
+            : (systemConfig.erpFaviconUrl || systemConfig.faviconUrl);
+
+        if (!faviconUrl) return;
+
+        const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+        if (link) {
+            link.href = faviconUrl;
+        } else {
+            const newLink = document.createElement('link');
+            newLink.rel = 'icon';
+            newLink.href = faviconUrl;
+            document.head.appendChild(newLink);
+        }
+    }, [currentSite, systemConfig.siteFaviconUrl, systemConfig.erpFaviconUrl, systemConfig.faviconUrl]);
 
     const toggleSidebar = () => {
         closePanels();
@@ -495,6 +515,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         currentSite={currentSite}
                         changeSite={changeSite}
                         menuPaths={menuPaths}
+                        logoUrl={activeLogoUrl}
                         isDarkMode={isDarkMode}
                         toggleDarkMode={toggleDarkMode}
                     />
@@ -517,7 +538,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                             isMobile={isMobile}
                             openMobileSidebar={() => setIsMobileOpen(true)}
                             toggleSidebar={toggleSidebar}
-                            logoUrl={systemConfig.logoUrl}
+                            logoUrl={activeLogoUrl}
                         />
                     </ErrorBoundary>
 
@@ -577,6 +598,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     currentSite={currentSite}
                     changeSite={changeSite}
                     menuPaths={menuPaths}
+                    logoUrl={activeLogoUrl}
                 />
 
                 <ErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
@@ -596,7 +618,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         isMobile={isMobile}
                         openMobileSidebar={() => setIsMobileOpen(true)}
                         toggleSidebar={toggleSidebar}
-                        logoUrl={systemConfig.logoUrl}
+                        logoUrl={activeLogoUrl}
                     />
                 </ErrorBoundary>
 

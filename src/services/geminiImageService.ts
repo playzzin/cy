@@ -519,30 +519,52 @@ export function deleteCustomCategory(key: string): CustomCategory[] {
 
 // --- Favicon & Logo Application ---
 
-const FAVICON_PATH = 'settings/favicon';
-const LOGO_PATH = 'settings/company_logo';
+export type BrandingTarget = 'erp' | 'site';
 
-export async function applyAsFavicon(imageUrl: string): Promise<{ success: boolean; error?: string }> {
+const BRANDING_PATHS: Record<BrandingTarget, { faviconPath: string; logoPath: string; faviconField: string; logoField: string }> = {
+    erp: {
+        faviconPath: 'settings/erp_favicon',
+        logoPath: 'settings/erp_logo',
+        faviconField: 'erpFaviconUrl',
+        logoField: 'erpLogoUrl',
+    },
+    site: {
+        faviconPath: 'settings/site_favicon',
+        logoPath: 'settings/site_logo',
+        faviconField: 'siteFaviconUrl',
+        logoField: 'siteLogoUrl',
+    },
+};
+
+export async function applyAsFavicon(imageUrl: string, target: BrandingTarget = 'site'): Promise<{ success: boolean; error?: string }> {
     try {
         const { db } = await import('../config/firebase');
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+        const targetPaths = BRANDING_PATHS[target];
 
-        // Download the image and re-upload to settings/favicon
+        // Download the image and re-upload to target favicon path
         const response = await fetch(imageUrl);
         const blob = await response.blob();
-        const storageRefObj = ref(storage, FAVICON_PATH);
+        const storageRefObj = ref(storage, targetPaths.faviconPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
 
         // Get the official Download URL
         const faviconUrl = await getDownloadURL(storageRefObj);
 
         // SYNC: Update Firestore for real-time reactivity
+        const patch: Record<string, any> = {
+            [targetPaths.faviconField]: faviconUrl,
+            [`${targetPaths.faviconField}UpdatedAt`]: serverTimestamp()
+        };
+        if (target === 'site') {
+            patch.faviconUrl = faviconUrl;
+            patch.faviconUpdatedAt = serverTimestamp();
+        }
         await setDoc(doc(db, 'settings', 'system_config'), {
-            faviconUrl,
-            faviconUpdatedAt: serverTimestamp()
+            ...patch
         }, { merge: true });
 
-        // Update browser favicon immediately (as a fallback/immediate effect)
+        // Update browser favicon immediately
         const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
         if (link) {
             link.href = faviconUrl;
@@ -560,21 +582,29 @@ export async function applyAsFavicon(imageUrl: string): Promise<{ success: boole
     }
 }
 
-export async function applyAsLogo(imageUrl: string): Promise<{ success: boolean; url?: string; error?: string }> {
+export async function applyAsLogo(imageUrl: string, target: BrandingTarget = 'site'): Promise<{ success: boolean; url?: string; error?: string }> {
     try {
         const { db } = await import('../config/firebase');
         const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+        const targetPaths = BRANDING_PATHS[target];
 
         const response = await fetch(imageUrl);
         const blob = await response.blob();
-        const storageRefObj = ref(storage, LOGO_PATH);
+        const storageRefObj = ref(storage, targetPaths.logoPath);
         await uploadBytes(storageRefObj, blob, { contentType: blob.type });
         const url = await getDownloadURL(storageRefObj);
 
         // SYNC: Update Firestore for real-time reactivity
+        const patch: Record<string, any> = {
+            [targetPaths.logoField]: url,
+            [`${targetPaths.logoField}UpdatedAt`]: serverTimestamp()
+        };
+        if (target === 'site') {
+            patch.logoUrl = url;
+            patch.logoUpdatedAt = serverTimestamp();
+        }
         await setDoc(doc(db, 'settings', 'system_config'), {
-            logoUrl: url,
-            logoUpdatedAt: serverTimestamp()
+            ...patch
         }, { merge: true });
 
         return { success: true, url };
@@ -584,17 +614,17 @@ export async function applyAsLogo(imageUrl: string): Promise<{ success: boolean;
     }
 }
 
-export async function getCurrentFaviconUrl(): Promise<string | null> {
+export async function getCurrentFaviconUrl(target: BrandingTarget = 'site'): Promise<string | null> {
     try {
-        return await getDownloadURL(ref(storage, FAVICON_PATH));
+        return await getDownloadURL(ref(storage, BRANDING_PATHS[target].faviconPath));
     } catch {
         return null;
     }
 }
 
-export async function getCurrentLogoUrl(): Promise<string | null> {
+export async function getCurrentLogoUrl(target: BrandingTarget = 'site'): Promise<string | null> {
     try {
-        return await getDownloadURL(ref(storage, LOGO_PATH));
+        return await getDownloadURL(ref(storage, BRANDING_PATHS[target].logoPath));
     } catch {
         return null;
     }
