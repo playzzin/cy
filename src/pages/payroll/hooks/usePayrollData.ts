@@ -242,6 +242,16 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
   const laborAdvance2 = record.items?.laborAdvance2;
   const laborAdvance3 = record.items?.laborAdvance3;
   const laborAdvance4 = record.items?.laborAdvance4;
+  const normalizedItemAssignments = Object.entries(record.itemAssignments ?? {}).reduce<Record<string, 'corporate' | 'labor'>>((acc, [key, value]) => {
+    const normalizedKey =
+      key === 'accommodation' ? 'lodging'
+        : key === 'maintenance' ? 'management'
+          : key === 'fines' ? 'fine'
+            : key;
+    if (!normalizedKey) return acc;
+    acc[normalizedKey] = value;
+    return acc;
+  }, {});
 
   return {
     invoice: {
@@ -254,10 +264,6 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       electricity: toNumber(record.electricity),
       gas: toNumber(record.gas),
       water: toNumber(record.water),
-      internet: toNumber(record.internet),
-      management: toNumber(record.items?.management ?? record.items?.maintenance),
-      fine: toNumber(record.fines),
-      other: toNumber(record.items?.other),
     },
     labor: {
       ...createEmptyLedgerSideInput(),
@@ -265,10 +271,14 @@ const buildManualInputFromAdvanceRecord = (record?: AdvancePayment): LedgerManua
       carrySecond: toNumber(laborAdvance2),
       currentAdvance: toNumber(laborAdvance3),
       currentAdvanceSecond: toNumber(laborAdvance4),
+      internet: toNumber(record.internet),
+      management: toNumber(record.items?.management ?? record.items?.maintenance),
+      fine: toNumber(record.fines),
+      other: toNumber(record.items?.other),
     },
     personalMemo: String(record.memo ?? ''),
     assignmentType: (record.assignmentType === 'corporate' ? 'corporate' : 'labor'),
-    itemAssignments: record.itemAssignments ?? {},
+    itemAssignments: normalizedItemAssignments,
   };
 };
 

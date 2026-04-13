@@ -806,6 +806,18 @@ const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionL
     }, []);
 };
 
+const buildVisibleUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
+    if (!manual) return [];
+
+    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
+        const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
+        if (amount <= 0) return acc;
+
+        acc.push({ label: field.label, amount });
+        return acc;
+    }, []);
+};
+
 const mergeDeductionBreakdownWithLines = (
     breakdown: DeductionBreakdown | undefined,
     lines: DeductionLine[]
@@ -2485,7 +2497,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const applyDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const payrollConfigRef = React.useRef(payrollConfig);
     const normalizeTeamNameRef = React.useRef(normalizeTeamName);
-    const buildUtilityDeductionLinesRef = React.useRef(buildUtilityDeductionLines);
+    const buildUtilityDeductionLinesRef = React.useRef(buildVisibleUtilityDeductionLines);
     const mergeDeductionBreakdownWithLinesRef = React.useRef(mergeDeductionBreakdownWithLines);
     const calculateWorkEntryTaxBreakdownRef = React.useRef(calculateWorkEntryTaxBreakdown);
     const rebuildDeductionBreakdownRef = React.useRef(rebuildDeductionBreakdown);
@@ -2531,7 +2543,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         paymentDataRef.current = paymentData;
         payrollConfigRef.current = payrollConfig;
         normalizeTeamNameRef.current = normalizeTeamName;
-        buildUtilityDeductionLinesRef.current = buildUtilityDeductionLines;
+        buildUtilityDeductionLinesRef.current = buildVisibleUtilityDeductionLines;
         mergeDeductionBreakdownWithLinesRef.current = mergeDeductionBreakdownWithLines;
         calculateWorkEntryTaxBreakdownRef.current = calculateWorkEntryTaxBreakdown;
         rebuildDeductionBreakdownRef.current = rebuildDeductionBreakdown;
@@ -2542,7 +2554,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         utilityInputByPaymentRowKeyRef.current = utilityInputByPaymentRowKey;
         utilityInputByWorkerMonthSingleRef.current = utilityInputByWorkerMonthSingle;
         mergeUtilityInputRef.current = mergeUtilityInput;
-    }, [basePaymentData, paymentData, payrollConfig, normalizeTeamName, buildUtilityDeductionLines, mergeDeductionBreakdownWithLines, calculateWorkEntryTaxBreakdown, rebuildDeductionBreakdown, stripTemporaryDeductionLines, stripTemporaryTaxLines, ledgerInputs, ledgerRowsData, utilityInputByPaymentRowKey, utilityInputByWorkerMonthSingle, mergeUtilityInput]);
+    }, [basePaymentData, paymentData, payrollConfig, normalizeTeamName, mergeDeductionBreakdownWithLines, calculateWorkEntryTaxBreakdown, rebuildDeductionBreakdown, stripTemporaryDeductionLines, stripTemporaryTaxLines, ledgerInputs, ledgerRowsData, utilityInputByPaymentRowKey, utilityInputByWorkerMonthSingle, mergeUtilityInput]);
 
     React.useEffect(() => {
         return () => {
@@ -2826,7 +2838,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
         const utilityInput = resolveUtilityInputForPaymentItem(payslipTarget);
 
-        const utilityLines = utilitiesApplied ? buildUtilityDeductionLines(utilityInput) : [];
+        const utilityLines = utilitiesApplied ? buildVisibleUtilityDeductionLines(utilityInput) : [];
         const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
         const dailyFeeLines = buildDailyFeeDeductionLines({
             item: payslipTarget,
@@ -3188,7 +3200,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                 utilityInputForDisplay = utilityInputByWorkerMonthSingle.get(monthWorkerKey);
             }
 
-            const utilityLinesForDisplay = utilitiesApplied ? buildUtilityDeductionLines(utilityInputForDisplay) : [];
+            const utilityLinesForDisplay = utilitiesApplied ? buildVisibleUtilityDeductionLines(utilityInputForDisplay) : [];
             const dailyFeeLinesForDisplay = buildDailyFeeDeductionLines({
                 item,
                 applyDailyFee: dailyFeeApplied,
