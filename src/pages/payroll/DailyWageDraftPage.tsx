@@ -45,18 +45,28 @@ type DraftRowTotals = {
 
 type ViewMode = 'daily' | 'monthly';
 
+type DeductionPreset = {
+    actual: number;
+    billing: number;
+    report: number;
+};
+
 type DailyWageDraftPageProps = {
     embedded?: boolean;
     dateOverride?: string;
     monthOverride?: string;
     viewModeOverride?: ViewMode;
+    deductionStorageKey?: string;
 };
+
+const DEFAULT_DEDUCTION_STORAGE_KEY = 'daily-wage-draft:deductions';
 
 const DailyWageDraftPage: React.FC<DailyWageDraftPageProps> = ({
     embedded = false,
     dateOverride,
     monthOverride,
     viewModeOverride,
+    deductionStorageKey,
 }) => {
     const navigate = useNavigate();
 
@@ -92,6 +102,8 @@ const DailyWageDraftPage: React.FC<DailyWageDraftPageProps> = ({
 
     const [showAccountColumns, setShowAccountColumns] = useState<boolean>(false);
     const [isFixed, setIsFixed] = useState<boolean>(true);
+
+    const resolvedDeductionStorageKey = deductionStorageKey || DEFAULT_DEDUCTION_STORAGE_KEY;
 
     // Lock parent scroll for internal scrolling
     useEffect(() => {
@@ -135,6 +147,39 @@ const DailyWageDraftPage: React.FC<DailyWageDraftPageProps> = ({
             setSelectedMonth(nextMonth);
         }
     }, [dateOverride, toYearMonth]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        try {
+            const raw = window.localStorage.getItem(resolvedDeductionStorageKey);
+            if (!raw) return;
+            const parsed = JSON.parse(raw) as Partial<DeductionPreset>;
+            setBulkActualDeductionUnitPrice(Number(parsed.actual) || 0);
+            setBulkBillingDeductionUnitPrice(Number(parsed.billing) || 0);
+            setBulkReportDeductionUnitPrice(Number(parsed.report) || 0);
+        } catch (error) {
+            console.warn('Failed to load deduction preset:', error);
+        }
+    }, [resolvedDeductionStorageKey]);
+
+    const handleSaveDeductionPreset = useCallback(() => {
+        if (typeof window === 'undefined') return;
+
+        const payload: DeductionPreset = {
+            actual: Math.max(0, bulkActualDeductionUnitPrice || 0),
+            billing: Math.max(0, bulkBillingDeductionUnitPrice || 0),
+            report: Math.max(0, bulkReportDeductionUnitPrice || 0),
+        };
+
+        window.localStorage.setItem(resolvedDeductionStorageKey, JSON.stringify(payload));
+        toast.success('차감 저장값을 저장했습니다.');
+    }, [
+        bulkActualDeductionUnitPrice,
+        bulkBillingDeductionUnitPrice,
+        bulkReportDeductionUnitPrice,
+        resolvedDeductionStorageKey,
+    ]);
 
     useEffect(() => {
         if (!monthOverride) return;
@@ -776,11 +821,21 @@ const DailyWageDraftPage: React.FC<DailyWageDraftPageProps> = ({
                                 </button>
                                 <button
                                     type="button"
+                                    onClick={handleSaveDeductionPreset}
+                                    className="bg-emerald-600 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold hover:bg-emerald-700"
+                                >
+                                    차감 저장
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={resetRows}
                                     className="bg-slate-500 text-white px-2.5 py-1 rounded-lg text-[11px] font-bold hover:bg-slate-600"
                                 >
                                     초기화
                                 </button>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                                저장한 차감값은 이 화면에서 자동으로 다시 불러옵니다.
                             </div>
                         </div>
 

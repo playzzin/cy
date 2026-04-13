@@ -16,7 +16,7 @@ import {
 import { aiSettingsService } from './aiSettingsService';
 
 // --- Types ---
-export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'custom';
+export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'dashboard-banner' | 'custom';
 
 export interface ImagePreset {
     key: ImageCategory;
@@ -96,6 +96,10 @@ export const IMAGE_PRESETS: Record<ImageCategory, ImagePreset> = {
     'custom': {
         key: 'custom', label: '커스텀', width: 1024, height: 1024, maxSizeKB: 2048,
         description: '사용자 지정 크기', promptHint: '원하는 이미지를 자유롭게 설명하세요.'
+    },
+    'dashboard-banner': {
+        key: 'dashboard-banner', label: '대시보드 배너', width: 1920, height: 800, maxSizeKB: 3072,
+        description: '청연 메인 상단 배너 (1920x800)', promptHint: '와이드하고 세련된 랜딩 페이지 메인 배너 이미지.'
     },
     'business-card': {
         key: 'business-card', label: '명함', width: 1024, height: 600, maxSizeKB: 1024,
@@ -318,7 +322,7 @@ export async function listGalleryImages(
 export async function migrateStorageToFirestore() {
     console.log('[GeminiImage] Starting migration...');
     const paths: string[] = [];
-    const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'birdseye', 'business-card', 'custom'];
+    const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'birdseye', 'business-card', 'dashboard-banner', 'custom'];
     categories.forEach(c => paths.push(`${STORAGE_BASE_PATH}/${c}`));
     paths.push(KAKAO_STORAGE_PATH);
 
@@ -593,5 +597,32 @@ export async function getCurrentLogoUrl(): Promise<string | null> {
         return await getDownloadURL(ref(storage, LOGO_PATH));
     } catch {
         return null;
+    }
+}
+
+export async function applyAsDashboardBanner(imageUrl: string, stepIndex: number): Promise<{ success: boolean; url?: string; error?: string }> {
+    try {
+        const { db } = await import('../config/firebase');
+        const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
+
+        const response = await fetch(imageUrl);
+        const blob = await response.blob();
+        const ext = blob.type.includes('png') ? 'png' : 'jpg';
+        const storagePath = `settings/dashboard_banners/step_${stepIndex}_${Date.now()}.${ext}`;
+        const storageRefObj = ref(storage, storagePath);
+        
+        await uploadBytes(storageRefObj, blob, { contentType: blob.type });
+        const finalUrl = await getDownloadURL(storageRefObj);
+
+        // SYNC: Update Firestore
+        await setDoc(doc(db, 'settings', 'cheongyeon_home'), {
+            [`banner_${stepIndex}`]: finalUrl,
+            [`banner_${stepIndex}_updatedAt`]: serverTimestamp()
+        }, { merge: true });
+
+        return { success: true, url: finalUrl };
+    } catch (error) {
+        console.error('[GeminiImage] Apply Dashboard Banner Error:', error);
+        return { success: false, error: error instanceof Error ? error.message : '배너 적용 실패' };
     }
 }

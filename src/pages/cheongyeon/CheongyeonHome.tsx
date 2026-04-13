@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRight, faPlay, faHelmetSafety, faChartLine, faNetworkWired, faUsers, faCalendarDays, faBuilding, faHandshake, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRight, faHelmetSafety, faChartLine, faNetworkWired, faUsers, faCalendarDays, faBuilding, faHandshake, faChevronLeft, faChevronRight } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, Variants } from 'framer-motion';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip } from 'recharts';
-import { storage } from '../../config/firebase';
+import { storage, db } from '../../config/firebase';
 import { ref, getDownloadURL } from 'firebase/storage';
+import { doc, getDoc } from 'firebase/firestore';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { companyService } from '../../services/companyService';
 import { useSiteMode } from '../../contexts/SiteModeContext';
 import logoConstruction from '../../assets/logo_construction.jpg';
 import ceoPortrait from '../../assets/ceo_portrait.png';
@@ -27,6 +29,13 @@ type SiteHighlight = {
     totalWorkers: number;
     teamNames: string[];
     workers: SiteWorkerHighlight[];
+};
+
+type CompanyProfile = {
+    name: string;
+    businessNumber: string;
+    phone: string;
+    address: string;
 };
 
 type HeroSlide = {
@@ -250,7 +259,7 @@ const statSectionVariant: Variants = {
     },
 };
 
-const HERO_SLIDES: HeroSlide[] = [
+const DEFAULT_HERO_SLIDES: HeroSlide[] = [
     {
         stage: '1단계 기획',
         title: '현장 분석과 공정 설계를 먼저 완성합니다',
@@ -333,12 +342,42 @@ const CheongyeonHome: React.FC = () => {
     const [trendMode, setTrendMode] = useState<'daily' | 'monthly'>('daily');
     const [summaryScope, setSummaryScope] = useState<'yesterday' | 'yearToDate'>('yesterday');
     const [activeHeroIndex, setActiveHeroIndex] = useState(0);
+    const [heroSlides, setHeroSlides] = useState<HeroSlide[]>(DEFAULT_HERO_SLIDES);
+    const [companyProfile, setCompanyProfile] = useState<CompanyProfile>({
+        name: '청연이엔지',
+        businessNumber: '',
+        phone: '',
+        address: '',
+    });
     const [animatedStats, setAnimatedStats] = useState<{ yesterday: DailyStatRow; yearToDate: DailyStatRow }>({
         yesterday: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
         yearToDate: { totalWorkers: 0, totalManDay: 0, siteCount: 0, teamCount: 0 },
     });
     const videoRef = useRef<HTMLVideoElement>(null);
     const navigate = useNavigate();
+
+    // Load custom banners from firestore
+    useEffect(() => {
+        const loadBanners = async () => {
+            try {
+                const docRef = doc(db, 'settings', 'cheongyeon_home');
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    setHeroSlides(prev => prev.map((slide, i) => {
+                        const step = i + 1;
+                        if (data[`banner_${step}`]) {
+                            return { ...slide, image: data[`banner_${step}`] };
+                        }
+                        return slide;
+                    }));
+                }
+            } catch (error) {
+                console.error('Failed to load dashboard banners:', error);
+            }
+        };
+        loadBanners();
+    }, []);
 
     // Firebase Storage에서 비디오 URL 동적으로 가져오기
     useEffect(() => {
@@ -497,6 +536,39 @@ const CheongyeonHome: React.FC = () => {
     }, []);
 
     useEffect(() => {
+        const loadCompanyProfile = async () => {
+            try {
+                const companies = await companyService.getCompanies();
+                const cheongyeonCompany =
+                    companies.find((company) => /청연|cheongyeon/i.test(String(company.name || ''))) ||
+                    companies.find((company) => String(company.type || '') === '시공사') ||
+                    null;
+
+                if (!cheongyeonCompany) {
+                    return;
+                }
+
+                setCompanyProfile({
+                    name: String(cheongyeonCompany.name || '청연이엔지'),
+                    businessNumber: String((cheongyeonCompany as any).businessNumber || '').trim(),
+                    phone: String((cheongyeonCompany as any).phone || '').trim(),
+                    address: String((cheongyeonCompany as any).address || '').trim(),
+                });
+            } catch (error) {
+                console.error('Failed to load company profile for dashboard2:', error);
+            }
+        };
+
+        loadCompanyProfile();
+    }, []);
+
+    const formatBusinessNumber = (value: string) => {
+        const digits = String(value || '').replace(/\D/g, '');
+        if (digits.length !== 10) return value || '정보 확인 중';
+        return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+    };
+
+    useEffect(() => {
         if (!dashboardStats || loadingStats) return;
 
         const duration = 2400;
@@ -551,15 +623,6 @@ const CheongyeonHome: React.FC = () => {
         }
     };
 
-    const handleReplayIntro = () => {
-        setIsIntro(true);
-        setPlayCount(0);
-        if (videoRef.current) {
-            videoRef.current.currentTime = 0;
-            videoRef.current.play();
-        }
-    };
-
     const formatStatValue = (value: number, decimals = 0): string => {
         if (decimals > 0) return value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
         return Math.round(value).toLocaleString();
@@ -586,21 +649,21 @@ const CheongyeonHome: React.FC = () => {
 
     useEffect(() => {
         const id = window.setInterval(() => {
-            setActiveHeroIndex((prev) => (prev + 1) % HERO_SLIDES.length);
+            setActiveHeroIndex((prev) => (prev + 1) % heroSlides.length);
         }, 5500);
 
         return () => window.clearInterval(id);
-    }, []);
+    }, [heroSlides.length]);
 
     const handlePrevHero = () => {
-        setActiveHeroIndex((prev) => (prev - 1 + HERO_SLIDES.length) % HERO_SLIDES.length);
+        setActiveHeroIndex((prev) => (prev - 1 + heroSlides.length) % heroSlides.length);
     };
 
     const handleNextHero = () => {
-        setActiveHeroIndex((prev) => (prev + 1) % HERO_SLIDES.length);
+        setActiveHeroIndex((prev) => (prev + 1) % heroSlides.length);
     };
 
-    const activeHero = HERO_SLIDES[activeHeroIndex];
+    const activeHero = heroSlides[activeHeroIndex];
 
     return (
         <div className={`relative min-h-screen ${isDarkMode ? 'bg-slate-900' : 'bg-slate-50'} overflow-x-hidden`}>
@@ -686,7 +749,7 @@ const CheongyeonHome: React.FC = () => {
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-2 bg-black/40">
-                            {HERO_SLIDES.map((slide, index) => (
+                            {heroSlides.map((slide, index) => (
                                 <button
                                     key={slide.stage}
                                     type="button"
@@ -710,14 +773,6 @@ const CheongyeonHome: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-4 mt-7">
-                        <button
-                            className="px-6 py-3 bg-transparent border border-amber-400/60 text-amber-200 rounded-full font-medium text-base transition-all flex items-center gap-2 group hover:bg-amber-500/10 hover:text-amber-300"
-                            onClick={handleReplayIntro}
-                        >
-                            <FontAwesomeIcon icon={faPlay} className="text-sm" /> 브랜드 영상 다시보기
-                        </button>
-                    </div>
                 </div>
 
                 {loadingHighlights ? (
@@ -996,20 +1051,26 @@ const CheongyeonHome: React.FC = () => {
                 </div>
             </div>
 
-            {/* Bottom Stats (Moved to Footer area for continuity) */}
-            <div className="relative z-10 border-t border-white/10 bg-black/40 backdrop-blur-xl">
-                <div className="max-w-[1800px] mx-auto px-8 py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
-                    {[
-                        { label: 'Active Sites', value: '124' },
-                        { label: 'Workers Today', value: '3,402' },
-                        { label: 'Safety Index', value: '99.9%' },
-                        { label: 'AI Detections', value: '24/7' },
-                    ].map((stat, idx) => (
-                        <div key={idx} className="flex flex-col items-center justify-center text-center p-4">
-                            <span className="text-4xl font-bold text-white font-display mb-2">{stat.value}</span>
-                            <span className="text-sm text-slate-400 uppercase tracking-widest">{stat.label}</span>
+            {/* Bottom Company Profile Strip */}
+            <div className="relative z-10 border-t border-white/10 bg-black/35 backdrop-blur-xl">
+                <div className="mx-auto max-w-[1800px] px-5 py-5 md:px-8 md:py-6">
+                    <div className="rounded-2xl border border-white/12 bg-white/[0.04] px-4 py-4 md:px-6 md:py-5">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            {[
+                                { label: '회사명', value: companyProfile.name || '청연이엔지' },
+                                { label: '사업자번호', value: formatBusinessNumber(companyProfile.businessNumber) },
+                                { label: '대표 연락처', value: companyProfile.phone || '정보 확인 중' },
+                                { label: '본사 주소', value: companyProfile.address || '정보 확인 중' },
+                            ].map((stat, idx) => (
+                                <div key={idx} className="rounded-xl border border-white/10 bg-slate-900/40 px-4 py-3 text-left">
+                                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{stat.label}</div>
+                                    <div className={`mt-1.5 font-semibold text-white ${idx === 3 ? 'text-sm md:text-base leading-relaxed break-keep' : 'text-base md:text-lg'}`}>
+                                        {stat.value}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
-                    ))}
+                    </div>
                 </div>
             </div>
         </div>

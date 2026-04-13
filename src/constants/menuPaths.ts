@@ -208,6 +208,9 @@ export const MENU_PATHS: { [key: string]: string } = {
     "AI \uc774\ubbf8\uc9c0 \uc2a4\ud29c\ub514\uc624": "/gallery/ai-images",
     "\uc774\ubbf8\uc9c0 \uac24\ub7ec\ub9ac": "/gallery/ai-images", // Alias
     "\ud604\uc7a5 \uad00\ub9ac \uc2dc\uc2a4\ud15c": "/site/management",
+    "\ub9c8\uac10 \ud604\uc7a5 \uad00\ub9ac": "/site/management/closed",
+    "\ub9c8\uac10\ud604\uc7a5\uad00\ub9ac": "/site/management/closed",
+    "\ud604\uc7a5 \uad00\ub9ac(\ub9c8\uac10)": "/site/management/closed",
     "\ud68c\uc0ac \ub79c\ub529 \ud398\uc774\uc9c0": "/company/landing",
     "\ud68c\uc0ac\uc18c\uac1c \ub79c\ub529": "/company/landing",
 };

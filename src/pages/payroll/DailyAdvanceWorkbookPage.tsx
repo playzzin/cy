@@ -28,6 +28,27 @@ type WorkbookTabKey =
   | 'day-lookup'
   | 'daily-wage';
 
+type StatementPriceMode = 'actual' | 'claim' | 'report';
+
+type GoyunjungCelebrationBurst = {
+  id: number;
+  imageUrl: string;
+  messages: string[];
+  position: {
+    left: string;
+    top: string;
+    align: 'left' | 'center' | 'right';
+  };
+  hearts: Array<{
+    id: string;
+    left: number;
+    size: number;
+    duration: number;
+    delay: number;
+    drift: number;
+  }>;
+};
+
 type WorkbookEntry = {
   key: string;
   reportId: string;
@@ -54,6 +75,7 @@ type WorkbookEntry = {
   deductionAmount: number;
   claimUnitPrice: number;
   claimAmount: number;
+  reportUnitPrice: number;
   recruiterFee: number;
   note: string;
 };
@@ -117,6 +139,32 @@ const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
   { key: 'statement', label: '청구서' },
   { key: 'day-lookup', label: '일자별조회' },
   { key: 'daily-wage', label: '일급제' },
+];
+
+const STATEMENT_PRICE_MODE_OPTIONS: Array<{
+  key: StatementPriceMode;
+  label: string;
+  amountLabel: string;
+  buttonClassName: string;
+}> = [
+  {
+    key: 'actual',
+    label: '지급단가',
+    amountLabel: '노무지급금',
+    buttonClassName: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  },
+  {
+    key: 'claim',
+    label: '청구단가',
+    amountLabel: '노무청구금',
+    buttonClassName: 'border-amber-200 bg-amber-50 text-amber-700',
+  },
+  {
+    key: 'report',
+    label: '신고단가',
+    amountLabel: '노무신고금',
+    buttonClassName: 'border-sky-200 bg-sky-50 text-sky-700',
+  },
 ];
 
 const normalizeText = (value: unknown): string =>
@@ -225,7 +273,29 @@ const buildEmptyDraft = (): WorkerProfileDraft => ({
 });
 
 const GOYUNJUNG_MODE_STORAGE_KEY = 'daily-advance-workbook:goyunjung-mode';
+const DAILY_ADVANCE_STATEMENT_DEDUCTION_STORAGE_KEY =
+  'daily-advance-workbook:statement-deductions';
+const DAILY_ADVANCE_DAILY_WAGE_DEDUCTION_STORAGE_KEY =
+  'daily-advance-workbook:daily-wage-deductions';
 const GOYUNJUNG_IMAGE_ROOTS = ['goyumjung', 'goyunjung'];
+const GOYUNJUNG_MESSAGES = [
+  '경복 오빠 화이팅',
+  '경복 오빠 제가 있잔아요',
+  '경복 오빠 힘내세요',
+];
+
+const GOYUNJUNG_SAFE_POSITIONS: Array<{
+  left: string;
+  top: string;
+  align: 'left' | 'center' | 'right';
+}> = [
+  { left: '6%', top: '10%', align: 'left' },
+  { left: '74%', top: '10%', align: 'right' },
+  { left: '5%', top: '58%', align: 'left' },
+  { left: '75%', top: '58%', align: 'right' },
+  { left: '10%', top: '32%', align: 'left' },
+  { left: '70%', top: '34%', align: 'right' },
+];
 
 const DailyAdvanceWorkbookPage: React.FC = () => {
   const currentMonth = getCurrentMonth();
@@ -233,6 +303,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(monthToPeriod(currentMonth).endDate);
   const [selectedTeamKey, setSelectedTeamKey] = useState('ALL');
   const [statementTeamKey, setStatementTeamKey] = useState('');
+  const [statementPriceMode, setStatementPriceMode] = useState<StatementPriceMode>('claim');
+  const [statementActualDeductionDraft, setStatementActualDeductionDraft] = useState(0);
+  const [statementClaimDeductionDraft, setStatementClaimDeductionDraft] = useState(0);
+  const [statementReportDeductionDraft, setStatementReportDeductionDraft] = useState(0);
+  const [statementActualDeductionApplied, setStatementActualDeductionApplied] = useState(0);
+  const [statementClaimDeductionApplied, setStatementClaimDeductionApplied] = useState(0);
+  const [statementReportDeductionApplied, setStatementReportDeductionApplied] = useState(0);
   const [activeTab, setActiveTab] = useState<WorkbookTabKey>('input');
   const [entries, setEntries] = useState<WorkbookEntry[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
@@ -247,6 +324,34 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   });
   const [goyunjungImagePaths, setGoyunjungImagePaths] = useState<string[]>([]);
   const [goyunjungBackgroundUrl, setGoyunjungBackgroundUrl] = useState('');
+  const [goyunjungCurrentPath, setGoyunjungCurrentPath] = useState('');
+  const [goyunjungBursts, setGoyunjungBursts] = useState<GoyunjungCelebrationBurst[]>([]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const raw = window.localStorage.getItem(DAILY_ADVANCE_STATEMENT_DEDUCTION_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{
+        actual: number;
+        claim: number;
+        report: number;
+      }>;
+      const actual = Number(parsed.actual) || 0;
+      const claim = Number(parsed.claim) || 0;
+      const report = Number(parsed.report) || 0;
+
+      setStatementActualDeductionDraft(actual);
+      setStatementClaimDeductionDraft(claim);
+      setStatementReportDeductionDraft(report);
+      setStatementActualDeductionApplied(actual);
+      setStatementClaimDeductionApplied(claim);
+      setStatementReportDeductionApplied(report);
+    } catch (error) {
+      console.warn('Failed to load statement deduction preset:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!selectedDate.startsWith(month)) {
@@ -297,14 +402,52 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       const candidates = paths && paths.length > 0 ? paths : await loadGoyunjungImagePaths();
       if (candidates.length === 0) {
         setGoyunjungBackgroundUrl('');
+        setGoyunjungCurrentPath('');
         return;
       }
 
-      const randomPath = candidates[Math.floor(Math.random() * candidates.length)];
+      const availableCandidates =
+        candidates.length > 1 && goyunjungCurrentPath
+          ? candidates.filter((candidate) => candidate !== goyunjungCurrentPath)
+          : candidates;
+      const pool = availableCandidates.length > 0 ? availableCandidates : candidates;
+      const randomPath = pool[Math.floor(Math.random() * pool.length)];
       const downloadUrl = await storageService.getDownloadUrl(randomPath);
+      const burstId = Date.now() + Math.floor(Math.random() * 1000);
+      const safePositions =
+        typeof window !== 'undefined' && window.innerWidth < 1024
+          ? [{ left: '50%', top: '8%', align: 'center' as const }]
+          : GOYUNJUNG_SAFE_POSITIONS;
+      const position = safePositions[Math.floor(Math.random() * safePositions.length)];
+      const nextBurst: GoyunjungCelebrationBurst = {
+        id: burstId,
+        imageUrl: downloadUrl,
+        messages: GOYUNJUNG_MESSAGES,
+        position,
+        hearts: Array.from({ length: 18 }, (_, index) => ({
+          id: `${burstId}-${index}`,
+          left:
+            position.align === 'left'
+              ? 8 + Math.random() * 24
+              : position.align === 'right'
+                ? 68 + Math.random() * 24
+                : 26 + Math.random() * 48,
+          size: 14 + Math.round(Math.random() * 18),
+          duration: 2.6 + Math.random() * 1.8,
+          delay: Math.random() * 0.8,
+          drift: -80 + Math.random() * 160,
+        })),
+      };
+
+      setGoyunjungCurrentPath(randomPath);
       setGoyunjungBackgroundUrl(downloadUrl);
+      setGoyunjungBursts((prev) => [...prev, nextBurst]);
+
+      window.setTimeout(() => {
+        setGoyunjungBursts((prev) => prev.filter((burst) => burst.id !== burstId));
+      }, 4200);
     },
-    [loadGoyunjungImagePaths]
+    [goyunjungCurrentPath, loadGoyunjungImagePaths]
   );
 
   useEffect(() => {
@@ -318,6 +461,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   useEffect(() => {
     if (!isGoyunjungMode) {
       setGoyunjungBackgroundUrl('');
+      setGoyunjungCurrentPath('');
+      setGoyunjungBursts([]);
       return;
     }
 
@@ -332,25 +477,29 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           return;
         }
 
-        const randomPath = paths[Math.floor(Math.random() * paths.length)];
-        const downloadUrl = await storageService.getDownloadUrl(randomPath);
         if (!cancelled) {
-          setGoyunjungBackgroundUrl(downloadUrl);
+          await applyRandomGoyunjungBackground(paths);
         }
       } catch (error) {
         console.error('Failed to load goyunjung background images:', error);
         if (!cancelled) {
           setGoyunjungBackgroundUrl('');
+          setGoyunjungCurrentPath('');
         }
       }
     };
 
     void loadBackground();
 
+    const intervalId = window.setInterval(() => {
+      void applyRandomGoyunjungBackground();
+    }, 9000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
-  }, [isGoyunjungMode, loadGoyunjungImagePaths]);
+  }, [applyRandomGoyunjungBackground, isGoyunjungMode, loadGoyunjungImagePaths]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -428,6 +577,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const claimUnitPrice = toNumber(
             profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(actualUnitPrice)
           );
+          const reportUnitPrice = actualUnitPrice;
           const recruiterFee = toNumber(profile?.recruiterFee ?? 0);
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
@@ -466,6 +616,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             deductionAmount: 0,
             claimUnitPrice,
             claimAmount: manDay * claimUnitPrice,
+            reportUnitPrice,
             recruiterFee,
             note,
           } satisfies WorkbookEntry;
@@ -627,6 +778,50 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     [statementTeamKey, teamOptions]
   );
 
+  const statementPriceOption = useMemo(
+    () =>
+      STATEMENT_PRICE_MODE_OPTIONS.find((option) => option.key === statementPriceMode) ||
+      STATEMENT_PRICE_MODE_OPTIONS[1],
+    [statementPriceMode]
+  );
+
+  const statementAppliedDeductionMap = useMemo(
+    () => ({
+      actual: statementActualDeductionApplied,
+      claim: statementClaimDeductionApplied,
+      report: statementReportDeductionApplied,
+    }),
+    [
+      statementActualDeductionApplied,
+      statementClaimDeductionApplied,
+      statementReportDeductionApplied,
+    ]
+  );
+
+  const getStatementBaseUnitPrice = useCallback(
+    (entry: WorkbookEntry, mode: StatementPriceMode): number => {
+      if (mode === 'actual') return entry.actualUnitPrice;
+      if (mode === 'report') return entry.reportUnitPrice;
+      return entry.claimUnitPrice;
+    },
+    []
+  );
+
+  const getStatementAdjustedUnitPrice = useCallback(
+    (entry: WorkbookEntry, mode: StatementPriceMode): number => {
+      const deduction = statementAppliedDeductionMap[mode] || 0;
+      return Math.max(0, getStatementBaseUnitPrice(entry, mode) - deduction);
+    },
+    [getStatementBaseUnitPrice, statementAppliedDeductionMap]
+  );
+
+  const getStatementAmount = useCallback(
+    (entry: WorkbookEntry, mode: StatementPriceMode): number => {
+      return entry.manDay * getStatementAdjustedUnitPrice(entry, mode);
+    },
+    [getStatementAdjustedUnitPrice]
+  );
+
   const statementEntries = useMemo(() => {
     if (!statementTeamKey) return [];
     return entries.filter((entry) => entry.teamKey === statementTeamKey);
@@ -649,7 +844,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         days: number[];
         totalManDay: number;
         recruiterFee: number;
-        claimAmount: number;
+        selectedAmount: number;
       }
     >();
 
@@ -664,7 +859,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           days: Array.from({ length: statementLastDay }, () => 0),
           totalManDay: 0,
           recruiterFee: entry.recruiterFee,
-          claimAmount: 0,
+          selectedAmount: 0,
         });
       }
 
@@ -673,7 +868,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         target.days[entry.day - 1] += entry.manDay;
       }
       target.totalManDay += entry.manDay;
-      target.claimAmount += entry.claimAmount;
+      target.selectedAmount += getStatementAmount(entry, statementPriceMode);
       if (!target.idNumber && entry.idNumber) target.idNumber = entry.idNumber;
       if (!target.address && entry.address) target.address = entry.address;
       if (!target.recruiterFee && entry.recruiterFee) target.recruiterFee = entry.recruiterFee;
@@ -682,7 +877,49 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     return Array.from(rowMap.values()).sort((left, right) =>
       left.workerName.localeCompare(right.workerName, 'ko')
     );
-  }, [statementEntries, statementLastDay]);
+  }, [getStatementAmount, statementEntries, statementLastDay, statementPriceMode]);
+
+  const handleApplyStatementDeductions = useCallback(() => {
+    setStatementActualDeductionApplied(Math.max(0, statementActualDeductionDraft || 0));
+    setStatementClaimDeductionApplied(Math.max(0, statementClaimDeductionDraft || 0));
+    setStatementReportDeductionApplied(Math.max(0, statementReportDeductionDraft || 0));
+  }, [
+    statementActualDeductionDraft,
+    statementClaimDeductionDraft,
+    statementReportDeductionDraft,
+  ]);
+
+  const handleResetStatementDeductions = useCallback(() => {
+    setStatementActualDeductionDraft(0);
+    setStatementClaimDeductionDraft(0);
+    setStatementReportDeductionDraft(0);
+    setStatementActualDeductionApplied(0);
+    setStatementClaimDeductionApplied(0);
+    setStatementReportDeductionApplied(0);
+  }, []);
+
+  const handleSaveStatementDeductions = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const payload = {
+      actual: Math.max(0, statementActualDeductionDraft || 0),
+      claim: Math.max(0, statementClaimDeductionDraft || 0),
+      report: Math.max(0, statementReportDeductionDraft || 0),
+    };
+
+    window.localStorage.setItem(
+      DAILY_ADVANCE_STATEMENT_DEDUCTION_STORAGE_KEY,
+      JSON.stringify(payload)
+    );
+    setStatementActualDeductionApplied(payload.actual);
+    setStatementClaimDeductionApplied(payload.claim);
+    setStatementReportDeductionApplied(payload.report);
+    window.alert('청구서 차감 저장값을 저장했습니다.');
+  }, [
+    statementActualDeductionDraft,
+    statementClaimDeductionDraft,
+    statementReportDeductionDraft,
+  ]);
 
   const statementDailyTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);
@@ -1180,11 +1417,104 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const renderStatementTab = () => (
     <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
       <div className="border-b border-[#d5ccb0] px-4 py-4" style={{ backgroundColor: COLORS.paleYellow }}>
-        <div className="text-lg font-black text-[#4A452A]">
-          {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
-        </div>
-        <div className="mt-1 text-xs text-slate-500">
-          노무청구금은 출역 합계 x 청구단가로 계산하고, 인력소개비는 별도 컬럼으로 표시합니다.
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-lg font-black text-[#4A452A]">
+              {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              선택한 단가기준으로 노무금액을 계산하며, 차감값은 이 청구서 화면에만 반영됩니다.
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-[#d5ccb0] bg-white px-3 py-3 shadow-sm lg:min-w-[520px]">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-500">단가기준</span>
+              {STATEMENT_PRICE_MODE_OPTIONS.map((option) => {
+                const isActive = option.key === statementPriceMode;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => setStatementPriceMode(option.key)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition ${
+                      isActive
+                        ? option.buttonClassName
+                        : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+              <span className="ml-auto rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                현재 {statementPriceOption.label}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <div className="mb-1 text-[11px] text-slate-500">지급차감</div>
+                <input
+                  type="number"
+                  value={statementActualDeductionDraft}
+                  onChange={(event) => setStatementActualDeductionDraft(Number(event.target.value))}
+                  step={5000}
+                  className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-right"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] text-slate-500">청구차감</div>
+                <input
+                  type="number"
+                  value={statementClaimDeductionDraft}
+                  onChange={(event) => setStatementClaimDeductionDraft(Number(event.target.value))}
+                  step={5000}
+                  className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-right"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-[11px] text-slate-500">신고차감</div>
+                <input
+                  type="number"
+                  value={statementReportDeductionDraft}
+                  onChange={(event) => setStatementReportDeductionDraft(Number(event.target.value))}
+                  step={5000}
+                  className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-[11px] text-right"
+                  placeholder="0"
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleApplyStatementDeductions}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"
+                >
+                  차감 적용
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveStatementDeductions}
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-emerald-700"
+                >
+                  차감 저장
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetStatementDeductions}
+                  className="rounded-lg bg-slate-500 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-slate-600"
+                >
+                  차감 초기화
+                </button>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-500">
+              적용 차감: {statementPriceOption.label} {formatCurrency(statementAppliedDeductionMap[statementPriceMode] || 0)}원. 저장한 값은 자동으로 다시 불러옵니다.
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1234,7 +1564,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 인력소개비
               </th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold" style={{ backgroundColor: COLORS.wine }}>
-                노무청구금
+                {statementPriceOption.amountLabel}
               </th>
             </tr>
           </thead>
@@ -1270,7 +1600,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     {row.recruiterFee ? formatCurrency(row.recruiterFee) : '-'}
                   </td>
                   <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
-                    {formatCurrency(row.claimAmount)}
+                    {formatCurrency(row.selectedAmount)}
                   </td>
                 </tr>
               ))
@@ -1292,7 +1622,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   {formatCurrency(statementRows.reduce((sum, row) => sum + row.recruiterFee, 0))}
                 </td>
                 <td className="border border-[#d5ccb0] px-3 py-2 text-right font-black">
-                  {formatCurrency(statementRows.reduce((sum, row) => sum + row.claimAmount, 0))}
+                  {formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount, 0))}
                 </td>
               </tr>
             )}
@@ -1418,7 +1748,14 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       case 'day-lookup':
         return renderDayLookupTab();
       case 'daily-wage':
-        return <DailyWageDraftPage embedded dateOverride={selectedDate} monthOverride={month} />;
+        return (
+          <DailyWageDraftPage
+            embedded
+            dateOverride={selectedDate}
+            monthOverride={month}
+            deductionStorageKey={DAILY_ADVANCE_DAILY_WAGE_DEDUCTION_STORAGE_KEY}
+          />
+        );
       default:
         return null;
     }
@@ -1438,14 +1775,123 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   return (
     <div className="relative min-h-screen overflow-hidden">
+      <style>
+        {`
+          @keyframes goyunjungBurstCard {
+            0% { opacity: 0; transform: translate(-50%, 28px) scale(0.82); }
+            12% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            78% { opacity: 1; transform: translate(-50%, -6px) scale(1.02); }
+            100% { opacity: 0; transform: translate(-50%, -34px) scale(0.9); }
+          }
+
+          @keyframes goyunjungMessageFloat {
+            0% { opacity: 0; transform: translateY(18px) scale(0.92); }
+            18% { opacity: 1; transform: translateY(0) scale(1); }
+            76% { opacity: 1; transform: translateY(-10px) scale(1.02); }
+            100% { opacity: 0; transform: translateY(-26px) scale(0.95); }
+          }
+
+          @keyframes goyunjungHeartBurst {
+            0% { opacity: 0; transform: translate3d(0, 30px, 0) scale(0.7) rotate(0deg); }
+            15% { opacity: 1; }
+            100% { opacity: 0; transform: translate3d(var(--heart-drift), -220px, 0) scale(1.3) rotate(22deg); }
+          }
+        `}
+      </style>
       {isGoyunjungMode && goyunjungBackgroundUrl && (
         <>
           <div
-            className="pointer-events-none absolute inset-0 bg-cover bg-center bg-fixed opacity-35"
+            className="pointer-events-none absolute inset-0 bg-cover bg-center bg-fixed opacity-[0.78] saturate-[1.12]"
             style={{ backgroundImage: `url("${goyunjungBackgroundUrl}")` }}
           />
-          <div className="pointer-events-none absolute inset-0 bg-white/35" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.10),_rgba(255,255,255,0.28)_55%,_rgba(255,255,255,0.42))]" />
         </>
+      )}
+
+      {isGoyunjungMode && goyunjungBursts.length > 0 && (
+        <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
+          {goyunjungBursts.map((burst) => (
+            <div key={burst.id} className="absolute inset-0">
+              <div
+                className="absolute w-[240px] max-w-[34vw] min-w-[180px] overflow-hidden rounded-[28px] border border-white/70 bg-white/18 shadow-[0_25px_80px_rgba(190,24,93,0.33)] backdrop-blur-md xl:w-[280px]"
+                style={{
+                  left: burst.position.left,
+                  top: burst.position.top,
+                  transform:
+                    burst.position.align === 'left'
+                      ? 'translate(0, 0)'
+                      : burst.position.align === 'right'
+                        ? 'translate(0, 0)'
+                        : 'translate(-50%, 0)',
+                  animation: 'goyunjungBurstCard 4.2s ease forwards',
+                }}
+              >
+                <div className="bg-gradient-to-r from-rose-500/80 via-pink-500/75 to-fuchsia-500/80 px-4 py-2 text-center text-sm font-black tracking-[0.18em] text-white">
+                  GOYUNJUNG MODE
+                </div>
+                <div className="bg-white/82 p-3">
+                  <img
+                    src={burst.imageUrl}
+                    alt="고윤정"
+                    className="h-[340px] w-full rounded-[20px] object-cover object-center shadow-lg"
+                  />
+                </div>
+              </div>
+
+              <div
+                className={`absolute flex flex-col gap-3 px-2 ${
+                  burst.position.align === 'left'
+                    ? 'items-start'
+                    : burst.position.align === 'right'
+                      ? 'items-end'
+                      : 'items-center'
+                }`}
+                style={{
+                  left:
+                    burst.position.align === 'left'
+                      ? burst.position.left
+                      : burst.position.align === 'right'
+                        ? 'auto'
+                        : burst.position.left,
+                  right: burst.position.align === 'right' ? burst.position.left : 'auto',
+                  top: `calc(${burst.position.top} + 360px)`,
+                  width: burst.position.align === 'center' ? '70vw' : '260px',
+                  maxWidth: '70vw',
+                  transform: burst.position.align === 'center' ? 'translateX(-50%)' : 'none',
+                }}
+              >
+                {burst.messages.map((message, index) => (
+                  <div
+                    key={`${burst.id}-message-${index}`}
+                    className="rounded-full border border-white/70 bg-white/80 px-5 py-2 text-center text-sm font-black text-rose-700 shadow-[0_14px_40px_rgba(225,29,72,0.22)] backdrop-blur-md"
+                    style={{
+                      animation: 'goyunjungMessageFloat 3.2s ease forwards',
+                      animationDelay: `${0.18 * index}s`,
+                    }}
+                  >
+                    {message}
+                  </div>
+                ))}
+              </div>
+
+              {burst.hearts.map((heart) => (
+                <div
+                  key={heart.id}
+                  className="absolute top-[56%] text-rose-500 drop-shadow-[0_6px_14px_rgba(244,63,94,0.35)]"
+                  style={{
+                    left: `${heart.left}%`,
+                    fontSize: `${heart.size}px`,
+                    animation: `goyunjungHeartBurst ${heart.duration}s ease-out forwards`,
+                    animationDelay: `${heart.delay}s`,
+                    ['--heart-drift' as string]: `${heart.drift}px`,
+                  }}
+                >
+                  ♥
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       )}
 
       <div className="relative space-y-6">

@@ -169,7 +169,7 @@ import RefineSiteList from './pages/refine/RefineSiteList';
 import { RefineSmartSelectDemo } from './pages/refine/RefineSmartSelectDemo';
 import { ProjectGalleryPage } from './pages/gallery/ProjectGalleryPage';
 import { AiImageGalleryPage } from './pages/gallery/AiImageGalleryPage';
-import SiteManagementPage from './pages/site/SiteManagementPage';
+import SiteManagementPage, { ClosedSiteManagementPage } from './pages/site/SiteManagementPage';
 import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
 import RefineCompanyList from './pages/refine/RefineCompanyList';
@@ -496,6 +496,8 @@ const App: React.FC = () => {
 
             {/* Site Management */}
             <Route path="/site/management" element={<SiteManagementPage />} />
+            <Route path="/site/management/closed" element={<ClosedSiteManagementPage />} />
+            <Route path="/site/management-closed" element={<ClosedSiteManagementPage />} />
 
           </Route>
 

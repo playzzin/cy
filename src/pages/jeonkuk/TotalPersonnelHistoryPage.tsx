@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faThumbtack, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faChevronDown, faDownload, faFileInvoiceDollar, faSearch, faSync, faTimes, faUser } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx-js-style';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
@@ -730,17 +730,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     >
                         <FontAwesomeIcon icon={faSync} />
                         일보
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setIsFixed((prev) => !prev)}
-                        className={`flex items-center gap-2 px-3 py-2 border rounded-lg transition-all shadow-sm font-medium text-sm ${isFixed
-                            ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={faThumbtack} className={isFixed ? 'rotate-45' : ''} />
-                        {isFixed ? '틀고정 해제' : '틀고정'}
                     </button>
                 </div>
             </div>

@@ -931,7 +931,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
   }, [month, statementPeriod.end]);
 
   const primaryDayNumbers = useMemo(() => {
-    const visibleDayCount = isSplitView ? Math.ceil(statementLastDay / 2) : statementLastDay;
+    const visibleDayCount = isSplitView ? Math.floor(statementLastDay / 2) : statementLastDay;
     return Array.from({ length: visibleDayCount }, (_, idx) => idx + 1);
   }, [isSplitView, statementLastDay]);
 
@@ -940,6 +940,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     const secondaryCount = Math.max(statementLastDay - primaryDayNumbers.length, 0);
     return Array.from({ length: secondaryCount }, (_, idx) => primaryDayNumbers.length + idx + 1);
   }, [isSplitView, primaryDayNumbers.length, statementLastDay]);
+
+  const hasSplitSpacerColumn = isSplitView && secondaryDayNumbers.length > primaryDayNumbers.length;
 
   const splitRowSectionClass = isSplitView ? 'h-[30px] min-h-[30px]' : 'h-[30px] min-h-[30px]';
   const spanningCellHeightClass = isSplitView ? 'min-h-[60px]' : 'min-h-[30px]';
@@ -982,13 +984,24 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     return fixedWidth + visibleDayCount * dayWidth;
   }, [isSplitView, primaryDayNumbers.length, showBankColumn, statementLastDay]);
 
+  const previewContentHeight = useMemo(() => {
+    const pageHeaderHeight = 132;
+    const tableHeadHeight = isSplitView ? 56 : 32;
+    const rowHeight = isSplitView ? 60 : 30;
+    const footerHeight = isSplitView ? 60 : 32;
+    const outerGapHeight = 16;
+    return pageHeaderHeight + tableHeadHeight + footerHeight + (rows.length * rowHeight) + outerGapHeight;
+  }, [isSplitView, rows.length]);
+
   const printScale = useMemo(() => {
-    const safeA4WidthPx = 1060;
-    const baseScale = Math.min(1, safeA4WidthPx / Math.max(previewSurfaceMinWidth, 1));
-    const safetyScale = showBankColumn ? 0.97 : 0.98;
-    const computed = Number((baseScale * safetyScale).toFixed(2));
-    return Math.max(0.42, computed);
-  }, [isSplitView, previewSurfaceMinWidth, showBankColumn]);
+    const safeA4WidthPx = 1094;
+    const safeA4HeightPx = 748;
+    const widthScale = Math.min(1, safeA4WidthPx / Math.max(previewSurfaceMinWidth, 1));
+    const heightScale = Math.min(1, safeA4HeightPx / Math.max(previewContentHeight, 1));
+    const fittedWidthScale = Number((widthScale * 0.992).toFixed(3));
+    const fittedHeightScale = Number((heightScale * (showBankColumn ? 0.972 : 0.978)).toFixed(3));
+    return Math.max(0.4, Math.min(fittedWidthScale, fittedHeightScale));
+  }, [previewContentHeight, previewSurfaceMinWidth, showBankColumn]);
 
   const printRootRef = useRef<HTMLDivElement>(null);
   const [copying, setCopying] = useState(false);
@@ -1083,7 +1096,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
         @media print {
           @page {
             size: A4 landscape;
-            margin: 6mm;
+            margin: 4mm;
           }
 
           html, body, #root {
@@ -1110,6 +1123,16 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            transform-origin: top left !important;
+            zoom: var(--statement-print-scale, 0.7);
+          }
+
+          @supports not (zoom: 1) {
+            .labor-statement-print-root {
+              transform: scale(var(--statement-print-scale, 0.7));
+              transform-origin: top left !important;
+              width: calc(100% / var(--statement-print-scale, 0.7)) !important;
+            }
           }
 
           .labor-statement-page {
@@ -1145,13 +1168,13 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
           .labor-statement-print-sheet {
             width: 100%;
-            max-width: 285mm;
-            max-width: calc(297mm - 12mm);
+            max-width: 289mm;
+            max-width: calc(297mm - 8mm);
             min-height: 0 !important;
             margin: 0 auto !important;
             padding: 0 !important;
             box-sizing: border-box !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             background: #ffffff !important;
           }
 
@@ -1163,8 +1186,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
             width: max-content !important;
             min-width: max-content !important;
             margin: 0 auto !important;
-            transform-origin: top left;
-            zoom: var(--statement-print-scale, 0.74);
+            transform: none !important;
           }
 
           .labor-statement-print-header {
@@ -1332,7 +1354,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
                 <input type="checkbox" checked={isSplitView} onChange={(e) => setIsSplitView(e.target.checked)} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300" />
-                <span className="text-sm font-bold text-slate-700">2줄 보기 (16+15일)</span>
+                <span className="text-sm font-bold text-slate-700">2줄 보기 (1~15 / 16~말일)</span>
               </label>
               <div className="w-px h-3 bg-slate-200"></div>
               <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none">
@@ -1421,7 +1443,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     </tr>
                     <tr>
                       <td className="border border-black p-1 text-center">{statementPeriod.end}</td>
-                      <th className="border border-black bg-yellow-100 p-1">팀명</th>
+                      <th className="border border-black bg-yellow-100 p-1">현장명</th>
                       <td className="border border-black p-1 text-center">{siteNameInput || '전체 통합'}</td>
                     </tr>
                   </tbody>
@@ -1454,6 +1476,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   {primaryDayNumbers.map((dayNumber) => (
                     <th key={dayNumber} className={`${getStatementDayHeaderClass(dayNumber)} ${widthClassByColumn.day}`}>{String(dayNumber).padStart(2, '0')}</th>
                   ))}
+                  {hasSplitSpacerColumn && <th className={`${getStatementDayHeaderClass(primaryDayNumbers.length + 1)} ${widthClassByColumn.day}`}></th>}
                   <th className={`${getStatementHeaderCellClass('summary')} ${widthClassByColumn.total}`} rowSpan={isSplitView ? 2 : 1}>출역합계</th>
                   <th className={`${getStatementHeaderCellClass('rate')} ${widthClassByColumn.unitPrice}`} rowSpan={isSplitView ? 2 : 1}>단가</th>
                   <th className={`${getStatementHeaderCellClass('amount')} ${widthClassByColumn.amount}`} rowSpan={isSplitView ? 2 : 1}>인건비총액</th>
@@ -1524,6 +1547,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                           </td>
                         );
                       })}
+                      {hasSplitSpacerColumn && <td className="border-r border-black bg-slate-50"></td>}
                       <td className="border-r border-black text-center text-xs font-black text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{sumDaysForMonth(row.days, statementLastDay).toFixed(1)}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
                         <input type="text" value={row.unitPrice} onChange={e => updateRow(row.id, { unitPrice: e.target.value })}
@@ -1582,6 +1606,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                       </div>
                     </td>
                   ))}
+                  {hasSplitSpacerColumn && <td className="border border-black p-0 bg-[#fca5a5]"></td>}
                   <td className="border border-black p-0 text-center text-sm font-black bg-[#fca5a5]" rowSpan={isSplitView ? 2 : 1}>
                     <div className={`flex items-center justify-center px-2 ${footerSpanningRowHeightClass}`}>{statementSummary.totalDays.toFixed(1)}</div>
                   </td>
@@ -1610,11 +1635,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                 )}
               </tfoot>
             </table>
-              </div>
             </div>
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 };

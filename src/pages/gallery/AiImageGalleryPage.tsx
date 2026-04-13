@@ -13,7 +13,7 @@ import {
     generateImage, saveGeneratedImage, listGalleryImages, deleteSavedImage, updateImageMetadata,
     uploadImageFile, applyAsFavicon, applyAsLogo, getCurrentFaviconUrl, getCurrentLogoUrl,
     getCustomCategories, addCustomCategory, deleteCustomCategory,
-    migrateStorageToFirestore,
+    migrateStorageToFirestore, applyAsDashboardBanner,
     IMAGE_PRESETS, ImageCategory, GalleryImage, CustomCategory
 } from '../../services/geminiImageService';
 import { manpowerService } from '../../services/manpowerService';
@@ -27,7 +27,8 @@ const PRESET_ICONS: Record<ImageCategory, any> = {
     'character': faUserAstronaut,
     'birdseye': faBuilding,
     'business-card': faAddressCard,
-    'kakao-square': faComment, 'kakao-wide': faComment, 'custom': faCube
+    'kakao-square': faComment, 'kakao-wide': faComment, 'custom': faCube,
+    'dashboard-banner': faImages
 };
 
 const PRESET_COLORS: Record<ImageCategory, string> = {
@@ -42,6 +43,7 @@ const PRESET_COLORS: Record<ImageCategory, string> = {
     'kakao-square': 'from-yellow-400 to-yellow-600',
     'kakao-wide': 'from-yellow-500 to-yellow-700',
     'custom': 'from-slate-500 to-slate-700',
+    'dashboard-banner': 'from-blue-600 to-cyan-600',
 };
 
 const BADGE_COLORS: Record<ImageCategory, string> = {
@@ -56,6 +58,7 @@ const BADGE_COLORS: Record<ImageCategory, string> = {
     'kakao-square': 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
     'kakao-wide': 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
     'custom': 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+    'dashboard-banner': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
 };
 
 const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
@@ -73,7 +76,7 @@ const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
 ];
 
 // --- Detail Modal ---
-const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, onApplyLogo, onAssignLeader, assigningLeader, onApplySiteImage, applyingSiteImage }: {
+const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, onApplyLogo, onAssignLeader, assigningLeader, onApplySiteImage, applyingSiteImage, onApplyDashboardBanner, applyingDashboardBanner }: {
     image: GalleryImage;
     onClose: () => void;
     onDelete: (img: GalleryImage) => void;
@@ -84,6 +87,8 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
     assigningLeader: boolean;
     onApplySiteImage: (img: GalleryImage) => void;
     applyingSiteImage: boolean;
+    onApplyDashboardBanner: (img: GalleryImage) => void;
+    applyingDashboardBanner: boolean;
 }) => {
     const [editing, setEditing] = useState(false);
     const [editName, setEditName] = useState(image.customName || image.name);
@@ -148,8 +153,8 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
                     </button>
 
                     <div className="mb-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${BADGE_COLORS[image.category]}`}>
-                            <FontAwesomeIcon icon={PRESET_ICONS[image.category]} />
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${BADGE_COLORS[image.category] || 'bg-slate-500/20 text-slate-400 border-slate-500/30'}`}>
+                            <FontAwesomeIcon icon={PRESET_ICONS[image.category] || faCube} />
                             {preset?.label || image.category}
                         </span>
                     </div>
@@ -240,6 +245,16 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
                                 {assigningLeader ? '지정 중...' : '팀장 프로필로 지정'}
                             </button>
                         )}
+                        {['dashboard-banner', 'banner', 'custom'].includes(image.category) && (
+                            <button
+                                onClick={() => onApplyDashboardBanner(image)}
+                                disabled={applyingDashboardBanner}
+                                className={`col-span-2 py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5 ${applyingDashboardBanner ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-900/50 hover:bg-blue-800/50 text-blue-300'}`}
+                            >
+                                <FontAwesomeIcon icon={applyingDashboardBanner ? faSpinner : faImages} spin={applyingDashboardBanner} />
+                                {applyingDashboardBanner ? '적용 중...' : '대시보드 배너 적용'}
+                            </button>
+                        )}
                     </div>
                 </div>
             </motion.div>
@@ -284,6 +299,7 @@ export const AiImageGalleryPage = () => {
     const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
     const [assigningLeaderImage, setAssigningLeaderImage] = useState(false);
     const [applyingSiteImage, setApplyingSiteImage] = useState(false);
+    const [applyingDashboardBanner, setApplyingDashboardBanner] = useState(false);
 
     // Panel state
     const [showGenPanel, setShowGenPanel] = useState(true);
@@ -715,7 +731,45 @@ export const AiImageGalleryPage = () => {
         }
     };
 
-    const preset = IMAGE_PRESETS[category];
+    const handleApplyDashboardBanner = async (img: GalleryImage) => {
+        const options: Record<string, string> = {
+            '1': '1단계 (기획/분석)',
+            '2': '2단계 (설계)',
+            '3': '3단계 (시공)',
+            '4': '4단계 (마감/검수)',
+            '5': '5단계 (유지보수)'
+        };
+
+        const { value: stepIndex } = await Swal.fire({
+            title: '대시보드 배너 적용',
+            text: '어느 단계의 배너로 적용하시겠습니까?',
+            input: 'select',
+            inputOptions: options,
+            inputPlaceholder: '단계 선택',
+            showCancelButton: true,
+            confirmButtonText: '적용',
+            cancelButtonText: '취소',
+            inputValidator: (value) => (value ? undefined : '단계를 선택해주세요.')
+        });
+
+        if (!stepIndex) return;
+
+        setApplyingDashboardBanner(true);
+        try {
+            const result = await applyAsDashboardBanner(img.url, Number(stepIndex));
+            if (result.success) {
+                Swal.fire('완료', `${stepIndex}단계 배너로 적용되었습니다.`, 'success');
+            } else {
+                Swal.fire('실패', result.error || '적용 중 오류 발생', 'error');
+            }
+        } catch (error) {
+            Swal.fire('오류', '오류가 발생했습니다.', 'error');
+        } finally {
+            setApplyingDashboardBanner(false);
+        }
+    };
+
+    const preset = IMAGE_PRESETS[category] || IMAGE_PRESETS['custom'];
 
     return (
         <div className="min-h-[calc(100vh+60px)] -m-[30px] w-[calc(100%+60px)] bg-slate-950 text-slate-100 overflow-x-hidden">
@@ -817,13 +871,13 @@ export const AiImageGalleryPage = () => {
                                 {/* Selected Preset Info */}
                                 <div className="bg-slate-800/30 rounded-xl p-3 border border-slate-700/50">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <div className={`w-6 h-6 rounded-md bg-gradient-to-br ${PRESET_COLORS[category]} flex items-center justify-center`}>
-                                            <FontAwesomeIcon icon={PRESET_ICONS[category]} className="text-white text-[10px]" />
+                                        <div className={`w-6 h-6 rounded-md bg-gradient-to-br ${PRESET_COLORS[category] || 'from-slate-500 to-slate-700'} flex items-center justify-center`}>
+                                            <FontAwesomeIcon icon={PRESET_ICONS[category] || faCube} className="text-white text-[10px]" />
                                         </div>
-                                        <span className="text-sm font-bold text-white">{preset.label}</span>
-                                        <span className="text-xs text-slate-500 ml-auto">{preset.width}×{preset.height}px</span>
+                                        <span className="text-sm font-bold text-white">{preset?.label || category}</span>
+                                        <span className="text-xs text-slate-500 ml-auto">{preset?.width}×{preset?.height}px</span>
                                     </div>
-                                    <p className="text-xs text-slate-400">{preset.description}</p>
+                                    <p className="text-xs text-slate-400">{preset?.description}</p>
                                 </div>
 
                                 {/* === AI Generation Tab === */}
@@ -921,7 +975,7 @@ export const AiImageGalleryPage = () => {
                                         </label>
                                         <textarea
                                             className="w-full p-3 bg-slate-800 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:ring-purple-500 focus:border-purple-500 min-h-[100px] resize-none"
-                                            placeholder={category === 'character' ? '예: 숲속을 달리고 있는 모습, 웃고 있는 표정...' : category === 'business-card' ? '예: 배경에 은은한 기하학 패턴을 넣어주세요, 로고는 우측 상단에 배치...' : preset.promptHint}
+                                            placeholder={category === 'character' ? '예: 숲속을 달리고 있는 모습, 웃고 있는 표정...' : category === 'business-card' ? '예: 배경에 은은한 기하학 패턴을 넣어주세요, 로고는 우측 상단에 배치...' : preset?.promptHint || ''}
                                             value={prompt} onChange={e => setPrompt(e.target.value)} disabled={generating}
                                         />
                                     </div>
@@ -1127,6 +1181,8 @@ export const AiImageGalleryPage = () => {
                         assigningLeader={assigningLeaderImage}
                         onApplySiteImage={handleApplySiteImage}
                         applyingSiteImage={applyingSiteImage}
+                        onApplyDashboardBanner={handleApplyDashboardBanner}
+                        applyingDashboardBanner={applyingDashboardBanner}
                     />
                 )}
             </AnimatePresence>

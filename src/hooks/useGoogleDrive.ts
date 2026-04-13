@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Swal from 'sweetalert2';
+import { aiSettingsService } from '../services/aiSettingsService';
 
 // Types for GAPI and GIS
 // We declare them globally or essentially treat window.gapi as any for interactions, 
@@ -16,7 +17,8 @@ const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/drive/v3/r
 
 // Configuration - Check Env Vars
 const CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
-const API_KEY = process.env.REACT_APP_GOOGLE_API_KEY;
+
+const getGoogleApiKey = () => aiSettingsService.getApiKey() || process.env.REACT_APP_GOOGLE_API_KEY || '';
 
 export interface GoogleDriveFile {
     id: string;
@@ -45,8 +47,10 @@ export const useGoogleDrive = () => {
     // Initial Script Loading
     useEffect(() => {
         const loadScripts = async () => {
-            if (!CLIENT_ID || !API_KEY) {
-                console.warn('Google Drive API: Missing Client ID or API Key in environment variables.');
+            const apiKey = getGoogleApiKey();
+
+            if (!CLIENT_ID || !apiKey) {
+                console.warn('Google Drive API: Missing Client ID or API Key. Set /settings/ai or .env.local.');
                 return;
             }
 
@@ -78,7 +82,7 @@ export const useGoogleDrive = () => {
                     window.gapi.load('client', async () => {
                         try {
                             await window.gapi.client.init({
-                                apiKey: API_KEY,
+                                apiKey,
                                 discoveryDocs: DISCOVERY_DOCS,
                             });
                             resolve();
@@ -289,6 +293,6 @@ export const useGoogleDrive = () => {
         uploadFile,
         deleteFile,
         getFile,
-        checkEnv: { hasClientId: !!CLIENT_ID, hasApiKey: !!API_KEY }
+        checkEnv: { hasClientId: !!CLIENT_ID, hasApiKey: !!getGoogleApiKey() }
     };
 };

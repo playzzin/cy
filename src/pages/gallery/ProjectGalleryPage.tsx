@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { Site } from '../../services/siteService';
+import { listGalleryImages } from '../../services/geminiImageService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -28,7 +29,7 @@ type ProjectStatus = 'all' | 'active' | 'planned' | 'completed';
 
 // --- Mock Data Helper ---
 // Backend doesn't support images yet, so we generate deterministic mock data based on Site ID
-const enrichSiteWithMockData = (site: Site): Site => {
+const enrichSiteWithMockData = (site: Site, birdseyeUrls: string[] = []): Site => {
     const seed = site.id ? site.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) : 0;
     const getRandom = (arr: string[]) => arr[seed % arr.length];
 
@@ -53,17 +54,21 @@ const enrichSiteWithMockData = (site: Site): Site => {
         "https://images.unsplash.com/photo-1535732759880-bbd5c7265e3f?q=80&w=800&auto=format&fit=crop"
     ];
 
+    const fallbackPool = birdseyeUrls.length > 0 ? birdseyeUrls : galleryPhotos;
+
     // Select 4-8 photos deterministically
-    const numPhotos = (seed % 5) + 4;
+    const numPhotos = Math.min((seed % 5) + 4, Math.max(fallbackPool.length, 1));
     const selectedPhotos: string[] = [];
     for (let i = 0; i < numPhotos; i++) {
-        selectedPhotos.push(galleryPhotos[(seed + i) % galleryPhotos.length]);
+        selectedPhotos.push(fallbackPool[(seed + i) % fallbackPool.length]);
     }
+
+    const hasRegisteredPhotos = Array.isArray(site.photos) && site.photos.filter(Boolean).length > 0;
 
     return {
         ...site,
-        imageUrl: site.imageUrl || getRandom(perspectives),
-        photos: site.photos || selectedPhotos
+        imageUrl: site.imageUrl || getRandom(birdseyeUrls.length > 0 ? birdseyeUrls : perspectives),
+        photos: hasRegisteredPhotos ? site.photos : selectedPhotos
     };
 };
 
@@ -476,6 +481,27 @@ export const ProjectGalleryPage = () => {
 
     const [filter, setFilter] = useState<ProjectStatus>('all');
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
+    const [birdseyeUrls, setBirdseyeUrls] = useState<string[]>([]);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const loadBirdseyeImages = async () => {
+            try {
+                const { images } = await listGalleryImages('birdseye', 200);
+                if (!mounted) return;
+                const urls = images.map((image) => String(image.url || '').trim()).filter(Boolean);
+                setBirdseyeUrls(urls);
+            } catch (error) {
+                console.error('Failed to load birdseye images for project gallery fallback:', error);
+            }
+        };
+
+        loadBirdseyeImages();
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     // Filter logic
     const filteredSites = useMemo(() => {
@@ -484,9 +510,9 @@ export const ProjectGalleryPage = () => {
         if (filter !== 'all') {
             result = sites.filter(site => site.status === filter);
         }
-        // Enrich with mock data for display
-        return result.map(enrichSiteWithMockData);
-    }, [sites, filter]);
+        // Use AI 조감도 images as fallback when a site has no registered photos/image
+        return result.map((site) => enrichSiteWithMockData(site, birdseyeUrls));
+    }, [sites, filter, birdseyeUrls]);
 
     const activeCount = sites.filter(s => s.status === 'active').length || 0;
     const totalCount = sites.length || 0;

@@ -65,7 +65,13 @@ exports.DEFAULT_MENU_CONFIG = {
             {
                 text: "시스템 관리",
                 icon: "fa-gears",
-                sub: ["메뉴관리", "시스템 메시지 설정", "데이터 연결 점검", { text: "현장 관리", path: "/site/management" }]
+                sub: [
+                    "메뉴관리",
+                    "시스템 메시지 설정",
+                    "데이터 연결 점검",
+                    { text: "현장 관리", path: "/site/management" },
+                    { text: "마감 현장 관리", path: "/site/management/closed" }
+                ]
             },
             {
                 text: "클라우드 저장소",

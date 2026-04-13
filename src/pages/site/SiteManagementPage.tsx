@@ -17,6 +17,7 @@ import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
 import materialService from '../../services/materialService';
 import { InboundTransaction, OutboundTransaction } from '../../types/materials';
+import { listGalleryImages } from '../../services/geminiImageService';
 
 // ----------------------------------------------------------------------
 // Types & Interfaces
@@ -73,6 +74,13 @@ const getReportSiteKey = (siteId?: string | null, siteName?: string | null): str
     const name = String(siteName || '').trim();
     if (name) return `name:${name}`;
     return '';
+};
+
+const pickFallbackBirdseyeImage = (site: Site, pool: string[]): string => {
+    if (pool.length === 0) return '';
+    const seedSource = String(site.id || site.code || site.name || 'site');
+    const seed = seedSource.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return pool[seed % pool.length] || '';
 };
 
 // ----------------------------------------------------------------------
@@ -572,7 +580,16 @@ const SiteDetailModal: React.FC<SiteDetailModalProps> = ({ site, onClose }) => {
 // Component: SiteManagementPage (Main, Dark Theme)
 // ----------------------------------------------------------------------
 
-export const SiteManagementPage: React.FC = () => {
+interface SiteManagementPageProps {
+    closedOnly?: boolean;
+}
+
+const isClosedSite = (site: Site): boolean => {
+    const normalized = String(site.status || '').trim().toLowerCase();
+    return normalized === 'completed' || normalized === 'closed' || normalized === '마감';
+};
+
+const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly = false }) => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const [sites, setSites] = useState<Site[]>([]);
@@ -581,6 +598,8 @@ export const SiteManagementPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
     const [siteReportSummaryMap, setSiteReportSummaryMap] = useState<Record<string, SiteReportSummary>>({});
+    const [birdseyeUrls, setBirdseyeUrls] = useState<string[]>([]);
+    const [siteImageErrorMap, setSiteImageErrorMap] = useState<Record<string, boolean>>({});
 
     // Initial Load & Query Param Handling
     useEffect(() => {
@@ -591,8 +610,9 @@ export const SiteManagementPage: React.FC = () => {
                     siteService.getSites(),
                     dailyReportService.getReports(),
                 ]);
-                setSites(data);
-                setFilteredSites(data);
+                const sourceSites = closedOnly ? data.filter(isClosedSite) : data;
+                setSites(sourceSites);
+                setFilteredSites(sourceSites);
 
                 const summaryMap: Record<string, SiteReportSummary> = {};
                 allReports.forEach((report) => {
@@ -617,7 +637,7 @@ export const SiteManagementPage: React.FC = () => {
                 // Auto-open modal if siteId is present in URL
                 const targetSiteId = searchParams.get('siteId');
                 if (targetSiteId) {
-                    const targetSite = data.find(s => s.id === targetSiteId);
+                    const targetSite = sourceSites.find(s => s.id === targetSiteId);
                     if (targetSite) {
                         setSelectedSite(targetSite);
                     }
@@ -629,7 +649,44 @@ export const SiteManagementPage: React.FC = () => {
             }
         };
         init();
-    }, [searchParams]);
+    }, [closedOnly, searchParams]);
+
+    useEffect(() => {
+        let mounted = true;
+
+        const loadBirdseyeFallbackPool = async () => {
+            try {
+                // 1) 전체에서 조감도(category/tag) 우선 수집
+                const { images: allImages } = await listGalleryImages(undefined, 400);
+                if (!mounted) return;
+
+                const urlsFromAll = allImages
+                    .filter((image) => {
+                        if (image.category === 'birdseye') return true;
+                        const tags = Array.isArray(image.tags) ? image.tags : [];
+                        return tags.some((tag) => /birdseye|조감도/i.test(String(tag)));
+                    })
+                    .map((image) => String(image.url || '').trim())
+                    .filter(Boolean);
+
+                // 2) 부족하면 카테고리 전용 조회로 보강
+                let urls = Array.from(new Set(urlsFromAll));
+                if (urls.length === 0) {
+                    const { images } = await listGalleryImages('birdseye', 200);
+                    urls = images.map((image) => String(image.url || '').trim()).filter(Boolean);
+                }
+
+                setBirdseyeUrls(urls);
+            } catch (error) {
+                console.error('Failed to load birdseye fallback pool for site management:', error);
+            }
+        };
+
+        loadBirdseyeFallbackPool();
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     const getSiteSummary = useCallback((site: Site): SiteReportSummary | null => {
         const keyById = getReportSiteKey(site.id, null);
@@ -664,10 +721,12 @@ export const SiteManagementPage: React.FC = () => {
                 <div>
                     <h1 className="text-2xl md:text-3xl font-bold text-white flex items-center gap-3">
                         <FontAwesomeIcon icon={faBuilding} className="text-blue-500" />
-                        통합 현장 관리 시스템
+                        {closedOnly ? '마감 현장 관리 시스템' : '통합 현장 관리 시스템'}
                     </h1>
                     <p className="text-slate-400 mt-2">
-                        모든 현장의 자재, 인력, 공정 현황을 한눈에 관리하세요.
+                        {closedOnly
+                            ? '마감된 현장의 자재, 인력, 공정 현황만 모아 관리합니다.'
+                            : '모든 현장의 자재, 인력, 공정 현황을 한눈에 관리하세요.'}
                     </p>
                 </div>
 
@@ -695,9 +754,16 @@ export const SiteManagementPage: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4">
                     {filteredSites.map(site => (
                         (() => {
+                            const siteKey = String(site.id || site.code || site.name || 'site');
                             const siteSummary = getSiteSummary(site);
                             const periodText = siteSummary ? `${siteSummary.firstDate} ~ ${siteSummary.lastDate}` : '- ~ -';
                             const totalManDayText = siteSummary ? siteSummary.totalManDay.toFixed(1) : '0.0';
+                            const fallbackImageUrl = pickFallbackBirdseyeImage(site, birdseyeUrls);
+                            const hasOriginalImage = Boolean(site.imageUrl);
+                            const useFallbackByError = Boolean(siteImageErrorMap[siteKey]);
+                            const previewImageUrl = !useFallbackByError && hasOriginalImage
+                                ? String(site.imageUrl)
+                                : fallbackImageUrl;
                             return (
                         <motion.div
                             key={site.id}
@@ -708,8 +774,17 @@ export const SiteManagementPage: React.FC = () => {
                             className="bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden cursor-pointer group flex flex-col h-full"
                         >
                             <div className="aspect-[4/3] w-full bg-slate-700 relative overflow-hidden">
-                                {site.imageUrl ? (
-                                    <img src={site.imageUrl} alt={site.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                {previewImageUrl ? (
+                                    <img
+                                        src={previewImageUrl}
+                                        alt={site.name}
+                                        className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                                        onError={() => {
+                                            if (hasOriginalImage && fallbackImageUrl) {
+                                                setSiteImageErrorMap((prev) => ({ ...prev, [siteKey]: true }));
+                                            }
+                                        }}
+                                    />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center bg-slate-800 text-slate-600">
                                         <FontAwesomeIcon icon={faBuilding} size="2x" />
@@ -776,6 +851,14 @@ export const SiteManagementPage: React.FC = () => {
             </AnimatePresence>
         </div>
     );
+};
+
+export const SiteManagementPage: React.FC = () => {
+    return <SiteManagementPageBase />;
+};
+
+export const ClosedSiteManagementPage: React.FC = () => {
+    return <SiteManagementPageBase closedOnly />;
 };
 
 export default SiteManagementPage;

@@ -6,7 +6,6 @@ import logoFinished from '../../assets/logo_finished.png';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSitemap,
-    faLayerGroup,
     faProjectDiagram,
     faBuilding,
     faUsers,
@@ -30,57 +29,36 @@ interface MenuItem {
 
 const MENUS: MenuItem[] = [
     {
-        id: 'system-dongbari',
-        title: '시스템 동바리시공',
-        description: '안전한 하중 지지를 위한 시스템 동바리 자동화 모델링 및 물량 산출.',
+        id: 'system-dongbari-scaffolding',
+        title: '시스템 동바리비계 시공',
+        description: '시스템 동바리와 비계 시공을 통합 관리하며 구조 검토, 물량 산출, 공정 계획을 한 번에 운영합니다.',
         icon: faSitemap,
         color: 'blue'
     },
     {
-        id: 'system-scaffolding',
-        title: '시스템비계시공',
-        description: '외벽 작업자의 안전을 책임지는 3D 시스템비계 레이아웃 배치 시뮬레이션.',
-        icon: faLayerGroup,
-        color: 'indigo'
-    },
-    {
         id: 'peri-dongbari',
-        title: '페리 동바리시공',
-        description: '페리(Peri)사의 규격을 반영한 특수 동바리 폼 배치 및 도면 생성 지원.',
+        title: '시스템 자재임대',
+        description: '페리(Peri) 규격 자재의 임대 가능 수량, 출고 일정, 회수 계획을 통합 관리하는 임대 운영 모듈.',
         icon: faProjectDiagram,
         color: 'violet'
     },
     {
         id: 'peri-scaffolding',
-        title: '페리 비계시공',
-        description: '구조 검토가 완료된 페리 시스템 비계 설계 모듈 및 공수 계산.',
+        title: '시스템 인력공급',
+        description: '현장별 시스템 인력 배치, 출역 현황, 인건비 정산 흐름을 한 번에 관리하는 운영 사무소 모듈.',
         icon: faBuilding,
         color: 'cyan'
     },
     {
-        id: 'erp-hr',
-        title: 'erp실시간인력관리',
-        description: '각 현장별 투입 인원 실시간 모니터링, 공수 집계, 노무비 정산 시스템.',
-        icon: faUsers,
+        id: 'erp-site-management',
+        title: 'ERP 실시간 현장관리',
+        description: '인력, 자재, 현장 데이터베이스를 통합해 실시간 투입 현황, 재고, 정산 흐름을 한 화면에서 관리합니다.',
+        icon: faDatabase,
         color: 'emerald'
     },
     {
-        id: 'erp-material',
-        title: 'erp실시간자재관리',
-        description: '가설 자재의 현장 입출고, 재고 파악, 손망실 처리 및 자재 이동 경로 트래킹.',
-        icon: faBoxes,
-        color: 'amber'
-    },
-    {
-        id: 'erp-database',
-        title: 'erp현장관리데이터베이스',
-        description: '전국 설계 및 시공 현장의 도면, 사진, 작업 일보 등 중앙 DB 통합 관리.',
-        icon: faDatabase,
-        color: 'rose'
-    },
-    {
         id: 'partner-network',
-        title: '협력사네트워크',
+        title: '협력사 네트워크',
         description: '우수 시공 협력사 정보 조회, 발주 연계, 시공 평가 내역 및 파트너 매칭.',
         icon: faNetworkWired,
         color: 'teal'
@@ -204,7 +182,7 @@ const DesignManagementPage: React.FC = () => {
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-900/20 blur-[100px]" />
             </div>
 
-            <div className="relative z-10 container mx-auto px-6 py-12 max-w-7xl">
+            <div className="relative z-10 w-full px-4 py-12 md:px-8 xl:px-10">
 
                 {/* Header Section */}
                 <motion.div
@@ -216,14 +194,14 @@ const DesignManagementPage: React.FC = () => {
                     <div className="text-center md:text-left mb-8 md:mb-0">
                         <div className="flex items-center justify-center md:justify-start gap-3 mb-2">
                             <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-bold uppercase tracking-widest">
-                                통합 현장 관리 플랫폼 V12
+                                청연ENG 사업영역
                             </span>
                         </div>
                         <h1 className="text-5xl font-extrabold text-white mb-4">
-                            설계 및 현장 관리 센터
+                            청연ENG 사업영역
                         </h1>
                         <p className="text-lg text-slate-400 max-w-lg">
-                            가설재 설계부터 실시간 ERP, 자재 관리, 협력사 네트워크까지 모든 프로젝트 데이터를 한 곳에서 제어합니다.
+                            시스템 동바리비계 시공, 시스템 자재임대, 시스템 인력공급, ERP 실시간 현장관리, 협력사 네트워크까지 청연ENG의 핵심 사업영역을 통합 운영합니다.
                         </p>
                     </div>
 
@@ -346,7 +324,7 @@ const DesignManagementPage: React.FC = () => {
                         variants={containerVariants}
                         initial="hidden"
                         animate="visible"
-                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6"
                     >
                         {MENUS.map((menu, idx) => (
                             <ToolCard

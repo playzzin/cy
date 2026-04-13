@@ -4583,15 +4583,6 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <div className="text-sm text-emerald-900">
                             미지급금 선택 {selectedSummaryRowIds.length.toLocaleString()}건
                         </div>
-                        <button
-                            type="button"
-                            className="excel-button excel-button-green"
-                            onClick={handleOpenKbPreview}
-                            disabled={downloadingKb || selectedSummaryRowIds.length === 0}
-                        >
-                            <FontAwesomeIcon icon={downloadingKb ? faSpinner : faDownload} spin={downloadingKb} />
-                            {`국민은행용 다운로드${selectedSummaryRowIds.length > 0 ? ` (${selectedSummaryRowIds.length})` : ''}`}
-                        </button>
                     </div>
                 )}
 

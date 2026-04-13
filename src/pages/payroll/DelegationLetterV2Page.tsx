@@ -604,7 +604,7 @@ const DelegationLetterV2Page: React.FC = () => {
                     }
                     .delegation-signature-cell {
                         position: relative;
-                        height: 7mm !important;
+                        height: 10mm !important;
                         padding: 0 !important;
                         overflow: hidden !important;
                     }
@@ -1200,7 +1200,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                         .delegation-signature-cell {
                             position: relative;
-                            height: 28px;
+                            height: 38px;
                             padding: 0 !important;
                             overflow: hidden;
                         }
@@ -1293,9 +1293,9 @@ const DelegationLetterV2Page: React.FC = () => {
                                     <th className="border-r border-black p-1 w-16 text-center">성 명</th>
                                     <th className="border-r border-black p-1 w-28 text-center">주민번호</th>
                                     {showManDays && <th className="border-r border-black p-1 w-12 text-center">공수</th>}
-                                    <th className="border-r border-black p-1 text-center">주 소</th>
+                                    <th className="border-r border-black p-1 w-24 text-center">주 소</th>
                                     <th className="border-r border-black p-1 w-20 text-center">금 액</th>
-                                    <th className="p-1 w-16 text-center">서 명</th>
+                                    <th className="p-1 w-24 text-center">서 명</th>
                                 </tr>
                             </thead>
                             <tbody data-measure="workers">
@@ -1305,8 +1305,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                         <td className="border-r border-black p-1 font-bold tracking-widest text-center text-[12px]">{worker.workerName}</td>
                                         <td className="border-r border-black p-1 text-center tracking-wider">{worker.idNumber}</td>
                                         {showManDays && <td className="border-r border-black p-1 text-center">{worker.manDays.toFixed(1)}</td>}
-                                        <td className="border-r border-black p-1 text-[9px] leading-tight break-all">
-                                            {worker.address || ''}
+                                        <td className="border-r border-black p-1 text-[8.5px] leading-snug break-all">
+                                            <div className="line-clamp-2">{worker.address || ''}</div>
                                         </td>
                                         <td className="border-r border-black p-1 px-2 text-right font-bold text-[12px]">{worker.amount.toLocaleString()}</td>
                                         <td className="delegation-signature-cell"></td>
@@ -1416,9 +1416,9 @@ const DelegationLetterV2Page: React.FC = () => {
                                                     <th className="border-r border-black p-1 w-[52px] text-center font-bold">성 명</th>
                                                     <th className="border-r border-black p-1 w-[100px] text-center font-bold">주민번호</th>
                                                     {showManDays && <th className="border-r border-black p-1 w-10 text-center font-bold">공수</th>}
-                                                    <th className="border-r border-black p-1 text-center font-bold">주 소</th>
+                                                    <th className="border-r border-black p-1 w-[76px] text-center font-bold">주 소</th>
                                                     <th className="border-r border-black p-1 w-[72px] text-center font-bold">금 액</th>
-                                                    <th className="p-1 w-[52px] text-center font-bold">서 명</th>
+                                                    <th className="p-1 w-[84px] text-center font-bold">서 명</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -1430,7 +1430,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                                             <td className="border-r border-black p-1 font-bold tracking-[0.1em] text-center text-[11px]">{worker.workerName}</td>
                                                             <td className="border-r border-black p-1 text-center font-medium tracking-wider text-[10.5px]">{worker.idNumber}</td>
                                                             {showManDays && <td className="border-r border-black p-1 text-center text-gray-600 font-medium">{worker.manDays.toFixed(1)}</td>}
-                                                            <td className="border-r border-black p-1 text-[8.5px] leading-snug break-all text-gray-700">
+                                                            <td className="border-r border-black p-1 text-[8px] leading-snug break-all text-gray-700">
                                                                 <div className="line-clamp-2">{worker.address || ''}</div>
                                                             </td>
                                                             <td className="border-r border-black p-1 px-1.5 text-right font-bold text-[11px] tracking-wide">
@@ -1438,7 +1438,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                                             </td>
                                                             <td className="delegation-signature-cell align-middle">
                                                                 {worker.signatureUrl ? (
-                                                                    <div className="absolute inset-0 flex items-center justify-center p-0.5">
+                                                                    <div className="absolute inset-0 flex items-center justify-center p-1">
                                                                         <img src={worker.signatureUrl} alt={`Sign ${worker.workerName}`} className="max-h-full max-w-full object-contain pointer-events-none opacity-90 mix-blend-multiply" />
                                                                     </div>
                                                                 ) : (

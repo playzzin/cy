@@ -22,7 +22,7 @@ import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
 import { useSiteMode } from '../../contexts/SiteModeContext';
 import './CheongyeonOrgChartPage.css';
 
-type DepartmentKey = 'construction' | 'sales' | 'finance' | 'materials';
+type DepartmentKey = 'construction' | 'hrPeople' | 'hrAdmin' | 'sales' | 'development';
 
 type TeamSlot = {
     slot: number;
@@ -51,7 +51,7 @@ type DepartmentCardConfig = {
     value: string;
 };
 
-const TEAM_GRID_COLUMNS = 4;
+const TEAM_GRID_COLUMNS = 5;
 const TEAM_SLOT_LEADERS: Array<string | undefined> = [
     '이재욱',
     '김봉수',
@@ -64,6 +64,88 @@ const TEAM_SLOT_LEADERS: Array<string | undefined> = [
     '임효재',
     '유재훈',
 ];
+
+const DEPARTMENT_TEAM_PRESETS: Record<Exclude<DepartmentKey, 'construction'>, Array<{
+    displayName: string;
+    originalName: string;
+    leaderName: string;
+    memberCount: number;
+    statusLabel: string;
+    siteNames: string[];
+}>> = {
+    hrPeople: [
+        {
+            displayName: '인사팀 1팀',
+            originalName: '인사 운영본부',
+            leaderName: '김팀장',
+            memberCount: 5,
+            statusLabel: '운영 중',
+            siteNames: ['본사 인사 라인'],
+        },
+        {
+            displayName: '인사팀 2팀',
+            originalName: '채용·교육 파트',
+            leaderName: '박팀장',
+            memberCount: 4,
+            statusLabel: '운영 중',
+            siteNames: ['채용·교육'],
+        },
+    ],
+    hrAdmin: [
+        {
+            displayName: '회계팀 1팀',
+            originalName: '회계·정산 파트',
+            leaderName: '이과장',
+            memberCount: 4,
+            statusLabel: '운영 중',
+            siteNames: ['회계·정산'],
+        },
+        {
+            displayName: '회계팀 2팀',
+            originalName: '원가·세무 파트',
+            leaderName: '고대리',
+            memberCount: 3,
+            statusLabel: '세팅 중',
+            siteNames: ['원가·세무'],
+        },
+    ],
+    sales: [
+        {
+            displayName: '영업팀 1팀',
+            originalName: '수주 영업 라인',
+            leaderName: '이차장',
+            memberCount: 6,
+            statusLabel: '운영 중',
+            siteNames: ['입찰·영업'],
+        },
+        {
+            displayName: '영업팀 2팀',
+            originalName: '파트너 영업 라인',
+            leaderName: '이차장',
+            memberCount: 5,
+            statusLabel: '운영 중',
+            siteNames: ['협력사·파트너'],
+        },
+    ],
+    development: [
+        {
+            displayName: '개발팀 1팀',
+            originalName: '플랫폼 개발 라인',
+            leaderName: '최실장',
+            memberCount: 5,
+            statusLabel: '운영 중',
+            siteNames: ['내부 시스템 개발'],
+        },
+        {
+            displayName: '개발팀 2팀',
+            originalName: 'AI 자동화 라인',
+            leaderName: '최실장',
+            memberCount: 4,
+            statusLabel: '세팅 중',
+            siteNames: ['AI 이미지·자동화'],
+        },
+    ],
+};
 
 const isCheongyeonName = (value?: string) => {
     const normalized = String(value ?? '').replace(/\s+/g, '').toLowerCase();
@@ -211,7 +293,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
     const { isDarkMode } = useSiteMode();
     const { treeData, loading } = useOrganizationTree();
     const [selectedSlot, setSelectedSlot] = useState<number>(1);
-    const [isConstructionOpen, setIsConstructionOpen] = useState(false);
+    const [activeDepartmentKey, setActiveDepartmentKey] = useState<DepartmentKey>('construction');
     const [sites, setSites] = useState<Site[]>([]);
     const [sitesLoading, setSitesLoading] = useState(true);
     const pyramidSectionRef = useRef<HTMLElement | null>(null);
@@ -240,6 +322,27 @@ const CheongyeonOrgChartPage: React.FC = () => {
             mounted = false;
         };
     }, []);
+
+    const workerProfileImageByName = useMemo(() => {
+        const map: Record<string, string> = {};
+        const walk = (node: OrgNode) => {
+            if (node.type === 'worker') {
+                const normalizedWorkerName = normalizeName(node.name);
+                const profileImageUrl = getWorkerProfileImageUrl(node);
+                if (normalizedWorkerName && profileImageUrl && !map[normalizedWorkerName]) {
+                    map[normalizedWorkerName] = profileImageUrl;
+                }
+            }
+            node.children.forEach(walk);
+        };
+
+        treeData.forEach(walk);
+        return map;
+    }, [treeData]);
+
+    const resolveLeaderImageFromWorker = (leaderName: string, fallback = '') => {
+        return workerProfileImageByName[normalizeName(leaderName)] ?? fallback;
+    };
 
     const companyNodes = useMemo(
         () => treeData.filter((node) => node.type === 'company'),
@@ -333,6 +436,9 @@ const CheongyeonOrgChartPage: React.FC = () => {
                     leaderImageUrl:
                         getWorkerProfileImageUrl(preferredLeader) ||
                         getWorkerProfileImageUrl(leader) ||
+                        resolveLeaderImageFromWorker(
+                            preferredLeaderName ?? leader?.name ?? source?.data?.leaderName ?? ''
+                        ) ||
                         '',
                     memberCount: members.length,
                     siteNames: source ? getTeamSiteNames(source, sites) : [],
@@ -342,23 +448,88 @@ const CheongyeonOrgChartPage: React.FC = () => {
                     source,
                 };
             }),
-        [sites, slottedConstructionTeams]
+        [sites, slottedConstructionTeams, workerProfileImageByName]
+    );
+
+    const nonConstructionTeamSlots = useMemo<Record<Exclude<DepartmentKey, 'construction'>, TeamSlot[]>>(
+        () => ({
+            hrPeople: DEPARTMENT_TEAM_PRESETS.hrPeople.map((team, index) => ({
+                slot: index + 1,
+                displayName: team.displayName,
+                originalName: team.originalName,
+                leaderName: team.leaderName,
+                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
+                memberCount: team.memberCount,
+                siteNames: team.siteNames,
+                statusLabel: team.statusLabel,
+                members: [],
+                isPlaceholder: true,
+            })),
+            hrAdmin: DEPARTMENT_TEAM_PRESETS.hrAdmin.map((team, index) => ({
+                slot: index + 1,
+                displayName: team.displayName,
+                originalName: team.originalName,
+                leaderName: team.leaderName,
+                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
+                memberCount: team.memberCount,
+                siteNames: team.siteNames,
+                statusLabel: team.statusLabel,
+                members: [],
+                isPlaceholder: true,
+            })),
+            sales: DEPARTMENT_TEAM_PRESETS.sales.map((team, index) => ({
+                slot: index + 1,
+                displayName: team.displayName,
+                originalName: team.originalName,
+                leaderName: team.leaderName,
+                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
+                memberCount: team.memberCount,
+                siteNames: team.siteNames,
+                statusLabel: team.statusLabel,
+                members: [],
+                isPlaceholder: true,
+            })),
+            development: DEPARTMENT_TEAM_PRESETS.development.map((team, index) => ({
+                slot: index + 1,
+                displayName: team.displayName,
+                originalName: team.originalName,
+                leaderName: team.leaderName,
+                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
+                memberCount: team.memberCount,
+                siteNames: team.siteNames,
+                statusLabel: team.statusLabel,
+                members: [],
+                isPlaceholder: true,
+            })),
+        }),
+        [workerProfileImageByName]
+    );
+
+    const activeTeamSlots = useMemo(
+        () =>
+            activeDepartmentKey === 'construction'
+                ? teamSlots
+                : nonConstructionTeamSlots[activeDepartmentKey],
+        [activeDepartmentKey, nonConstructionTeamSlots, teamSlots]
     );
 
     const teamGridRows = useMemo(() => {
         let cursor = 0;
         const rows: TeamSlot[][] = [];
-        while (cursor < teamSlots.length) {
-            const row = teamSlots.slice(cursor, cursor + TEAM_GRID_COLUMNS);
+        while (cursor < activeTeamSlots.length) {
+            const row = activeTeamSlots.slice(cursor, cursor + TEAM_GRID_COLUMNS);
             rows.push(row);
             cursor += TEAM_GRID_COLUMNS;
         }
         return rows;
-    }, [teamSlots]);
+    }, [activeTeamSlots]);
 
-    const selectedTeam = teamSlots.find((slot) => slot.slot === selectedSlot) ?? teamSlots[0];
+    const selectedTeam = activeTeamSlots.find((slot) => slot.slot === selectedSlot) ?? activeTeamSlots[0];
     const extraTeamCount = Math.max(0, constructionTeams.length - 10);
     const selectedTeamMembers = useMemo(() => {
+        if (!selectedTeam) {
+            return [];
+        }
         const selectedLeaderName = selectedTeam.leaderName;
 
         return [...selectedTeam.members].sort((left, right) => {
@@ -391,10 +562,37 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 highlights: [
                     `${formatNumber(totalMembers)}명 투입`,
                     `${formatNumber(uniqueSiteCount)}개 현장`,
-                    '1~10팀 4열 배열 운영',
+                    '1~10팀 5열 배열 운영',
                 ],
                 members: [
                     { name: '청연 1팀~10팀', role: `전체 ${formatNumber(totalMembers)}명 운영` },
+                ],
+            },
+            {
+                key: 'hrPeople',
+                title: '인사팀',
+                english: 'HR Operations',
+                description: '채용, 배치, 인사 운영 정책을 관리하는 핵심 운영 라인입니다.',
+                icon: faChartLine,
+                accent: 'from-emerald-500/25 via-teal-500/15 to-white/5',
+                iconGradient: 'from-emerald-400 to-teal-500',
+                value: 'HR Core',
+                highlights: ['채용 운영', '인력 배치', '교육 관리'],
+                members: [{ name: '김팀장', role: '인사 운영 리드' }],
+            },
+            {
+                key: 'hrAdmin',
+                title: '회계팀',
+                english: 'Accounting Team',
+                description: '회계, 정산, 원가·세무 운영을 담당하는 재무 관리 라인입니다.',
+                icon: faCalculator,
+                accent: 'from-amber-500/25 via-orange-500/15 to-white/5',
+                iconGradient: 'from-amber-400 to-orange-500',
+                value: 'Accounting Core',
+                highlights: ['회계 정산', '원가 관리', '세무 대응'],
+                members: [
+                    { name: '이과장', role: '회계/정산 운영' },
+                    { name: '고대리', role: '원가/세무 담당' },
                 ],
             },
             {
@@ -402,59 +600,42 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 title: '영업팀',
                 english: 'Sales & Bidding',
                 description: '입찰, 견적, 수주 파이프라인과 대외 커뮤니케이션을 담당합니다.',
-                icon: faChartLine,
-                accent: 'from-emerald-500/25 via-teal-500/15 to-white/5',
-                iconGradient: 'from-emerald-400 to-teal-500',
-                value: 'Bid Flow',
-                highlights: ['입찰 전략', '수주 관리', '고객 대응'],
-                members: [{ name: '김팀장', role: '수주/입찰 리드' }],
-            },
-            {
-                key: 'finance',
-                title: '경리팀',
-                english: 'Finance & Accounting',
-                description: '원가, 정산, 회계 마감과 자금 흐름을 안정적으로 관리합니다.',
-                icon: faCalculator,
-                accent: 'from-amber-500/25 via-orange-500/15 to-white/5',
-                iconGradient: 'from-amber-400 to-orange-500',
-                value: 'Cost Control',
-                highlights: ['정산 관리', '회계 마감', '세금 자료'],
-                members: [
-                    { name: '이대리', role: '정산/회계 운영' },
-                    { name: '고과장', role: '원가/마감 총괄' },
-                ],
-            },
-            {
-                key: 'materials',
-                title: '자재팀',
-                english: 'Materials & Logistics',
-                description: '자재 발주, 재고 운영, 납기 대응을 연결해 현장 공급을 책임집니다.',
                 icon: faBoxesStacked,
                 accent: 'from-fuchsia-500/20 via-violet-500/10 to-white/5',
                 iconGradient: 'from-fuchsia-400 to-violet-500',
-                value: 'Supply Chain',
-                highlights: ['발주/조달', '재고 추적', '납기 대응'],
-                members: [{ name: '이차장', role: '자재/물류 총괄' }],
+                value: 'Bid Flow',
+                highlights: ['입찰 전략', '수주 관리', '고객 대응'],
+                members: [{ name: '이차장', role: '영업 리드' }],
+            },
+            {
+                key: 'development',
+                title: '개발팀',
+                english: 'Development Team',
+                description: '업무 자동화와 내부 플랫폼 개발을 담당하는 기술 조직입니다.',
+                icon: faSitemap,
+                accent: 'from-sky-500/20 via-indigo-500/12 to-white/5',
+                iconGradient: 'from-sky-400 to-indigo-500',
+                value: 'Build Ops',
+                highlights: ['사내 시스템', '자동화', 'AI 이미지 연동'],
+                members: [{ name: '최실장', role: '개발팀 리드' }],
             },
         ],
         [constructionTeams.length, totalMembers, uniqueSiteCount]
     );
 
+    const activeDepartmentCard =
+        departmentCards.find((card) => card.key === activeDepartmentKey) ?? departmentCards[0];
+
+    const handleDepartmentSelect = (departmentKey: DepartmentKey) => {
+        setActiveDepartmentKey(departmentKey);
+        setSelectedSlot(1);
+        window.setTimeout(() => {
+            pyramidSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 80);
+    };
+
     const ceoName = String(primaryCompany?.data?.ceoName ?? '').trim() || '대표이사';
     const companyName = primaryCompany?.name ?? '청연ENG';
-
-    useEffect(() => {
-        if (!isConstructionOpen) {
-            return;
-        }
-
-        window.setTimeout(() => {
-            pyramidSectionRef.current?.scrollIntoView({
-                behavior: 'smooth',
-                block: 'start',
-            });
-        }, 90);
-    }, [isConstructionOpen]);
 
     if (loading || sitesLoading) {
         return (
@@ -484,52 +665,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 </div>
             )}
 
-            <main className="relative z-10 mx-auto flex w-full max-w-[1520px] flex-col gap-8 px-4 py-6 md:px-8 md:py-8 xl:px-10">
-                <motion.section
-                    initial={{ opacity: 0, y: 18 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.45 }}
-                    className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] shadow-[0_32px_120px_rgba(2,6,23,0.55)] backdrop-blur-xl"
-                >
-                    <div className="grid gap-8 px-6 py-8 md:px-8 lg:grid-cols-[minmax(0,1.2fr)_420px] lg:items-center lg:px-10">
-                        <div className="space-y-5">
-                            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/85">
-                                <FontAwesomeIcon icon={faLayerGroup} />
-                                Cheongyeon Organization Blueprint
-                            </div>
-                            <div className="space-y-3">
-                                <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">
-                                    CEO 중심의 운영 조직도로
-                                    <br className="hidden md:block" /> 청연 시공 라인을 재정렬했습니다.
-                                </h1>
-                                <p className="max-w-3xl text-sm leading-7 text-slate-300 md:text-base">
-                                    최상단은 CEO, 그 아래는 시공팀 · 영업팀 · 경리팀 · 자재팀으로 분기하고,
-                                    시공팀은 빠르게 스캔할 수 있도록 1팀부터 10팀까지 4개씩 정렬되는 그리드 구조로 배치했습니다.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 md:gap-4">
-                            <OverviewCard label="표준 팀 슬롯" value="10" accent="from-cyan-400 to-blue-500" />
-                            <OverviewCard
-                                label="실운영 팀"
-                                value={formatNumber(Math.min(constructionTeams.length, 10))}
-                                accent="from-emerald-400 to-teal-500"
-                            />
-                            <OverviewCard
-                                label="투입 인원"
-                                value={formatNumber(totalMembers)}
-                                accent="from-amber-400 to-orange-500"
-                            />
-                            <OverviewCard
-                                label="운영 현장"
-                                value={formatNumber(uniqueSiteCount)}
-                                accent="from-fuchsia-400 to-violet-500"
-                            />
-                        </div>
-                    </div>
-                </motion.section>
-
+            <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-8 px-4 py-6 md:px-8 md:py-8 xl:px-10">
                 <motion.section
                     initial={{ opacity: 0, y: 22 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -568,17 +704,13 @@ const CheongyeonOrgChartPage: React.FC = () => {
                         <div className="absolute left-1/2 top-[-38px] hidden h-10 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/80 to-transparent xl:block" />
                         <div className="absolute left-[12.5%] right-[12.5%] top-0 hidden h-px bg-gradient-to-r from-transparent via-cyan-300/65 to-transparent xl:block" />
 
-                        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                             {departmentCards.map((card) => (
                                 <DepartmentCard
                                     key={card.key}
                                     card={card}
-                                    isActive={card.key === 'construction' && isConstructionOpen}
-                                    onClick={
-                                        card.key === 'construction'
-                                            ? () => setIsConstructionOpen(true)
-                                            : undefined
-                                    }
+                                    isActive={card.key === activeDepartmentKey}
+                                    onClick={() => handleDepartmentSelect(card.key)}
                                 />
                             ))}
                         </div>
@@ -587,7 +719,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
 
                 <section
                     ref={pyramidSectionRef}
-                    className={isConstructionOpen ? 'grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]' : 'grid gap-6'}
+                    className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_380px]"
                 >
                     <motion.div
                         initial={{ opacity: 0, y: 24 }}
@@ -596,33 +728,34 @@ const CheongyeonOrgChartPage: React.FC = () => {
                         className="overflow-hidden rounded-[34px] border border-white/10 bg-white/[0.045] px-5 py-6 shadow-[0_30px_100px_rgba(2,6,23,0.5)] backdrop-blur-xl md:px-6 md:py-7 xl:px-8"
                     >
                         <AnimatePresence mode="wait" initial={false}>
-                            {isConstructionOpen ? (
-                                <motion.div
-                                    key="construction-open-panel"
-                                    variants={pyramidRevealVariants}
-                                    initial="hidden"
-                                    animate="visible"
-                                    exit="exit"
-                                >
+                            <motion.div
+                                key="construction-open-panel"
+                                variants={pyramidRevealVariants}
+                                initial="hidden"
+                                animate="visible"
+                                exit="exit"
+                            >
                                     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                                         <div className="space-y-2">
                                             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.3em] text-cyan-100/80">
                                                 <FontAwesomeIcon icon={faHardHat} />
-                                                Construction Grid
+                                                {activeDepartmentCard?.english ?? 'Department Grid'}
                                             </div>
                                             <h2 className="text-2xl font-black tracking-tight text-white md:text-3xl">
-                                                시공팀 1~10 운영 그리드
+                                                {activeDepartmentCard?.title ?? '부서'} 팀 운영 그리드
                                             </h2>
                                             <p className="max-w-3xl text-sm leading-7 text-slate-300">
-                                                시공팀 카드를 4개씩 정렬해 한 번에 비교하기 쉽게 구성했습니다.
-                                                팀 카드를 누르면 현재 연결된 실제 팀 정보와 인원 구성을 오른쪽에서 확인할 수 있습니다.
+                                                선택된 부서의 팀 카드를 5개씩 정렬해 한 번에 비교하기 쉽게 구성했습니다.
+                                                팀 카드를 누르면 현재 연결된 팀 리더 이미지와 구성 정보를 오른쪽에서 확인할 수 있습니다.
                                             </p>
                                         </div>
 
                                         <div className="rounded-2xl border border-cyan-300/15 bg-cyan-400/8 px-4 py-3 text-sm text-cyan-50">
                                             <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-100/70">Current Coverage</div>
                                             <div className="mt-1 text-xl font-black">
-                                                {formatNumber(Math.min(constructionTeams.length, 10))} / 10 팀 연결
+                                                {activeDepartmentKey === 'construction'
+                                                    ? `${formatNumber(Math.min(constructionTeams.length, 10))} / 10 팀 연결`
+                                                    : `${formatNumber(activeTeamSlots.length)}개 팀 구성`}
                                             </div>
                                         </div>
                                     </div>
@@ -633,7 +766,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                             <motion.div
                                                 key={`row-${rowIndex}`}
                                                 variants={pyramidItemVariants}
-                                                className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
+                                                className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-5"
                                             >
                                                 {row.map((slot) => (
                                                     <motion.button
@@ -668,11 +801,11 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                                                         {slot.displayName}
                                                                     </div>
                                                                 </div>
-                                                                <div className="flex flex-col items-end gap-2">
+                                                                <div className="flex w-36 flex-col items-end gap-2">
                                                                     <LeaderAvatar
                                                                         imageUrl={slot.leaderImageUrl}
                                                                         name={slot.leaderName}
-                                                                        size="sm"
+                                                                        size="tile"
                                                                     />
                                                                     <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200">
                                                                         {slot.statusLabel}
@@ -685,7 +818,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                                             </div>
 
                                                             <div className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-300">
-                                                                <SmallStat label="리더" value={slot.leaderName} />
+                                                                <SmallStat label="현장" value={`${formatNumber(slot.siteNames.length)}개`} />
                                                                 <SmallStat label="인원" value={`${formatNumber(slot.memberCount)}명`} />
                                                             </div>
 
@@ -700,56 +833,17 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                         ))}
                                     </div>
 
-                                    {extraTeamCount > 0 && (
+                                    {activeDepartmentKey === 'construction' && extraTeamCount > 0 && (
                                         <div className="mt-8 rounded-2xl border border-amber-300/15 bg-amber-400/10 px-4 py-3 text-sm text-amber-50">
                                             10팀 이후 추가로 연결된 시공팀이 {formatNumber(extraTeamCount)}개 있습니다. 현재 화면은 요청 기준에 맞춰 1팀부터 10팀까지만 4열 구조로 노출합니다.
                                         </div>
                                     )}
                                 </motion.div>
-                            ) : (
-                                <motion.div
-                                    key="construction-closed-panel"
-                                    initial={{ opacity: 0, y: 18, filter: 'blur(10px)' }}
-                                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                                    exit={{ opacity: 0, y: -12, filter: 'blur(10px)' }}
-                                    transition={{ duration: 0.32, ease: 'easeOut' }}
-                                    className="flex flex-col gap-5"
-                                >
-                                    <div className="inline-flex w-fit items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-100/80">
-                                        <FontAwesomeIcon icon={faHelmetSafety} />
-                                        Team Reveal
-                                    </div>
-                                    <div className="space-y-3">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            시공팀 카드를 누르면 팀 그리드가 펼쳐집니다.
-                                        </h2>
-                                        <p className="max-w-3xl text-sm leading-7 text-slate-300">
-                                            시공팀을 클릭하면 청연 1팀부터 10팀까지가 4열 그리드로 나타나고,
-                                            선택한 팀의 전체 인원과 현장 연결 정보도 함께 전환됩니다.
-                                        </p>
-                                    </div>
-                                    <motion.button
-                                        type="button"
-                                        whileHover={{ y: -4, scale: 1.02 }}
-                                        whileTap={{ scale: 0.98 }}
-                                        onClick={() => setIsConstructionOpen(true)}
-                                        className="inline-flex w-fit items-center gap-3 rounded-2xl border border-cyan-300/25 bg-gradient-to-r from-cyan-400/15 to-blue-500/15 px-5 py-3 text-sm font-semibold text-cyan-50 shadow-[0_16px_36px_rgba(34,211,238,0.12)]"
-                                    >
-                                        <span>시공팀 펼치기</span>
-                                        <motion.span
-                                            animate={{ y: [0, 4, 0] }}
-                                            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
-                                        >
-                                            <FontAwesomeIcon icon={faChevronDown} />
-                                        </motion.span>
-                                    </motion.button>
-                                </motion.div>
-                            )}
                         </AnimatePresence>
                     </motion.div>
 
                     <AnimatePresence initial={false}>
-                        {isConstructionOpen && (
+                        {selectedTeam && (
                             <motion.aside
                                 variants={pyramidItemVariants}
                                 initial="hidden"
@@ -759,7 +853,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                             >
                                 <AnimatePresence mode="wait">
                                     <motion.div
-                                        key={selectedTeam.slot}
+                                        key={`${activeDepartmentKey}-${selectedTeam.slot}`}
                                         initial={{ opacity: 0, y: 18, scale: 0.985 }}
                                         animate={{ opacity: 1, y: 0, scale: 1 }}
                                         exit={{ opacity: 0, y: -14, scale: 0.985 }}
@@ -779,7 +873,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                         <LeaderAvatar
                                             imageUrl={selectedTeam.leaderImageUrl}
                                             name={selectedTeam.leaderName}
-                                            size="lg"
+                                            size="feature"
                                         />
                                         <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
                                             {selectedTeam.statusLabel}
@@ -788,21 +882,10 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                 </div>
 
                                 <div className="mt-6 grid grid-cols-2 gap-3">
-                                    <DetailMetric icon={faUserTie} label="리더" value={selectedTeam.leaderName} />
+                                    <DetailMetric icon={faMapMarkerAlt} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} />
                                     <DetailMetric icon={faUsers} label="인원" value={`${formatNumber(selectedTeam.memberCount)}명`} />
-                                    <DetailMetric icon={faBuilding} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} />
-                                    <DetailMetric icon={faSitemap} label="조직 단계" value={`시공팀 > ${selectedTeam.slot}팀`} />
-                                </div>
-
-                                <div className="mt-6 rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
-                                    <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                                        운영 메모
-                                    </div>
-                                    <p className="mt-3 text-sm leading-7 text-slate-300">
-                                        {selectedTeam.isPlaceholder
-                                            ? '이 슬롯은 아직 실제 팀 데이터가 연결되지 않았습니다. 향후 팀 확장 시 해당 위치에 즉시 반영되도록 준비된 자리입니다.'
-                                            : '실제 청연 팀 데이터를 연결한 슬롯입니다. 원본 팀명과 현장 인원 정보를 유지하면서 조직도 표시는 1팀부터 10팀까지 통일했습니다.'}
-                                    </p>
+                                    <DetailMetric icon={faBuilding} label="상태" value={selectedTeam.statusLabel} />
+                                    <DetailMetric icon={faSitemap} label="조직 단계" value={`${activeDepartmentCard?.title ?? '부서'} > ${selectedTeam.slot}팀`} />
                                 </div>
 
                                         <div className="mt-6">
@@ -945,7 +1028,7 @@ const DepartmentCard = ({
 
                 {onClick && (
                     <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-50">
-                        {isActive ? '팀 접기' : '팀 펼치기'}
+                        {isActive ? '팀 열람중' : '팀 펼치기'}
                     </div>
                 )}
 
@@ -1039,27 +1122,41 @@ const LeaderAvatar = ({
 }: {
     imageUrl?: string;
     name: string;
-    size: 'sm' | 'lg';
+    size: 'sm' | 'lg' | 'tile' | 'feature';
 }) => {
     const [hasImageError, setHasImageError] = useState(false);
-    const dimensions = size === 'lg' ? 'h-16 w-16 rounded-2xl' : 'h-11 w-11 rounded-xl';
-    const labelSize = size === 'lg' ? 'text-lg' : 'text-sm';
+    const dimensions =
+        size === 'feature'
+            ? 'h-[13rem] w-[9.4rem] rounded-[1.4rem]'
+            : size === 'tile'
+                ? 'h-[8.8rem] w-full rounded-[1rem]'
+            : size === 'lg'
+                ? 'h-16 w-16 rounded-2xl'
+                : 'h-11 w-11 rounded-xl';
+    const labelSize = size === 'feature' ? 'text-3xl' : size === 'lg' ? 'text-lg' : 'text-sm';
     const resolvedImageUrl = String(imageUrl ?? '').trim();
     const shouldRenderImage = Boolean(resolvedImageUrl) && !hasImageError;
+    const wrapperClass =
+        size === 'feature'
+            ? `relative overflow-hidden border border-cyan-300/30 bg-slate-900/90 ${dimensions} shadow-[0_28px_60px_rgba(8,145,178,0.28)]`
+            : size === 'tile'
+                ? `relative overflow-hidden border border-cyan-300/25 bg-slate-900/90 ${dimensions} shadow-[0_18px_42px_rgba(14,116,144,0.28)]`
+            : `overflow-hidden border border-white/10 bg-slate-900/80 ${dimensions}`;
+    const imageClass = size === 'feature' || size === 'tile' ? 'h-full w-full object-cover object-top' : 'h-full w-full object-cover';
 
     return (
-        <div className={`overflow-hidden border border-white/10 bg-slate-900/80 ${dimensions}`}>
+        <div className={wrapperClass}>
             {shouldRenderImage ? (
                 <img
                     src={resolvedImageUrl}
                     alt={name}
-                    className="h-full w-full object-cover"
+                    className={imageClass}
                     loading="lazy"
                     onError={() => setHasImageError(true)}
                 />
             ) : (
-                <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/30 to-blue-500/20 font-black text-white ${labelSize}`}>
-                    {name ? name.charAt(0) : '팀'}
+                <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/30 to-blue-500/20 ${labelSize}`}>
+                    <FontAwesomeIcon icon={faUserTie} className="text-white/75" />
                 </div>
             )}
         </div>
