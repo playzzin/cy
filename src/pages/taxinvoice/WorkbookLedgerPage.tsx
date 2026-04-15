@@ -179,9 +179,9 @@ const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
     { id: 'summary', label: '전체 조회' },
 ];
 
-const TENANT_TABS: Array<{ key: WorkbookLedgerTenant; label: string; path: string }> = [
-    { key: 'cheongyeon', label: '청연', path: '/payroll/workbook-ledger' },
-    { key: 'dawon', label: '다원', path: '/payroll/workbook-ledger-dawon' }
+const TENANT_TABS: Array<{ key: WorkbookLedgerTenant; label: string; path: string; colorClass: string }> = [
+    { key: 'cheongyeon', label: '청연', path: '/payroll/workbook-ledger', colorClass: 'tenant-cheongyeon' },
+    { key: 'dawon', label: '다원', path: '/payroll/workbook-ledger-dawon', colorClass: 'tenant-dawon' }
 ];
 
 const DB_HEADERS = [
@@ -4723,12 +4723,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         </section>
     );
     return (
-        <div className="workbook-ledger-page">
+        <div className={`workbook-ledger-page ${tenantKey === 'cheongyeon' ? 'tenant-cheongyeon' : 'tenant-dawon'}`}>
             <div className="workbook-shell">
                 <div className="workbook-titlebar">
                     <div>
-                        <h1>{`매입매출 Pro Ver 2.5 (${companyLabel}) [KB-CHECKBOX-LIVE]`}</h1>
-                        <p>엑셀 통합문서 UI를 웹 화면으로 옮긴 전용 장부 페이지입니다.</p>
+                        <h1>{`${companyLabel} 매입매출`}</h1>
+                        <p>{`${companyLabel} 매입매출 전용 장부 페이지입니다.`}</p>
                     </div>
                     <div className="workbook-title-actions">
                         <button
@@ -4748,7 +4748,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <button
                             key={tab.key}
                             type="button"
-                            className={`workbook-tenant-tab ${tenantKey === tab.key ? 'active' : ''}`}
+                            className={`workbook-tenant-tab ${tab.colorClass} ${tenantKey === tab.key ? 'active' : ''}`}
                             onClick={() => navigate(tab.path)}
                         >
                             {tab.label}
@@ -4756,7 +4756,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     ))}
                 </div>
 
-                <div className="workbook-tabs" role="tablist" aria-label="Workbook tabs">
+                <div className={`workbook-tabs ${tenantKey === 'cheongyeon' ? 'tenant-cheongyeon' : 'tenant-dawon'}`} role="tablist" aria-label="Workbook tabs">
                     {WORKBOOK_TABS.map((tab) => (
                         <button
                             key={tab.id}

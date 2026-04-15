@@ -154,9 +154,6 @@
 }
 
 .workbook-tenant-tab {
-    border: 1px solid #c7d2fe;
-    background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
-    color: #3730a3;
     padding: 8px 14px;
     border-radius: 999px;
     font-size: 13px;
@@ -164,18 +161,45 @@
     line-height: 1;
     cursor: pointer;
     transition: all 0.18s ease;
+    border: 1px solid transparent;
 }
 
-.workbook-tenant-tab:hover {
+/* 청연 - 보라색 */
+.workbook-tenant-tab.tenant-cheongyeon {
+    border-color: #c7d2fe;
+    background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+    color: #3730a3;
+}
+
+.workbook-tenant-tab.tenant-cheongyeon:hover {
     transform: translateY(-1px);
     box-shadow: 0 8px 16px rgba(79, 70, 229, 0.14);
 }
 
-.workbook-tenant-tab.active {
+.workbook-tenant-tab.tenant-cheongyeon.active {
     border-color: #4338ca;
     background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
     color: #f8fafc;
     box-shadow: 0 10px 18px rgba(67, 56, 202, 0.24);
+}
+
+/* 다원 - 빨간색 */
+.workbook-tenant-tab.tenant-dawon {
+    border-color: #fecaca;
+    background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+    color: #9f1239;
+}
+
+.workbook-tenant-tab.tenant-dawon:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 16px rgba(239, 68, 68, 0.14);
+}
+
+.workbook-tenant-tab.tenant-dawon.active {
+    border-color: #dc2626;
+    background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
+    color: #f8fafc;
+    box-shadow: 0 10px 18px rgba(220, 38, 38, 0.24);
 }
 
 .workbook-tab {
@@ -195,6 +219,34 @@
     color: #0f172a;
     border-bottom-color: #ffffff;
     box-shadow: 0 -1px 0 #ffffff inset;
+}
+
+/* 하단 워크북 탭(입력폼/DB/조회/전체조회): 청연 보라 테마 */
+.workbook-tabs.tenant-cheongyeon .workbook-tab {
+    border-color: #c7d2fe;
+    background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+    color: #3730a3;
+}
+
+.workbook-tabs.tenant-cheongyeon .workbook-tab.active {
+    border-color: #4338ca;
+    background: linear-gradient(180deg, #4338ca 0%, #3730a3 100%);
+    color: #f8fafc;
+    box-shadow: 0 10px 18px rgba(67, 56, 202, 0.24);
+}
+
+/* 하단 워크북 탭(입력폼/DB/조회/전체조회): 다원 빨강 테마 */
+.workbook-tabs.tenant-dawon .workbook-tab {
+    border-color: #fecaca;
+    background: linear-gradient(180deg, #fff1f2 0%, #ffe4e6 100%);
+    color: #9f1239;
+}
+
+.workbook-tabs.tenant-dawon .workbook-tab.active {
+    border-color: #dc2626;
+    background: linear-gradient(180deg, #dc2626 0%, #b91c1c 100%);
+    color: #f8fafc;
+    box-shadow: 0 10px 18px rgba(220, 38, 38, 0.24);
 }
 
 @media (max-width: 768px) {
@@ -885,6 +937,76 @@
     border-radius: 8px;
     background: #f8fafc;
     text-align: right;
+}
+
+/* 테이블 테마: 청연(보라) */
+.workbook-ledger-page.tenant-cheongyeon .workbook-sheet {
+    border-color: #c7d2fe;
+}
+
+.workbook-ledger-page.tenant-cheongyeon .sheet-control-table th,
+.workbook-ledger-page.tenant-cheongyeon .sheet-control-table td,
+.workbook-ledger-page.tenant-cheongyeon .sheet-table th,
+.workbook-ledger-page.tenant-cheongyeon .sheet-table td {
+    border-color: #d6dbff;
+}
+
+.workbook-ledger-page.tenant-cheongyeon .sheet-table thead th,
+.workbook-ledger-page.tenant-cheongyeon .workbook-input-grid .handsontable thead th {
+    background: linear-gradient(180deg, #5b4ed6 0%, #4338ca 100%);
+    border-color: #4338ca;
+    color: #f8fafc;
+}
+
+.workbook-ledger-page.tenant-cheongyeon .sheet-table .summary-header th {
+    background: #ede9fe;
+    color: #3730a3;
+}
+
+.workbook-ledger-page.tenant-cheongyeon .workbook-filter-row th,
+.workbook-ledger-page.tenant-cheongyeon .workbook-filter-spacer {
+    background: #f5f3ff;
+}
+
+.workbook-ledger-page.tenant-cheongyeon .workbook-filter-input,
+.workbook-ledger-page.tenant-cheongyeon .workbook-inline-cell-input,
+.workbook-ledger-page.tenant-cheongyeon .workbook-inline-cell-select {
+    border-color: #c4b5fd;
+}
+
+/* 테이블 테마: 다원(빨강) */
+.workbook-ledger-page.tenant-dawon .workbook-sheet {
+    border-color: #fecaca;
+}
+
+.workbook-ledger-page.tenant-dawon .sheet-control-table th,
+.workbook-ledger-page.tenant-dawon .sheet-control-table td,
+.workbook-ledger-page.tenant-dawon .sheet-table th,
+.workbook-ledger-page.tenant-dawon .sheet-table td {
+    border-color: #ffd4d4;
+}
+
+.workbook-ledger-page.tenant-dawon .sheet-table thead th,
+.workbook-ledger-page.tenant-dawon .workbook-input-grid .handsontable thead th {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    border-color: #dc2626;
+    color: #f8fafc;
+}
+
+.workbook-ledger-page.tenant-dawon .sheet-table .summary-header th {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.workbook-ledger-page.tenant-dawon .workbook-filter-row th,
+.workbook-ledger-page.tenant-dawon .workbook-filter-spacer {
+    background: #fff1f2;
+}
+
+.workbook-ledger-page.tenant-dawon .workbook-filter-input,
+.workbook-ledger-page.tenant-dawon .workbook-inline-cell-input,
+.workbook-ledger-page.tenant-dawon .workbook-inline-cell-select {
+    border-color: #fca5a5;
 }
 
 @media (max-width: 768px) {

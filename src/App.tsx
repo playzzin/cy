@@ -331,8 +331,8 @@ const App: React.FC = () => {
               <Route path="taxinvoice/receivables" element={<ReceivablesManagerPage />} />
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
-              <Route path="workbook-ledger" element={<WorkbookLedgerPage tenantKey="cheongyeon" companyLabel="청연" />} />
-              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage tenantKey="dawon" companyLabel="다원" />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerPage key="cheongyeon" tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage key="dawon" tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
               <Route path="taxinvoice/account-inquiry" element={<AccountManagementPage />} />
