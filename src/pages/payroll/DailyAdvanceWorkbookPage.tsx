@@ -17,10 +17,7 @@ import {
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
-import DailyWageDraftPage from './DailyWageDraftPage';
-
 type WorkbookTabKey =
-  | 'input'
   | 'database'
   | 'workers'
   | 'team-summary'
@@ -132,7 +129,6 @@ const COLORS = {
 };
 
 const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
-  { key: 'input', label: '입력표' },
   { key: 'database', label: 'DB' },
   { key: 'workers', label: '인원DB' },
   { key: 'team-summary', label: '팀별출력' },
@@ -275,8 +271,6 @@ const buildEmptyDraft = (): WorkerProfileDraft => ({
 const GOYUNJUNG_MODE_STORAGE_KEY = 'daily-advance-workbook:goyunjung-mode';
 const DAILY_ADVANCE_STATEMENT_DEDUCTION_STORAGE_KEY =
   'daily-advance-workbook:statement-deductions';
-const DAILY_ADVANCE_DAILY_WAGE_DEDUCTION_STORAGE_KEY =
-  'daily-advance-workbook:daily-wage-deductions';
 const GOYUNJUNG_IMAGE_ROOTS = ['goyumjung', 'goyunjung'];
 const GOYUNJUNG_MESSAGES = [
   '경복 오빠 화이팅',
@@ -310,7 +304,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [statementActualDeductionApplied, setStatementActualDeductionApplied] = useState(0);
   const [statementClaimDeductionApplied, setStatementClaimDeductionApplied] = useState(0);
   const [statementReportDeductionApplied, setStatementReportDeductionApplied] = useState(0);
-  const [activeTab, setActiveTab] = useState<WorkbookTabKey>('input');
+  const [activeTab, setActiveTab] = useState<WorkbookTabKey>('database');
+  const [dayLookupDeductions, setDayLookupDeductions] = useState<Record<string, number>>({});
+  const [dbDeductions, setDbDeductions] = useState<Record<string, number>>({});
   const [entries, setEntries] = useState<WorkbookEntry[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -1041,106 +1037,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     </div>
   );
 
-  const renderInputTab = () => (
-    <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
-      <div className="grid gap-0 lg:grid-cols-[1fr_280px]">
-        <div className="border-r border-[#d5ccb0]">
-          <div
-            className="flex items-center justify-center px-4 py-3 text-xl font-black tracking-[0.35em] text-white"
-            style={{ backgroundColor: COLORS.olive }}
-          >
-            입력표
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr style={{ backgroundColor: COLORS.olive }} className="text-white">
-                  {['no', '이름', '공수', '실지급금', '공제금', '비고', '일당'].map((header) => (
-                    <th
-                      key={header}
-                      className="border border-[#d5ccb0] px-3 py-2 text-center font-bold"
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {selectedDateEntries.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">
-                      선택한 일자에 일급제 출역 데이터가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  selectedDateEntries.map((entry, index) => (
-                    <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">
-                        {formatNumber(entry.manDay)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                        {formatCurrency(entry.actualAmount)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                        {entry.deductionAmount ? formatCurrency(entry.deductionAmount) : '-'}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                        {formatCurrency(entry.actualUnitPrice)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="bg-[#f7f2df]">
-          <div className="grid grid-cols-[92px_1fr] text-sm">
-            <div className="border-b border-r border-[#d5ccb0] px-3 py-3 font-bold text-white" style={{ backgroundColor: COLORS.blue }}>
-              일자
-            </div>
-            <div className="border-b border-[#d5ccb0] px-3 py-3 font-bold text-[#4A452A]" style={{ backgroundColor: COLORS.paleYellow }}>
-              {selectedDate}
-            </div>
-            <div className="border-r border-[#d5ccb0] px-3 py-3 font-bold text-white" style={{ backgroundColor: COLORS.blue }}>
-              팀
-            </div>
-            <div className="px-3 py-3 font-bold text-[#4A452A]" style={{ backgroundColor: COLORS.paleYellow }}>
-              {selectedTeamKey === 'ALL'
-                ? '전체 팀'
-                : teamOptions.find((option) => option.key === selectedTeamKey)?.name || '-'}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 p-4 text-sm">
-            <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 총공수</div>
-              <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatNumber(selectedDateEntries.reduce((sum, entry) => sum + entry.manDay, 0))}
-              </div>
-            </div>
-            <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 실지급금</div>
-              <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatCurrency(selectedDateEntries.reduce((sum, entry) => sum + entry.actualAmount, 0))}
-              </div>
-            </div>
-            <div className="col-span-2 rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">메모</div>
-              <div className="mt-1 leading-6 text-[#4A452A]">
-                공제금은 출력일보 기준이며, 청구단가와 인력소개비 조정은 인원DB에서 관리합니다.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   const renderDatabaseTab = () => (
     <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
       <div className="grid gap-px bg-[#d5ccb0] sm:grid-cols-4">
@@ -1158,44 +1054,62 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-full border-collapse text-sm">
+        <table className="min-w-[900px] border-collapse text-sm">
           <thead>
             <tr style={{ backgroundColor: COLORS.darkBrown }} className="text-white">
-              {['일자', '팀', '이름', '공수', '실지급금', '공제금', '비고'].map((header) => (
-                <th
-                  key={header}
-                  className="border border-[#d5ccb0] px-3 py-2 text-center font-bold"
-                >
-                  {header}
-                </th>
+              {['일자', '팀', '이름', '공수', '일당'].map((header) => (
+                <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
               ))}
+              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">차감</th>
+              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급액</th>
+              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구금액</th>
+              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
             </tr>
           </thead>
           <tbody>
             {filteredEntries.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-500">
+                <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">
                   조회 조건에 맞는 데이터가 없습니다.
                 </td>
               </tr>
             ) : (
-              filteredEntries.map((entry) => (
-                <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-center">
-                    {formatNumber(entry.manDay)}
-                  </td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                    {formatCurrency(entry.actualAmount)}
-                  </td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                    {entry.deductionAmount ? formatCurrency(entry.deductionAmount) : '-'}
-                  </td>
-                  <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
-                </tr>
-              ))
+              filteredEntries.map((entry) => {
+                const deduction = dbDeductions[entry.key] || 0;
+                const netActual = entry.actualUnitPrice - deduction;
+                return (
+                  <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
+                      {formatCurrency(entry.actualUnitPrice)}
+                    </td>
+                    <td className="border border-[#e3dcc4] px-2 py-1.5">
+                      <input
+                        type="number"
+                        value={deduction || ''}
+                        onChange={(event) =>
+                          setDbDeductions((prev) => ({
+                            ...prev,
+                            [entry.key]: Math.max(0, Number(event.target.value) || 0),
+                          }))
+                        }
+                        placeholder="0"
+                        className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
+                      />
+                    </td>
+                    <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
+                      {formatCurrency(netActual)}
+                    </td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
+                      {formatCurrency(entry.claimUnitPrice)}
+                    </td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -1655,13 +1569,18 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
               <div className="text-xs font-bold text-slate-500">선택일 실지급금</div>
               <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatCurrency(selectedDateEntries.reduce((sum, entry) => sum + entry.actualAmount, 0))}
+                {formatCurrency(
+                  selectedDateEntries.reduce(
+                    (sum, entry) => sum + (entry.actualUnitPrice - (dayLookupDeductions[entry.key] || 0)),
+                    0
+                  )
+                )}
               </div>
             </div>
             <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 청구금</div>
+              <div className="text-xs font-bold text-slate-500">선택일 청구단가 합계</div>
               <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatCurrency(selectedDateEntries.reduce((sum, entry) => sum + entry.claimAmount, 0))}
+                {formatCurrency(selectedDateEntries.reduce((sum, entry) => sum + entry.claimUnitPrice, 0))}
               </div>
             </div>
           </div>
@@ -1669,61 +1588,70 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
         <div className="flex-1">
           <div className="overflow-x-auto">
-            <table className="min-w-[1180px] border-collapse text-sm">
+            <table className="min-w-[1200px] border-collapse text-sm">
               <thead>
                 <tr style={{ backgroundColor: COLORS.blackBrown }} className="text-white">
-                  {[
-                    '팀',
-                    '이름',
-                    '현장',
-                    '공수',
-                    '실지급금',
-                    '청구금',
-                    '은행명',
-                    '예금주명',
-                    '계좌번호',
-                    '비고',
-                  ].map((header, index) => (
-                    <th
-                      key={header}
-                      className="border border-[#d5ccb0] px-3 py-2 text-center font-bold"
-                      style={index === 8 ? { backgroundColor: COLORS.red } : undefined}
-                    >
-                      {header}
-                    </th>
+                  {['팀', '이름', '현장', '공수'].map((header) => (
+                    <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
                   ))}
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">차감</th>
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급금</th>
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구단가</th>
+                  {['은행명', '예금주명'].map((header) => (
+                    <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
+                  ))}
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.red }}>
+                    계좌번호
+                  </th>
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
                 </tr>
               </thead>
               <tbody>
                 {selectedDateEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">
+                    <td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">
                       선택한 일자에 조회 결과가 없습니다.
                     </td>
                   </tr>
                 ) : (
-                  selectedDateEntries.map((entry) => (
-                    <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.siteName || '-'}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">
-                        {formatNumber(entry.manDay)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                        {formatCurrency(entry.actualAmount)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                        {formatCurrency(entry.claimAmount)}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.bankName || '-'}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.accountHolder || '-'}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 font-medium text-[#7a2c2c]">
-                        {entry.accountNumber || '-'}
-                      </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
-                    </tr>
-                  ))
+                  selectedDateEntries.map((entry) => {
+                    const deduction = dayLookupDeductions[entry.key] || 0;
+                    const netActual = entry.actualUnitPrice - deduction;
+                    return (
+                      <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
+                        <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
+                        <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
+                        <td className="border border-[#e3dcc4] px-3 py-2">{entry.siteName || '-'}</td>
+                        <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
+                        <td className="border border-[#e3dcc4] px-2 py-1.5">
+                          <input
+                            type="number"
+                            value={deduction || ''}
+                            onChange={(event) =>
+                              setDayLookupDeductions((prev) => ({
+                                ...prev,
+                                [entry.key]: Math.max(0, Number(event.target.value) || 0),
+                              }))
+                            }
+                            placeholder="0"
+                            className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
+                          />
+                        </td>
+                        <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
+                          {formatCurrency(netActual)}
+                        </td>
+                        <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
+                          {formatCurrency(entry.claimUnitPrice)}
+                        </td>
+                        <td className="border border-[#e3dcc4] px-3 py-2">{entry.bankName || '-'}</td>
+                        <td className="border border-[#e3dcc4] px-3 py-2">{entry.accountHolder || '-'}</td>
+                        <td className="border border-[#e3dcc4] px-3 py-2 font-medium text-[#7a2c2c]">
+                          {entry.accountNumber || '-'}
+                        </td>
+                        <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -1733,10 +1661,81 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     </div>
   );
 
+  const renderDailyWageTab = () => (
+    <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
+      <div className="border-b border-[#d5ccb0] bg-[#faf8ef] px-4 py-3">
+        <div className="text-sm font-black text-[#4A452A]">일급제 인원 현황</div>
+        <div className="text-xs text-slate-500">
+          {getMonthTitle(month)} 기준 일급제 인원별 총공수, 실지급금, 청구금 현황
+        </div>
+      </div>
+      <div className="grid gap-px bg-[#d5ccb0] sm:grid-cols-4">
+        {[
+          ['인원수', `${workerMasterRows.length}명`],
+          ['총공수', formatNumber(workerMasterRows.reduce((s, r) => s + r.totalManDay, 0))],
+          ['총 실지급금', formatCurrency(workerMasterRows.reduce((s, r) => s + r.actualTotal, 0))],
+          ['총 청구금', formatCurrency(workerMasterRows.reduce((s, r) => s + r.claimTotal, 0))],
+        ].map(([label, value]) => (
+          <div key={label} className="bg-[#faf8ef] px-4 py-3">
+            <div className="text-xs font-bold text-slate-500">{label}</div>
+            <div className="mt-1 text-lg font-black text-[#4A452A]">{value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1100px] border-collapse text-sm">
+          <thead>
+            <tr style={{ backgroundColor: COLORS.olive }} className="text-white">
+              {['번호', '팀', '이름', '총공수', '실지급금', '청구금', '일당', '청구단가', '인력소개비', '상태'].map((header) => (
+                <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {workerMasterRows.length === 0 ? (
+              <tr>
+                <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">
+                  표시할 일급제 작업자가 없습니다.
+                </td>
+              </tr>
+            ) : (
+              workerMasterRows.map((row, index) => (
+                <tr key={row.workerId} className="odd:bg-white even:bg-[#faf8ef]">
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2">{row.teamName}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-center font-bold">{formatNumber(row.totalManDay)}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
+                    {formatCurrency(row.actualTotal)}
+                  </td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-sky-700">
+                    {formatCurrency(row.claimTotal)}
+                  </td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">{formatCurrency(row.actualUnitPrice)}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">{formatCurrency(row.claimUnitPrice)}</td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">
+                    {row.recruiterFee ? formatCurrency(row.recruiterFee) : '-'}
+                  </td>
+                  <td className="border border-[#e3dcc4] px-3 py-2 text-center">
+                    {row.status === '신규' ? (
+                      <span className="rounded bg-rose-100 px-2 py-1 text-xs font-bold text-rose-700">신규</span>
+                    ) : (
+                      row.status || '-'
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   const renderActiveTab = () => {
     switch (activeTab) {
-      case 'input':
-        return renderInputTab();
       case 'database':
         return renderDatabaseTab();
       case 'workers':
@@ -1748,14 +1747,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       case 'day-lookup':
         return renderDayLookupTab();
       case 'daily-wage':
-        return (
-          <DailyWageDraftPage
-            embedded
-            dateOverride={selectedDate}
-            monthOverride={month}
-            deductionStorageKey={DAILY_ADVANCE_DAILY_WAGE_DEDUCTION_STORAGE_KEY}
-          />
-        );
+        return renderDailyWageTab();
       default:
         return null;
     }
