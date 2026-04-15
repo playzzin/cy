@@ -19,9 +19,7 @@ import SupportSettingsPage from './pages/support/SupportSettingsPage';
 import SupportStatusPage from './pages/support/SupportStatusPage';
 import AccommodationManager from './pages/support/AccommodationManager';
 import WorkerSummaryPage from './pages/manpower/WorkerSummaryPage';
-import { VehicleManagerPage } from './pages/support/VehicleManagerPage';
-
-import { CardManagerPage } from './pages/support/CardManagerPage';
+import VehicleCardIntegratedPage from './pages/support/VehicleCardIntegratedPage';
 import MaterialMasterPage from './pages/materials/MaterialMasterPage';
 import MaterialInboundPage from './pages/materials/MaterialInboundPage';
 import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
@@ -405,8 +403,8 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<AccommodationManager />} />
-            <Route path="/support/vehicles" element={<VehicleManagerPage />} />
-            <Route path="/support/cards" element={<CardManagerPage />} />
+            <Route path="/support/vehicles" element={<VehicleCardIntegratedPage />} />
+            <Route path="/support/cards" element={<VehicleCardIntegratedPage />} />
 
             <Route path="/hr/certificate" element={<EmploymentCertificatePage />} />
             <Route path="/hr/termination-certificate" element={<TerminationCertificatePage />} />

@@ -688,10 +688,10 @@ const CheongyeonHome: React.FC = () => {
             </div>
 
             {/* 1. Recent Daily Report Highlights */}
-            <section className={`relative z-10 w-full px-0 pt-2 pb-20 transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
-                <div className="mb-10 w-full animate-slideUp">
+            <section className={`relative z-10 w-full px-0 pt-2 pb-4 transition-all duration-1000 ${isIntro ? 'opacity-0 translate-y-10 pointer-events-none' : 'opacity-100 translate-y-0'}`}>
+                <div className="mb-2 w-full animate-slideUp">
                     <div className="rounded-none border-y border-white/15 bg-slate-900/45 backdrop-blur-md overflow-hidden md:rounded-none">
-                        <div className="relative aspect-[16/8] md:aspect-[16/6] xl:aspect-[16/5.2]">
+                        <div className="relative aspect-[16/2.7] md:aspect-[16/2] xl:aspect-[16/1.7]">
                             <AnimatePresence mode="wait">
                                 <motion.img
                                     key={`${activeHero.stage}-${activeHero.image}`}
@@ -705,30 +705,7 @@ const CheongyeonHome: React.FC = () => {
                                 />
                             </AnimatePresence>
 
-                            <div className="absolute inset-0 bg-gradient-to-r from-black/78 via-black/48 to-black/20" />
-
-                            <div className="absolute inset-0 flex flex-col justify-end p-5 md:p-8 lg:p-10">
-                                <AnimatePresence mode="wait">
-                                    <motion.div
-                                        key={`hero-copy-${activeHeroIndex}`}
-                                        className="max-w-4xl"
-                                        initial={{ opacity: 0, y: 18, filter: 'blur(8px)' }}
-                                        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                                        exit={{ opacity: 0, y: -10, filter: 'blur(8px)' }}
-                                        transition={{ duration: 0.45, ease: 'easeOut' }}
-                                    >
-                                        <div className="inline-flex items-center rounded-full border border-white/30 bg-black/35 px-3 py-1 text-xs font-semibold text-amber-200">
-                                            {activeHero.stage}
-                                        </div>
-                                        <h1 className="mt-3 text-2xl md:text-4xl xl:text-5xl font-bold text-white leading-tight break-keep">
-                                            {activeHero.title}
-                                        </h1>
-                                        <p className="mt-3 text-sm md:text-base xl:text-lg text-slate-200 leading-relaxed break-keep">
-                                            {activeHero.description}
-                                        </p>
-                                    </motion.div>
-                                </AnimatePresence>
-                            </div>
+                            <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-black/10 to-transparent" />
 
                             <button
                                 type="button"
@@ -748,6 +725,32 @@ const CheongyeonHome: React.FC = () => {
                             </button>
                         </div>
 
+                        {/* Hero text below image */}
+                        <div className="px-5 py-4 bg-slate-900/70 border-t border-white/10">
+                            <AnimatePresence mode="wait">
+                                <motion.div
+                                    key={`hero-copy-${activeHeroIndex}`}
+                                    className="flex items-start gap-4"
+                                    initial={{ opacity: 0, y: 10, filter: 'blur(6px)' }}
+                                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                                    exit={{ opacity: 0, y: -6, filter: 'blur(6px)' }}
+                                    transition={{ duration: 0.35, ease: 'easeOut' }}
+                                >
+                                    <div className="inline-flex items-center flex-shrink-0 rounded-full border border-amber-400/40 bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-200 mt-0.5">
+                                        {activeHero.stage}
+                                    </div>
+                                    <div>
+                                        <h2 className="text-base md:text-lg font-bold text-white leading-snug break-keep">
+                                            {activeHero.title}
+                                        </h2>
+                                        <p className="mt-1 text-xs md:text-sm text-slate-300 leading-relaxed break-keep">
+                                            {activeHero.description}
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            </AnimatePresence>
+                        </div>
+
                         <div className="grid grid-cols-2 md:grid-cols-5 gap-2 p-2 bg-black/40">
                             {heroSlides.map((slide, index) => (
                                 <button
@@ -760,7 +763,7 @@ const CheongyeonHome: React.FC = () => {
                                             : 'border-white/15 hover:border-white/40'
                                     }`}
                                 >
-                                    <div className="relative h-20 md:h-24">
+                                    <div className="relative h-12 md:h-14">
                                         <img src={slide.image} alt={slide.stage} className="h-full w-full object-cover" />
                                         <div className={`absolute inset-0 transition-colors ${activeHeroIndex === index ? 'bg-black/30' : 'bg-black/58'}`} />
                                         <div className="absolute inset-x-0 bottom-0 p-2">
@@ -775,90 +778,6 @@ const CheongyeonHome: React.FC = () => {
 
                 </div>
 
-                {loadingHighlights ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-pulse">
-                        {Array.from({ length: 3 }).map((_, index) => (
-                            <div key={index} className="h-72 rounded-3xl bg-white/5 border border-white/10" />
-                        ))}
-                    </div>
-                ) : highlightError ? (
-                    <div className="rounded-2xl border border-red-400/30 bg-red-500/10 px-6 py-5 text-red-100">
-                        {highlightError}
-                    </div>
-                ) : siteHighlights.length === 0 ? null : (
-                    <div className="overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                        <div className="flex gap-5 w-max pr-8">
-                            {siteHighlights.map((site) => (
-                                <article
-                                    key={site.key}
-                                    className="w-[340px] md:w-[380px] rounded-3xl p-6 bg-white/5 backdrop-blur-md border border-white/10 hover:border-amber-500/50 transition-all duration-300 hover:-translate-y-1"
-                                >
-                                    <header className="flex items-start justify-between gap-3 mb-4">
-                                        <div>
-                                            <div className="text-xs text-amber-300/90 tracking-wide uppercase mb-1">최근 일보 {toKoreanDate(site.latestDate)}</div>
-                                            <h3 className="text-xl font-bold text-white leading-tight break-keep">{site.siteName}</h3>
-                                        </div>
-                                        <button
-                                            onClick={() => site.siteId ? navigate(`/site/management?siteId=${site.siteId}`) : navigate('/site/management')}
-                                            className="text-[11px] px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-200 hover:bg-amber-500/25 transition-colors"
-                                        >
-                                            현장 보기
-                                        </button>
-                                    </header>
-
-                                    <div className="grid grid-cols-3 gap-2 mb-4">
-                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
-                                            <div className="text-lg font-bold text-white">{site.reportCount}</div>
-                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">일보 건수</div>
-                                        </div>
-                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
-                                            <div className="text-lg font-bold text-white">{site.totalWorkers}</div>
-                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">작업자</div>
-                                        </div>
-                                        <div className="rounded-xl bg-slate-900/70 border border-white/10 p-3 text-center">
-                                            <div className="text-lg font-bold text-white">{site.teamNames.length}</div>
-                                            <div className="text-[10px] text-slate-400 uppercase tracking-wider">팀</div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex flex-wrap gap-2 mb-4">
-                                        {site.teamNames.length > 0 ? site.teamNames.map((team) => (
-                                            <span key={team} className="text-[11px] px-2.5 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-100">
-                                                {team}
-                                            </span>
-                                        )) : (
-                                            <span className="text-[11px] px-2.5 py-1 rounded-full bg-slate-500/20 border border-slate-400/30 text-slate-200">
-                                                팀 정보 미기록
-                                            </span>
-                                        )}
-                                    </div>
-
-                                    <div className="rounded-2xl bg-black/25 border border-white/10 p-4">
-                                        <div className="flex items-center gap-2 text-xs text-slate-300 mb-3 uppercase tracking-wider">
-                                            <FontAwesomeIcon icon={faUsers} className="text-amber-300" /> 투입 작업자
-                                        </div>
-                                        <div className="flex flex-wrap gap-2 max-h-[160px] overflow-y-auto pr-1">
-                                            {site.workers.map((worker) => (
-                                                <div key={worker.id} className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/10 border border-white/10 text-sm text-white">
-                                                    <span className="w-5 h-5 rounded-full bg-amber-500/25 text-amber-100 text-[11px] flex items-center justify-center font-bold">
-                                                        {worker.name.slice(0, 1)}
-                                                    </span>
-                                                    <span className="font-medium">{worker.name}</span>
-                                                    <span className="text-[10px] text-slate-300">{worker.role}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    <footer className="mt-4 flex items-center justify-between text-[11px] text-slate-400">
-                                        <span className="inline-flex items-center gap-1"><FontAwesomeIcon icon={faCalendarDays} /> 최근 업데이트 {toKoreanDate(site.latestDate)}</span>
-                                        <span className="inline-flex items-center gap-1"><FontAwesomeIcon icon={faBuilding} /> 청연ENG 출력일보</span>
-                                    </footer>
-                                </article>
-                            ))}
-                        </div>
-                    </div>
-                )}
             </section>
 
             {/* Stats Cards Section */}

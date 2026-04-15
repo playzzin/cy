@@ -15,7 +15,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
-import { InboundTransaction, OutboundTransaction } from '../../types/materials';
+import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
 import * as XLSX from 'xlsx';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & { type: 'inbound' | 'outbound' };
@@ -24,11 +24,13 @@ const MaterialTransactionsPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const [materials, setMaterials] = useState<Material[]>([]);
 
     // Filters
     const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
     const [siteId, setSiteId] = useState('');
+    const [siteKeyword, setSiteKeyword] = useState('');
     const [transactionType, setTransactionType] = useState<'all' | 'inbound' | 'outbound'>('all');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [materialName, setMaterialName] = useState('');
@@ -46,8 +48,21 @@ const MaterialTransactionsPage: React.FC = () => {
         notes: ''
     });
 
+    const normalizeDateInput = (value: string): string => {
+        const digits = String(value ?? '').replace(/[^\d]/g, '').slice(0, 8);
+        if (digits.length <= 4) return digits;
+        if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+        return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+    };
+
+    const isValidDateText = (value: string): boolean => {
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? '').trim());
+    };
+
+    const trimText = (value: unknown): string => String(value ?? '').trim();
+
     useEffect(() => {
-        loadSites();
+        loadMasterData();
         handleSearch();
     }, []);
 
@@ -63,16 +78,30 @@ const MaterialTransactionsPage: React.FC = () => {
         }
     }, []);
 
-    const loadSites = async () => {
+    const loadMasterData = async () => {
         try {
-            const data = await siteService.getSites();
-            setSites(data.filter(s => s.status === 'active'));
+            const [siteRows, materialRows] = await Promise.all([
+                siteService.getSites(),
+                materialService.getAllMaterials(),
+            ]);
+            setSites(siteRows.filter((s) => s.status === 'active'));
+            setMaterials(materialRows);
         } catch (error) {
-            console.error('Failed to load sites:', error);
+            console.error('Failed to load transaction master data:', error);
         }
     };
 
+    const filteredSites = sites.filter((site) => {
+        if (!siteKeyword.trim()) return true;
+        return trimText(site.name).toLowerCase().includes(siteKeyword.trim().toLowerCase());
+    });
+
     const handleSearch = async () => {
+        if (!isValidDateText(startDate) || !isValidDateText(endDate)) {
+            alert('날짜는 YYYY-MM-DD 형식으로 입력해 주세요.');
+            return;
+        }
+
         setLoading(true);
         try {
             let fetchedInbound: InboundTransaction[] = [];
@@ -106,7 +135,19 @@ const MaterialTransactionsPage: React.FC = () => {
             // Sort by Date DESC
             all.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
 
-            setTransactions(all);
+            const materialById = new Map(materials.map((m) => [m.id, m]));
+            const normalized = all.map((t) => {
+                const master = materialById.get(t.materialId);
+                return {
+                    ...t,
+                    category: trimText(master?.category) || trimText(t.category),
+                    itemName: trimText(master?.itemName) || trimText(t.itemName),
+                    spec: trimText(master?.spec) || trimText(t.spec),
+                    unit: trimText(master?.unit) || trimText(t.unit),
+                };
+            });
+
+            setTransactions(normalized);
         } catch (error) {
             console.error('Failed to search transactions:', error);
             alert('데이터를 조회하는 중 오류가 발생했습니다.');
@@ -146,6 +187,10 @@ const MaterialTransactionsPage: React.FC = () => {
 
     const handleUpdate = async () => {
         if (!editingTx) return;
+        if (!isValidDateText(editForm.transactionDate)) {
+            alert('일자는 YYYY-MM-DD 형식으로 입력해 주세요.');
+            return;
+        }
 
         try {
             const updates = {
@@ -174,7 +219,7 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const handleDownloadExcel = () => {
-        const data = transactions.map(t => ({
+        const data = visibleTransactions.map(t => ({
             '일자': t.transactionDate,
             '구분': t.type === 'inbound' ? '입고' : '출고',
             '현장': t.siteName,
@@ -192,6 +237,11 @@ const MaterialTransactionsPage: React.FC = () => {
         XLSX.utils.book_append_sheet(wb, ws, "입출고내역");
         XLSX.writeFile(wb, `자재입출고내역_${new Date().toISOString().slice(0, 10)}.xlsx`);
     };
+
+    const visibleTransactions = transactions.filter((t) => {
+        if (!siteKeyword.trim()) return true;
+        return trimText(t.siteName).toLowerCase().includes(siteKeyword.trim().toLowerCase());
+    });
 
     return (
         <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[1800px] w-full mx-auto bg-slate-50 overflow-hidden font-sans">
@@ -214,22 +264,24 @@ const MaterialTransactionsPage: React.FC = () => {
 
             {/* Filter Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
                     <div className="md:col-span-1">
                         <label className="block text-xs font-bold text-slate-500 mb-1">시작일</label>
                         <input
-                            type="date"
+                            type="text"
                             value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
+                            onChange={(e) => setStartDate(normalizeDateInput(e.target.value))}
+                            placeholder="YYYY-MM-DD"
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                         />
                     </div>
                     <div className="md:col-span-1">
                         <label className="block text-xs font-bold text-slate-500 mb-1">종료일</label>
                         <input
-                            type="date"
+                            type="text"
                             value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
+                            onChange={(e) => setEndDate(normalizeDateInput(e.target.value))}
+                            placeholder="YYYY-MM-DD"
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                         />
                     </div>
@@ -241,10 +293,20 @@ const MaterialTransactionsPage: React.FC = () => {
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                         >
                             <option value="">전체 현장</option>
-                            {sites.map(site => (
+                            {filteredSites.map(site => (
                                 <option key={site.id} value={site.id}>{site.name}</option>
                             ))}
                         </select>
+                    </div>
+                    <div className="md:col-span-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">현장명 검색</label>
+                        <input
+                            type="text"
+                            value={siteKeyword}
+                            onChange={(e) => setSiteKeyword(e.target.value)}
+                            placeholder="현장명 포함 검색"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
+                        />
                     </div>
                     <div className="md:col-span-1">
                         <label className="block text-xs font-bold text-slate-500 mb-1">구분</label>
@@ -285,14 +347,14 @@ const MaterialTransactionsPage: React.FC = () => {
 
             {/* Data Table */}
             <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-auto min-h-[400px]">
+                <div className="flex-1 overflow-auto min-h-[680px] max-h-[calc(100vh-290px)]">
                     <table className="w-full text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
-                                <th className="p-4 text-left font-bold text-slate-600 w-32">일자</th>
-                                <th className="p-4 text-center font-bold text-slate-600 w-24">구분</th>
-                                <th className="p-4 text-left font-bold text-slate-600">현장</th>
-                                <th className="p-4 text-left font-bold text-slate-600">품명</th>
+                                <th className="p-4 text-left font-bold text-slate-600 w-32 sticky left-0 z-20 bg-slate-50">일자</th>
+                                <th className="p-4 text-center font-bold text-slate-600 w-24 sticky left-[128px] z-20 bg-slate-50">구분</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px] sticky left-[224px] z-20 bg-slate-50">현장</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px] sticky left-[404px] z-20 bg-slate-50">품명</th>
                                 <th className="p-4 text-left font-bold text-slate-600 w-24">규격</th>
                                 <th className="p-4 text-right font-bold text-slate-600 w-24">수량</th>
                                 <th className="p-4 text-left font-bold text-slate-600 w-20">단위</th>
@@ -309,11 +371,11 @@ const MaterialTransactionsPage: React.FC = () => {
                                         <p>데이터를 불러오는 중입니다...</p>
                                     </td>
                                 </tr>
-                            ) : transactions.length > 0 ? (
-                                transactions.map((t, index) => (
+                            ) : visibleTransactions.length > 0 ? (
+                                visibleTransactions.map((t, index) => (
                                     <tr key={`${t.id}-${index}`} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-4 text-slate-600">{t.transactionDate}</td>
-                                        <td className="p-4 text-center">
+                                        <td className="p-4 text-slate-600 sticky left-0 z-10 bg-white">{t.transactionDate}</td>
+                                        <td className="p-4 text-center sticky left-[128px] z-10 bg-white">
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
                                                 ${t.type === 'inbound'
                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -324,8 +386,8 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 {t.type === 'inbound' ? '입고' : '출고'}
                                             </span>
                                         </td>
-                                        <td className="p-4 font-medium text-slate-800">{t.siteName}</td>
-                                        <td className="p-4 font-medium text-slate-800">{t.itemName}</td>
+                                        <td className="p-4 font-medium text-slate-800 sticky left-[224px] z-10 bg-white">{t.siteName}</td>
+                                        <td className="p-4 font-medium text-slate-800 sticky left-[404px] z-10 bg-white">{t.itemName}</td>
                                         <td className="p-4 text-slate-500">{t.spec}</td>
                                         <td className={`p-4 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                             {t.quantity.toLocaleString()}
@@ -376,7 +438,7 @@ const MaterialTransactionsPage: React.FC = () => {
                     </table>
                 </div>
                 <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 text-xs text-slate-400 flex justify-end">
-                    Total {transactions.length} records found
+                    Total {visibleTransactions.length} records found
                 </div>
             </div>
 
@@ -408,9 +470,10 @@ const MaterialTransactionsPage: React.FC = () => {
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-1">일자</label>
                                         <input
-                                            type="date"
+                                            type="text"
                                             value={editForm.transactionDate}
-                                            onChange={(e) => setEditForm(prev => ({ ...prev, transactionDate: e.target.value }))}
+                                            onChange={(e) => setEditForm(prev => ({ ...prev, transactionDate: normalizeDateInput(e.target.value) }))}
+                                            placeholder="YYYY-MM-DD"
                                             className="w-full border border-slate-300 rounded-lg px-3 py-2"
                                         />
                                     </div>

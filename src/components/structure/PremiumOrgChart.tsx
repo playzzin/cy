@@ -11,6 +11,7 @@ import {
 import { Company, companyService } from '../../services/companyService';
 import { Team, teamService } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 
 // ============================================================================
 // TYPES
@@ -27,6 +28,117 @@ interface OrgNode {
 interface TreeNode extends d3.HierarchyPointNode<OrgNode> {
     _children?: TreeNode[];
 }
+
+type TeamAccent = {
+    bg: string;
+    border: string;
+    glow: string;
+    text: string;
+    icon: string;
+};
+
+const TEAM_ACCENT_LIGHT: Record<string, TeamAccent> = {
+    management: { bg: 'rgba(14, 116, 144, 0.14)', border: 'rgba(14, 116, 144, 0.35)', glow: '#0891b2', text: '#0f172a', icon: '#0e7490' },
+    accounting: { bg: 'rgba(124, 58, 237, 0.14)', border: 'rgba(124, 58, 237, 0.35)', glow: '#7c3aed', text: '#0f172a', icon: '#7c3aed' },
+    construction: { bg: 'rgba(22, 163, 74, 0.14)', border: 'rgba(22, 163, 74, 0.35)', glow: '#16a34a', text: '#0f172a', icon: '#16a34a' },
+    support: { bg: 'rgba(217, 119, 6, 0.14)', border: 'rgba(217, 119, 6, 0.35)', glow: '#d97706', text: '#0f172a', icon: '#d97706' },
+    default: { bg: 'rgba(37, 99, 235, 0.14)', border: 'rgba(37, 99, 235, 0.3)', glow: '#2563eb', text: '#0f172a', icon: '#2563eb' }
+};
+
+const TEAM_ACCENT_DARK: Record<string, TeamAccent> = {
+    management: { bg: 'rgba(6, 182, 212, 0.28)', border: 'rgba(6, 182, 212, 0.48)', glow: '#06b6d4', text: '#ecfeff', icon: '#67e8f9' },
+    accounting: { bg: 'rgba(139, 92, 246, 0.28)', border: 'rgba(139, 92, 246, 0.48)', glow: '#8b5cf6', text: '#f5f3ff', icon: '#c4b5fd' },
+    construction: { bg: 'rgba(16, 185, 129, 0.28)', border: 'rgba(16, 185, 129, 0.48)', glow: '#10b981', text: '#ecfdf5', icon: '#6ee7b7' },
+    support: { bg: 'rgba(245, 158, 11, 0.28)', border: 'rgba(245, 158, 11, 0.48)', glow: '#f59e0b', text: '#fffbeb', icon: '#fcd34d' },
+    default: { bg: 'rgba(59, 130, 246, 0.26)', border: 'rgba(59, 130, 246, 0.45)', glow: '#3b82f6', text: '#eff6ff', icon: '#93c5fd' }
+};
+
+const getTeamAccentKey = (teamName: string): string => {
+    const name = String(teamName || '').trim();
+    if (name.includes('관리팀')) return 'management';
+    if (name.includes('회계')) return 'accounting';
+    if (name.includes('시공') || name.includes('공사')) return 'construction';
+    if (name.includes('지원')) return 'support';
+    return 'default';
+};
+
+const getTeamAccent = (teamName: string, isDarkMode: boolean): TeamAccent => {
+    const key = getTeamAccentKey(teamName);
+    const palette = isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT;
+    return palette[key] || palette.default;
+};
+
+const withManagementTeam = (
+    sourceCompanies: Company[],
+    sourceTeams: Team[],
+    sourceWorkers: Worker[]
+): { companies: Company[]; teams: Team[]; workers: Worker[] } => {
+    const companies = [...sourceCompanies];
+    const teams = [...sourceTeams];
+    const workers = [...sourceWorkers];
+
+    const cheongyeonCompany = companies.find((c) => String(c.name || '').includes('청연'));
+    if (!cheongyeonCompany?.id) {
+        return { companies, teams, workers };
+    }
+
+    let managementTeam = teams.find(
+        (t) => String(t.name || '').trim() === '관리팀' && String(t.companyId || '') === cheongyeonCompany.id
+    );
+
+    if (!managementTeam) {
+        managementTeam = {
+            id: 'virtual-management-team',
+            name: '관리팀',
+            type: '관리',
+            status: 'active',
+            companyId: cheongyeonCompany.id,
+            companyName: cheongyeonCompany.name,
+            memberCount: 0,
+            memberIds: [],
+            memberNames: [],
+            siteIds: [],
+            siteNames: [],
+            assignedWorkers: [],
+            totalManDay: 0,
+            iconKey: 'fa-user-tie',
+            color: '#06b6d4'
+        } as Team;
+        teams.push(managementTeam);
+    }
+
+    const accountingTeam = teams.find(
+        (t) => String(t.name || '').includes('회계') && String(t.companyId || '') === cheongyeonCompany.id
+    );
+
+    const goDaeriIndex = workers.findIndex((w) => String(w.name || '').trim() === '고대리');
+    if (goDaeriIndex >= 0) {
+        const originWorker = workers[goDaeriIndex];
+        const nextWorker: Worker = {
+            ...originWorker,
+            teamId: managementTeam.id,
+            teamName: managementTeam.name,
+            teamType: managementTeam.type || '관리',
+            companyId: cheongyeonCompany.id,
+            companyName: cheongyeonCompany.name
+        };
+        workers.splice(goDaeriIndex, 1, nextWorker);
+    }
+
+    if (accountingTeam && goDaeriIndex >= 0) {
+        const accountingMembers = workers.filter((w) => w.teamId === accountingTeam.id);
+        accountingTeam.memberCount = accountingMembers.length;
+        accountingTeam.memberIds = accountingMembers.map((w) => String(w.id || '')).filter(Boolean);
+        accountingTeam.memberNames = accountingMembers.map((w) => String(w.name || '')).filter(Boolean);
+    }
+
+    const managementMembers = workers.filter((w) => w.teamId === managementTeam.id);
+    managementTeam.memberCount = managementMembers.length;
+    managementTeam.memberIds = managementMembers.map((w) => String(w.id || '')).filter(Boolean);
+    managementTeam.memberNames = managementMembers.map((w) => String(w.name || '')).filter(Boolean);
+
+    return { companies, teams, workers };
+};
 
 // ============================================================================
 // DESIGN SYSTEM - 2024/2025 Trend Colors
@@ -311,6 +423,7 @@ interface OrgNodeCardProps {
     onToggle: () => void;
     onSelect: () => void;
     isSelected: boolean;
+    isDarkMode: boolean;
 }
 
 const OrgNodeCard: React.FC<OrgNodeCardProps> = React.memo(({
@@ -318,12 +431,14 @@ const OrgNodeCard: React.FC<OrgNodeCardProps> = React.memo(({
     isExpanded,
     onToggle,
     onSelect,
-    isSelected
+    isSelected,
+    isDarkMode
 }) => {
     const [isHovered, setIsHovered] = useState(false);
     const nodeData = node.data;
     const type = nodeData.type;
-    const colors = COLORS[type] || COLORS.worker;
+    const baseColors = COLORS[type] || COLORS.worker;
+    const colors = type === 'team' ? getTeamAccent(nodeData.name, isDarkMode) : baseColors;
     const hasChildren = (node.children && node.children.length > 0) ||
         (node._children && node._children.length > 0);
 
@@ -809,6 +924,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, onClose, companies, tea
 // MAIN COMPONENT
 // ============================================================================
 const PremiumOrgChart: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
     // State
     const [companies, setCompanies] = useState<Company[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
@@ -866,9 +982,10 @@ const PremiumOrgChart: React.FC = () => {
                     teamService.getTeams(),
                     manpowerService.getWorkers()
                 ]);
-                setCompanies(c);
-                setTeams(t);
-                setWorkers(w);
+                const normalized = withManagementTeam(c, t, w);
+                setCompanies(normalized.companies);
+                setTeams(normalized.teams);
+                setWorkers(normalized.workers);
             } catch (error) {
                 console.error('Failed to load data:', error);
             } finally {
@@ -1273,6 +1390,7 @@ const PremiumOrgChart: React.FC = () => {
                                     onToggle={() => toggleNode(node.data.id)}
                                     onSelect={() => setSelectedNode(node.data)}
                                     isSelected={selectedNode?.id === node.data.id}
+                                    isDarkMode={isDarkMode}
                                 />
                             ))}
                         </AnimatePresence>
@@ -1406,9 +1524,9 @@ const PremiumOrgChart: React.FC = () => {
                                                 >
                                                     <div
                                                         className="w-8 h-8 rounded-lg flex items-center justify-center"
-                                                        style={{ background: COLORS.team.bg }}
+                                                        style={{ background: getTeamAccent(team.name, isDarkMode).bg }}
                                                     >
-                                                        <FontAwesomeIcon icon={faUsers} style={{ color: COLORS.team.icon }} />
+                                                        <FontAwesomeIcon icon={faUsers} style={{ color: getTeamAccent(team.name, isDarkMode).icon }} />
                                                     </div>
                                                     <div>
                                                         <div style={{ color: COLORS.textPrimary }}>{team.name}</div>

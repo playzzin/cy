@@ -49,6 +49,7 @@ const SingleSelectPopover: React.FC<SingleSelectPopoverProps> = ({
     useEffect(() => {
         if (!isOpen) {
             setPopoverRect(null);
+            setSearchTerm('');
             return;
         }
 
@@ -72,7 +73,34 @@ const SingleSelectPopover: React.FC<SingleSelectPopoverProps> = ({
         };
     }, [isOpen]);
 
-    const filteredOptions = options.filter(opt => opt.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    const normalizedSearchTerm = searchTerm.toLowerCase().replace(/\s+/g, '').trim();
+
+    const filteredOptions = React.useMemo(() => {
+        if (!normalizedSearchTerm) return options;
+
+        return [...options]
+            .map((option, index) => {
+                const normalizedName = option.name.toLowerCase().replace(/\s+/g, '');
+                const startsWith = normalizedName.startsWith(normalizedSearchTerm);
+                const includes = startsWith || normalizedName.includes(normalizedSearchTerm);
+
+                return {
+                    option,
+                    index,
+                    startsWith,
+                    includes
+                };
+            })
+            .filter((entry) => entry.includes)
+            .sort((a, b) => {
+                if (a.startsWith !== b.startsWith) {
+                    return a.startsWith ? -1 : 1;
+                }
+
+                return a.index - b.index;
+            })
+            .map((entry) => entry.option);
+    }, [options, normalizedSearchTerm]);
 
     const handleSelect = (id: string) => {
         onSelect(id);

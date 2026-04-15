@@ -266,6 +266,15 @@ a {
     height: 100%;
 }
 
+.cheongyeon-top-nav-item::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 14px;
+}
+
 .cheongyeon-top-nav-link {
     height: 100%;
     padding: 0 16px;
@@ -310,7 +319,7 @@ a {
 
 .cheongyeon-top-nav-dropdown {
     position: absolute;
-    top: calc(100% + 2px);
+    top: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
     min-width: 300px;

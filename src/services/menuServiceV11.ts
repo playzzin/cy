@@ -44,7 +44,11 @@ const MENU_TEXT_ALIASES: Record<string, string> = {
     "\uBA54\uC2DC\uC9C0\uAD00\uB9AC": "\uC2DC\uC2A4\uD15C \uBA54\uC2DC\uC9C0 \uC124\uC815",
     "\uC2DC\uC2A4\uD15C\uBA54\uC2DC\uC9C0\uC124\uC815": "\uC2DC\uC2A4\uD15C \uBA54\uC2DC\uC9C0 \uC124\uC815",
     "\uD604\uC7A5\uAD00\uB9AC": "\uD604\uC7A5 \uAD00\uB9AC",
-    "\uCD9C\uB825\uAD00\uB9AC": "\uCD9C\uB825 \uAD00\uB9AC"
+    "\uCD9C\uB825\uAD00\uB9AC": "\uCD9C\uB825 \uAD00\uB9AC",
+    "\ubc95\uc778\ucc28\ub7c9 \uad00\ub9ac": "\ucc28\ub7c9/\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac",
+    "\ubc95\uc778\uce74\ub4dc \uad00\ub9ac": "\ucc28\ub7c9/\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac",
+    "\ucc28\ub7c9/\uce74\ub4dc \uad00\ub9ac": "\ucc28\ub7c9/\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac",
+    "\ucc28\ub7c9\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac": "\ucc28\ub7c9/\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac"
 };
 
 const FORCE_MENU_PATH_TEXTS = new Set([
@@ -231,6 +235,88 @@ const ensureMenuChild = (config: SiteDataType, parentText: string, childText: st
                 changed = true;
             }
         });
+    });
+
+    return changed;
+};
+
+const getMenuText = (item: MenuItem | string | undefined): string => {
+    if (!item) return '';
+    return typeof item === 'string' ? item : String(item.text ?? '');
+};
+
+const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
+    const supportGroupSignals = new Set([
+        '지원비 설정',
+        '지원 현황판',
+        '숙소 관리',
+        '법인차량 관리',
+        '법인카드 관리',
+        '차량/카드 관리',
+        '차량/카드 통합 관리'
+    ]);
+    const legacyAssetLabels = new Set([
+        '법인차량 관리',
+        '법인카드 관리',
+        '차량/카드 관리',
+        '차량카드 통합 관리',
+        '차량/카드 통합 관리'
+    ]);
+    const unifiedAssetLabel = '차량/카드 통합 관리';
+    let changed = false;
+
+    Object.entries(config).forEach(([siteKey, site]) => {
+        if (siteKey !== 'admin') return;
+        if (!site || !Array.isArray(site.menu)) return;
+
+        let hasSupportAssetGroup = false;
+
+        site.menu.forEach((menuItem) => {
+            if (typeof menuItem === 'string' || !Array.isArray(menuItem.sub)) return;
+
+            const childTexts = menuItem.sub.map((child) => getMenuText(child));
+            const isSupportAssetGroup = childTexts.some((text) => supportGroupSignals.has(text));
+            if (!isSupportAssetGroup) return;
+            hasSupportAssetGroup = true;
+
+            const nextSub = menuItem.sub.filter((child) => !legacyAssetLabels.has(getMenuText(child)));
+            const insertAfterIndex = nextSub.findIndex((child) => getMenuText(child) === '숙소 관리');
+            const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : nextSub.length;
+
+            nextSub.splice(insertIndex, 0, unifiedAssetLabel);
+
+            const nextTexts = nextSub.map((child) => getMenuText(child));
+            if (JSON.stringify(childTexts) !== JSON.stringify(nextTexts)) {
+                menuItem.sub = nextSub;
+                changed = true;
+            }
+        });
+
+        if (hasSupportAssetGroup) return;
+
+        const firstSupportMenu = site.menu.find(
+            (menuItem) => typeof menuItem !== 'string' && menuItem.text === '지원 관리' && Array.isArray(menuItem.sub)
+        );
+
+        if (firstSupportMenu && Array.isArray(firstSupportMenu.sub)) {
+            const hasUnifiedAssetLabel = firstSupportMenu.sub.some((child) => getMenuText(child) === unifiedAssetLabel);
+            if (!hasUnifiedAssetLabel) {
+                firstSupportMenu.sub = [...firstSupportMenu.sub, unifiedAssetLabel];
+                changed = true;
+            }
+            return;
+        }
+
+        const supportMenuItem: MenuItem = {
+            text: '지원 관리',
+            icon: 'fa-life-ring',
+            sub: [unifiedAssetLabel]
+        };
+
+        const insertAfterIndex = site.menu.findIndex((menuItem) => typeof menuItem !== 'string' && menuItem.text === '출력 관리');
+        const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : site.menu.length;
+        site.menu.splice(insertIndex, 0, supportMenuItem);
+        changed = true;
     });
 
     return changed;
@@ -665,7 +751,9 @@ export const menuServiceV11 = {
             const config = await menuServiceV11.getMenuConfig();
             if (!config) return;
 
-            const changed = ensureMenuChild(config, '현황관리', '전국페이지');
+            const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
+            const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
+            const changed = addedNationwidePage || normalizedSupportAssetMenu;
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

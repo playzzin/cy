@@ -14,6 +14,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import PremiumOrgChart from '../../components/structure/PremiumOrgChart';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 
 type PositionLevel = 'executive' | 'management' | 'field';
 
@@ -51,7 +52,34 @@ const getWorkerPhotoUrl = (worker: Worker): string => {
     return String(worker.profileImageUrl ?? '').trim();
 };
 
+const TEAM_ACCENT_LIGHT = {
+    management: { card: 'border-cyan-200 bg-cyan-50', icon: 'bg-cyan-100 text-cyan-700', leader: 'border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50', title: 'text-cyan-700' },
+    accounting: { card: 'border-violet-200 bg-violet-50', icon: 'bg-violet-100 text-violet-700', leader: 'border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50', title: 'text-violet-700' },
+    support: { card: 'border-amber-200 bg-amber-50', icon: 'bg-amber-100 text-amber-700', leader: 'border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50', title: 'text-amber-700' },
+    construction: { card: 'border-emerald-200 bg-emerald-50', icon: 'bg-emerald-100 text-emerald-700', leader: 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50', title: 'text-emerald-700' },
+    default: { card: 'border-slate-200 bg-white', icon: 'bg-slate-100 text-slate-600', leader: 'border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100', title: 'text-slate-700' }
+};
+
+const TEAM_ACCENT_DARK = {
+    management: { card: 'border-cyan-400/30 bg-cyan-500/10', icon: 'bg-cyan-400/20 text-cyan-200', leader: 'border-cyan-300/30 bg-gradient-to-r from-cyan-500/20 to-sky-500/20', title: 'text-cyan-200' },
+    accounting: { card: 'border-violet-400/30 bg-violet-500/10', icon: 'bg-violet-400/20 text-violet-200', leader: 'border-violet-300/30 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20', title: 'text-violet-200' },
+    support: { card: 'border-amber-400/30 bg-amber-500/10', icon: 'bg-amber-400/20 text-amber-200', leader: 'border-amber-300/30 bg-gradient-to-r from-amber-500/20 to-orange-500/20', title: 'text-amber-200' },
+    construction: { card: 'border-emerald-400/30 bg-emerald-500/10', icon: 'bg-emerald-400/20 text-emerald-200', leader: 'border-emerald-300/30 bg-gradient-to-r from-emerald-500/20 to-teal-500/20', title: 'text-emerald-200' },
+    default: { card: 'border-slate-700 bg-slate-800/70', icon: 'bg-slate-700 text-slate-200', leader: 'border-slate-600 bg-gradient-to-r from-slate-800 to-slate-700', title: 'text-slate-200' }
+};
+
+const getTeamAccentKey = (teamName: string): keyof typeof TEAM_ACCENT_LIGHT => {
+    const name = String(teamName || '').trim();
+    if (name.includes('관리팀')) return 'management';
+    if (name.includes('회계')) return 'accounting';
+    if (name.includes('지원')) return 'support';
+    if (name.includes('시공') || name.includes('공사')) return 'construction';
+    return 'default';
+};
+
 const CheongyeonOrganizationPage: React.FC = () => {
+    const { isDarkMode } = useSiteMode();
+
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [company, setCompany] = useState<Company | null>(null);
@@ -78,8 +106,49 @@ const CheongyeonOrganizationPage: React.FC = () => {
                 companyList.find(c => c.name.includes('청연ENG')) ||
                 null;
 
-            setWorkers(workerList);
-            setTeams(teamList);
+            let nextTeams = [...teamList];
+            let nextWorkers = [...workerList];
+
+            if (cheongyeonCompany?.id) {
+                let managementTeam = nextTeams.find(
+                    (team) => String(team.name || '').trim() === '관리팀' && team.companyId === cheongyeonCompany.id
+                );
+                if (!managementTeam) {
+                    managementTeam = {
+                        id: 'virtual-management-team',
+                        name: '관리팀',
+                        type: '관리',
+                        status: 'active',
+                        companyId: cheongyeonCompany.id,
+                        companyName: cheongyeonCompany.name,
+                        memberCount: 0,
+                        memberIds: [],
+                        memberNames: [],
+                        siteIds: [],
+                        siteNames: [],
+                        assignedWorkers: [],
+                        totalManDay: 0,
+                        color: '#06b6d4',
+                        iconKey: 'fa-user-tie'
+                    } as Team;
+                    nextTeams.push(managementTeam);
+                }
+
+                const goDaeriIndex = nextWorkers.findIndex((worker) => String(worker.name || '').trim() === '고대리');
+                if (goDaeriIndex >= 0) {
+                    nextWorkers[goDaeriIndex] = {
+                        ...nextWorkers[goDaeriIndex],
+                        teamId: managementTeam.id,
+                        teamName: managementTeam.name,
+                        teamType: managementTeam.type || '관리',
+                        companyId: cheongyeonCompany.id,
+                        companyName: cheongyeonCompany.name
+                    };
+                }
+            }
+
+            setWorkers(nextWorkers);
+            setTeams(nextTeams);
             setCompany(cheongyeonCompany);
         } catch (e) {
             console.error('Failed to load Cheongyeon organization data', e);
@@ -124,17 +193,17 @@ const CheongyeonOrganizationPage: React.FC = () => {
 
     // Card View Mode
     return (
-        <div className="flex flex-col h-full bg-slate-50">
+        <div className={`flex flex-col h-full ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
             {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-8 py-6 shadow-sm">
+            <div className={`${isDarkMode ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'} border-b px-8 py-6 shadow-sm`}>
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white">
                             <FontAwesomeIcon icon={faBuilding} />
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold text-slate-800">청연ENG 조직도</h1>
-                            <p className="text-xs text-slate-500">팀 및 인원 구조</p>
+                            <h1 className={`text-lg font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>청연ENG 조직도</h1>
+                            <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>팀 및 인원 구조</p>
                         </div>
                     </div>
                     <button
@@ -194,18 +263,18 @@ const CheongyeonOrganizationPage: React.FC = () => {
                                         return (
                                             <div
                                                 key={team.id}
-                                                className="rounded-2xl border border-slate-200 bg-white p-4 flex flex-col gap-3 shadow-sm"
+                                                className={`rounded-2xl border p-4 flex flex-col gap-3 shadow-sm ${(isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT)[getTeamAccentKey(team.name)].card}`}
                                             >
                                                 <div className="flex items-start justify-between gap-2">
                                                     <div className="flex items-center gap-2">
-                                                        <div className="w-8 h-8 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600 text-sm">
+                                                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm ${(isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT)[getTeamAccentKey(team.name)].icon}`}>
                                                             <FontAwesomeIcon icon={faUsers} />
                                                         </div>
                                                         <div>
-                                                            <div className="text-sm font-bold text-slate-800 flex items-center gap-1">
+                                                            <div className={`text-sm font-bold flex items-center gap-1 ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
                                                                 {team.name}
                                                             </div>
-                                                            <div className="text-[11px] text-slate-500">
+                                                            <div className={`text-[11px] ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                                                 구성원 {members.length}명
                                                             </div>
                                                         </div>
@@ -221,8 +290,8 @@ const CheongyeonOrganizationPage: React.FC = () => {
                                                 </div>
 
                                                 {leader && (
-                                                    <div className="rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-blue-50 px-3 py-3 shadow-sm">
-                                                        <div className="text-[10px] font-bold text-indigo-600 mb-2 tracking-wide">TEAM LEADER</div>
+                                                    <div className={`rounded-xl border px-3 py-3 shadow-sm ${(isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT)[getTeamAccentKey(team.name)].leader}`}>
+                                                        <div className={`text-[10px] font-bold mb-2 tracking-wide ${(isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT)[getTeamAccentKey(team.name)].title}`}>TEAM LEADER</div>
                                                         <div className="flex items-center gap-3">
                                                             {getWorkerPhotoUrl(leader) ? (
                                                                 <img
@@ -237,11 +306,11 @@ const CheongyeonOrganizationPage: React.FC = () => {
                                                                 </div>
                                                             )}
                                                             <div className="min-w-0">
-                                                                <div className="text-sm font-extrabold text-slate-800 truncate">{leader.name}</div>
-                                                                <div className="text-[11px] text-slate-600 truncate">
+                                                                <div className={`text-sm font-extrabold truncate ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{leader.name}</div>
+                                                                <div className={`text-[11px] truncate ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                                                                     {leader.rank || leader.role || '직급 미지정'}
                                                                 </div>
-                                                                <div className="text-[10px] text-indigo-600 font-semibold mt-1">시공팀 리더</div>
+                                                                <div className={`text-[10px] font-semibold mt-1 ${(isDarkMode ? TEAM_ACCENT_DARK : TEAM_ACCENT_LIGHT)[getTeamAccentKey(team.name)].title}`}>팀 리더</div>
                                                             </div>
                                                         </div>
                                                     </div>

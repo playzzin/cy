@@ -22,7 +22,7 @@ import { OrgNode, useOrganizationTree } from './hooks/useOrganizationTree';
 import { useSiteMode } from '../../contexts/SiteModeContext';
 import './CheongyeonOrgChartPage.css';
 
-type DepartmentKey = 'construction' | 'hrPeople' | 'hrAdmin' | 'sales' | 'development';
+type DepartmentKey = 'construction' | 'hrPeople' | 'accounting' | 'management' | 'sales' | 'development';
 
 type TeamSlot = {
     slot: number;
@@ -49,6 +49,13 @@ type DepartmentCardConfig = {
     highlights: string[];
     members: Array<{ name: string; role: string }>;
     value: string;
+};
+
+type TeamTone = {
+    selectedCard: string;
+    normalCard: string;
+    statusBadge: string;
+    iconText: string;
 };
 
 const TEAM_GRID_COLUMNS = 5;
@@ -91,22 +98,24 @@ const DEPARTMENT_TEAM_PRESETS: Record<Exclude<DepartmentKey, 'construction'>, Ar
             siteNames: ['채용·교육'],
         },
     ],
-    hrAdmin: [
+    accounting: [
         {
             displayName: '회계팀 1팀',
             originalName: '회계·정산 파트',
             leaderName: '이과장',
-            memberCount: 4,
+            memberCount: 3,
             statusLabel: '운영 중',
             siteNames: ['회계·정산'],
         },
+    ],
+    management: [
         {
-            displayName: '회계팀 2팀',
-            originalName: '원가·세무 파트',
+            displayName: '관리팀',
+            originalName: '운영·총무 관리 파트',
             leaderName: '고대리',
-            memberCount: 3,
-            statusLabel: '세팅 중',
-            siteNames: ['원가·세무'],
+            memberCount: 4,
+            statusLabel: '운영 중',
+            siteNames: ['운영·총무'],
         },
     ],
     sales: [
@@ -145,6 +154,105 @@ const DEPARTMENT_TEAM_PRESETS: Record<Exclude<DepartmentKey, 'construction'>, Ar
             siteNames: ['AI 이미지·자동화'],
         },
     ],
+};
+
+const getTeamTone = (departmentKey: DepartmentKey, displayName: string, isDarkMode: boolean): TeamTone => {
+    const isManagementTeam = displayName.includes('관리팀');
+    const isAccountingTeam = displayName.includes('회계팀');
+
+    if (isManagementTeam) {
+        return isDarkMode
+            ? {
+                selectedCard: 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950',
+                normalCard: 'border-cyan-300/35 bg-slate-950/72 hover:border-cyan-300/55',
+                statusBadge: 'border-cyan-300/20 bg-cyan-400/12 text-cyan-100',
+                iconText: 'text-cyan-300/90'
+            }
+            : {
+                selectedCard: 'border-cyan-400 bg-gradient-to-br from-cyan-100 via-white to-sky-50',
+                normalCard: 'border-cyan-200 bg-white hover:border-cyan-300',
+                statusBadge: 'border-cyan-300/60 bg-cyan-50 text-cyan-700',
+                iconText: 'text-cyan-600'
+            };
+    }
+
+    if (isAccountingTeam || departmentKey === 'accounting') {
+        return isDarkMode
+            ? {
+                selectedCard: 'border-amber-300/70 bg-gradient-to-br from-amber-400/18 via-slate-900 to-slate-950',
+                normalCard: 'border-amber-300/25 bg-slate-950/72 hover:border-amber-300/45',
+                statusBadge: 'border-amber-300/20 bg-amber-400/12 text-amber-100',
+                iconText: 'text-amber-300/90'
+            }
+            : {
+                selectedCard: 'border-amber-400 bg-gradient-to-br from-amber-100 via-white to-orange-50',
+                normalCard: 'border-amber-200 bg-white hover:border-amber-300',
+                statusBadge: 'border-amber-300/60 bg-amber-50 text-amber-700',
+                iconText: 'text-amber-600'
+            };
+    }
+
+    if (departmentKey === 'management') {
+        return isDarkMode
+            ? {
+                selectedCard: 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950',
+                normalCard: 'border-cyan-300/35 bg-slate-950/72 hover:border-cyan-300/55',
+                statusBadge: 'border-cyan-300/20 bg-cyan-400/12 text-cyan-100',
+                iconText: 'text-cyan-300/90'
+            }
+            : {
+                selectedCard: 'border-cyan-400 bg-gradient-to-br from-cyan-100 via-white to-sky-50',
+                normalCard: 'border-cyan-200 bg-white hover:border-cyan-300',
+                statusBadge: 'border-cyan-300/60 bg-cyan-50 text-cyan-700',
+                iconText: 'text-cyan-600'
+            };
+    }
+
+    if (departmentKey === 'hrPeople') {
+        return isDarkMode
+            ? {
+                selectedCard: 'border-emerald-300/70 bg-gradient-to-br from-emerald-400/18 via-slate-900 to-slate-950',
+                normalCard: 'border-emerald-300/25 bg-slate-950/72 hover:border-emerald-300/45',
+                statusBadge: 'border-emerald-300/20 bg-emerald-400/12 text-emerald-100',
+                iconText: 'text-emerald-300/90'
+            }
+            : {
+                selectedCard: 'border-emerald-400 bg-gradient-to-br from-emerald-100 via-white to-teal-50',
+                normalCard: 'border-emerald-200 bg-white hover:border-emerald-300',
+                statusBadge: 'border-emerald-300/60 bg-emerald-50 text-emerald-700',
+                iconText: 'text-emerald-600'
+            };
+    }
+
+    if (departmentKey === 'sales') {
+        return isDarkMode
+            ? {
+                selectedCard: 'border-fuchsia-300/70 bg-gradient-to-br from-fuchsia-400/18 via-slate-900 to-slate-950',
+                normalCard: 'border-fuchsia-300/25 bg-slate-950/72 hover:border-fuchsia-300/45',
+                statusBadge: 'border-fuchsia-300/20 bg-fuchsia-400/12 text-fuchsia-100',
+                iconText: 'text-fuchsia-300/90'
+            }
+            : {
+                selectedCard: 'border-fuchsia-400 bg-gradient-to-br from-fuchsia-100 via-white to-violet-50',
+                normalCard: 'border-fuchsia-200 bg-white hover:border-fuchsia-300',
+                statusBadge: 'border-fuchsia-300/60 bg-fuchsia-50 text-fuchsia-700',
+                iconText: 'text-fuchsia-600'
+            };
+    }
+
+    return isDarkMode
+        ? {
+            selectedCard: 'border-sky-300/70 bg-gradient-to-br from-sky-400/18 via-slate-900 to-slate-950',
+            normalCard: 'border-sky-300/25 bg-slate-950/72 hover:border-sky-300/45',
+            statusBadge: 'border-sky-300/20 bg-sky-400/12 text-sky-100',
+            iconText: 'text-sky-300/90'
+        }
+        : {
+            selectedCard: 'border-sky-400 bg-gradient-to-br from-sky-100 via-white to-blue-50',
+            normalCard: 'border-sky-200 bg-white hover:border-sky-300',
+            statusBadge: 'border-sky-300/60 bg-sky-50 text-sky-700',
+            iconText: 'text-sky-600'
+        };
 };
 
 const isCheongyeonName = (value?: string) => {
@@ -465,7 +573,19 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 members: [],
                 isPlaceholder: true,
             })),
-            hrAdmin: DEPARTMENT_TEAM_PRESETS.hrAdmin.map((team, index) => ({
+            accounting: DEPARTMENT_TEAM_PRESETS.accounting.map((team, index) => ({
+                slot: index + 1,
+                displayName: team.displayName,
+                originalName: team.originalName,
+                leaderName: team.leaderName,
+                leaderImageUrl: resolveLeaderImageFromWorker(team.leaderName),
+                memberCount: team.memberCount,
+                siteNames: team.siteNames,
+                statusLabel: team.statusLabel,
+                members: [],
+                isPlaceholder: true,
+            })),
+            management: DEPARTMENT_TEAM_PRESETS.management.map((team, index) => ({
                 slot: index + 1,
                 displayName: team.displayName,
                 originalName: team.originalName,
@@ -581,10 +701,10 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 members: [{ name: '김팀장', role: '인사 운영 리드' }],
             },
             {
-                key: 'hrAdmin',
+                key: 'accounting',
                 title: '회계팀',
                 english: 'Accounting Team',
-                description: '회계, 정산, 원가·세무 운영을 담당하는 재무 관리 라인입니다.',
+                description: '회계·정산과 원가 데이터 관리를 담당하는 재무 운영 라인입니다.',
                 icon: faCalculator,
                 accent: 'from-amber-500/25 via-orange-500/15 to-white/5',
                 iconGradient: 'from-amber-400 to-orange-500',
@@ -592,7 +712,20 @@ const CheongyeonOrgChartPage: React.FC = () => {
                 highlights: ['회계 정산', '원가 관리', '세무 대응'],
                 members: [
                     { name: '이과장', role: '회계/정산 운영' },
-                    { name: '고대리', role: '원가/세무 담당' },
+                ],
+            },
+            {
+                key: 'management',
+                title: '관리팀',
+                english: 'Management Team',
+                description: '운영·총무와 관리 지원을 전담하는 조직 운영 라인입니다.',
+                icon: faLayerGroup,
+                accent: 'from-cyan-500/25 via-sky-500/15 to-white/5',
+                iconGradient: 'from-cyan-400 to-sky-500',
+                value: 'Management Core',
+                highlights: ['운영 총무', '관리 지원', '내부 운영'],
+                members: [
+                    { name: '고대리', role: '관리팀 운영 담당' },
                 ],
             },
             {
@@ -704,13 +837,14 @@ const CheongyeonOrgChartPage: React.FC = () => {
                         <div className="absolute left-1/2 top-[-38px] hidden h-10 w-px -translate-x-1/2 bg-gradient-to-b from-cyan-300/80 to-transparent xl:block" />
                         <div className="absolute left-[12.5%] right-[12.5%] top-0 hidden h-px bg-gradient-to-r from-transparent via-cyan-300/65 to-transparent xl:block" />
 
-                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                             {departmentCards.map((card) => (
                                 <DepartmentCard
                                     key={card.key}
                                     card={card}
                                     isActive={card.key === activeDepartmentKey}
                                     onClick={() => handleDepartmentSelect(card.key)}
+                                    isDarkMode={isDarkMode}
                                 />
                             ))}
                         </div>
@@ -768,7 +902,9 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                                 variants={pyramidItemVariants}
                                                 className="grid grid-cols-1 gap-4 md:grid-cols-3 lg:grid-cols-5"
                                             >
-                                                {row.map((slot) => (
+                                                {row.map((slot) => {
+                                                    const teamTone = getTeamTone(activeDepartmentKey, slot.displayName, isDarkMode);
+                                                    return (
                                                     <motion.button
                                                         key={slot.slot}
                                                         type="button"
@@ -785,19 +921,19 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                                             transition={{ duration: 0.28, ease: 'easeOut' }}
                                                             className={`relative overflow-hidden rounded-[26px] border px-5 py-5 shadow-[0_18px_46px_rgba(2,6,23,0.35)] transition-all duration-300 ${
                                                                 selectedSlot === slot.slot
-                                                                    ? 'border-cyan-300/70 bg-gradient-to-br from-cyan-400/18 via-slate-900 to-slate-950'
+                                                                    ? teamTone.selectedCard
                                                                     : slot.isPlaceholder
-                                                                        ? 'border-white/10 bg-white/[0.035] hover:border-white/20'
-                                                                        : 'border-white/12 bg-slate-950/72 hover:border-cyan-300/35'
+                                                                        ? (isDarkMode ? 'border-white/10 bg-white/[0.035] hover:border-white/20' : 'border-slate-200 bg-white hover:border-slate-300')
+                                                                        : teamTone.normalCard
                                                             }`}
                                                         >
                                                             <div className="absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent opacity-60" />
                                                             <div className="flex items-start justify-between gap-3">
                                                                 <div>
-                                                                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+                                                                    <div className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                                                         Team {slot.slot}
                                                                     </div>
-                                                                    <div className="mt-2 text-xl font-black tracking-tight text-white">
+                                                                    <div className={`mt-2 text-xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
                                                                         {slot.displayName}
                                                                     </div>
                                                                 </div>
@@ -806,29 +942,30 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                                                         imageUrl={slot.leaderImageUrl}
                                                                         name={slot.leaderName}
                                                                         size="tile"
+                                                                        isDarkMode={isDarkMode}
                                                                     />
-                                                                    <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200">
+                                                                    <div className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${teamTone.statusBadge}`}>
                                                                         {slot.statusLabel}
                                                                     </div>
                                                                 </div>
                                                             </div>
 
-                                                            <div className="mt-4 text-sm text-slate-300">
+                                                            <div className={`mt-4 text-sm ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                                                                 {slot.originalName}
                                                             </div>
 
-                                                            <div className="mt-5 grid grid-cols-2 gap-2 text-xs text-slate-300">
-                                                                <SmallStat label="현장" value={`${formatNumber(slot.siteNames.length)}개`} />
-                                                                <SmallStat label="인원" value={`${formatNumber(slot.memberCount)}명`} />
+                                                            <div className={`mt-5 grid grid-cols-2 gap-2 text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                                <SmallStat label="현장" value={`${formatNumber(slot.siteNames.length)}개`} isDarkMode={isDarkMode} />
+                                                                <SmallStat label="인원" value={`${formatNumber(slot.memberCount)}명`} isDarkMode={isDarkMode} />
                                                             </div>
 
-                                                            <div className="mt-4 flex items-center gap-2 text-xs text-slate-400">
-                                                                <FontAwesomeIcon icon={faMapMarkerAlt} className="text-cyan-300/80" />
+                                                            <div className={`mt-4 flex items-center gap-2 text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                                <FontAwesomeIcon icon={faMapMarkerAlt} className={teamTone.iconText} />
                                                                 {slot.siteNames.length > 0 ? `${slot.siteNames.length}개 현장 연결·담당` : '현장 연결 대기'}
                                                             </div>
                                                         </motion.div>
                                                     </motion.button>
-                                                ))}
+                                                );})}
                                             </motion.div>
                                         ))}
                                     </div>
@@ -874,6 +1011,7 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                             imageUrl={selectedTeam.leaderImageUrl}
                                             name={selectedTeam.leaderName}
                                             size="feature"
+                                            isDarkMode={isDarkMode}
                                         />
                                         <div className="rounded-full border border-cyan-300/15 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-50">
                                             {selectedTeam.statusLabel}
@@ -882,10 +1020,10 @@ const CheongyeonOrgChartPage: React.FC = () => {
                                 </div>
 
                                 <div className="mt-6 grid grid-cols-2 gap-3">
-                                    <DetailMetric icon={faMapMarkerAlt} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} />
-                                    <DetailMetric icon={faUsers} label="인원" value={`${formatNumber(selectedTeam.memberCount)}명`} />
-                                    <DetailMetric icon={faBuilding} label="상태" value={selectedTeam.statusLabel} />
-                                    <DetailMetric icon={faSitemap} label="조직 단계" value={`${activeDepartmentCard?.title ?? '부서'} > ${selectedTeam.slot}팀`} />
+                                    <DetailMetric icon={faMapMarkerAlt} label="현장 수" value={`${formatNumber(selectedTeam.siteNames.length)}개`} isDarkMode={isDarkMode} />
+                                    <DetailMetric icon={faUsers} label="인원" value={`${formatNumber(selectedTeam.memberCount)}명`} isDarkMode={isDarkMode} />
+                                    <DetailMetric icon={faBuilding} label="상태" value={selectedTeam.statusLabel} isDarkMode={isDarkMode} />
+                                    <DetailMetric icon={faSitemap} label="조직 단계" value={`${activeDepartmentCard?.title ?? '부서'} > ${selectedTeam.slot}팀`} isDarkMode={isDarkMode} />
                                 </div>
 
                                         <div className="mt-6">
@@ -986,10 +1124,12 @@ const DepartmentCard = ({
     card,
     isActive = false,
     onClick,
+    isDarkMode = true,
 }: {
     card: DepartmentCardConfig;
     isActive?: boolean;
     onClick?: () => void;
+    isDarkMode?: boolean;
 }) => {
     const body = (
         <>
@@ -1012,18 +1152,18 @@ const DepartmentCard = ({
                                 <FontAwesomeIcon icon={faChevronDown} className="text-xs" />
                             </motion.span>
                         )}
-                        <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white/90">
+                        <div className={`rounded-full border px-3 py-1.5 text-[11px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/10 text-white/90' : 'border-slate-200 bg-white text-slate-700'}`}>
                             {card.value}
                         </div>
                     </div>
                 </div>
 
                 <div className="mt-5">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+                    <div className={`text-[11px] font-semibold uppercase tracking-[0.28em] ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                         {card.english}
                     </div>
-                    <div className="mt-2 text-2xl font-black tracking-tight text-white">{card.title}</div>
-                    <p className="mt-3 text-sm leading-7 text-slate-300">{card.description}</p>
+                    <div className={`mt-2 text-2xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{card.title}</div>
+                    <p className={`mt-3 text-sm leading-7 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{card.description}</p>
                 </div>
 
                 {onClick && (
@@ -1036,7 +1176,7 @@ const DepartmentCard = ({
                     {card.highlights.map((highlight) => (
                         <span
                             key={highlight}
-                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200"
+                            className={`rounded-full border px-3 py-1.5 text-xs ${isDarkMode ? 'border-white/10 bg-white/5 text-slate-200' : 'border-slate-200 bg-white text-slate-600'}`}
                         >
                             {highlight}
                         </span>
@@ -1051,10 +1191,10 @@ const DepartmentCard = ({
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true, amount: 0.5 }}
                             transition={{ duration: 0.24, delay: index * 0.06 }}
-                            className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/10 px-3 py-2.5"
+                            className={`flex items-center justify-between rounded-2xl border px-3 py-2.5 ${isDarkMode ? 'border-white/10 bg-black/10' : 'border-slate-200 bg-white'}`}
                         >
-                            <div className="text-sm font-semibold text-white">{member.name}</div>
-                            <div className="text-xs text-slate-300">{member.role}</div>
+                            <div className={`text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{member.name}</div>
+                            <div className={`text-xs ${isDarkMode ? 'text-slate-300' : 'text-slate-500'}`}>{member.role}</div>
                         </motion.div>
                     ))}
                 </div>
@@ -1070,8 +1210,10 @@ const DepartmentCard = ({
                 whileTap={{ scale: 0.985 }}
                 transition={{ duration: 0.2 }}
                 onClick={onClick}
-                className={`relative overflow-hidden rounded-[28px] border bg-white/[0.04] p-5 text-left shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${
-                    isActive ? 'border-cyan-300/40' : 'border-white/10'
+                className={`relative overflow-hidden rounded-[28px] border p-5 text-left shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${
+                    isActive
+                        ? (isDarkMode ? 'border-cyan-300/40 bg-white/[0.04]' : 'border-cyan-400 bg-white')
+                        : (isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white')
                 }`}
             >
                 {body}
@@ -1083,17 +1225,17 @@ const DepartmentCard = ({
         <motion.div
             whileHover={{ y: -6, scale: 1.01 }}
             transition={{ duration: 0.2 }}
-            className="relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_48px_rgba(2,6,23,0.36)]"
+            className={`relative overflow-hidden rounded-[28px] border p-5 shadow-[0_18px_48px_rgba(2,6,23,0.36)] ${isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white'}`}
         >
             {body}
         </motion.div>
     );
 };
 
-const SmallStat = ({ label, value }: { label: string; value: string }) => (
-    <div className="rounded-2xl border border-white/8 bg-white/[0.04] px-3 py-2">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">{label}</div>
-        <div className="mt-1 truncate text-sm font-semibold text-white">{value}</div>
+const SmallStat = ({ label, value, isDarkMode = true }: { label: string; value: string; isDarkMode?: boolean }) => (
+    <div className={`rounded-2xl border px-3 py-2 ${isDarkMode ? 'border-white/8 bg-white/[0.04]' : 'border-slate-200 bg-slate-50'}`}>
+        <div className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>{label}</div>
+        <div className={`mt-1 truncate text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>{value}</div>
     </div>
 );
 
@@ -1101,17 +1243,19 @@ const DetailMetric = ({
     icon,
     label,
     value,
+    isDarkMode = true,
 }: {
     icon: IconDefinition;
     label: string;
     value: string;
+    isDarkMode?: boolean;
 }) => (
-    <div className="rounded-[22px] border border-white/10 bg-white/[0.04] p-3">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+    <div className={`rounded-[22px] border p-3 ${isDarkMode ? 'border-white/10 bg-white/[0.04]' : 'border-slate-200 bg-white'}`}>
+        <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
             <FontAwesomeIcon icon={icon} />
             {label}
         </div>
-        <div className="mt-3 text-sm font-semibold text-white">{value}</div>
+        <div className={`mt-3 text-sm font-semibold ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{value}</div>
     </div>
 );
 
@@ -1119,10 +1263,12 @@ const LeaderAvatar = ({
     imageUrl,
     name,
     size,
+    isDarkMode = true,
 }: {
     imageUrl?: string;
     name: string;
     size: 'sm' | 'lg' | 'tile' | 'feature';
+    isDarkMode?: boolean;
 }) => {
     const [hasImageError, setHasImageError] = useState(false);
     const dimensions =
@@ -1138,10 +1284,10 @@ const LeaderAvatar = ({
     const shouldRenderImage = Boolean(resolvedImageUrl) && !hasImageError;
     const wrapperClass =
         size === 'feature'
-            ? `relative overflow-hidden border border-cyan-300/30 bg-slate-900/90 ${dimensions} shadow-[0_28px_60px_rgba(8,145,178,0.28)]`
+            ? `relative overflow-hidden border ${isDarkMode ? 'border-cyan-300/30 bg-slate-900/90 shadow-[0_28px_60px_rgba(8,145,178,0.28)]' : 'border-cyan-300/60 bg-white shadow-[0_18px_40px_rgba(6,182,212,0.2)]'} ${dimensions}`
             : size === 'tile'
-                ? `relative overflow-hidden border border-cyan-300/25 bg-slate-900/90 ${dimensions} shadow-[0_18px_42px_rgba(14,116,144,0.28)]`
-            : `overflow-hidden border border-white/10 bg-slate-900/80 ${dimensions}`;
+                ? `relative overflow-hidden border ${isDarkMode ? 'border-cyan-300/25 bg-slate-900/90 shadow-[0_18px_42px_rgba(14,116,144,0.28)]' : 'border-cyan-300/50 bg-white shadow-[0_12px_28px_rgba(14,116,144,0.18)]'} ${dimensions}`
+                : `overflow-hidden border ${isDarkMode ? 'border-white/10 bg-slate-900/80' : 'border-slate-200 bg-white'} ${dimensions}`;
     const imageClass = size === 'feature' || size === 'tile' ? 'h-full w-full object-cover object-top' : 'h-full w-full object-cover';
 
     return (
@@ -1155,8 +1301,8 @@ const LeaderAvatar = ({
                     onError={() => setHasImageError(true)}
                 />
             ) : (
-                <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-cyan-400/30 to-blue-500/20 ${labelSize}`}>
-                    <FontAwesomeIcon icon={faUserTie} className="text-white/75" />
+                <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-gradient-to-br from-cyan-400/30 to-blue-500/20' : 'bg-gradient-to-br from-cyan-100 to-sky-100'} ${labelSize}`}>
+                    <FontAwesomeIcon icon={faUserTie} className={`${isDarkMode ? 'text-white/75' : 'text-cyan-700'}`} />
                 </div>
             )}
         </div>

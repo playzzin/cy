@@ -345,7 +345,10 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         return true;
     });
 
-    const companyOptions = companies.filter(c => c.type === '시공사' || c.type === '협력사');
+    const companyOptions = companies.filter((company) => {
+        const type = String(company.type ?? '').trim();
+        return type === '시공사' || type === '미지정';
+    });
 
     return (
         <div className="flex flex-col h-full bg-slate-50">

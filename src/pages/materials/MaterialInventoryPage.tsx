@@ -2,14 +2,18 @@ import React, { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxes, faSearch, faExclamationTriangle, faCheckCircle, faPlus } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
+import { siteService, Site } from '../../services/siteService';
 import { Inventory } from '../../types/materials';
 
 const MaterialInventoryPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [categoryFilter, setCategoryFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'sufficient' | 'warning' | 'shortage'>('all');
+    const [siteIdFilter, setSiteIdFilter] = useState('');
+    const [siteKeyword, setSiteKeyword] = useState('');
 
     const [inventories, setInventories] = useState<Inventory[]>([]);
+    const [sites, setSites] = useState<Site[]>([]);
 
     useEffect(() => {
         loadInventory();
@@ -32,9 +36,13 @@ const MaterialInventoryPage: React.FC = () => {
         setLoading(true);
         console.log('[DEBUG] loadInventory started');
         try {
-            const data = await materialService.getAllInventory();
+            const [data, siteRows] = await Promise.all([
+                materialService.getAllInventory(),
+                siteService.getSites(),
+            ]);
             console.log(`[DEBUG] Received inventory data: ${data.length} items`, data);
             setInventories(data);
+            setSites(siteRows.filter((s) => s.status === 'active'));
         } catch (error) {
             console.error('Failed to load inventory:', error);
             // toast.error('재고 현황을 불러오지 못했습니다.'); // toast가 있다면 사용, 없으면 alert
@@ -57,8 +65,28 @@ const MaterialInventoryPage: React.FC = () => {
     const filteredInventories = inventories.filter(inv => {
         if (categoryFilter && inv.category !== categoryFilter) return false;
         if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
+        if (siteIdFilter && inv.siteId !== siteIdFilter) return false;
+        if (siteKeyword.trim() && !String(inv.siteName || '').toLowerCase().includes(siteKeyword.trim().toLowerCase())) {
+            return false;
+        }
         return true;
     });
+
+    const sortedInventories = [...filteredInventories].sort((a, b) => {
+        const siteCompare = String(a.siteName || '').localeCompare(String(b.siteName || ''), 'ko');
+        if (siteCompare !== 0) return siteCompare;
+        const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), 'ko');
+        if (categoryCompare !== 0) return categoryCompare;
+        const itemCompare = String(a.itemName || '').localeCompare(String(b.itemName || ''), 'ko');
+        if (itemCompare !== 0) return itemCompare;
+        return String(a.spec || '').localeCompare(String(b.spec || ''), 'ko', { numeric: true });
+    });
+
+    const inventoryBySiteCount = sortedInventories.reduce((acc, inv) => {
+        const key = inv.siteName || '미지정 현장';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
 
     //  카테고리 목록
     const categories = Array.from(new Set(inventories.map(inv => inv.category)));
@@ -117,7 +145,7 @@ const MaterialInventoryPage: React.FC = () => {
 
             {/* 필터 */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">분류</label>
                         <select
@@ -144,6 +172,29 @@ const MaterialInventoryPage: React.FC = () => {
                             <option value="shortage">부족</option>
                         </select>
                     </div>
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">현장</label>
+                        <select
+                            value={siteIdFilter}
+                            onChange={(e) => setSiteIdFilter(e.target.value)}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                        >
+                            <option value="">전체 현장</option>
+                            {sites.map((site) => (
+                                <option key={site.id} value={site.id}>{site.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">현장명 검색</label>
+                        <input
+                            type="text"
+                            value={siteKeyword}
+                            onChange={(e) => setSiteKeyword(e.target.value)}
+                            placeholder="현장명 포함 검색"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                        />
+                    </div>
                     <div className="flex items-end">
                         <button
                             onClick={loadInventory}
@@ -163,7 +214,7 @@ const MaterialInventoryPage: React.FC = () => {
                     <div className="text-center py-20">
                         <p className="text-slate-400">로딩 중...</p>
                     </div>
-                ) : filteredInventories.length === 0 ? (
+                ) : sortedInventories.length === 0 ? (
                     <div className="text-center py-32 bg-slate-50 rounded-lg border border-dashed border-slate-300">
                         <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 mb-6">
                             <FontAwesomeIcon icon={faBoxes} className="text-4xl text-slate-400" />
@@ -191,13 +242,14 @@ const MaterialInventoryPage: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex-1 overflow-auto">
+                    <div className="flex-1 overflow-auto min-h-[680px] max-h-[calc(100vh-290px)]">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                 <tr>
-                                    <th className="p-3 text-left font-bold text-slate-700">분류</th>
-                                    <th className="p-3 text-left font-bold text-slate-700">품명</th>
-                                    <th className="p-3 text-left font-bold text-slate-700">규격</th>
+                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
+                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[180px] z-20 bg-slate-100 min-w-[160px]">분류</th>
+                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[340px] z-20 bg-slate-100 min-w-[180px]">품명</th>
+                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[520px] z-20 bg-slate-100 min-w-[130px]">규격</th>
                                     <th className="p-3 text-right font-bold text-slate-700">입고</th>
                                     <th className="p-3 text-right font-bold text-slate-700">출고</th>
                                     <th className="p-3 text-right font-bold text-slate-700">현재고</th>
@@ -206,11 +258,12 @@ const MaterialInventoryPage: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
-                                {filteredInventories.map(inv => (
+                                {sortedInventories.map(inv => (
                                     <tr key={`${inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                        <td className="p-3">{inv.category}</td>
-                                        <td className="p-3 font-semibold">{inv.itemName}</td>
-                                        <td className="p-3">{inv.spec}</td>
+                                        <td className="p-3 sticky left-0 z-10 bg-white font-semibold text-slate-800">{inv.siteName || '미지정 현장'}</td>
+                                        <td className="p-3 sticky left-[180px] z-10 bg-white">{inv.category}</td>
+                                        <td className="p-3 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
+                                        <td className="p-3 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
                                         <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
                                         <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
                                         <td className="p-3 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
@@ -241,6 +294,10 @@ const MaterialInventoryPage: React.FC = () => {
                         </table>
                     </div>
                 )}
+            </div>
+
+            <div className="mt-3 text-xs text-slate-500">
+                현장별 품목 수: {Object.entries(inventoryBySiteCount).map(([siteName, count]) => `${siteName} ${count}건`).join(' / ')}
             </div>
         </div>
     );

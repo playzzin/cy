@@ -87,7 +87,19 @@ const Header: React.FC<HeaderProps> = ({
         clearTopNavCloseTimer();
         topNavCloseTimerRef.current = setTimeout(() => {
             setActiveTopNavKey(null);
-        }, 180);
+        }, 280);
+    };
+
+    const handleTopNavMouseLeave = (event: React.MouseEvent<HTMLElement>) => {
+        const nextTarget = event.relatedTarget as HTMLElement | null;
+        if (
+            nextTarget &&
+            (nextTarget.closest('.cheongyeon-top-nav') || nextTarget.closest('.cheongyeon-top-nav-dropdown'))
+        ) {
+            clearTopNavCloseTimer();
+            return;
+        }
+        scheduleTopNavClose();
     };
 
     useEffect(() => {
@@ -264,12 +276,13 @@ const Header: React.FC<HeaderProps> = ({
                 <nav
                     className="cheongyeon-top-nav"
                     onMouseEnter={clearTopNavCloseTimer}
-                    onMouseLeave={scheduleTopNavClose}
+                    onMouseLeave={handleTopNavMouseLeave}
                 >
                     {cheongyeonTopNav.map((section) => (
                         <div
                             key={section.key}
                             className="cheongyeon-top-nav-item"
+                            onMouseLeave={handleTopNavMouseLeave}
                             onMouseEnter={() => {
                                 clearTopNavCloseTimer();
                                 setActiveTopNavKey(section.key);
@@ -284,7 +297,7 @@ const Header: React.FC<HeaderProps> = ({
                             </button>
 
                             {activeTopNavKey === section.key && section.children.length > 0 && (
-                                <div className="cheongyeon-top-nav-dropdown" onMouseEnter={clearTopNavCloseTimer} onMouseLeave={scheduleTopNavClose}>
+                                <div className="cheongyeon-top-nav-dropdown" onMouseEnter={clearTopNavCloseTimer} onMouseLeave={handleTopNavMouseLeave}>
                                     <div className="cheongyeon-top-nav-dropdown-grid">
                                         {section.children.map((child) => (
                                             <button

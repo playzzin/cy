@@ -8,6 +8,7 @@ import { geminiService } from '../../services/geminiService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUserTag, faCamera, faCheck, faTimes } from '@fortawesome/free-solid-svg-icons';
 import { showSuccessAlert, showErrorAlert } from '../../utils/swal';
+import SingleSelectPopover from '../common/SingleSelectPopover';
 
 interface WorkerFormProps {
     initialData?: Worker | null;
@@ -46,6 +47,13 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
     const [affiliationType, setAffiliationType] = useState<'시공사' | '협력사'>('시공사');
     const [isNewTeam, setIsNewTeam] = useState(false);
     const [newTeamName, setNewTeamName] = useState('');
+    const companyOptions = React.useMemo(() => companies
+        .filter((company) => company.type === affiliationType && Boolean(company.id))
+        .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+        .map((company) => ({
+            id: company.id!,
+            name: company.name
+        })), [companies, affiliationType]);
 
     // companyId가 변경되면 affiliationType을 동기화
     useEffect(() => {
@@ -414,7 +422,22 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                             <span className="text-sm text-slate-700">협력사</span>
                                         </label>
                                     </div>
-                                    <select
+                                    <SingleSelectPopover
+                                        options={companyOptions}
+                                        selectedId={formData.companyId || ''}
+                                        onSelect={(val) => {
+                                            const comp = companies.find(c => c.id === val);
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                companyId: val,
+                                                companyName: comp ? comp.name : '',
+                                                teamId: '',
+                                                teamName: ''
+                                            }));
+                                        }}
+                                        placeholder={'\uD68C\uC0AC \uAC80\uC0C9'}
+                                    />
+                                    {false && <select
                                         name="companyId"
                                         value={formData.companyId || ''}
                                         onChange={(e) => {
@@ -440,7 +463,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                                 <option key={c.id} value={c.id}>{c.name}</option>
                                             ))
                                         }
-                                    </select>
+                                    </select>}
                                 </div>
                             </div>
 

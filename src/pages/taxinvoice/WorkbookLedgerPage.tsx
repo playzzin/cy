@@ -4589,7 +4589,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 <div className="sheet-table-wrapper workbook-frozen-table-wrapper">
                     <table className="sheet-table workbook-summary-table">
                         <colgroup>
-                            <col style={{ width: '92px' }} />
+                            <col style={{ width: '80px' }} />
                             <col className="workbook-summary-col-no" />
                             <col className="workbook-summary-col-partner" />
                             <col className="workbook-summary-col-site" />

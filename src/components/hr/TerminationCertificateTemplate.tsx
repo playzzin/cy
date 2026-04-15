@@ -404,7 +404,7 @@ export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, Termina
             <MainTitle>해촉증명서</MainTitle>
 
             <div style={{ position: 'relative', zIndex: 10 }}>
-              <SectionHeader>인적사항</SectionHeader>
+              <SectionHeader>신청인</SectionHeader>
               <DocTable>
                 <tbody>
                   <tr>
@@ -432,11 +432,11 @@ export const TerminationCertificateTemplate = forwardRef<HTMLDivElement, Termina
                     <Td>해촉</Td>
                   </tr>
                   <tr>
-                    <Th>해촉기간</Th>
+                    <Th>용역기간</Th>
                     <Td colSpan={3}>{servicePeriod}</Td>
                   </tr>
                   <tr>
-                    <Th>업무내용</Th>
+                    <Th>용역내용</Th>
                     <Td colSpan={3}>{serviceDescription}</Td>
                   </tr>
                 </tbody>

@@ -174,6 +174,16 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
         if (currentClientId.length > 0) return;
 
         const constructorCompany = companyOptions.find(c => c.id === rawConstructorId || c.legacyId === rawConstructorId);
+        const constructorCompanyType = String((constructorCompany as any)?.type ?? '').trim();
+
+        if (constructorCompany && constructorCompanyType === '미지정') {
+            setCurrentSite(prev => ({
+                ...prev,
+                clientCompanyId: constructorCompany.id as any
+            }));
+            return;
+        }
+
         const assigned = (constructorCompany as any)?.assignedClientCompanyIds as unknown;
         const assignedIds = Array.isArray(assigned)
             ? assigned.map(v => String(v)).filter(Boolean)
@@ -565,7 +575,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                                 const t = String((c as any)?.type ?? '').trim();
                                                 const selectedId = currentSite.companyId ? String(currentSite.companyId) : '';
                                                 if (selectedId && c.id === selectedId) return true;
-                                                return t === '시공사' || t === '건설사' || t === '미지정' || t === '기타';
+                                                return t === '시공사' || t === '미지정';
                                             })
                                             .map(c => (
                                                 <option key={c.id} value={c.id}>{c.name}</option>
@@ -709,7 +719,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                             const t = String((c as any)?.type ?? '').trim();
                                             const selectedId = currentSite.clientCompanyId ? String(currentSite.clientCompanyId) : '';
                                             if (selectedId && c.id === selectedId) return true;
-                                            return t === '건설사' || t === '발주사' || t === '발주처';
+                                            return t === '건설사' || t === '발주사' || t === '발주처' || t === '미지정';
                                         })
                                         .map(c => (
                                             <option key={c.id} value={c.id}>🏗️ {c.name}</option>

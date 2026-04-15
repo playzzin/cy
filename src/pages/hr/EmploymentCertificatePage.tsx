@@ -163,6 +163,44 @@ const WorkerItem = styled.div<{ $isActive: boolean }>`
   }
 `;
 
+const fallbackPrintFromElement = (element: HTMLElement, title: string) => {
+        const popup = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
+        if (!popup) {
+                window.alert('팝업이 차단되어 PDF 저장 창을 열 수 없습니다. 브라우저 팝업 차단을 해제해 주세요.');
+                return;
+        }
+
+        const styleNodes = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+                .map((node) => node.outerHTML)
+                .join('\n');
+
+        popup.document.open();
+        popup.document.write(`
+            <!doctype html>
+            <html lang="ko">
+                <head>
+                    <meta charset="utf-8" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1" />
+                    <title>${title}</title>
+                    ${styleNodes}
+                    <style>
+                        @page { size: A4 portrait; margin: 10mm; }
+                        html, body { margin: 0 !important; padding: 0 !important; background: #ffffff !important; }
+                    </style>
+                </head>
+                <body>
+                    ${element.outerHTML}
+                </body>
+            </html>
+        `);
+        popup.document.close();
+        popup.focus();
+
+        window.setTimeout(() => {
+                popup.print();
+        }, 250);
+};
+
 const EmploymentCertificatePage: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -224,10 +262,42 @@ const EmploymentCertificatePage: React.FC = () => {
         fetchData();
     }, []);
 
-    const handlePrint = useReactToPrint({
+        const handlePrint = useReactToPrint({
         contentRef: componentRef,
         documentTitle: `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
+                pageStyle: `
+                    @page {
+                        size: A4 portrait;
+                        margin: 10mm;
+                    }
+                    @media print {
+                        html, body {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            background: #ffffff !important;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
+                        }
+                    }
+                `,
+                onPrintError: () => {
+                        if (componentRef.current) {
+                                const title = `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`;
+                                fallbackPrintFromElement(componentRef.current, title);
+                        }
+                }
     });
+
+        const handlePrintClick = async () => {
+                if (!componentRef.current) return;
+
+                try {
+                        await handlePrint();
+                } catch {
+                        const title = `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`;
+                        fallbackPrintFromElement(componentRef.current, title);
+                }
+        };
 
     // 대상 근로자는 시공사(다원, 청연 등) 소속인 경우 모두 노출
     const filteredWorkers = workers.filter(w => {
@@ -434,7 +504,7 @@ const EmploymentCertificatePage: React.FC = () => {
 
                 <div style={{ flex: 1 }}></div>
 
-                <Button onClick={() => handlePrint()} disabled={!selectedWorker}>
+                <Button onClick={handlePrintClick} disabled={!selectedWorker}>
                     <FontAwesomeIcon icon={faPrint} />
                     재직증명서 인쇄 / PDF 저장
                 </Button>

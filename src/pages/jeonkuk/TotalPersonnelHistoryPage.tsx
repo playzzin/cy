@@ -83,6 +83,10 @@ const formatResidentNumberForDisplay = (rawValue: string): string => {
     return raw;
 };
 
+const formatManDay = (value: number): string => {
+    return Number.isFinite(value) ? value.toFixed(2) : '0.00';
+};
+
 
 const TotalPersonnelHistoryPage: React.FC = () => {
     return (
@@ -1058,9 +1062,9 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                                         item.salaryModel === '지원팀' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-600'
                                                     }`}>{item.salaryModel}</span>
                                             </td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.laborManDay > 0 ? item.laborManDay.toFixed(1) : '-'}</td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.invoiceManDay > 0 ? item.invoiceManDay.toFixed(1) : '-'}</td>
-                                            <td className="px-3 py-3 text-right font-mono text-slate-800 font-bold bg-slate-100/30 border-b border-r border-slate-100 tracking-tighter">{item.totalManDay.toFixed(1)}</td>
+                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.laborManDay > 0 ? formatManDay(item.laborManDay) : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-mono text-slate-500 bg-slate-50/30 border-b border-r border-slate-100">{item.invoiceManDay > 0 ? formatManDay(item.invoiceManDay) : '-'}</td>
+                                            <td className="px-3 py-3 text-right font-mono text-slate-800 font-bold bg-slate-100/30 border-b border-r border-slate-100 tracking-tighter">{formatManDay(item.totalManDay)}</td>
                                             <td className="px-4 py-3 text-right font-mono text-slate-500 text-xs border-b border-r border-slate-100">{item.unitPrice.toLocaleString()}</td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.laborAmount > 0 ? item.laborAmount.toLocaleString() : '-'}</td>
                                             <td className="px-3 py-3 text-right font-mono text-slate-600 border-b border-r border-slate-100">{item.invoiceAmount > 0 ? item.invoiceAmount.toLocaleString() : '-'}</td>
@@ -1077,13 +1081,13 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                     <tr>
                                         <td colSpan={5} className="px-4 py-3 text-center text-slate-600 border-r border-slate-200">전체 합계</td>
                                         <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
-                                            {historyData.reduce((sum, item) => sum + item.laborManDay, 0).toFixed(1)}
+                                            {formatManDay(historyData.reduce((sum, item) => sum + item.laborManDay, 0))}
                                         </td>
                                         <td className="px-3 py-3 text-right text-slate-500 font-mono text-xs border-r border-slate-200">
-                                            {historyData.reduce((sum, item) => sum + item.invoiceManDay, 0).toFixed(1)}
+                                            {formatManDay(historyData.reduce((sum, item) => sum + item.invoiceManDay, 0))}
                                         </td>
                                         <td className="px-3 py-3 text-right text-slate-900 font-mono border-r border-slate-200">
-                                            {historyData.reduce((sum, item) => sum + item.totalManDay, 0).toFixed(1)}
+                                            {formatManDay(historyData.reduce((sum, item) => sum + item.totalManDay, 0))}
                                         </td>
                                         <td className="px-4 py-3 border-r border-slate-200"></td>
                                         <td className="px-3 py-3 text-right text-slate-600 font-mono text-xs border-r border-slate-200">

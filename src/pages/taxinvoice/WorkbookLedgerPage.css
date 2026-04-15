@@ -746,7 +746,7 @@
 }
 
 .workbook-summary-table .workbook-summary-col-note {
-    width: 72px;
+    width: 156px;
 }
 
 .workbook-summary-table .workbook-summary-col-team {
@@ -778,6 +778,17 @@
 .workbook-summary-table td:first-child {
     background: #f8fafc;
     white-space: nowrap;
+}
+
+.workbook-summary-table th:nth-child(1),
+.workbook-summary-table td:nth-child(1),
+.workbook-summary-table th:nth-child(5),
+.workbook-summary-table td:nth-child(5),
+.workbook-summary-table th:nth-child(9),
+.workbook-summary-table td:nth-child(9),
+.workbook-summary-table th:nth-child(13),
+.workbook-summary-table td:nth-child(13) {
+    text-align: center;
 }
 
 .workbook-summary-select-btn {
@@ -830,6 +841,10 @@
 .workbook-summary-table .cell-date-list {
     gap: 1px;
     line-height: 1.2;
+}
+
+.workbook-summary-table td:nth-child(9) .cell-date-list {
+    align-items: center;
 }
 
 .sheet-empty-state {

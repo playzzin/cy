@@ -31,7 +31,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                     "지원 현황판",
                     "지원비 단가 관리",
                     "숙소 관리",
-                    "법인차량 관리"
+                    "차량/카드 통합 관리"
                 ]
             },
             {

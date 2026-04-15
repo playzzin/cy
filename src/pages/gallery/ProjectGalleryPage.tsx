@@ -478,6 +478,7 @@ const ProjectDetailModal = ({ site, onClose }: { site: Site; onClose: () => void
 export const ProjectGalleryPage = () => {
     // Use consistent MasterData context
     const { sites } = useMasterData();
+    const navigate = useNavigate();
 
     const [filter, setFilter] = useState<ProjectStatus>('all');
     const [selectedSite, setSelectedSite] = useState<Site | null>(null);
@@ -571,7 +572,13 @@ export const ProjectGalleryPage = () => {
                                 exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
                                 transition={{ duration: 0.3 }}
                             >
-                                <ProjectCard site={site} onClick={() => setSelectedSite(site)} />
+                                <ProjectCard site={site} onClick={() => {
+                                        if (site.status === 'active') {
+                                            navigate(`/site/management?siteId=${site.id}`);
+                                        } else {
+                                            setSelectedSite(site);
+                                        }
+                                    }} />
                             </motion.div>
                         ))}
                     </AnimatePresence>

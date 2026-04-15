@@ -198,6 +198,7 @@ const MaterialOutboundPage: React.FC = () => {
         }
 
         const transactions: Array<Omit<OutboundTransaction, 'id' | 'createdAt' | 'updatedAt'>> = [];
+        const resolvedSiteName = siteName || sites.find(s => s.id === siteId)?.name || '';
 
         Object.entries(quantities).forEach(([materialId, quantity]) => {
             if (quantity > 0) {
@@ -206,14 +207,14 @@ const MaterialOutboundPage: React.FC = () => {
                     transactions.push({
                         transactionDate,
                         siteId,
-                        siteName,
+                        siteName: String(resolvedSiteName || '').trim(),
                         vehicleNumber: vehicleNumber || '',
                         materialId: material.id,
-                        category: material.category,
-                        itemName: material.itemName,
-                        spec: material.spec,
+                        category: String(material.category || '').trim(),
+                        itemName: String(material.itemName || '').trim(),
+                        spec: String(material.spec || '').trim(),
                         quantity,
-                        unit: material.unit,
+                        unit: String(material.unit || '').trim(),
                         recipient: recipient || '',
                         deliveryStatus: 'pending',
                         notes: '',

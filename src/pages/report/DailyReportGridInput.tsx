@@ -263,15 +263,16 @@ const DailyReportTable: React.FC<{
         onUpdate(ledger.id, { rows: newRows });
     }, [buildDuplicateInputNames, ledger.id, ledger.rows, onUpdate, teams, workerMap]);
 
-    const selectedSite = sites.find(s => s.id === ledger.siteId);
+    const normalizedLedgerSiteId = String(ledger.siteId ?? '').trim();
+    const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
 
     // Filter teams assigned to this site (via Site.responsibleTeamId)
     const siteTeams = useMemo(() => {
-        if (!ledger.siteId) return [];
-        const site = sites.find(s => s.id === ledger.siteId);
+        if (!normalizedLedgerSiteId) return [];
+        const site = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
         if (!site || !site.responsibleTeamId) return [];
         return teams.filter(t => t.id === site.responsibleTeamId);
-    }, [ledger.siteId, sites, teams]);
+    }, [normalizedLedgerSiteId, sites, teams]);
 
     const handleAddTeamMembers = (team: Team) => {
         // Find all workers in this team
@@ -348,8 +349,8 @@ const DailyReportTable: React.FC<{
                                                         options={sites
                                                             .filter((site) => Boolean(site.id))
                                                             .map((site) => ({ id: String(site.id), name: site.name }))}
-                                                        selectedId={ledger.siteId || null}
-                                                        onSelect={siteId => onUpdate(ledger.id, { siteId })}
+                                                        selectedId={normalizedLedgerSiteId || null}
+                                                        onSelect={(siteId) => onUpdate(ledger.id, { siteId: String(siteId ?? '').trim() })}
                                                         placeholder="현장명을 검색/선택하세요"
                                                     />
                                                 </div>
@@ -555,6 +556,8 @@ const DailyReportGridInput: React.FC = () => {
     const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    const normalizeSiteId = useCallback((value: unknown): string => String(value ?? '').trim(), []);
+
     // Optimize lookups
     const workerMap = useMemo(() => {
         const map = new Map<string, Worker>();
@@ -737,16 +740,17 @@ const DailyReportGridInput: React.FC = () => {
             // So we group by siteId.
             const siteGroups = new Map<string, DailyReport[]>();
             reports.forEach(r => {
-                if (!r.siteId) return;
-                const list = siteGroups.get(r.siteId) || [];
+                const siteIdKey = normalizeSiteId(r.siteId);
+                if (!siteIdKey) return;
+                const list = siteGroups.get(siteIdKey) || [];
                 list.push(r);
-                siteGroups.set(r.siteId, list);
+                siteGroups.set(siteIdKey, list);
             });
 
             const newLedgers: Ledger[] = [];
 
             siteGroups.forEach((siteReports, siteId) => {
-                const site = sites.find(s => s.id === siteId);
+                const site = sites.find((s) => normalizeSiteId(s.id) === siteId);
 
                 // Aggregate Work Content (Report Level)
                 const uniqueContent = Array.from(new Set(
@@ -805,7 +809,7 @@ const DailyReportGridInput: React.FC = () => {
 
                 newLedgers.push({
                     id: Date.now().toString() + Math.random(),
-                    siteId: siteId,
+                    siteId,
                     rows: rows,
                     description: uniqueContent
                 });
@@ -819,7 +823,7 @@ const DailyReportGridInput: React.FC = () => {
         } finally {
             setFetching(false);
         }
-    }, [sites, teams, workers]);
+    }, [normalizeSiteId, sites, teams, workers]);
 
     // Initialize & Watch Date
     useEffect(() => {
@@ -1008,7 +1012,8 @@ const DailyReportGridInput: React.FC = () => {
             const involvedTeamIds = new Set<string>();
 
             for (const ledger of ledgers) {
-                if (!ledger.siteId) continue;
+                const normalizedLedgerSiteId = normalizeSiteId(ledger.siteId);
+                if (!normalizedLedgerSiteId) continue;
 
                 const validRows = ledger.rows.filter(r => r.name.trim() !== '');
                 if (validRows.length === 0) continue;
@@ -1021,7 +1026,7 @@ const DailyReportGridInput: React.FC = () => {
                     groups[key].push(row);
                 });
 
-                const site = sites.find(s => s.id === ledger.siteId);
+                const site = sites.find((s) => normalizeSiteId(s.id) === normalizedLedgerSiteId);
 
                 Object.entries(groups).forEach(([teamKey, rows]) => {
                     const realTeamId = teamKey === 'no-team' ? '' : teamKey;
@@ -1059,7 +1064,7 @@ const DailyReportGridInput: React.FC = () => {
                         date,
                         teamId: realTeamId,
                         teamName: team?.name || '',
-                        siteId: ledger.siteId,
+                        siteId: normalizedLedgerSiteId,
                         siteName: site?.name || '',
                         writerId: currentUser?.uid || 'unknown',
                         workers: reportWorkers,

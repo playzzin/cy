@@ -18,6 +18,27 @@ const generateId = (prefix: string = 'mat'): string => {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
 
+const trimText = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeMaterialSnapshot = async () => {
+    const rows = await materialFirestoreService.getAllMaterials();
+    return new Map(rows.map((m) => [m.id, m]));
+};
+
+const normalizeTransactionWithMaster = <T extends { materialId: string; category?: string; itemName?: string; spec?: string; unit?: string }>(
+    row: T,
+    materialById: Map<string, any>
+): T => {
+    const master = materialById.get(row.materialId);
+    return {
+        ...row,
+        category: trimText(master?.category) || trimText(row.category),
+        itemName: trimText(master?.itemName) || trimText(row.itemName),
+        spec: trimText(master?.spec) || trimText(row.spec),
+        unit: trimText(master?.unit) || trimText(row.unit),
+    };
+};
+
 /**
  * MaterialService (Facade)
  * Delegates all operations to materialFirestoreService.
@@ -120,7 +141,8 @@ export const getInboundTransactions = async (filters?: TransactionFilters): Prom
         rows = rows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
     }
 
-    return rows as any[];
+    const materialById = await normalizeMaterialSnapshot();
+    return rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 };
 
 export const updateInboundTransaction = async (
@@ -186,7 +208,8 @@ export const getOutboundTransactions = async (filters?: TransactionFilters): Pro
         rows = rows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
     }
 
-    return rows as any[];
+    const materialById = await normalizeMaterialSnapshot();
+    return rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 };
 
 export const updateOutboundTransaction = async (
@@ -219,8 +242,14 @@ export const calculateInventory = async (
     // To handle "opening balance", we technically need everything from the beginning.
     // This is the downside of frontend-side inventory calculation.
 
-    const allInbounds = await materialFirestoreService.getInboundsByRange('1900-01-01', endDate || '2100-01-01', siteId);
-    const allOutbounds = await materialFirestoreService.getOutboundsByRange('1900-01-01', endDate || '2100-01-01', siteId);
+    const [allInboundsRaw, allOutboundsRaw, materialById] = await Promise.all([
+        materialFirestoreService.getInboundsByRange('1900-01-01', endDate || '2100-01-01', siteId),
+        materialFirestoreService.getOutboundsByRange('1900-01-01', endDate || '2100-01-01', siteId),
+        normalizeMaterialSnapshot(),
+    ]);
+
+    const allInbounds = allInboundsRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
+    const allOutbounds = allOutboundsRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
 
     // Apply materialId filter if provided
     let inbounds = materialId ? allInbounds.filter(t => t.materialId === materialId) : allInbounds;

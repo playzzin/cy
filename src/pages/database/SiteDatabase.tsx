@@ -63,17 +63,30 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     }, [companies]);
 
     const getFilteredTeamsForSite = (site: Site): Team[] => {
-        const rawPartnerId = site.partnerId ? String(site.partnerId).trim() : '';
         const rawCompanyId = site.companyId ? String(site.companyId).trim() : '';
+        const targetCompanyId = rawCompanyId ? (companyUuidByAnyId.get(rawCompanyId) ?? rawCompanyId) : '';
 
-        // 담당팀은 우선 시공사 소속 팀을 기준으로 보고,
-        // 시공사가 비어 있을 때만 협력사 팀을 후보로 사용한다.
-        const targetCompanyIdRaw = rawCompanyId || rawPartnerId;
-        const targetCompanyId = targetCompanyIdRaw ? (companyUuidByAnyId.get(targetCompanyIdRaw) ?? targetCompanyIdRaw) : '';
-        if (!targetCompanyId) return teams;
+        const constructorCompanyIds = new Set(
+            companies
+                .filter((company) => {
+                    const type = String(company.type ?? '').trim();
+                    return type === '시공사' || type === '미지정';
+                })
+                .map((company) => String(company.id ?? '').trim())
+                .filter(Boolean)
+        );
 
-        return teams.filter(t => {
-            const teamCompanyIdRaw = t.companyId ? String(t.companyId).trim() : '';
+        const constructorTeams = teams.filter((team) => {
+            const teamCompanyIdRaw = team.companyId ? String(team.companyId).trim() : '';
+            if (!teamCompanyIdRaw) return false;
+            const teamCompanyId = companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw;
+            return constructorCompanyIds.has(teamCompanyId);
+        });
+
+        if (!targetCompanyId) return constructorTeams;
+
+        return constructorTeams.filter((team) => {
+            const teamCompanyIdRaw = team.companyId ? String(team.companyId).trim() : '';
             if (!teamCompanyIdRaw) return false;
             const teamCompanyId = companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw;
             return teamCompanyId === targetCompanyId;
@@ -607,7 +620,12 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     >
                                                                         <option value="">발주사 선택</option>
                                                                         {companies
-                                                                            .filter(c => c.type === '건설사')
+                                                                            .filter(c => {
+                                                                                const type = String(c.type ?? '').trim();
+                                                                                const selectedId = String(site.clientCompanyId ?? '').trim();
+                                                                                if (selectedId && String(c.id ?? '').trim() === selectedId) return true;
+                                                                                return type === '건설사' || type === '미지정';
+                                                                            })
                                                                             .map(company => (
                                                                                 <option key={company.id} value={company.id}>{company.name}</option>
                                                                             ))}
@@ -618,16 +636,26 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         onChange={(e) => {
                                                                             const companyId = e.target.value;
                                                                             const company = companies.find(c => c.id === companyId);
+                                                                            const companyType = String(company?.type ?? '').trim();
                                                                             handleSiteSelectChange(site.id!, {
                                                                                 companyId: companyId || '',
-                                                                                companyName: company?.name || ''
+                                                                                companyName: company?.name || '',
+                                                                                ...(companyType === '미지정'
+                                                                                    ? {
+                                                                                        clientCompanyId: companyId || '',
+                                                                                        clientCompanyName: company?.name || ''
+                                                                                    }
+                                                                                    : {})
                                                                             });
                                                                         }}
                                                                         className="border rounded px-2 py-1 w-full text-sm"
                                                                     >
                                                                         <option value="">시공사 선택</option>
                                                                         {companies
-                                                                            .filter(c => c.type === '시공사')
+                                                                            .filter(c => {
+                                                                                const type = String(c.type ?? '').trim();
+                                                                                return type === '시공사' || type === '미지정';
+                                                                            })
                                                                             .map(company => (
                                                                                 <option key={company.id} value={company.id}>{company.name}</option>
                                                                             ))}
@@ -776,8 +804,9 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                         </span>
                                                                         {(() => {
                                                                             const compNames = site.companyName || siteCompany?.name || '-';
-                                                                            // 시공사인데 타입이 '시공사'가 아니면 경고 (단, 미지정은 허용할 수도 있으나 Strict 모드에서는 경고)
-                                                                            const isInvalid = siteCompany && siteCompany.type !== '시공사';
+                                                                            const allowedTypes = new Set(['시공사', '미지정']);
+                                                                            const siteCompanyType = String(siteCompany?.type ?? '').trim();
+                                                                            const isInvalid = !!siteCompany && !allowedTypes.has(siteCompanyType);
 
                                                                             return (
                                                                                 <div className="flex flex-col">

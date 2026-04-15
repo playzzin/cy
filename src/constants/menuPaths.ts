@@ -108,6 +108,11 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\uc9c0\uc6d0 \ud604\ud669\ud310": "/support/status",
     "\uc9c0\uc6d0\ube44 \ub2e8\uac00 \uad00\ub9ac": "/support/rate-management",
     "\uc778\ub825 \uad50\ub958 \uc815\uc0b0": "/support/labor-exchange",
+    "\ucc28\ub7c9/\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac": "/support/vehicles",
+    "\ucc28\ub7c9/\uce74\ub4dc \uad00\ub9ac": "/support/vehicles",
+    "\ucc28\ub7c9\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac": "/support/vehicles",
+    "\ubc95\uc778\ucc28\ub7c9 \uad00\ub9ac": "/support/vehicles",
+    "\ubc95\uc778\uce74\ub4dc \uad00\ub9ac": "/support/cards",
 
     "\uccad\uc5f0ERP \uc124\uba85\uc11c": "/manual",
     "\ud648\ud398\uc774\uc9c0 \uc0ac\uc6a9\ubc95": "/manual",
