@@ -228,13 +228,27 @@ export const dailyReportService = {
         const reports = await dailyReportService.getReports(params);
         const { siteService } = await import('./siteService');
         const sites = await siteService.getSites();
-        const siteMap = new Map(sites.map(site => [site.id, site]));
+        const siteMap = new Map<string, (typeof sites)[number]>();
+        const siteNameMap = new Map<string, (typeof sites)[number]>();
+
+        sites.forEach((site) => {
+            const id = String(site.id ?? '').trim();
+            const legacyId = String(site.legacyId ?? '').trim();
+            const name = String(site.name ?? '').trim();
+
+            if (id) siteMap.set(id, site);
+            if (legacyId) siteMap.set(legacyId, site);
+            if (name && !siteNameMap.has(name)) siteNameMap.set(name, site);
+        });
 
         const rows: DailyReportWorkerRow[] = [];
         reports.forEach(report => {
-            const site = report.siteId ? siteMap.get(report.siteId) : undefined;
-            const fallbackSiteType = site?.siteType || '';
-            const fallbackPaymentType = site?.paymentMethod || '';
+            const site = report.siteId
+                ? siteMap.get(String(report.siteId).trim())
+                : undefined;
+            const resolvedSite = site ?? siteNameMap.get(String(report.siteName ?? '').trim());
+            const fallbackSiteType = resolvedSite?.siteType || '';
+            const fallbackPaymentType = resolvedSite?.paymentMethod || '';
 
             report.workers.forEach(worker => {
                 const unitPrice = worker.unitPrice || 0;
@@ -245,8 +259,8 @@ export const dailyReportService = {
                     teamName: report.teamName,
                     siteId: report.siteId,
                     siteName: report.siteName,
-                    responsibleTeamId: report.responsibleTeamId ?? site?.responsibleTeamId,
-                    responsibleTeamName: report.responsibleTeamName ?? site?.responsibleTeamName,
+                    responsibleTeamId: report.responsibleTeamId ?? resolvedSite?.responsibleTeamId,
+                    responsibleTeamName: report.responsibleTeamName ?? resolvedSite?.responsibleTeamName,
                     workerId: worker.workerId,
                     workerName: worker.name,
                     role: worker.role,

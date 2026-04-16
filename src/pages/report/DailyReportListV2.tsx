@@ -65,6 +65,8 @@ const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지
 type RowDraft = {
     siteId: string;
     teamId: string;
+    responsibleTeamId: string;
+    responsibleTeamName: string;
     workerId?: string; // New Worker ID if changed
     workerName?: string;
     workerTeamName?: string;
@@ -452,8 +454,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         const byId = normalizeTeamId(params.responsibleTeamId);
         if (byId) return byId;
+
+        const rawName = String(params.responsibleTeamName ?? '').trim();
+        if (rawName) return rawName;
+
         return '';
     }, [normalizeTeamId, teamNameCanonicalIdMap]);
+
+    const resolveResponsibleTeamOptionId = useCallback((params: { responsibleTeamId?: string | null; responsibleTeamName?: string | null }) => {
+        return resolveResponsibleTeamCanonicalId(params) || String(params.responsibleTeamName ?? '').trim();
+    }, [resolveResponsibleTeamCanonicalId]);
 
     const resolveResponsibleTeamDisplayName = useCallback((params: { responsibleTeamId?: string | null; responsibleTeamName?: string | null }) => {
         const rawName = String(params.responsibleTeamName ?? '').trim();
@@ -1142,6 +1152,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return {
             siteId: normalizeSiteId(r.siteId),
             teamId: normalizeTeamId(r.teamId),
+            responsibleTeamId: resolveResponsibleTeamOptionId({
+                responsibleTeamId: r.responsibleTeamId,
+                responsibleTeamName: r.responsibleTeamName
+            }),
+            responsibleTeamName: resolveResponsibleTeamDisplayName({
+                responsibleTeamId: r.responsibleTeamId,
+                responsibleTeamName: r.responsibleTeamName
+            }),
             workerName: r.workerName ?? '',
             workerTeamName: fallbackWorkerTeamName,
             workerTeamId: canonicalWorkerTeamId || undefined,
@@ -1165,6 +1183,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         if (draft.siteId !== normalizeSiteId(original.siteId)) return true;
         if (draft.teamId !== normalizeTeamId(original.teamId)) return true;
+        if (draft.responsibleTeamId !== resolveResponsibleTeamOptionId({
+            responsibleTeamId: original.responsibleTeamId,
+            responsibleTeamName: original.responsibleTeamName
+        })) return true;
+        if (draft.responsibleTeamName !== resolveResponsibleTeamDisplayName({
+            responsibleTeamId: original.responsibleTeamId,
+            responsibleTeamName: original.responsibleTeamName
+        })) return true;
         if (draft.salaryModel !== String(original.salaryModel ?? original.payType ?? '')) return true;
         if (Number(draft.manDay) !== (Number.isFinite(original.manDay) ? original.manDay : 0)) return true;
         if (Number(draft.unitPrice) !== (Number.isFinite(original.unitPrice) ? original.unitPrice : 0)) return true;
@@ -1176,7 +1202,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         if (draft.workerTeamName !== undefined && draft.workerTeamName !== (original.workerTeamName ?? '')) return true;
 
         return false;
-    }, [normalizeSiteId]);
+    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId]);
 
     const setRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>) => {
         const key = getRowKey(r);
@@ -1184,6 +1210,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             const current = prev[key] || {
                 siteId: normalizeSiteId(r.siteId),
                 teamId: normalizeTeamId(r.teamId),
+                responsibleTeamId: resolveResponsibleTeamOptionId({
+                    responsibleTeamId: r.responsibleTeamId,
+                    responsibleTeamName: r.responsibleTeamName
+                }),
+                responsibleTeamName: resolveResponsibleTeamDisplayName({
+                    responsibleTeamId: r.responsibleTeamId,
+                    responsibleTeamName: r.responsibleTeamName
+                }),
                 workerName: r.workerName ?? '',
                 workerTeamName: r.workerTeamName ?? '',
                 workerTeamId: resolveWorkerTeamCanonicalId({
@@ -1202,7 +1236,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 [key]: { ...current, ...changes }
             };
         });
-    }, [getRowKey, normalizeSiteId, resolveWorkerTeamCanonicalId]);
+    }, [getRowKey, normalizeSiteId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamCanonicalId]);
 
     const mergeRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>): RowDraft => {
         const key = getRowKey(r);
@@ -1224,12 +1258,24 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const buildReportLevelUpdates = useCallback((original: DailyReportWorkerRow, draft: RowDraft) => {
         const reportLevelUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
 
-        if (draft.teamId !== normalizeTeamId(original.teamId)) {
-            const matchedTeam = teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === draft.teamId);
-            if (matchedTeam?.id) {
-                reportLevelUpdates.teamId = String(matchedTeam.id);
-                reportLevelUpdates.teamName = matchedTeam.name ?? '';
-            }
+        if (
+            draft.responsibleTeamId !== resolveResponsibleTeamOptionId({
+                responsibleTeamId: original.responsibleTeamId,
+                responsibleTeamName: original.responsibleTeamName
+            }) ||
+            draft.responsibleTeamName !== resolveResponsibleTeamDisplayName({
+                responsibleTeamId: original.responsibleTeamId,
+                responsibleTeamName: original.responsibleTeamName
+            })
+        ) {
+            const matchedTeam = teams.find((team) => {
+                const canonicalId = normalizeTeamId(team.id ?? team.legacyId ?? '');
+                const nameKey = normalizeTeamNameKey(team.name);
+                return canonicalId === draft.responsibleTeamId || nameKey === normalizeTeamNameKey(draft.responsibleTeamName);
+            });
+
+            reportLevelUpdates.responsibleTeamId = matchedTeam?.id ? String(matchedTeam.id) : '';
+            reportLevelUpdates.responsibleTeamName = matchedTeam?.name ?? draft.responsibleTeamName ?? '';
         }
 
         if (draft.siteId !== normalizeSiteId(original.siteId)) {
@@ -1251,7 +1297,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
 
         return reportLevelUpdates;
-    }, [normalizeSiteId, normalizeTeamId, siteOptions, teams]);
+    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, siteOptions, teams]);
 
     // Worker Change Logic
     // Worker Change Logic
@@ -2407,13 +2453,31 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 {isEditMode ? (
                                                     <select
                                                         value={draft ? draft.teamId : normalizeTeamId(r.teamId)}
-                                                        onChange={(e) => setRowDraft(r, { teamId: e.target.value })}
+                                                        onChange={(e) => {
+                                                            const selectedTeam = availableReportTeams.find((team) => {
+                                                                const optionId = resolveResponsibleTeamOptionId({
+                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
+                                                                    responsibleTeamName: team.name
+                                                                });
+                                                                return optionId === e.target.value;
+                                                            });
+                                                            setRowDraft(r, {
+                                                                responsibleTeamId: e.target.value,
+                                                                responsibleTeamName: selectedTeam?.name ?? ''
+                                                            });
+                                                        }}
                                                         disabled={saving}
                                                         className="px-2 py-1 border border-slate-300 rounded text-sm w-[118px] bg-white"
                                                     >
                                                         <option value="">-</option>
                                                         {availableReportTeams.map((team) => (
-                                                            <option key={String(team.id ?? team.legacyId ?? team.name)} value={normalizeTeamId(team.id ?? team.legacyId ?? '')}>
+                                                            <option
+                                                                key={String(team.id ?? team.legacyId ?? team.name)}
+                                                                value={resolveResponsibleTeamOptionId({
+                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
+                                                                    responsibleTeamName: team.name
+                                                                })}
+                                                            >
                                                                 {team.name}
                                                             </option>
                                                         ))}
@@ -2421,11 +2485,29 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 ) : (
                                                     <SingleSelectPopover
                                                         options={availableReportTeams.map((team) => ({
-                                                            id: normalizeTeamId(team.id ?? team.legacyId ?? ''),
+                                                            id: resolveResponsibleTeamOptionId({
+                                                                responsibleTeamId: team.id ?? team.legacyId ?? '',
+                                                                responsibleTeamName: team.name
+                                                            }),
                                                             name: team.name ?? ''
                                                         }))}
-                                                        selectedId={(draft ? draft.teamId : normalizeTeamId(r.teamId)) || null}
-                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { teamId: id }); }}
+                                                        selectedId={(draft?.responsibleTeamId ?? resolveResponsibleTeamOptionId({
+                                                            responsibleTeamId: r.responsibleTeamId,
+                                                            responsibleTeamName: r.responsibleTeamName
+                                                        })) || null}
+                                                        onSelect={(id) => {
+                                                            const selectedTeam = availableReportTeams.find((team) => {
+                                                                const optionId = resolveResponsibleTeamOptionId({
+                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
+                                                                    responsibleTeamName: team.name
+                                                                });
+                                                                return optionId === id;
+                                                            });
+                                                            void handleQuickRowUpdate(r, {
+                                                                responsibleTeamId: id,
+                                                                responsibleTeamName: selectedTeam?.name ?? ''
+                                                            });
+                                                        }}
                                                         placeholder="담당팀 선택"
                                                         minimal
                                                         disabled={saving}
