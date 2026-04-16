@@ -18,7 +18,6 @@ import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
 type WorkbookTabKey =
-  | 'database'
   | 'workers'
   | 'team-summary'
   | 'statement'
@@ -79,7 +78,6 @@ type WorkbookEntry = {
 
 type WorkerProfileDraft = {
   claimUnitPrice: string;
-  recruiterFee: string;
   memo: string;
 };
 
@@ -129,7 +127,6 @@ const COLORS = {
 };
 
 const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
-  { key: 'database', label: 'DB' },
   { key: 'workers', label: '인원DB' },
   { key: 'team-summary', label: '팀별출력' },
   { key: 'statement', label: '청구서' },
@@ -264,13 +261,14 @@ const resolveWorkerStableId = (worker?: Partial<Worker> | null): string => {
 
 const buildEmptyDraft = (): WorkerProfileDraft => ({
   claimUnitPrice: '',
-  recruiterFee: '',
   memo: '',
 });
 
 const GOYUNJUNG_MODE_STORAGE_KEY = 'daily-advance-workbook:goyunjung-mode';
 const DAILY_ADVANCE_STATEMENT_DEDUCTION_STORAGE_KEY =
   'daily-advance-workbook:statement-deductions';
+const DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY =
+  'daily-advance-workbook:statement-recruiter-fees';
 const GOYUNJUNG_IMAGE_ROOTS = ['goyumjung', 'goyunjung'];
 const GOYUNJUNG_MESSAGES = [
   '경복 오빠 화이팅',
@@ -291,6 +289,9 @@ const GOYUNJUNG_SAFE_POSITIONS: Array<{
   { left: '70%', top: '34%', align: 'right' },
 ];
 
+const buildStatementRecruiterFeeKey = (month: string, teamKey: string, workerId: string): string =>
+  `${month}__${teamKey}__${workerId}`;
+
 const DailyAdvanceWorkbookPage: React.FC = () => {
   const currentMonth = getCurrentMonth();
   const [month, setMonth] = useState(currentMonth);
@@ -304,9 +305,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [statementActualDeductionApplied, setStatementActualDeductionApplied] = useState(0);
   const [statementClaimDeductionApplied, setStatementClaimDeductionApplied] = useState(0);
   const [statementReportDeductionApplied, setStatementReportDeductionApplied] = useState(0);
-  const [activeTab, setActiveTab] = useState<WorkbookTabKey>('database');
-  const [dayLookupDeductions, setDayLookupDeductions] = useState<Record<string, number>>({});
-  const [dbDeductions, setDbDeductions] = useState<Record<string, number>>({});
+  const [activeTab, setActiveTab] = useState<WorkbookTabKey>('workers');
+  const [manDayDrafts, setManDayDrafts] = useState<Record<string, string>>({});
+  const [statementRecruiterFeeValues, setStatementRecruiterFeeValues] = useState<Record<string, number>>({});
+  const [statementRecruiterFeeDrafts, setStatementRecruiterFeeDrafts] = useState<Record<string, string>>({});
   const [entries, setEntries] = useState<WorkbookEntry[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -314,6 +316,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const [profileDrafts, setProfileDrafts] = useState<Record<string, WorkerProfileDraft>>({});
   const [loading, setLoading] = useState(false);
   const [savingProfiles, setSavingProfiles] = useState(false);
+  const [savingStatementRecruiterFees, setSavingStatementRecruiterFees] = useState(false);
   const [isGoyunjungMode, setIsGoyunjungMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(GOYUNJUNG_MODE_STORAGE_KEY) === 'true';
@@ -346,6 +349,26 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       setStatementReportDeductionApplied(report);
     } catch (error) {
       console.warn('Failed to load statement deduction preset:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const raw = window.localStorage.getItem(DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const nextValues = Object.entries(parsed).reduce<Record<string, number>>((accumulator, [key, value]) => {
+        const amount = toNumber(value);
+        if (amount > 0) {
+          accumulator[key] = amount;
+        }
+        return accumulator;
+      }, {});
+      setStatementRecruiterFeeValues(nextValues);
+    } catch (error) {
+      console.warn('Failed to load statement recruiter fees:', error);
     }
   }, []);
 
@@ -546,7 +569,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             workerByAnyId.get(String(row.workerId ?? '').trim()) ||
             workerByName.get(normalizeText(row.workerName || row.name));
 
-          const labels = [row.salaryModel, row.payType, worker?.salaryModel, worker?.payType];
+          // 일급제 판정은 조회 월의 일보 행 데이터(급여구분/지급유형) 우선으로 제한한다.
+          const labels = [row.salaryModel, row.payType];
           if (!labels.some((label) => isDailyWageLabel(label))) return null;
 
           const workerId =
@@ -568,22 +592,22 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
           const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
 
-          const actualUnitPrice = toNumber(row.unitPrice || worker?.unitPrice || 0);
+          // 단가도 일보 행 단가를 우선 사용해 과거 월 데이터가 현재 인원마스터 단가에 끌려가지 않게 한다.
+          const actualUnitPrice = toNumber(row.unitPrice || 0);
           const profile = nextProfiles[workerId];
           const claimUnitPrice = toNumber(
             profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(actualUnitPrice)
           );
           const reportUnitPrice = actualUnitPrice;
-          const recruiterFee = toNumber(profile?.recruiterFee ?? 0);
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
           const day = getDayNumber(date);
           const note = displayText(row.workContent || profile?.memo || '');
           const salaryType = getSalaryTypeLabel(
-            worker?.salaryModel,
             row.salaryModel,
-            worker?.payType,
-            row.payType
+            row.payType,
+            worker?.salaryModel,
+            worker?.payType
           );
 
           return {
@@ -613,7 +637,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             claimUnitPrice,
             claimAmount: manDay * claimUnitPrice,
             reportUnitPrice,
-            recruiterFee,
+            recruiterFee: 0,
             note,
           } satisfies WorkbookEntry;
         })
@@ -639,12 +663,31 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   }, [month]);
 
   useEffect(() => {
+    setManDayDrafts((prev) => {
+      const validKeys = new Set(entries.map((entry) => entry.key));
+      const nextEntries = Object.entries(prev).filter(([key]) => validKeys.has(key));
+      return Object.fromEntries(nextEntries);
+    });
+  }, [entries]);
+
+  useEffect(() => {
     void loadData();
   }, [loadData]);
 
   const dailyWageWorkers = useMemo(() => {
+    const workerIdSet = new Set(entries.map((entry) => entry.workerId));
+
     return workers
-      .filter((worker) => isDailyWageLabel(worker.salaryModel) || isDailyWageLabel(worker.payType))
+      .filter((worker) => {
+        const stableId = resolveWorkerStableId(worker);
+        const currentId = String(worker.id ?? '').trim();
+        const legacyId = String(worker.legacyId ?? '').trim();
+        return (
+          (stableId && workerIdSet.has(stableId)) ||
+          (currentId && workerIdSet.has(currentId)) ||
+          (legacyId && workerIdSet.has(legacyId))
+        );
+      })
       .sort((left, right) => {
         const leftTeam = displayText(left.teamName || '');
         const rightTeam = displayText(right.teamName || '');
@@ -652,7 +695,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         if (teamCompare !== 0) return teamCompare;
         return displayText(left.name).localeCompare(displayText(right.name), 'ko');
       });
-  }, [workers]);
+  }, [entries, workers]);
 
   const teamOptions = useMemo<TeamOption[]>(() => {
     const optionMap = new Map<string, TeamOption>();
@@ -692,16 +735,29 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       const claimUnitPrice = toNumber(
         profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(actualUnitPrice)
       );
-      const recruiterFee = toNumber(profile?.recruiterFee ?? 0);
       const memo = displayText(profile?.memo || '');
-      const totalManDay = workerEntries.reduce((sum, entry) => sum + entry.manDay, 0);
-      const actualTotal = workerEntries.reduce((sum, entry) => sum + entry.actualAmount, 0);
-      const claimTotal = workerEntries.reduce((sum, entry) => sum + entry.claimAmount, 0);
       const teamName = displayText(worker.teamName || workerEntries[0]?.teamName || '미지정팀');
       const teamKey =
         String(worker.teamId ?? '').trim() ||
         workerEntries[0]?.teamKey ||
         `unresolved:${normalizeTeamName(teamName || worker.name)}`;
+      const recruiterFee =
+        statementRecruiterFeeValues[buildStatementRecruiterFeeKey(month, teamKey, workerId)] || 0;
+      const totalManDay = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay;
+      }, 0);
+      const actualTotal = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay * entry.actualUnitPrice;
+      }, 0);
+      const claimTotal = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay * entry.claimUnitPrice;
+      }, 0);
 
       return {
         workerId,
@@ -725,7 +781,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         claimTotal,
       };
     });
-  }, [dailyWageWorkers, entries, profiles]);
+  }, [dailyWageWorkers, entries, manDayDrafts, month, profiles, statementRecruiterFeeValues]);
 
   const workerMasterRows = useMemo(() => {
     if (selectedTeamKey === 'ALL') return allWorkerMasterRows;
@@ -737,7 +793,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     allWorkerMasterRows.forEach((row) => {
       nextDrafts[row.workerId] = {
         claimUnitPrice: row.claimUnitPrice ? String(row.claimUnitPrice) : '',
-        recruiterFee: row.recruiterFee ? String(row.recruiterFee) : '',
         memo: row.memo || '',
       };
     });
@@ -754,9 +809,21 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   }, [filteredEntries, selectedDate]);
 
   const workbookStats = useMemo(() => {
-    const totalManDay = filteredEntries.reduce((sum, entry) => sum + entry.manDay, 0);
-    const totalActualAmount = filteredEntries.reduce((sum, entry) => sum + entry.actualAmount, 0);
-    const totalClaimAmount = filteredEntries.reduce((sum, entry) => sum + entry.claimAmount, 0);
+    const totalManDay = filteredEntries.reduce((sum, entry) => {
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+      return sum + nextManDay;
+    }, 0);
+    const totalActualAmount = filteredEntries.reduce((sum, entry) => {
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+      return sum + nextManDay * entry.actualUnitPrice;
+    }, 0);
+    const totalClaimAmount = filteredEntries.reduce((sum, entry) => {
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+      return sum + nextManDay * entry.claimUnitPrice;
+    }, 0);
     const workerCount = new Set(filteredEntries.map((entry) => entry.workerId)).size;
     const teamCount = new Set(filteredEntries.map((entry) => entry.teamKey)).size;
 
@@ -767,7 +834,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       workerCount,
       teamCount,
     };
-  }, [filteredEntries]);
+  }, [filteredEntries, manDayDrafts]);
 
   const statementTeamOption = useMemo(
     () => teamOptions.find((option) => option.key === statementTeamKey) || null,
@@ -813,9 +880,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   const getStatementAmount = useCallback(
     (entry: WorkbookEntry, mode: StatementPriceMode): number => {
-      return entry.manDay * getStatementAdjustedUnitPrice(entry, mode);
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+      return nextManDay * getStatementAdjustedUnitPrice(entry, mode);
     },
-    [getStatementAdjustedUnitPrice]
+    [getStatementAdjustedUnitPrice, manDayDrafts]
   );
 
   const statementEntries = useMemo(() => {
@@ -854,26 +923,30 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           address: entry.address,
           days: Array.from({ length: statementLastDay }, () => 0),
           totalManDay: 0,
-          recruiterFee: entry.recruiterFee,
+          recruiterFee:
+            statementRecruiterFeeValues[
+              buildStatementRecruiterFeeKey(month, statementTeamKey, entry.workerId)
+            ] || 0,
           selectedAmount: 0,
         });
       }
 
       const target = rowMap.get(key)!;
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
       if (entry.day >= 1 && entry.day <= statementLastDay) {
-        target.days[entry.day - 1] += entry.manDay;
+        target.days[entry.day - 1] += nextManDay;
       }
-      target.totalManDay += entry.manDay;
+      target.totalManDay += nextManDay;
       target.selectedAmount += getStatementAmount(entry, statementPriceMode);
       if (!target.idNumber && entry.idNumber) target.idNumber = entry.idNumber;
       if (!target.address && entry.address) target.address = entry.address;
-      if (!target.recruiterFee && entry.recruiterFee) target.recruiterFee = entry.recruiterFee;
     });
 
     return Array.from(rowMap.values()).sort((left, right) =>
       left.workerName.localeCompare(right.workerName, 'ko')
     );
-  }, [getStatementAmount, statementEntries, statementLastDay, statementPriceMode]);
+  }, [getStatementAmount, manDayDrafts, month, statementEntries, statementLastDay, statementPriceMode, statementRecruiterFeeValues, statementTeamKey]);
 
   const handleApplyStatementDeductions = useCallback(() => {
     setStatementActualDeductionApplied(Math.max(0, statementActualDeductionDraft || 0));
@@ -920,12 +993,14 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
   const statementDailyTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);
     statementEntries.forEach((entry) => {
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
       if (entry.day >= 1 && entry.day <= statementLastDay) {
-        totals[entry.day - 1] += entry.manDay;
+        totals[entry.day - 1] += nextManDay;
       }
     });
     return totals;
-  }, [statementEntries, statementLastDay]);
+  }, [manDayDrafts, statementEntries, statementLastDay]);
 
   const teamSummaryRows = useMemo(() => {
     const rowMap = new Map<string, { name: string; days: number[]; total: number }>();
@@ -938,16 +1013,18 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         });
       }
       const target = rowMap.get(entry.teamKey)!;
+      const draftValue = manDayDrafts[entry.key];
+      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
       if (entry.day >= 1 && entry.day <= statementLastDay) {
-        target.days[entry.day - 1] += entry.manDay;
+        target.days[entry.day - 1] += nextManDay;
       }
-      target.total += entry.manDay;
+      target.total += nextManDay;
     });
 
     return Array.from(rowMap.entries())
       .map(([teamKey, row]) => ({ teamKey, ...row }))
       .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
-  }, [entries, statementLastDay]);
+  }, [entries, manDayDrafts, statementLastDay]);
   const teamSummaryTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);
     teamSummaryRows.forEach((row) => {
@@ -963,16 +1040,76 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       .filter((row) => {
         const draft = profileDrafts[row.workerId] || buildEmptyDraft();
         const baselineClaim = row.claimUnitPrice ? String(row.claimUnitPrice) : '';
-        const baselineRecruiter = row.recruiterFee ? String(row.recruiterFee) : '';
         const baselineMemo = row.memo || '';
         return (
           String(draft.claimUnitPrice ?? '') !== baselineClaim ||
-          String(draft.recruiterFee ?? '') !== baselineRecruiter ||
           String(draft.memo ?? '') !== baselineMemo
         );
       })
       .map((row) => row.workerId);
   }, [allWorkerMasterRows, profileDrafts]);
+
+  const handleManDayDraftChange = useCallback((entryKey: string, value: string) => {
+    setManDayDrafts((prev) => ({
+      ...prev,
+      [entryKey]: value,
+    }));
+  }, []);
+
+  const statementRecruiterFeeDirtyKeys = useMemo(() => {
+    if (!statementTeamKey) return [] as string[];
+
+    return statementRows
+      .map((row) => buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId))
+      .filter((storageKey) => {
+        const draftValue = statementRecruiterFeeDrafts[storageKey];
+        const baselineValue = statementRecruiterFeeValues[storageKey] || 0;
+        if (draftValue === undefined) return false;
+        return parseMoneyInput(draftValue) !== baselineValue;
+      });
+  }, [month, statementRecruiterFeeDrafts, statementRecruiterFeeValues, statementRows, statementTeamKey]);
+
+  const handleStatementRecruiterFeeDraftChange = useCallback((storageKey: string, value: string) => {
+    setStatementRecruiterFeeDrafts((prev) => ({
+      ...prev,
+      [storageKey]: value,
+    }));
+  }, []);
+
+  const handleSaveStatementRecruiterFees = useCallback(() => {
+    if (typeof window === 'undefined' || !statementTeamKey) return;
+
+    setSavingStatementRecruiterFees(true);
+    try {
+      const nextValues = { ...statementRecruiterFeeValues };
+
+      statementRows.forEach((row) => {
+        const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
+        const draftValue = statementRecruiterFeeDrafts[storageKey];
+        const nextValue = draftValue === undefined
+          ? (statementRecruiterFeeValues[storageKey] || 0)
+          : parseMoneyInput(draftValue);
+
+        if (nextValue > 0) {
+          nextValues[storageKey] = nextValue;
+        } else {
+          delete nextValues[storageKey];
+        }
+      });
+
+      window.localStorage.setItem(
+        DAILY_ADVANCE_STATEMENT_RECRUITER_FEE_STORAGE_KEY,
+        JSON.stringify(nextValues)
+      );
+      setStatementRecruiterFeeValues(nextValues);
+      window.alert('청구서 인력소개비를 저장했습니다.');
+    } catch (error) {
+      console.error('Failed to save statement recruiter fees:', error);
+      window.alert('청구서 인력소개비 저장 중 오류가 발생했습니다.');
+    } finally {
+      setSavingStatementRecruiterFees(false);
+    }
+  }, [month, statementRecruiterFeeDrafts, statementRecruiterFeeValues, statementRows, statementTeamKey]);
 
   const handleProfileDraftChange = useCallback(
     (workerId: string, field: keyof WorkerProfileDraft, value: string) => {
@@ -999,7 +1136,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           return {
             workerId: row.workerId,
             claimUnitPrice: parseMoneyInput(draft.claimUnitPrice),
-            recruiterFee: parseMoneyInput(draft.recruiterFee),
             memo: String(draft.memo || '').trim(),
           };
         })
@@ -1060,7 +1196,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               {['일자', '팀', '이름', '공수', '일당'].map((header) => (
                 <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
               ))}
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">차감</th>
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급액</th>
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구금액</th>
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
@@ -1070,43 +1205,40 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             {filteredEntries.length === 0
               ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
                     조회 조건에 맞는 데이터가 없습니다.
                   </td>
                 </tr>
               )
               : filteredEntries.map((entry) => {
-                  const deduction = dbDeductions[entry.key] || 0;
-                  const netActual = entry.actualUnitPrice - deduction;
+                  const draftValue = manDayDrafts[entry.key];
+                  const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+                  const actualAmount = nextManDay * entry.actualUnitPrice;
+                  const claimAmount = nextManDay * entry.claimUnitPrice;
 
                   return (
                     <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
                       <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
                       <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
                       <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
-                        {formatCurrency(entry.actualUnitPrice)}
-                      </td>
                       <td className="border border-[#e3dcc4] px-2 py-1.5">
                         <input
                           type="number"
-                          value={deduction || ''}
-                          onChange={(event) =>
-                            setDbDeductions((prev) => ({
-                              ...prev,
-                              [entry.key]: Math.max(0, Number(event.target.value) || 0),
-                            }))
-                          }
-                          placeholder="0"
+                          min="0"
+                          step="0.5"
+                          value={draftValue ?? String(entry.manDay)}
+                          onChange={(event) => handleManDayDraftChange(entry.key, event.target.value)}
                           className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
                         />
                       </td>
-                      <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
-                        {formatCurrency(netActual)}
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
+                        {formatCurrency(entry.actualUnitPrice)}
+                      </td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
+                        {formatCurrency(actualAmount)}
                       </td>
                       <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
-                        {formatCurrency(entry.claimUnitPrice)}
+                        {formatCurrency(claimAmount)}
                       </td>
                       <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
                     </tr>
@@ -1124,7 +1256,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         <div>
           <div className="text-sm font-black text-[#4A452A]">인원DB</div>
           <div className="text-xs text-slate-500">
-            청구단가 기본값은 일당 + 15,000원이며 인력소개비와 비고를 인원별로 조정합니다.
+            청구단가 기본값은 일당 + 15,000원이며 비고를 인원별로 조정합니다.
           </div>
         </div>
         <button
@@ -1152,8 +1284,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 '연락처',
                 '은행명(예금주)',
                 '계좌번호',
-                '인력소개비',
-                '소개소',
                 '일당',
                 '청구단가',
                 '상태',
@@ -1171,7 +1301,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           <tbody>
             {workerMasterRows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-sm text-slate-500">
+                <td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">
                   표시할 일급제 작업자가 없습니다.
                 </td>
               </tr>
@@ -1195,16 +1325,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                         : '-'}
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2">{row.accountNumber || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-2 py-2">
-                      <input
-                        type="text"
-                        value={draft.recruiterFee}
-                        onChange={(event) =>
-                          handleProfileDraftChange(row.workerId, 'recruiterFee', event.target.value)
-                        }
-                        className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
-                      />
-                    </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
                       {formatCurrency(row.actualUnitPrice)}
                     </td>
@@ -1339,7 +1459,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               {`${getMonthTitle(month)} ${statementTeamOption?.name || ''} 청구서`.trim()}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              선택한 단가기준으로 노무금액을 계산하며, 차감값은 이 청구서 화면에만 반영됩니다.
+              선택한 단가기준으로 노무금액을 계산하며, 인력소개비는 이 청구서 화면에서 입력 후 저장합니다.
             </div>
           </div>
 
@@ -1409,6 +1529,14 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"
                 >
                   차감 적용
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveStatementRecruiterFees}
+                  disabled={savingStatementRecruiterFees}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  인력소개비 저장{statementRecruiterFeeDirtyKeys.length > 0 ? ` (${statementRecruiterFeeDirtyKeys.length})` : ''}
                 </button>
                 <button
                   type="button"
@@ -1495,31 +1623,45 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 </td>
               </tr>
             ) : (
-              statementRows.map((row, index) => (
-                <tr key={row.workerId || row.workerName} className="odd:bg-white even:bg-[#faf8ef]">
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2">{row.idNumber || '-'}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2">{row.address || '-'}</td>
-                  {row.days.map((value, dayIndex) => (
-                    <td
-                      key={`${row.workerId}-${dayIndex}`}
-                      className="border border-[#e3dcc4] px-2 py-2 text-center"
-                    >
-                      {value ? formatNumber(value) : '-'}
+              statementRows.map((row, index) => {
+                const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
+                const recruiterFeeDraft = statementRecruiterFeeDrafts[storageKey];
+                const recruiterFee = recruiterFeeDraft === undefined
+                  ? row.recruiterFee
+                  : parseMoneyInput(recruiterFeeDraft);
+
+                return (
+                  <tr key={row.workerId || row.workerName} className="odd:bg-white even:bg-[#faf8ef]">
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{row.idNumber || '-'}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{row.address || '-'}</td>
+                    {row.days.map((value, dayIndex) => (
+                      <td
+                        key={`${row.workerId}-${dayIndex}`}
+                        className="border border-[#e3dcc4] px-2 py-2 text-center"
+                      >
+                        {value ? formatNumber(value) : '-'}
+                      </td>
+                    ))}
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
+                      {formatNumber(row.totalManDay)}
                     </td>
-                  ))}
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
-                    {formatNumber(row.totalManDay)}
-                  </td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-right">
-                    {row.recruiterFee ? formatCurrency(row.recruiterFee) : '-'}
-                  </td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
-                    {formatCurrency(row.selectedAmount)}
-                  </td>
-                </tr>
-              ))
+                    <td className="border border-[#e3dcc4] px-2 py-2 text-right">
+                      <input
+                        type="text"
+                        value={recruiterFeeDraft ?? (recruiterFee ? String(recruiterFee) : '')}
+                        onChange={(event) => handleStatementRecruiterFeeDraftChange(storageKey, event.target.value)}
+                        className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
+                      {formatCurrency(row.selectedAmount)}
+                    </td>
+                  </tr>
+                );
+              })
             )}
             {statementRows.length > 0 && (
               <tr style={{ backgroundColor: COLORS.pink }}>
@@ -1535,7 +1677,16 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   {formatNumber(statementRows.reduce((sum, row) => sum + row.totalManDay, 0))}
                 </td>
                 <td className="border border-[#d5ccb0] px-3 py-2 text-right font-black">
-                  {formatCurrency(statementRows.reduce((sum, row) => sum + row.recruiterFee, 0))}
+                  {formatCurrency(
+                    statementRows.reduce((sum, row) => {
+                      const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
+                      const recruiterFeeDraft = statementRecruiterFeeDrafts[storageKey];
+                      const recruiterFee = recruiterFeeDraft === undefined
+                        ? row.recruiterFee
+                        : parseMoneyInput(recruiterFeeDraft);
+                      return sum + recruiterFee;
+                    }, 0)
+                  )}
                 </td>
                 <td className="border border-[#d5ccb0] px-3 py-2 text-right font-black">
                   {formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount, 0))}
@@ -1565,7 +1716,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
               <div className="text-xs font-bold text-slate-500">선택일 공수</div>
               <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatNumber(selectedDateEntries.reduce((sum, entry) => sum + entry.manDay, 0))}
+                {formatNumber(
+                  selectedDateEntries.reduce((sum, entry) => {
+                    const draftValue = manDayDrafts[entry.key];
+                    const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+                    return sum + nextManDay;
+                  }, 0)
+                )}
               </div>
             </div>
             <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
@@ -1573,16 +1730,26 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <div className="mt-1 text-lg font-black text-[#4A452A]">
                 {formatCurrency(
                   selectedDateEntries.reduce(
-                    (sum, entry) => sum + (entry.actualUnitPrice - (dayLookupDeductions[entry.key] || 0)),
+                    (sum, entry) => {
+                      const draftValue = manDayDrafts[entry.key];
+                      const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+                      return sum + nextManDay * entry.actualUnitPrice;
+                    },
                     0
                   )
                 )}
               </div>
             </div>
             <div className="rounded-md border border-[#d5ccb0] bg-white px-3 py-3">
-              <div className="text-xs font-bold text-slate-500">선택일 청구단가 합계</div>
+              <div className="text-xs font-bold text-slate-500">선택일 청구금 합계</div>
               <div className="mt-1 text-lg font-black text-[#4A452A]">
-                {formatCurrency(selectedDateEntries.reduce((sum, entry) => sum + entry.claimUnitPrice, 0))}
+                {formatCurrency(
+                  selectedDateEntries.reduce((sum, entry) => {
+                    const draftValue = manDayDrafts[entry.key];
+                    const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+                    return sum + nextManDay * entry.claimUnitPrice;
+                  }, 0)
+                )}
               </div>
             </div>
           </div>
@@ -1596,9 +1763,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   {['팀', '이름', '현장', '공수'].map((header) => (
                     <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
                   ))}
-                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">차감</th>
                   <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급금</th>
-                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구단가</th>
+                  <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구금액</th>
                   {['은행명', '예금주명'].map((header) => (
                     <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
                   ))}
@@ -1611,39 +1777,36 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <tbody>
                 {selectedDateEntries.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">
+                    <td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">
                       선택한 일자에 조회 결과가 없습니다.
                     </td>
                   </tr>
                 ) : (
                   selectedDateEntries.map((entry) => {
-                    const deduction = dayLookupDeductions[entry.key] || 0;
-                    const netActual = entry.actualUnitPrice - deduction;
+                    const draftValue = manDayDrafts[entry.key];
+                    const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+                    const actualAmount = nextManDay * entry.actualUnitPrice;
+                    const claimAmount = nextManDay * entry.claimUnitPrice;
                     return (
                       <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
                         <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.siteName || '-'}</td>
-                        <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
-                        <td className="border border-[#e3dcc4] px-2 py-1.5">
+                        <td className="border border-[#e3dcc4] px-2 py-1.5 text-center">
                           <input
                             type="number"
-                            value={deduction || ''}
-                            onChange={(event) =>
-                              setDayLookupDeductions((prev) => ({
-                                ...prev,
-                                [entry.key]: Math.max(0, Number(event.target.value) || 0),
-                              }))
-                            }
-                            placeholder="0"
+                            min="0"
+                            step="0.5"
+                            value={draftValue ?? String(entry.manDay)}
+                            onChange={(event) => handleManDayDraftChange(entry.key, event.target.value)}
                             className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
                           />
                         </td>
-                        <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
-                          {formatCurrency(netActual)}
+                        <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
+                          {formatCurrency(actualAmount)}
                         </td>
                         <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
-                          {formatCurrency(entry.claimUnitPrice)}
+                          {formatCurrency(claimAmount)}
                         </td>
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.bankName || '-'}</td>
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.accountHolder || '-'}</td>
@@ -1738,8 +1901,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   const renderActiveTab = () => {
     switch (activeTab) {
-      case 'database':
-        return renderDatabaseTab();
       case 'workers':
         return renderWorkersTab();
       case 'team-summary':
