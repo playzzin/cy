@@ -13,6 +13,8 @@ import { statisticsService } from '../../services/statisticsService';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import CompanyForm from '../../components/company/CompanyForm';
+import InputPopover from '../../components/common/InputPopover';
+import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 
 const COMPANY_COLUMNS = [
     { key: 'name', label: '회사명' },
@@ -206,6 +208,16 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
 
     const toggleCompanyExpand = (id: string) => {
         setExpandedCompanyIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const handleCompanyInlineUpdate = async (id: string, updates: Partial<Company>) => {
+        setCompanies(prev => prev.map(company => company.id === id ? { ...company, ...updates } : company));
+        try {
+            await companyService.updateCompany(id, updates);
+        } catch (error) {
+            console.error('Failed to update company inline:', error);
+            await loadData();
+        }
     };
 
     const renderCellValue = (company: Company, key: string) => {
@@ -431,9 +443,38 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
                                                                     {company.name}
                                                                 </div>
                                                             ) : col.key === 'status' ? (
-                                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${company.status === 'inactive' ? 'bg-slate-100 text-slate-500' : 'bg-green-100 text-green-600'}`}>
-                                                                    {company.status === 'inactive' ? '폐업' : '정상'}
-                                                                </span>
+                                                                <SingleSelectPopover
+                                                                    options={[
+                                                                        { id: 'active', name: '정상' },
+                                                                        { id: 'inactive', name: '폐업' },
+                                                                        { id: 'archived', name: '보관' }
+                                                                    ]}
+                                                                    selectedId={company.status || 'active'}
+                                                                    onSelect={(id) => company.id && handleCompanyInlineUpdate(company.id, { status: id as Company['status'] })}
+                                                                    placeholder="상태 선택"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'bankName' ? (
+                                                                <InputPopover
+                                                                    value={company.bankName || ''}
+                                                                    onChange={(value) => company.id && handleCompanyInlineUpdate(company.id, { bankName: String(value || '') })}
+                                                                    placeholder="은행명"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'accountNumber' ? (
+                                                                <InputPopover
+                                                                    value={company.accountNumber || ''}
+                                                                    onChange={(value) => company.id && handleCompanyInlineUpdate(company.id, { accountNumber: String(value || '') })}
+                                                                    placeholder="계좌번호"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'accountHolder' ? (
+                                                                <InputPopover
+                                                                    value={company.accountHolder || ''}
+                                                                    onChange={(value) => company.id && handleCompanyInlineUpdate(company.id, { accountHolder: String(value || '') })}
+                                                                    placeholder="예금주"
+                                                                    minimal={true}
+                                                                />
                                                             ) : (
                                                                 renderCellValue(company, col.key)
                                                             )}

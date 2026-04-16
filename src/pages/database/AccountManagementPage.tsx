@@ -2088,7 +2088,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                         group.items.map((worker) => {
                                                             const rowKey = `worker:${worker.id}`;
                                                             const savingKey = rowKey;
-                                                            const isEditing = !!editingKeys[rowKey];
+                                                            const isEditing = true;
                                                             const accountMissing = !hasAccountNumber(worker.accountNumber);
 
                                                             return (
@@ -2170,19 +2170,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                             <button
                                                                                 type="button"
                                                                                 disabled={!worker.id || !!savingKeys[savingKey]}
-                                                                                onClick={() => {
-                                                                                    if (!worker.id) return;
-                                                                                    if (isEditing) cancelWorkerEdit(worker.id);
-                                                                                    else beginRowEdit(rowKey, { ...worker });
-                                                                                }}
-                                                                                className={rowActionSecondaryClass}
-                                                                            >
-                                                                                <FontAwesomeIcon icon={faPenToSquare} />
-                                                                                {isEditing ? '취소' : '수정'}
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                disabled={!worker.id || !isEditing || !!savingKeys[savingKey]}
                                                                                 onClick={() => worker.id && saveWorkerAccount(worker.id)}
                                                                                 className={rowActionPrimaryClass}
                                                                             >
@@ -2251,7 +2238,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                     {group.items.map((team) => {
                                                         const rowKey = `team:${team.id}`;
                                                         const savingKey = rowKey;
-                                                        const isEditing = !!editingKeys[rowKey];
+                                                        const isEditing = true;
                                                         return (
                                                             <tr key={team.id} className="align-top">
                                                                 <td className="px-4 py-3">
@@ -2301,19 +2288,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         <button
                                                                             type="button"
                                                                             disabled={!team.id || !!savingKeys[savingKey]}
-                                                                            onClick={() => {
-                                                                                if (!team.id) return;
-                                                                                if (isEditing) cancelTeamEdit(team.id);
-                                                                                else beginRowEdit(rowKey, { ...team });
-                                                                            }}
-                                                                            className={rowActionSecondaryClass}
-                                                                        >
-                                                                            <FontAwesomeIcon icon={faPenToSquare} />
-                                                                            {isEditing ? '취소' : '수정'}
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={!team.id || !isEditing || !!savingKeys[savingKey]}
                                                                             onClick={() => team.id && saveTeamAccount(team.id)}
                                                                             className={rowActionPrimaryClass}
                                                                         >
@@ -2381,7 +2355,7 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                     {group.items.map((company) => {
                                                         const rowKey = `company:${company.id}`;
                                                         const savingKey = rowKey;
-                                                        const isEditing = !!editingKeys[rowKey];
+                                                        const isEditing = true;
                                                         return (
                                                             <tr key={company.id} className="align-top">
                                                                 <td className="px-4 py-3">
@@ -2431,19 +2405,6 @@ const AccountManagementPage: React.FC<AccountManagementPageProps> = ({ embedded 
                                                                         <button
                                                                             type="button"
                                                                             disabled={!company.id || !!savingKeys[savingKey]}
-                                                                            onClick={() => {
-                                                                                if (!company.id) return;
-                                                                                if (isEditing) cancelCompanyEdit(company.id);
-                                                                                else beginRowEdit(rowKey, { ...company });
-                                                                            }}
-                                                                            className={rowActionSecondaryClass}
-                                                                        >
-                                                                            <FontAwesomeIcon icon={faPenToSquare} />
-                                                                            {isEditing ? '취소' : '수정'}
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={!company.id || !isEditing || !!savingKeys[savingKey]}
                                                                             onClick={() => company.id && saveCompanyAccount(company.id)}
                                                                             className={rowActionPrimaryClass}
                                                                         >

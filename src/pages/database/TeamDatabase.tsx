@@ -14,6 +14,7 @@ import TeamForm from '../../components/manpower/TeamForm';
 import { Timestamp } from '../../types/timestamp';
 import MultiSelectPopover from '../../components/common/MultiSelectPopover';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
+import InputPopover from '../../components/common/InputPopover';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { positionService, Position } from '../../services/positionService';
 import { getIcon } from '../../utils/iconMapper';
@@ -649,13 +650,38 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 <span className="font-bold text-blue-600">
                                                                     {(teamStats[team.id!] || 0).toFixed(1)}공수
                                                                 </span>
+                                                            ) : col.key === 'type' ? (
+                                                                <SingleSelectPopover
+                                                                    options={[...new Set([
+                                                                        ...TEAM_TYPE_OPTIONS,
+                                                                        ...teams.map((item) => String(item.type || '').trim()).filter(Boolean)
+                                                                    ])].map((type) => ({
+                                                                        id: type,
+                                                                        name: type,
+                                                                    }))}
+                                                                    selectedId={team.type || TEAM_TYPE_OPTIONS[0]}
+                                                                    onSelect={(id: string) => {
+                                                                        if (!team.id) return;
+                                                                        handleTeamSelectChange(team.id, { type: id });
+                                                                    }}
+                                                                    placeholder="구분 선택"
+                                                                    minimal={true}
+                                                                />
                                                             ) : col.key === 'status' ? (
-                                                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${team.status === 'active' || !team.status ? 'bg-green-100 text-green-800 border border-green-200' :
-                                                                    team.status === 'waiting' ? 'bg-yellow-100 text-yellow-800 border border-yellow-200' :
-                                                                        'bg-slate-100 text-slate-800 border border-slate-200'
-                                                                    }`}>
-                                                                    {team.status === 'active' || !team.status ? '협업중' : team.status === 'waiting' ? '대기' : '폐업'}
-                                                                </span>
+                                                                <SingleSelectPopover
+                                                                    options={[
+                                                                        { id: 'active', name: '협업중' },
+                                                                        { id: 'waiting', name: '대기' },
+                                                                        { id: 'closed', name: '폐업' }
+                                                                    ]}
+                                                                    selectedId={team.status || 'active'}
+                                                                    onSelect={(id: string) => {
+                                                                        if (!team.id) return;
+                                                                        handleTeamSelectChange(team.id, { status: id as Team['status'] });
+                                                                    }}
+                                                                    placeholder="상태 선택"
+                                                                    minimal={true}
+                                                                />
                                                             ) : col.key === 'leaderName' ? (
                                                                 <SingleSelectPopover
                                                                     options={workers.sort((a, b) => a.name.localeCompare(b.name)).map(w => ({
@@ -688,15 +714,54 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                     }}
                                                                 />
                                                             ) : col.key === 'companyName' ? (
-                                                                <div className="flex items-center gap-2">
-                                                                    <span
-                                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-200 flex-shrink-0"
-                                                                        style={{ backgroundColor: teamCompany?.color || '#e5e7eb' }}
-                                                                    >
-                                                                        <FontAwesomeIcon icon={faBuilding} className="text-white text-xs" />
-                                                                    </span>
-                                                                    <span>{teamCompany?.name || team.companyName || '-'}</span>
-                                                                </div>
+                                                                <SingleSelectPopover
+                                                                    options={companyOptions.map(company => ({
+                                                                        id: company.id || '',
+                                                                        name: company.name,
+                                                                        icon: <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
+                                                                    }))}
+                                                                    selectedId={team.companyId || null}
+                                                                    onSelect={(id: string) => {
+                                                                        if (!team.id) return;
+                                                                        const selectedCompany = companies.find(c => c.id === id);
+                                                                        handleTeamSelectChange(team.id, {
+                                                                            companyId: id,
+                                                                            companyName: selectedCompany ? selectedCompany.name : ''
+                                                                        });
+                                                                    }}
+                                                                    placeholder="미소속"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'bankName' ? (
+                                                                <InputPopover
+                                                                    value={team.bankName || ''}
+                                                                    onChange={(value) => {
+                                                                        if (!team.id) return;
+                                                                        handleTeamSelectChange(team.id, { bankName: String(value || '') });
+                                                                    }}
+                                                                    placeholder="은행명"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'accountNumber' ? (
+                                                                <InputPopover
+                                                                    value={team.accountNumber || ''}
+                                                                    onChange={(value) => {
+                                                                        if (!team.id) return;
+                                                                        handleTeamSelectChange(team.id, { accountNumber: String(value || '') });
+                                                                    }}
+                                                                    placeholder="계좌번호"
+                                                                    minimal={true}
+                                                                />
+                                                            ) : col.key === 'accountHolder' ? (
+                                                                <InputPopover
+                                                                    value={team.accountHolder || ''}
+                                                                    onChange={(value) => {
+                                                                        if (!team.id) return;
+                                                                        handleTeamSelectChange(team.id, { accountHolder: String(value || '') });
+                                                                    }}
+                                                                    placeholder="예금주"
+                                                                    minimal={true}
+                                                                />
                                                             ) : col.key === 'siteCount' ? (
                                                                 <MultiSelectPopover
                                                                     options={sites.map(s => ({ ...s, id: s.id || '' }))}

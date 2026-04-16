@@ -22,6 +22,8 @@ import { siteService, Site } from '../../services/siteService';
 import { confirm, toast } from '../../utils/swal';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
+import SingleSelectPopover from '../../components/common/SingleSelectPopover';
+import InputPopover from '../../components/common/InputPopover';
 import '../taxinvoice/WorkbookLedgerPage.css';
 import './DailyReportListV2.css';
 
@@ -1202,6 +1204,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
     }, [getRowKey, normalizeSiteId, resolveWorkerTeamCanonicalId]);
 
+    const mergeRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>): RowDraft => {
+        const key = getRowKey(r);
+        return {
+            ...getRowInitialDraft(r),
+            ...(rowDrafts[key] ?? {}),
+            ...changes
+        };
+    }, [getRowInitialDraft, getRowKey, rowDrafts]);
+
     const clearRowDraft = useCallback((rowKey: string) => {
         setRowDrafts((prev) => {
             if (!prev[rowKey]) return prev;
@@ -1314,13 +1325,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     }, [allWorkers, teams, setRowDraft, rows, rowDrafts, getRowKey, normalizeTeamId]);
 
-    const handleSaveRow = useCallback(async (r: DailyReportWorkerRow) => {
+    const saveRowDraft = useCallback(async (
+        r: DailyReportWorkerRow,
+        draft: RowDraft,
+        options?: { confirmSave?: boolean; successMessage?: string }
+    ) => {
         const key = getRowKey(r);
-        const draft = rowDrafts[key];
-        if (!draft) return;
+        const { confirmSave = true, successMessage = '저장되었습니다.' } = options ?? {};
 
-        const result = await confirm.save('저장하시겠습니까?');
-        if (!result.isConfirmed) return;
+        if (confirmSave) {
+            const result = await confirm.save('저장하시겠습니까?');
+            if (!result.isConfirmed) return false;
+        }
 
         setRowSavingKeys(prev => {
             const next = new Set(prev);
@@ -1369,7 +1385,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (Object.keys(reportLevelUpdates).length > 0) {
                 await dailyReportService.updateReport(r.reportId, reportLevelUpdates as any);
             }
-            toast.success('저장되었습니다.');
+            if (successMessage) {
+                toast.success(successMessage);
+            }
             clearRowDraft(key);
 
             // Optimistic Update
@@ -1389,9 +1407,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                 return row;
             }));
+            return true;
         } catch (error) {
             console.error(error);
             toast.error('저장 실패');
+            return false;
         } finally {
             setRowSavingKeys(prev => {
                 const next = new Set(prev);
@@ -1399,7 +1419,88 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return next;
             });
         }
-    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, getRowKey, rowDrafts, confirm, toast, normalizeTeamId, resolveWorkerTeamCanonicalId]);
+    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, confirm, getRowKey, normalizeTeamId, resolveWorkerTeamCanonicalId, toast]);
+
+    const handleSaveRow = useCallback(async (r: DailyReportWorkerRow) => {
+        const key = getRowKey(r);
+        const draft = rowDrafts[key];
+        if (!draft) return;
+        await saveRowDraft(r, draft, { confirmSave: true, successMessage: '저장되었습니다.' });
+    }, [getRowKey, rowDrafts, saveRowDraft]);
+
+    const handleQuickRowUpdate = useCallback(async (r: DailyReportWorkerRow, changes: Partial<RowDraft>) => {
+        const key = getRowKey(r);
+        const nextDraft = mergeRowDraft(r, changes);
+
+        setRowDrafts((prev) => ({
+            ...prev,
+            [key]: nextDraft
+        }));
+
+        if (!isRowDirty(r, nextDraft)) {
+            clearRowDraft(key);
+            return;
+        }
+
+        await saveRowDraft(r, nextDraft, { confirmSave: false, successMessage: '수정되었습니다.' });
+    }, [clearRowDraft, getRowKey, isRowDirty, mergeRowDraft, saveRowDraft]);
+
+    const handleQuickWorkerNameUpdate = useCallback(async (r: DailyReportWorkerRow, workerName: string) => {
+        const trimmedName = workerName.trim();
+        const normalizedName = trimmedName.replace(/\s+/g, '');
+        const matched = allWorkers.find(w => w.name === trimmedName)
+            || (normalizedName ? allWorkers.find(w => w.name.replace(/\s+/g, '') === normalizedName) : undefined);
+
+        let nextChanges: Partial<RowDraft> = {
+            workerName
+        };
+
+        if (matched) {
+            const isDuplicate = rows.some(existingRow => {
+                if (existingRow.reportId !== r.reportId) return false;
+                if (getRowKey(existingRow) === getRowKey(r)) return false;
+                const existingKey = getRowKey(existingRow);
+                const existingDraft = rowDrafts[existingKey];
+                const currentId = existingDraft?.workerId ?? existingRow.workerId;
+                return String(currentId) === String(matched.id);
+            });
+
+            if (isDuplicate) {
+                toast.warning(`'${workerName}' 작업자는 같은 일보에 이미 포함되어 있습니다. (이름만 변경됨)`);
+                nextChanges = {
+                    workerName,
+                    workerId: undefined,
+                    workerTeamName: '',
+                    unitPrice: '0',
+                    salaryModel: ''
+                };
+            } else {
+                let team = matched.teamId
+                    ? teams.find(t => t.id === matched.teamId || t.legacyId === matched.teamId)
+                    : undefined;
+
+                if (!team && matched.teamName) {
+                    team = teams.find(t => t.name === matched.teamName);
+                    if (!team) {
+                        const searchName = matched.teamName.replace(/\s+/g, '');
+                        team = teams.find(t => t.name.replace(/\s+/g, '') === searchName);
+                    }
+                }
+
+                const resolvedTeamName = team?.name ?? matched.teamName ?? '';
+                nextChanges = {
+                    workerName,
+                    workerId: matched.id ? String(matched.id) : undefined,
+                    workerTeamName: resolvedTeamName || matched.teamName || (matched.teamType === '지원팀' ? '지원팀' : ''),
+                    workerTeamId: normalizeTeamId(team?.id ? String(team.id) : (matched.teamId ? String(matched.teamId) : '')) || undefined,
+                    unitPrice: String(matched.unitPrice ?? 0),
+                    salaryModel: matched.payType || matched.salaryModel || '일급'
+                };
+            }
+        }
+
+        await handleQuickRowUpdate(r, nextChanges);
+    }, [allWorkers, getRowKey, handleQuickRowUpdate, normalizeTeamId, rowDrafts, rows, teams, toast]);
 
     const handleBulkApply = async () => {
         const selected = Array.from(selectedRowKeys)
@@ -2235,7 +2336,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         ))}
                                                     </select>
                                                 ) : (
-                                                    (r.siteName ?? '')
+                                                    <SingleSelectPopover
+                                                        options={siteOptions.map((site) => ({
+                                                            id: String(site.id ?? ''),
+                                                            name: site.name ?? ''
+                                                        }))}
+                                                        selectedId={effectiveSiteId || null}
+                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { siteId: id }); }}
+                                                        placeholder="현장 선택"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2252,7 +2363,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         <option value="지원">지원</option>
                                                     </select>
                                                 ) : (
-                                                    (r.siteType ?? '')
+                                                    <SingleSelectPopover
+                                                        options={[
+                                                            { id: '도급', name: '도급' },
+                                                            { id: '직영', name: '직영' },
+                                                            { id: '지원', name: '지원' }
+                                                        ]}
+                                                        selectedId={(draft ? draft.siteType : (r.siteType ?? '')) || null}
+                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { siteType: id }); }}
+                                                        placeholder="현장구분"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2268,7 +2390,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         <option value="계산서">계산서</option>
                                                     </select>
                                                 ) : (
-                                                    (r.paymentType ?? '')
+                                                    <SingleSelectPopover
+                                                        options={[
+                                                            { id: '노무', name: '노무' },
+                                                            { id: '계산서', name: '계산서' }
+                                                        ]}
+                                                        selectedId={(draft ? draft.paymentType : (r.paymentType ?? '')) || null}
+                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { paymentType: id }); }}
+                                                        placeholder="결제구분"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2287,10 +2419,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         ))}
                                                     </select>
                                                 ) : (
-                                                    resolveResponsibleTeamDisplayName({
-                                                        responsibleTeamId: r.responsibleTeamId ?? r.teamId,
-                                                        responsibleTeamName: r.responsibleTeamName ?? r.teamName
-                                                    })
+                                                    <SingleSelectPopover
+                                                        options={availableReportTeams.map((team) => ({
+                                                            id: normalizeTeamId(team.id ?? team.legacyId ?? ''),
+                                                            name: team.name ?? ''
+                                                        }))}
+                                                        selectedId={(draft ? draft.teamId : normalizeTeamId(r.teamId)) || null}
+                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { teamId: id }); }}
+                                                        placeholder="담당팀 선택"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-200 ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
@@ -2306,7 +2445,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         />
                                                     </>
                                                 ) : (
-                                                    r.workerName
+                                                    <InputPopover
+                                                        value={draft ? (draft.workerName ?? r.workerName) : (r.workerName ?? '')}
+                                                        onChange={(value) => { void handleQuickWorkerNameUpdate(r, String(value ?? '')); }}
+                                                        placeholder="이름 입력"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2328,7 +2473,26 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         placeholder="소속팀"
                                                     />
                                                 ) : (
-                                                    resolvedWorkerTeamName
+                                                    <SingleSelectPopover
+                                                        options={availableWorkerTeams.map((team) => ({
+                                                            id: normalizeTeamId(team.id ?? team.legacyId ?? '') || String(team.name ?? ''),
+                                                            name: team.name ?? ''
+                                                        }))}
+                                                        selectedId={(draft?.workerTeamId ?? resolveWorkerTeamCanonicalId({ workerTeamId: r.workerTeamId, workerTeamName: r.workerTeamName })) || null}
+                                                        onSelect={(id) => {
+                                                            const selectedTeam = availableWorkerTeams.find((team) => {
+                                                                const teamId = normalizeTeamId(team.id ?? team.legacyId ?? '') || String(team.name ?? '');
+                                                                return teamId === id;
+                                                            });
+                                                            void handleQuickRowUpdate(r, {
+                                                                workerTeamId: id || undefined,
+                                                                workerTeamName: selectedTeam?.name ?? ''
+                                                            });
+                                                        }}
+                                                        placeholder="소속팀 선택"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap">
@@ -2343,7 +2507,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         placeholder="급여방식"
                                                     />
                                                 ) : (
-                                                    (r.salaryModel ?? r.payType ?? '')
+                                                    <SingleSelectPopover
+                                                        options={SALARY_MODEL_OPTIONS.map((option) => ({ id: option, name: option }))}
+                                                        selectedId={effectiveSalaryModel || null}
+                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { salaryModel: id }); }}
+                                                        placeholder="급여방식"
+                                                        minimal
+                                                        disabled={saving}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap text-right">
@@ -2356,7 +2527,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         className="px-2 py-1 border border-slate-300 rounded text-sm w-[72px] text-right bg-white"
                                                     />
                                                 ) : (
-                                                    (Number.isFinite(r.manDay) ? r.manDay : 0).toFixed(1)
+                                                    <InputPopover
+                                                        value={draft ? draft.manDay : (Number.isFinite(r.manDay) ? String(r.manDay) : '0')}
+                                                        onChange={(value) => { void handleQuickRowUpdate(r, { manDay: String(value ?? '0') }); }}
+                                                        type="number"
+                                                        placeholder="공수"
+                                                        minimal
+                                                        disabled={saving}
+                                                        formatDisplay={(value) => formatManDay(Number(value || 0))}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap text-right">
@@ -2369,7 +2548,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         className="px-2 py-1 border border-slate-300 rounded text-sm w-[92px] text-right bg-white"
                                                     />
                                                 ) : (
-                                                    formatNumber(Math.round(Number.isFinite(r.unitPrice) ? r.unitPrice : 0))
+                                                    <InputPopover
+                                                        value={draft ? draft.unitPrice : (Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0')}
+                                                        onChange={(value) => { void handleQuickRowUpdate(r, { unitPrice: String(value ?? '0') }); }}
+                                                        type="number"
+                                                        placeholder="단가"
+                                                        minimal
+                                                        disabled={saving}
+                                                        formatDisplay={(value) => formatNumber(Math.round(Number(value || 0)))}
+                                                    />
                                                 )}
                                             </td>
                                             <td className="px-2.5 py-2 whitespace-nowrap text-right font-bold">
@@ -2387,9 +2574,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                         />
                                                     </div>
                                                 ) : (
-                                                    <div className="max-h-[60px] overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed scrollbar-thin scrollbar-thumb-slate-200">
-                                                        {(r.workContent ?? '') || <span className="text-slate-300 italic">내역 없음</span>}
-                                                    </div>
+                                                    <InputPopover
+                                                        value={effectiveWorkContent}
+                                                        onChange={(value) => { void handleQuickRowUpdate(r, { workContent: String(value ?? '') }); }}
+                                                        placeholder="작업 내용 입력"
+                                                        minimal
+                                                        disabled={saving}
+                                                        formatDisplay={(value) => (
+                                                            <div className="max-h-[60px] overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed scrollbar-thin scrollbar-thumb-slate-200 text-left">
+                                                                {String(value ?? '') || <span className="text-slate-300 italic">내역 없음</span>}
+                                                            </div>
+                                                        )}
+                                                    />
                                                 )}
                                             </td>
                                             {isEditMode && (
