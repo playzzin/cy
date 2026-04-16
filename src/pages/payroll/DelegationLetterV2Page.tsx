@@ -287,6 +287,9 @@ const DelegationLetterV2Page: React.FC = () => {
         return chunks;
     };
 
+    const normalizeCompanyNameKey = (value?: string | null): string =>
+        String(value ?? '').replace(/\s+/g, '').toLowerCase();
+
     // --- 8. Final Preparation for View ---
     const selectedMonthParts = selectedMonth.split('-');
     const yearLabel = selectedMonthParts[0].slice(2);
@@ -303,13 +306,86 @@ const DelegationLetterV2Page: React.FC = () => {
         return companies.find((c) => String(c.id ?? '').trim() === selectedCompanyId) ?? null;
     }, [companies, selectedCompanyId]);
 
+    const constructionCompanies = useMemo(() => {
+        return companies
+            .filter((company) => String(company.type ?? '').trim() === '시공사')
+            .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
+    }, [companies]);
+
+    const constructionCompanyIdSet = useMemo(() => {
+        return new Set(
+            constructionCompanies
+                .map((company) => String(company.id ?? '').trim())
+                .filter(Boolean)
+        );
+    }, [constructionCompanies]);
+
+    const constructionCompanyNameKeySet = useMemo(() => {
+        return new Set(
+            constructionCompanies
+                .map((company) => normalizeCompanyNameKey(company.name))
+                .filter(Boolean)
+        );
+    }, [constructionCompanies]);
+
+    const mandataryTeams = useMemo(() => {
+        return teams
+            .filter((team) => {
+                const teamCompanyId = String(team.companyId ?? '').trim();
+                if (teamCompanyId && constructionCompanyIdSet.has(teamCompanyId)) return true;
+
+                const teamCompanyNameKey = normalizeCompanyNameKey(team.companyName);
+                if (teamCompanyNameKey && constructionCompanyNameKeySet.has(teamCompanyNameKey)) return true;
+
+                return false;
+            })
+            .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
+    }, [constructionCompanyIdSet, constructionCompanyNameKeySet, teams]);
+
+    const mandataryCompanyOptions = useMemo(() => {
+        return constructionCompanies
+            .filter((company) => String(company.id ?? '').trim())
+            .map((company) => ({
+                key: `company__${String(company.id ?? '').trim()}`,
+                company
+            }));
+    }, [constructionCompanies]);
+
+    const mandataryTeamLeaderOptions = useMemo(() => {
+        return mandataryTeams
+            .map((team) => {
+                const teamLeader = team.leaderId ? allWorkers.find((worker) => worker.id === team.leaderId) : undefined;
+                const fallbackLeader = allWorkers.find((worker) => worker.teamId === team.id && worker.role === '팀장');
+                const leader = teamLeader ?? fallbackLeader;
+                if (!leader?.id) return null;
+
+                const companyLabel = String(team.companyName ?? '').trim() || '시공사';
+                return {
+                    key: leader.id,
+                    label: `${companyLabel} · ${team.name} 팀장 (${leader.name})`
+                };
+            })
+            .filter((option): option is { key: string; label: string } => option !== null);
+    }, [allWorkers, mandataryTeams]);
+
+    const selectedMandataryCompanyId = useMemo(() => {
+        if (selectedLeaderId.startsWith('company__')) {
+            return selectedLeaderId.slice('company__'.length).trim();
+        }
+        return selectedCompanyId;
+    }, [selectedCompanyId, selectedLeaderId]);
+
+    const selectedMandataryCompany = useMemo(() => {
+        if (!selectedMandataryCompanyId) return null;
+        return companies.find((company) => String(company.id ?? '').trim() === selectedMandataryCompanyId) ?? null;
+    }, [companies, selectedMandataryCompanyId]);
+
     const selectedSiteName = useMemo(() => {
         if (!selectedSiteId) return '';
         return sites.find((s) => s.id === selectedSiteId)?.name || '';
     }, [sites, selectedSiteId]);
 
-    const companyMandataryKey = selectedCompany?.id ? `company__${String(selectedCompany.id)}` : '';
-    const isCompanyMandatarySelected = Boolean(companyMandataryKey) && selectedLeaderId === companyMandataryKey;
+    const isCompanyMandatarySelected = selectedLeaderId.startsWith('company__');
 
     const mandataryWorker = useMemo(() => {
         if (!selectedLeaderId) return null;
@@ -334,16 +410,16 @@ const DelegationLetterV2Page: React.FC = () => {
             };
         }
 
-        if (isCompanyMandatarySelected && selectedCompany) {
+        if (isCompanyMandatarySelected && selectedMandataryCompany) {
             return {
-                name: selectedCompany.ceoName || '',
-                idNumber: selectedCompany.ceoResidentNumber || '',
-                address: selectedCompany.address || '',
-                contact: selectedCompany.phone || '',
+                name: selectedMandataryCompany.ceoName || '',
+                idNumber: selectedMandataryCompany.ceoResidentNumber || '',
+                address: selectedMandataryCompany.address || '',
+                contact: selectedMandataryCompany.phone || '',
                 signatureUrl: undefined as string | undefined,
-                bankName: selectedCompany.bankName || '',
-                accountNumber: selectedCompany.accountNumber || '',
-                accountHolder: selectedCompany.accountHolder || selectedCompany.ceoName || ''
+                bankName: selectedMandataryCompany.bankName || '',
+                accountNumber: selectedMandataryCompany.accountNumber || '',
+                accountHolder: selectedMandataryCompany.accountHolder || selectedMandataryCompany.ceoName || ''
             };
         }
 
@@ -358,7 +434,7 @@ const DelegationLetterV2Page: React.FC = () => {
             accountNumber: mandataryWorker.accountNumber || '',
             accountHolder: mandataryWorker.accountHolder || mandataryWorker.name || ''
         };
-    }, [isCompanyMandatarySelected, mandataryWorker, selectedCompany, selectedLeaderId,
+    }, [isCompanyMandatarySelected, mandataryWorker, selectedMandataryCompany, selectedLeaderId,
         customMandataryName, customMandataryIdNumber, customMandataryAddress, customMandataryContact,
         customMandataryBankName, customMandataryAccountNumber, customMandataryAccountHolder]);
 
@@ -644,10 +720,10 @@ const DelegationLetterV2Page: React.FC = () => {
                 </div>
 
                 {/* Content Card */}
-                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-5 shadow-2xl flex-1 overflow-auto">
+                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-5 shadow-2xl flex-1 min-h-0 overflow-hidden flex flex-col">
                     {/* Filter Tab */}
                     {activeTab === 'filter' && (
-                        <div className="space-y-5">
+                        <div className="space-y-5 h-full min-h-0 flex flex-col">
                             <div className="flex items-center gap-2 mb-4">
                                 <div className="w-1.5 h-6 rounded-full bg-blue-500"></div>
                                 <h3 className="text-white font-semibold">기간 및 현장 선택</h3>
@@ -733,27 +809,21 @@ const DelegationLetterV2Page: React.FC = () => {
                                     >
                                         <option value="">수임인 선택</option>
                                         <option value="__custom__">✏️ 직접 입력</option>
-                                        {selectedCompany && companyMandataryKey && (
+                                        {mandataryCompanyOptions.length > 0 && (
                                             <optgroup label="회사 대표">
-                                                <option key={companyMandataryKey} value={companyMandataryKey}>
-                                                    {selectedCompany.name} 대표 ({selectedCompany.ceoName})
-                                                </option>
+                                                {mandataryCompanyOptions.map(({ key, company }) => (
+                                                    <option key={key} value={key}>
+                                                        {company.name} 대표 ({company.ceoName || '대표'})
+                                                    </option>
+                                                ))}
                                             </optgroup>
                                         )}
-                                        <optgroup label="현장 팀장">
-                                            {activeTeams
-                                                .map((team) => {
-                                                    const teamLeader = team.leaderId ? allWorkers.find((w) => w.id === team.leaderId) : undefined;
-                                                    const fallbackLeader = allWorkers.find((w) => w.teamId === team.id && w.role === '팀장');
-                                                    const leader = teamLeader ?? fallbackLeader;
-                                                    if (!leader?.id) return null;
-                                                    return (
-                                                        <option key={leader.id} value={leader.id}>
-                                                            {team.name} 팀장 ({leader.name})
-                                                        </option>
-                                                    );
-                                                })
-                                                .filter(Boolean)}
+                                        <optgroup label="시공사 팀장">
+                                            {mandataryTeamLeaderOptions.map((option) => (
+                                                <option key={option.key} value={option.key}>
+                                                    {option.label}
+                                                </option>
+                                            ))}
                                         </optgroup>
                                         <optgroup label="전체 작업자">
                                             {delegationWorkers.map(w => (
@@ -793,7 +863,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                             {/* Workers & Unit Price (inline in filter tab) */}
                             {delegationWorkers.length > 0 && (
-                                <div className="mt-2">
+                                <div className="mt-2 flex-1 min-h-0 flex flex-col">
                                     <div className="flex items-center justify-between mb-3">
                                         <div className="flex items-center gap-2">
                                             <div className="w-1.5 h-5 rounded-full bg-emerald-500"></div>
@@ -820,7 +890,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                     </div>
 
                                     {/* Workers List */}
-                                    <div className="max-h-[300px] overflow-y-auto space-y-1.5 pr-1">
+                                    <div className="flex-1 min-h-[260px] overflow-y-auto space-y-1.5 pr-1">
                                         {delegationWorkers.map(worker => {
                                             const isMandatary = worker.workerId === selectedLeaderId;
                                             const isSelected = selectedDelegatorIds.includes(worker.workerId);
@@ -878,7 +948,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                     {/* Document Tab */}
                     {activeTab === 'document' && (
-                        <div className="space-y-5">
+                        <div className="space-y-5 h-full overflow-y-auto pr-1">
                             <div className="flex items-center gap-2 mb-4">
                                 <div className="w-1.5 h-6 rounded-full bg-purple-500"></div>
                                 <h3 className="text-white font-semibold">위임장 문서 설정</h3>
@@ -987,7 +1057,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                     {/* Workers Tab */}
                     {activeTab === 'workers' && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 h-full min-h-0 flex flex-col">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-2">
                                     <div className="w-1.5 h-6 rounded-full bg-emerald-500"></div>
@@ -1016,7 +1086,7 @@ const DelegationLetterV2Page: React.FC = () => {
                             </div>
 
                             {/* Workers List */}
-                            <div className="max-h-[400px] overflow-y-auto space-y-2 pr-1">
+                            <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
                                 {delegationWorkers.length === 0 ? (
                                     <div className="text-center py-12">
                                         <FontAwesomeIcon icon={faUsers} className="text-4xl text-slate-600 mb-3" />
