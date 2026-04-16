@@ -1067,50 +1067,51 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredEntries.length === 0 ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">
-                  조회 조건에 맞는 데이터가 없습니다.
-                </td>
-              </tr>
-            ) : (
-              filteredEntries.map((entry) => {
-                const deduction = dbDeductions[entry.key] || 0;
-                const netActual = entry.actualUnitPrice - deduction;
-                return (
-                  <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                    <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
-                      {formatCurrency(entry.actualUnitPrice)}
-                    </td>
-                    <td className="border border-[#e3dcc4] px-2 py-1.5">
-                      <input
-                        type="number"
-                        value={deduction || ''}
-                        onChange={(event) =>
-                          setDbDeductions((prev) => ({
-                            ...prev,
-                            [entry.key]: Math.max(0, Number(event.target.value) || 0),
-                          }))
-                        }
-                        placeholder="0"
-                        className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
-                      />
-                    </td>
-                    <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
-                      {formatCurrency(netActual)}
-                    </td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
-                      {formatCurrency(entry.claimUnitPrice)}
-                    </td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
-                  </tr>
-                );
-              })
-            )}
+            {filteredEntries.length === 0
+              ? (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">
+                    조회 조건에 맞는 데이터가 없습니다.
+                  </td>
+                </tr>
+              )
+              : filteredEntries.map((entry) => {
+                  const deduction = dbDeductions[entry.key] || 0;
+                  const netActual = entry.actualUnitPrice - deduction;
+
+                  return (
+                    <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">{formatNumber(entry.manDay)}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
+                        {formatCurrency(entry.actualUnitPrice)}
+                      </td>
+                      <td className="border border-[#e3dcc4] px-2 py-1.5">
+                        <input
+                          type="number"
+                          value={deduction || ''}
+                          onChange={(event) =>
+                            setDbDeductions((prev) => ({
+                              ...prev,
+                              [entry.key]: Math.max(0, Number(event.target.value) || 0),
+                            }))
+                          }
+                          placeholder="0"
+                          className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
+                        />
+                      </td>
+                      <td className={`border border-[#e3dcc4] px-3 py-2 text-right font-black ${deduction > 0 ? 'text-emerald-700' : 'text-[#4A452A]'}`}>
+                        {formatCurrency(netActual)}
+                      </td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
+                        {formatCurrency(entry.claimUnitPrice)}
+                      </td>
+                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
+                    </tr>
+                  );
+                })}
           </tbody>
         </table>
       </div>
@@ -1152,6 +1153,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 '은행명(예금주)',
                 '계좌번호',
                 '인력소개비',
+                '소개소',
                 '일당',
                 '청구단가',
                 '상태',

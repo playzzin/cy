@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -35,7 +35,7 @@ const DelegationLetterV2Page: React.FC = () => {
     const [delegationText, setDelegationText] = useState<string>('노무비 청구 및 수령에 대한 권한 일체');
     const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
-    const [workersPerPage, setWorkersPerPage] = useState<number>(15);
+    const [workersPerPage, setWorkersPerPage] = useState<number>(18);
 
     // --- State: Data ---
     const [allReports, setAllReports] = useState<DailyReport[]>([]);
@@ -50,11 +50,9 @@ const DelegationLetterV2Page: React.FC = () => {
     const [selectedDelegatorIds, setSelectedDelegatorIds] = useState<string[]>([]);
     const [batchUnitPrice, setBatchUnitPrice] = useState<string>('');
     const [copying, setCopying] = useState(false);
-    const [measureTick, setMeasureTick] = useState(0);
 
     // --- State: UI ---
     const printRef = useRef<HTMLDivElement>(null);
-    const measureRef = useRef<HTMLDivElement>(null);
     const [activeTab, setActiveTab] = useState<'filter' | 'document' | 'workers'>('filter');
 
     // --- State: Custom Mandatary ---
@@ -305,6 +303,11 @@ const DelegationLetterV2Page: React.FC = () => {
         return companies.find((c) => String(c.id ?? '').trim() === selectedCompanyId) ?? null;
     }, [companies, selectedCompanyId]);
 
+    const selectedSiteName = useMemo(() => {
+        if (!selectedSiteId) return '';
+        return sites.find((s) => s.id === selectedSiteId)?.name || '';
+    }, [sites, selectedSiteId]);
+
     const companyMandataryKey = selectedCompany?.id ? `company__${String(selectedCompany.id)}` : '';
     const isCompanyMandatarySelected = Boolean(companyMandataryKey) && selectedLeaderId === companyMandataryKey;
 
@@ -370,126 +373,28 @@ const DelegationLetterV2Page: React.FC = () => {
     const totalAmount = finalDelegators.reduce((sum, w) => sum + w.amount, 0);
     const totalManDays = finalDelegators.reduce((sum, w) => sum + w.manDays, 0);
 
-    const areNumberArraysEqual = (a: number[], b: number[]) => {
-        if (a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i += 1) {
-            if (a[i] !== b[i]) return false;
-        }
-        return true;
-    };
-
-    const [autoPageSizes, setAutoPageSizes] = useState<number[]>([]);
-
-    useLayoutEffect(() => {
-        if (finalDelegators.length === 0) {
-            setAutoPageSizes((prev) => (prev.length === 0 ? prev : []));
-            return;
-        }
-
-        const pageEl = measureRef.current;
-        if (!pageEl) return;
-
-        const raf = window.requestAnimationFrame(() => {
-            const tbodyEl = pageEl.querySelector<HTMLTableSectionElement>('tbody[data-measure="workers"]');
-            const rowEls = Array.from(pageEl.querySelectorAll<HTMLTableRowElement>('tr[data-measure-row="worker"]'));
-            const totalRowEl = pageEl.querySelector<HTMLTableRowElement>('tr[data-measure-row="total"]');
-
-            if (!tbodyEl) return;
-            if (rowEls.length !== finalDelegators.length) return;
-
-            const pageRect = pageEl.getBoundingClientRect();
-            const tbodyRect = tbodyEl.getBoundingClientRect();
-
-            const safetyPx = 2;
-            const availableHeight = Math.max(0, Math.floor(pageRect.bottom - tbodyRect.top - safetyPx));
-            if (availableHeight <= 0) return;
-
-            const totalRowHeight = totalRowEl ? Math.ceil(totalRowEl.getBoundingClientRect().height) : 0;
-            const lastPageCapacity = Math.max(0, availableHeight - totalRowHeight - safetyPx);
-
-            const rowHeights = rowEls.map((el) => Math.ceil(el.getBoundingClientRect().height));
-
-            const sizes: number[] = [];
-            let currentSize = 0;
-            let currentHeight = 0;
-
-            for (let i = 0; i < finalDelegators.length; i += 1) {
-                const rowHeight = rowHeights[i] ?? 0;
-                if (currentSize > 0 && currentHeight + rowHeight > availableHeight) {
-                    sizes.push(currentSize);
-                    currentSize = 0;
-                    currentHeight = 0;
-                }
-                currentSize += 1;
-                currentHeight += rowHeight;
-            }
-            if (currentSize > 0) sizes.push(currentSize);
-
-            if (sizes.length > 0 && totalRowHeight > 0) {
-                const lastSize = sizes[sizes.length - 1] ?? 0;
-                const lastHeights = rowHeights.slice(finalDelegators.length - lastSize);
-                const lastTotalHeight = lastHeights.reduce((sum, h) => sum + h, 0);
-
-                if (lastSize > 1 && lastTotalHeight > lastPageCapacity) {
-                    let tailHeight = 0;
-                    let keepFromIndex = lastSize;
-                    for (let i = lastSize - 1; i >= 0; i -= 1) {
-                        const h = lastHeights[i] ?? 0;
-                        if (tailHeight + h > lastPageCapacity && i < lastSize - 1) break;
-                        if (tailHeight + h > lastPageCapacity && i === lastSize - 1) {
-                            keepFromIndex = i;
-                            break;
-                        }
-                        tailHeight += h;
-                        keepFromIndex = i;
-                    }
-
-                    if (keepFromIndex > 0 && keepFromIndex < lastSize) {
-                        const headSize = keepFromIndex;
-                        const tailSize = lastSize - keepFromIndex;
-                        sizes.splice(sizes.length - 1, 1, headSize, tailSize);
-                    }
-                }
-            }
-
-            setAutoPageSizes((prev) => (areNumberArraysEqual(prev, sizes) ? prev : sizes));
-        });
-
-        return () => {
-            window.cancelAnimationFrame(raf);
-        };
-    }, [
-        finalDelegators,
-        delegationText,
-        showManDays,
-        measureTick,
-        selectedSiteId,
-        selectedLeaderId,
-        customMandataryName,
-        customMandataryIdNumber,
-        customMandataryAddress,
-        customMandataryContact,
-        customMandataryBankName,
-        customMandataryAccountNumber,
-        customMandataryAccountHolder
-    ]);
-
     const pagedDelegators = useMemo(() => {
         if (finalDelegators.length === 0) return [] as DelegationWorker[][];
-        if (autoPageSizes.length > 0) {
-            const totalSized = autoPageSizes.reduce((sum, size) => sum + size, 0);
-            if (totalSized === finalDelegators.length) {
-                const pages: DelegationWorker[][] = [];
-                let cursor = 0;
-                for (const size of autoPageSizes) {
-                    pages.push(finalDelegators.slice(cursor, cursor + size));
-                    cursor += size;
-                }
-                return pages;
-            }
+
+        const cappedWorkersPerPage = Math.min(Math.max(1, Math.floor(workersPerPage)), 18);
+        const mandataryAddress = String(mandataryInfo?.address || '');
+        const firstPageReserve = Math.min(
+            3,
+            1 +
+            (showManDays ? 1 : 0) +
+            (mandataryAddress.length > 35 || delegationText.length > 18 ? 1 : 0)
+        );
+        const firstPageWorkers = Math.max(1, cappedWorkersPerPage - firstPageReserve);
+
+        if (finalDelegators.length <= firstPageWorkers) {
+            return [finalDelegators];
         }
-        return chunkArray(finalDelegators, workersPerPage);
-    }, [autoPageSizes, finalDelegators, workersPerPage]);
+
+        const pages: DelegationWorker[][] = [finalDelegators.slice(0, firstPageWorkers)];
+        const rest = finalDelegators.slice(firstPageWorkers);
+        pages.push(...chunkArray(rest, cappedWorkersPerPage));
+        return pages;
+    }, [delegationText, finalDelegators, mandataryInfo, showManDays, workersPerPage]);
 
     const allSitesLoaded = sites.length > 0;
 
@@ -510,7 +415,54 @@ const DelegationLetterV2Page: React.FC = () => {
             {/* Print-only styles */}
             <style>{`
                 @media print {
-                    @page { size: A4 portrait; margin: 0; }
+                    @page { size: A4 portrait; margin: 7mm; }
+                    #main-header,
+                    #sidebar,
+                    #bottom-panel,
+                    #submenu-panel,
+                    .cheongyeon-header,
+                    .cheongyeon-top-nav,
+                    .cheongyeon-top-nav-dropdown,
+                    .cheongyeon-header-logo,
+                    .header-right-group,
+                    .profile-menu-container,
+                    .mobile-logo-area,
+                    .header-left-group,
+                    .header-btn {
+                        display: none !important;
+                        visibility: hidden !important;
+                    }
+                    .app > #main-header,
+                    .app > #sidebar {
+                        display: none !important;
+                    }
+                    #main-content {
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        width: 100% !important;
+                        min-height: auto !important;
+                    }
+                    .app > * {
+                        display: none !important;
+                    }
+                    .app > #main-content {
+                        display: block !important;
+                    }
+                    #main-content > * {
+                        display: none !important;
+                    }
+                    #main-content .delegation-page-root {
+                        display: block !important;
+                    }
+                    body * {
+                        visibility: hidden !important;
+                    }
+                    .print-only-region,
+                    .print-only-region * {
+                        visibility: visible !important;
+                    }
                     html, body, #root {
                         width: 100% !important;
                         min-height: 100% !important;
@@ -532,6 +484,12 @@ const DelegationLetterV2Page: React.FC = () => {
                         background: white !important;
                         min-height: auto !important;
                     }
+                    .delegation-page-root > * {
+                        display: none !important;
+                    }
+                    .delegation-page-root .print-area-wrapper {
+                        display: flex !important;
+                    }
                     .print-area-wrapper {
                         width: 100% !important;
                         padding: 0 !important;
@@ -546,8 +504,20 @@ const DelegationLetterV2Page: React.FC = () => {
                         margin: 0 auto !important;
                     }
 
+                    .print-only-region {
+                        position: fixed !important;
+                        inset: 0 !important;
+                        width: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: white !important;
+                        z-index: 2147483647 !important;
+                        overflow: visible !important;
+                    }
+
                     .delegation-letter {
-                        width: 210mm !important;
+                        width: 100% !important;
+                        max-width: none !important;
                         min-height: auto !important;
                         padding: 0 !important;
                         margin: 0 auto !important;
@@ -558,10 +528,10 @@ const DelegationLetterV2Page: React.FC = () => {
 
                     .delegation-letter-page {
                         box-sizing: border-box;
-                        width: 210mm !important;
-                        height: 297mm !important;
-                        min-height: 297mm !important;
-                        padding: 14mm 14mm 12mm !important;
+                        width: 100% !important;
+                        height: calc(297mm - 14mm) !important;
+                        min-height: calc(297mm - 14mm) !important;
+                        padding: 12mm 12mm 10mm !important;
                         overflow: hidden !important;
                         background: white !important;
                         display: flex !important;
@@ -980,7 +950,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                         value={workersPerPage}
                                         onChange={(e) => {
                                             const next = Number(e.target.value);
-                                            setWorkersPerPage(Number.isFinite(next) && next > 0 ? Math.floor(next) : 1);
+                                            const safe = Number.isFinite(next) && next > 0 ? Math.floor(next) : 1;
+                                            setWorkersPerPage(Math.min(safe, 18));
                                         }}
                                         className="w-24 px-3 py-2 text-sm bg-slate-700/50 border border-slate-600/50 rounded-lg text-white text-right focus:border-purple-500 outline-none"
                                     />
@@ -1155,10 +1126,10 @@ const DelegationLetterV2Page: React.FC = () => {
             </div>
 
             {/* --- Right Panel: Preview --- */}
-            <div className="flex-1 bg-slate-800/30 backdrop-blur-sm overflow-auto rounded-2xl p-4 lg:p-8 flex justify-center border border-white/5 print-area-wrapper">
+            <div className="flex-1 bg-[#efebe2] overflow-auto rounded-2xl p-4 lg:p-8 flex justify-center border border-[#d8d1c3] print-area-wrapper">
                 <div
                     ref={printRef}
-                    className="bg-white shadow-2xl mx-auto box-border delegation-letter"
+                    className="bg-white shadow-xl mx-auto box-border delegation-letter print-only-region"
                 >
                     <style>{`
                         .delegation-letter-page {
@@ -1176,6 +1147,73 @@ const DelegationLetterV2Page: React.FC = () => {
                             flex-direction: column;
                             justify-content: space-between;
                             page-break-after: always;
+                        }
+
+                        .delegation-title {
+                            text-align: center;
+                            font-size: 30px;
+                            font-weight: 700;
+                            letter-spacing: 0.55em;
+                            margin-bottom: 5mm;
+                        }
+
+                        .delegation-meta-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            border: 1.5px solid #111;
+                            margin-bottom: 3.2mm;
+                            font-size: 11px;
+                        }
+
+                        .delegation-meta-table th,
+                        .delegation-meta-table td {
+                            border: 1px solid #111;
+                            padding: 1.6mm 2mm;
+                            vertical-align: middle;
+                        }
+
+                        .delegation-meta-table th {
+                            width: 18mm;
+                            text-align: center;
+                            font-weight: 700;
+                            background: #f3f2ef;
+                        }
+
+                        .delegation-section-title {
+                            display: inline-block;
+                            border: 1.5px solid #111;
+                            padding: 0.7mm 2.8mm;
+                            font-size: 11px;
+                            font-weight: 700;
+                            margin-bottom: 1.6mm;
+                            background: #f7f7f5;
+                        }
+
+                        .delegation-mandatary-table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            border: 1.5px solid #111;
+                            font-size: 11px;
+                        }
+
+                        .delegation-mandatary-table tr {
+                            height: 11mm;
+                        }
+
+                        .delegation-body-paragraph {
+                            border: 1.5px solid #111;
+                            padding: 3.2mm 3.5mm;
+                            margin-bottom: 3mm;
+                            text-align: justify;
+                            line-height: 1.7;
+                            font-size: 11px;
+                        }
+
+                        .delegation-underline {
+                            border-bottom: 1px solid #111;
+                            font-weight: 700;
+                            padding: 0 2px;
+                            display: inline-block;
                         }
 
                         .delegation-letter-body {
@@ -1225,165 +1263,54 @@ const DelegationLetterV2Page: React.FC = () => {
                         }
                     `}</style>
 
-                    <div ref={measureRef} className="measure-only delegation-letter-page h-auto min-h-0 m-0 p-[15mm]" style={{ position: 'absolute', top: -9999, left: -9999, visibility: 'hidden', height: 'auto', display: 'block' }}>
-                        {/* Title Header */}
-                        <div className="flex justify-center items-start mb-6">
-                            <h2 className="text-[32px] font-bold tracking-[0.2em]">위 임 장</h2>
-                        </div>
-
-                        {/* Top Context Info */}
-                        <div className="flex justify-between items-end mb-4 border-b-2 border-black pb-2 px-1">
-                            <div className="text-sm font-semibold">
-                                현 장 명 : {sites.find(s => s.id === selectedSiteId)?.name || ''}
-                            </div>
-                            <div className="text-sm font-semibold tracking-wider">
-                                {yearLabel}년 {monthLabel}월 귀속
-                            </div>
-                        </div>
-
-                        {/* Mandatary Info */}
-                        <div className="mb-4">
-                            <div className="flex items-center gap-2 mb-2 font-bold text-sm">
-                                <span className="bg-black text-white px-2 py-0.5 text-xs">수임인</span>
-                                (노무비를 수령할 자)
-                            </div>
-                            <table className="w-full border-collapse border border-black text-xs">
-                                <tbody>
-                                    <tr className="border-b border-black">
-                                        <th className="border-r border-black bg-gray-50 p-2 w-24 text-center font-bold">성 명</th>
-                                        <td className="border-r border-black p-2 relative h-12 w-48 text-center font-bold tracking-widest text-sm">
-                                            <span className="block text-center pr-8">{mandataryInfo?.name}</span>
-                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 tracking-normal">(인)</span>
-                                        </td>
-                                        <th className="border-r border-black bg-gray-50 p-2 w-28 text-center font-bold">주민등록번호</th>
-                                        <td className="p-2 text-center tracking-wider">{mandataryInfo?.idNumber}</td>
-                                    </tr>
-                                    <tr className="border-b border-black">
-                                        <th className="border-r border-black bg-gray-50 p-1.5 text-center">전화번호</th>
-                                        <td className="border-r border-black p-1.5 text-center">{mandataryInfo?.contact || ''}</td>
-                                        <th className="border-r border-black bg-gray-50 p-1.5 text-center">은행 / 계좌번호</th>
-                                        <td className="p-1.5 text-center font-bold text-[11px]">
-                                            {mandataryInfo ? `${mandataryInfo.bankName} ${mandataryInfo.accountNumber}` : ''}
-                                            {mandataryInfo?.accountHolder && ` (예금주: ${mandataryInfo.accountHolder})`}
-                                        </td>
-                                    </tr>
-                                    <tr>
-                                        <th className="border-r border-black bg-gray-50 p-1.5 text-center">주 소</th>
-                                        <td colSpan={3} className="p-1.5 text-[11px] leading-tight break-all">
-                                            {mandataryInfo?.address}
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Delegation Content */}
-                        <div className="mb-4 border border-black p-3 text-sm leading-relaxed text-center break-all">
-                            위 사람을 대리인으로 정하여 <span className="font-bold underline underline-offset-4 mx-1">[{delegationText}]</span>을 위임합니다.
-                        </div>
-
-                        <div className="text-[11px] font-bold text-gray-600 mb-1 flex items-center justify-between">
-                            <div><span className="bg-black text-white px-2 py-[1px] text-[10px] mr-2">위임인</span>(노무비를 지급받을 자)</div>
-                        </div>
-
-                        <table className="w-full border-collapse border border-black text-[11px] delegation-workers-table table-fixed">
-                            <thead>
-                                <tr className="border-b border-black bg-gray-50">
-                                    <th className="border-r border-black p-1 w-8 text-center">No.</th>
-                                    <th className="border-r border-black p-1 w-16 text-center">성 명</th>
-                                    <th className="border-r border-black p-1 w-28 text-center">주민번호</th>
-                                    {showManDays && <th className="border-r border-black p-1 w-12 text-center">공수</th>}
-                                    <th className="border-r border-black p-1 w-24 text-center">주 소</th>
-                                    <th className="border-r border-black p-1 w-20 text-center">금 액</th>
-                                    <th className="p-1 w-24 text-center">서 명</th>
-                                </tr>
-                            </thead>
-                            <tbody data-measure="workers">
-                                {finalDelegators.map((worker, index) => (
-                                    <tr key={worker.workerId} className="border-b border-black" data-measure-row="worker">
-                                        <td className="border-r border-black p-1 text-center font-medium opacity-50">{index + 1}</td>
-                                        <td className="border-r border-black p-1 font-bold tracking-widest text-center text-[12px]">{worker.workerName}</td>
-                                        <td className="border-r border-black p-1 text-center tracking-wider">{worker.idNumber}</td>
-                                        {showManDays && <td className="border-r border-black p-1 text-center">{worker.manDays.toFixed(1)}</td>}
-                                        <td className="border-r border-black p-1 text-[8.5px] leading-snug break-all">
-                                            <div className="line-clamp-2">{worker.address || ''}</div>
-                                        </td>
-                                        <td className="border-r border-black p-1 px-2 text-right font-bold text-[12px]">{worker.amount.toLocaleString()}</td>
-                                        <td className="delegation-signature-cell"></td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                            <tfoot>
-                                <tr className="bg-gray-100 border-t-2 border-black" data-measure-row="total">
-                                    <td colSpan={showManDays ? 5 : 4} className="border-r border-black p-1.5 text-center font-bold text-xs tracking-[0.5em]">
-                                        합 계 가 준 (총원 : {finalDelegators.length} 명)
-                                    </td>
-                                    <td colSpan={2} className="p-1.5 px-3 text-right font-bold text-sm tracking-wider">
-                                        ₩ {totalAmount.toLocaleString()}
-                                    </td>
-                                </tr>
-                            </tfoot>
-                        </table>
-
-                        <div className="text-center font-bold text-sm tracking-widest mt-8 flex flex-col items-center">
-                            <span>{formatDate(documentDate)}</span>
-                        </div>
-                    </div>
-
                     {finalDelegators.length > 0 && pagedDelegators.map((pageWorkers, pageIndex) => {
                         const isLastPage = pageIndex === pagedDelegators.length - 1;
                         let pageGlobalWorkerIdx = pagedDelegators.slice(0, pageIndex).reduce((sum, p) => sum + p.length, 0);
 
                         return (
                             <React.Fragment key={`page-${pageIndex}`}>
-                                <div className="delegation-letter-page flex flex-col justify-between" onClick={() => setMeasureTick(t => t + 1)}>
+                                <div className="delegation-letter-page flex flex-col justify-between">
                                     <div className="delegation-letter-body">
                                         {pageIndex === 0 && (
                                             <>
-                                                {/* Title Header */}
-                                                <div className="flex justify-center items-start mb-[4mm]">
-                                                    <h2 className="text-[28px] font-bold tracking-[0.2em]">위 임 장</h2>
-                                                </div>
+                                                <h2 className="delegation-title">위 임 장</h2>
 
-                                                {/* Top Context Info */}
-                                                <div className="flex justify-between items-end mb-[3mm] border-b-[1.5px] border-black pb-1.5 px-1">
-                                                    <div className="text-[12px] font-semibold tracking-wide">
-                                                        <span className="text-gray-600 mr-2">현장명:</span>
-                                                        {sites.find(s => s.id === selectedSiteId)?.name || ''}
-                                                    </div>
-                                                    <div className="text-[12px] font-bold tracking-wider">
-                                                        {yearLabel}년 {monthLabel}월 귀속
-                                                    </div>
-                                                </div>
+                                                <table className="delegation-meta-table">
+                                                    <tbody>
+                                                        <tr>
+                                                            <th>현장명</th>
+                                                            <td className="font-semibold tracking-wide">{selectedSiteName}</td>
+                                                            <th>귀속월</th>
+                                                            <td className="text-center font-semibold tracking-wider">20{yearLabel}년 {monthLabel}월</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
 
                                                 {/* Mandatary Info */}
                                                 <div className="mb-[3mm]">
-                                                    <div className="flex items-center gap-2 mb-1.5 font-bold text-[11px]">
-                                                        <span className="bg-black text-white px-2 py-0.5 text-[10px] rounded-sm shadow-sm">수임인</span>
-                                                        <span className="text-gray-600 font-normal">(노무비를 수령할 자)</span>
-                                                    </div>
-                                                    <table className="w-full border-collapse border-[1.5px] border-black text-[11px]">
+                                                    <div className="delegation-section-title">수임인 (노무비를 수령할 자)</div>
+                                                    <table className="delegation-mandatary-table">
                                                         <tbody>
                                                             <tr className="border-b border-black">
-                                                                <th className="border-r border-black bg-gray-100 p-1.5 w-20 text-center font-bold">성 명</th>
-                                                                <td className="border-r border-black p-1.5 relative h-10 w-40 text-center font-bold tracking-[0.2em] text-[13px]">
+                                                                <th className="border-r border-black bg-[#f3f2ef] p-1.5 w-20 text-center font-bold">성 명</th>
+                                                                <td className="border-r border-black p-1.5 relative w-40 text-center font-bold tracking-[0.2em] text-[13px]">
                                                                     <span className="block text-center pr-7">{mandataryInfo?.name}</span>
                                                                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] tracking-normal">(인)</span>
                                                                 </td>
-                                                                <th className="border-r border-black bg-gray-100 p-1.5 w-24 text-center font-bold">주민등록번호</th>
-                                                                <td className="p-1.5 text-center tracking-wider bg-yellow-50/10">{mandataryInfo?.idNumber}</td>
+                                                                <th className="border-r border-black bg-[#f3f2ef] p-1.5 w-24 text-center font-bold">주민등록번호</th>
+                                                                <td className="p-1.5 text-center tracking-wider">{mandataryInfo?.idNumber}</td>
                                                             </tr>
                                                             <tr className="border-b border-black">
-                                                                <th className="border-r border-black bg-gray-100 p-1.5 text-center">전화번호</th>
+                                                                <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center">전화번호</th>
                                                                 <td className="border-r border-black p-1.5 text-center">{mandataryInfo?.contact || ''}</td>
-                                                                <th className="border-r border-black bg-gray-100 p-1.5 text-center">은행/계좌번호</th>
-                                                                <td className="p-1.5 text-center font-bold text-[10px] bg-blue-50/10">
+                                                                <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center">은행/계좌번호</th>
+                                                                <td className="p-1.5 text-center font-bold text-[10px]">
                                                                     {mandataryInfo ? `${mandataryInfo.bankName} ${mandataryInfo.accountNumber}` : ''}
                                                                     {mandataryInfo?.accountHolder && ` (예금주: ${mandataryInfo.accountHolder})`}
                                                                 </td>
                                                             </tr>
                                                             <tr>
-                                                                <th className="border-r border-black bg-gray-100 p-1.5 text-center leading-tight">주 소</th>
+                                                                <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center leading-tight">주 소</th>
                                                                 <td colSpan={3} className="p-1.5 text-[10px] leading-relaxed break-all">
                                                                     {mandataryInfo?.address}
                                                                 </td>
@@ -1393,15 +1320,16 @@ const DelegationLetterV2Page: React.FC = () => {
                                                 </div>
 
                                                 {/* Delegation Content */}
-                                                <div className="mb-[3mm] border-[1.5px] border-black p-2.5 text-[12px] leading-relaxed text-center break-all bg-gray-50/50 shadow-inner">
-                                                    위 사람을 대리인으로 정하여 <span className="font-bold underline underline-offset-[3px] decoration-gray-400 mx-1 px-1 bg-yellow-100/30">[{delegationText}]</span>을 위임합니다.
+                                                <div className="delegation-body-paragraph !mb-[3mm] !text-[11px]">
+                                                    상기 수임인을 대리인으로 정하여 <span className="delegation-underline">{delegationText}</span>에 관한 권한 일체를 위임합니다.
+                                                    또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 이에 대하여 어떠한 이의도 제기하지 않겠습니다.
                                                 </div>
                                             </>
                                         )}
 
                                         <div className="text-[11px] font-bold text-gray-700 mb-1.5 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <span className="bg-black text-white px-2 py-0.5 text-[10px] rounded-sm shadow-sm">위임인</span>
+                                                <span className="delegation-section-title !mb-0">위임인</span>
                                                 <span className="text-gray-500 font-normal">(노무비를 지급받을 자)</span>
                                             </div>
                                             {pagedDelegators.length > 1 && (
@@ -1411,29 +1339,29 @@ const DelegationLetterV2Page: React.FC = () => {
 
                                         <table className="w-full border-collapse border-[1.5px] border-black text-[10px] delegation-workers-table table-fixed">
                                             <thead>
-                                                <tr className="border-b-[1.5px] border-black bg-gray-100">
-                                                    <th className="border-r border-black p-1 w-7 text-center font-bold">No.</th>
-                                                    <th className="border-r border-black p-1 w-[52px] text-center font-bold">성 명</th>
-                                                    <th className="border-r border-black p-1 w-[100px] text-center font-bold">주민번호</th>
+                                                <tr className="border-b-[1.5px] border-black bg-[#f3f2ef]">
+                                                    <th className="border-r border-black p-1 w-6 text-center font-bold">No.</th>
+                                                    <th className="border-r border-black p-1 w-[38px] text-center font-bold">성 명</th>
+                                                    <th className="border-r border-black p-1 w-[72px] text-center font-bold">주민번호</th>
                                                     {showManDays && <th className="border-r border-black p-1 w-10 text-center font-bold">공수</th>}
-                                                    <th className="border-r border-black p-1 w-[76px] text-center font-bold">주 소</th>
-                                                    <th className="border-r border-black p-1 w-[72px] text-center font-bold">금 액</th>
-                                                    <th className="p-1 w-[84px] text-center font-bold">서 명</th>
+                                                    <th className="border-r border-black p-1 w-[200px] text-center font-bold">주 소</th>
+                                                    <th className="border-r border-black p-1 w-[41px] text-center font-bold">금 액</th>
+                                                    <th className="p-1 w-[67px] text-center font-bold">서 명</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
                                                 {pageWorkers.map((worker) => {
                                                     pageGlobalWorkerIdx += 1;
                                                     return (
-                                                        <tr key={`print-${worker.workerId}`} className="border-b border-black hover:bg-gray-50/50 transition-colors">
+                                                        <tr key={`print-${worker.workerId}`} className="border-b border-black">
                                                             <td className="border-r border-black p-1 text-center text-gray-400 font-medium">{pageGlobalWorkerIdx}</td>
-                                                            <td className="border-r border-black p-1 font-bold tracking-[0.1em] text-center text-[11px]">{worker.workerName}</td>
+                                                            <td className="border-r border-black p-1 font-bold tracking-[0.08em] text-center text-[10px]">{worker.workerName}</td>
                                                             <td className="border-r border-black p-1 text-center font-medium tracking-wider text-[10.5px]">{worker.idNumber}</td>
                                                             {showManDays && <td className="border-r border-black p-1 text-center text-gray-600 font-medium">{worker.manDays.toFixed(1)}</td>}
-                                                            <td className="border-r border-black p-1 text-[8px] leading-snug break-all text-gray-700">
+                                                            <td className="border-r border-black p-1 text-[9px] leading-snug break-all text-gray-700">
                                                                 <div className="line-clamp-2">{worker.address || ''}</div>
                                                             </td>
-                                                            <td className="border-r border-black p-1 px-1.5 text-right font-bold text-[11px] tracking-wide">
+                                                            <td className="border-r border-black p-1 px-1 text-right font-bold text-[10px] tracking-wide">
                                                                 {worker.amount.toLocaleString()}
                                                             </td>
                                                             <td className="delegation-signature-cell align-middle">
@@ -1453,12 +1381,12 @@ const DelegationLetterV2Page: React.FC = () => {
                                             </tbody>
                                             {isLastPage && (
                                                 <tfoot>
-                                                    <tr className="bg-gray-100 border-t-[1.5px] border-black">
+                                                    <tr className="bg-[#f3f2ef] border-t-[1.5px] border-black">
                                                         <td colSpan={showManDays ? 5 : 4} className="border-r border-black p-1.5 text-center font-bold text-[11px] tracking-[0.3em]">
-                                                            합 계 가 준 <span className="text-gray-500 font-normal tracking-normal text-[10px] ml-1">(총원 : {finalDelegators.length}명)</span>
+                                                            합 계 <span className="text-gray-500 font-normal tracking-normal text-[10px] ml-1">(총원 : {finalDelegators.length}명)</span>
                                                         </td>
-                                                        <td colSpan={2} className="p-1.5 px-3 text-right font-bold text-[13px] tracking-wider text-blue-900">
-                                                            ₩ {totalAmount.toLocaleString()}
+                                                        <td colSpan={2} className="p-1.5 px-3 text-right font-bold text-[13px] tracking-wider text-black">
+                                                            금 {totalAmount.toLocaleString()} 원
                                                         </td>
                                                     </tr>
                                                 </tfoot>
