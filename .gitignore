@@ -38,3 +38,4 @@ cyee/
 # Backup & Secrets
 service-account.json
 backups/
+.codex-tmp/

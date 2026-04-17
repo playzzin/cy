@@ -25,7 +25,7 @@ import MaterialInboundPage from './pages/materials/MaterialInboundPage';
 import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
 import MaterialTransactionsPage from './pages/materials/MaterialTransactionsPage';
 import MaterialInventoryPage from './pages/materials/MaterialInventoryPage';
-// import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage'; // Fixed import
+import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage';
 import CompanyDatabase from './pages/database/CompanyDatabase';
 import ManpowerInputPage from './pages/manpower/ManpowerInputPage';
 import WorkerDatabase from './pages/database/WorkerDatabase';
@@ -417,7 +417,7 @@ const App: React.FC = () => {
             <Route path="/materials/outbound" element={<MaterialOutboundPage />} />
             <Route path="/materials/transactions" element={<MaterialTransactionsPage />} />
             <Route path="/materials/inventory" element={<MaterialInventoryPage />} />
-            {/* <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} /> */}
+            <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} />
 
             {/* Company DB */}
             <Route path="/database/company-db" element={<CompanyDatabase />} />

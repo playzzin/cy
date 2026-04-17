@@ -60,7 +60,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
     }, {} as Record<string, Inventory[]>);
 
     return (
-        <div className="p-6 max-w-[1800px] mx-auto bg-slate-50 min-h-screen">
+        <div className="p-6 max-w-[2200px] mx-auto bg-slate-50 min-h-screen">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -147,12 +147,12 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                 <h3 className="text-lg font-bold text-slate-800 mb-3 bg-indigo-50 px-4 py-2 rounded-lg">
                                     🏗️ {category}
                                 </h3>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-slate-100 border-b border-slate-300">
+                                <div className="overflow-auto min-h-[720px] max-h-[calc(100vh-240px)]">
+                                    <table className="w-full min-w-[1080px] text-sm">
+                                        <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                             <tr>
-                                                <th className="p-3 text-left font-bold text-slate-700">품명</th>
-                                                <th className="p-3 text-left font-bold text-slate-700">규격</th>
+                                                <th className="p-3 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
+                                                <th className="p-3 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
                                                 <th className="p-3 text-right font-bold text-slate-700">입고</th>
                                                 <th className="p-3 text-right font-bold text-slate-700">출고</th>
                                                 <th className="p-3 text-right font-bold text-slate-700 bg-green-50">현재고</th>
@@ -162,8 +162,8 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                         <tbody className="divide-y divide-slate-200">
                                             {categoryInventories.map(inv => (
                                                 <tr key={inv.materialId} className="hover:bg-slate-50">
-                                                    <td className="p-3 font-semibold">{inv.itemName}</td>
-                                                    <td className="p-3">{inv.spec}</td>
+                                                    <td className="p-3 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                    <td className="p-3 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
                                                     <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
                                                     <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
                                                     <td className="p-3 text-right font-bold text-lg">{inv.currentStock.toLocaleString()}</td>

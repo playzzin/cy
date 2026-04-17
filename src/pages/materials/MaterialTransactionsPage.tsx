@@ -60,6 +60,7 @@ const MaterialTransactionsPage: React.FC = () => {
     };
 
     const trimText = (value: unknown): string => String(value ?? '').trim();
+    const normalizeSearchText = (value: unknown): string => trimText(value).replace(/\s+/g, '').toLowerCase();
 
     useEffect(() => {
         loadMasterData();
@@ -93,7 +94,7 @@ const MaterialTransactionsPage: React.FC = () => {
 
     const filteredSites = sites.filter((site) => {
         if (!siteKeyword.trim()) return true;
-        return trimText(site.name).toLowerCase().includes(siteKeyword.trim().toLowerCase());
+        return normalizeSearchText(site.name).includes(normalizeSearchText(siteKeyword));
     });
 
     const handleSearch = async () => {
@@ -240,11 +241,11 @@ const MaterialTransactionsPage: React.FC = () => {
 
     const visibleTransactions = transactions.filter((t) => {
         if (!siteKeyword.trim()) return true;
-        return trimText(t.siteName).toLowerCase().includes(siteKeyword.trim().toLowerCase());
+        return normalizeSearchText(t.siteName).includes(normalizeSearchText(siteKeyword));
     });
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[1800px] w-full mx-auto bg-slate-50 overflow-hidden font-sans">
+        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-hidden font-sans">
             <div className="flex justify-between items-center mb-6 flex-shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -271,7 +272,10 @@ const MaterialTransactionsPage: React.FC = () => {
                             type="text"
                             value={startDate}
                             onChange={(e) => setStartDate(normalizeDateInput(e.target.value))}
+                            onBlur={(e) => setStartDate(normalizeDateInput(e.target.value))}
                             placeholder="YYYY-MM-DD"
+                            inputMode="numeric"
+                            autoComplete="off"
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                         />
                     </div>
@@ -281,7 +285,10 @@ const MaterialTransactionsPage: React.FC = () => {
                             type="text"
                             value={endDate}
                             onChange={(e) => setEndDate(normalizeDateInput(e.target.value))}
+                            onBlur={(e) => setEndDate(normalizeDateInput(e.target.value))}
                             placeholder="YYYY-MM-DD"
+                            inputMode="numeric"
+                            autoComplete="off"
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
                         />
                     </div>
@@ -347,26 +354,27 @@ const MaterialTransactionsPage: React.FC = () => {
 
             {/* Data Table */}
             <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                <div className="flex-1 overflow-auto min-h-[680px] max-h-[calc(100vh-290px)]">
-                    <table className="w-full text-sm">
+                <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
+                    <table className="w-full min-w-[1680px] text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
                                 <th className="p-4 text-left font-bold text-slate-600 w-32 sticky left-0 z-20 bg-slate-50">일자</th>
                                 <th className="p-4 text-center font-bold text-slate-600 w-24 sticky left-[128px] z-20 bg-slate-50">구분</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px] sticky left-[224px] z-20 bg-slate-50">현장</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px] sticky left-[404px] z-20 bg-slate-50">품명</th>
-                                <th className="p-4 text-left font-bold text-slate-600 w-24">규격</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px] sticky left-[224px] z-20 bg-slate-50">현장</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px] sticky left-[444px] z-20 bg-slate-50">품명</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px]">규격</th>
                                 <th className="p-4 text-right font-bold text-slate-600 w-24">수량</th>
                                 <th className="p-4 text-left font-bold text-slate-600 w-20">단위</th>
-                                <th className="p-4 text-left font-bold text-slate-600 w-32">차량번호</th>
-                                <th className="p-4 text-left font-bold text-slate-600 w-24">등록자</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[160px]">차량번호</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[120px]">등록자</th>
+                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
                                 <th className="p-4 text-center font-bold text-slate-600 w-24">관리</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={10} className="p-20 text-center text-slate-400">
+                                    <td colSpan={11} className="p-20 text-center text-slate-400">
                                         <div className="animate-spin inline-block w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full mb-4"></div>
                                         <p>데이터를 불러오는 중입니다...</p>
                                     </td>
@@ -387,7 +395,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                             </span>
                                         </td>
                                         <td className="p-4 font-medium text-slate-800 sticky left-[224px] z-10 bg-white">{t.siteName}</td>
-                                        <td className="p-4 font-medium text-slate-800 sticky left-[404px] z-10 bg-white">{t.itemName}</td>
+                                        <td className="p-4 font-medium text-slate-800 sticky left-[444px] z-10 bg-white">{t.itemName}</td>
                                         <td className="p-4 text-slate-500">{t.spec}</td>
                                         <td className={`p-4 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                             {t.quantity.toLocaleString()}
@@ -403,6 +411,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                             )}
                                         </td>
                                         <td className="p-4 text-slate-500 text-xs">{t.registeredByName}</td>
+                                        <td className="p-4 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
                                         <td className="p-4 text-center">
                                             <div className="flex justify-center gap-2">
                                                 <button
@@ -425,7 +434,7 @@ const MaterialTransactionsPage: React.FC = () => {
                                 ))
                             ) : (
                                 <tr>
-                                    <td colSpan={10} className="p-24 text-center text-slate-400">
+                                    <td colSpan={11} className="p-24 text-center text-slate-400">
                                         <div className="bg-slate-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
                                             <FontAwesomeIcon icon={faFilter} className="text-3xl text-slate-300" />
                                         </div>
@@ -473,7 +482,10 @@ const MaterialTransactionsPage: React.FC = () => {
                                             type="text"
                                             value={editForm.transactionDate}
                                             onChange={(e) => setEditForm(prev => ({ ...prev, transactionDate: normalizeDateInput(e.target.value) }))}
+                                            onBlur={(e) => setEditForm(prev => ({ ...prev, transactionDate: normalizeDateInput(e.target.value) }))}
                                             placeholder="YYYY-MM-DD"
+                                            inputMode="numeric"
+                                            autoComplete="off"
                                             className="w-full border border-slate-300 rounded-lg px-3 py-2"
                                         />
                                     </div>

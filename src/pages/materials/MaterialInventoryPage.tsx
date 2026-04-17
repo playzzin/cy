@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxes, faSearch, faExclamationTriangle, faCheckCircle, faPlus } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
@@ -82,6 +82,19 @@ const MaterialInventoryPage: React.FC = () => {
         return String(a.spec || '').localeCompare(String(b.spec || ''), 'ko', { numeric: true });
     });
 
+    const groupedInventoriesBySite = useMemo(() => {
+        const grouped = new Map<string, { key: string; label: string; rows: Inventory[] }>();
+        sortedInventories.forEach((inv) => {
+            const label = inv.siteName || '미지정 현장';
+            const key = `${inv.siteId || 'no-site'}::${label}`;
+            if (!grouped.has(key)) {
+                grouped.set(key, { key, label, rows: [] });
+            }
+            grouped.get(key)!.rows.push(inv);
+        });
+        return Array.from(grouped.values());
+    }, [sortedInventories]);
+
     const inventoryBySiteCount = sortedInventories.reduce((acc, inv) => {
         const key = inv.siteName || '미지정 현장';
         acc[key] = (acc[key] || 0) + 1;
@@ -92,15 +105,22 @@ const MaterialInventoryPage: React.FC = () => {
     const categories = Array.from(new Set(inventories.map(inv => inv.category)));
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[1800px] w-full mx-auto bg-slate-50 overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-hidden">
             <div className="flex justify-between items-center mb-6 flex-shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
                         <FontAwesomeIcon icon={faBoxes} className="text-green-600" />
                         재고 현황
                     </h1>
-                    <p className="text-slate-500 mt-1">전체 재고 현황을 확인합니다</p>
+                    <p className="text-slate-500 mt-1">현장별 재고를 1차 분류로 우선 확인합니다</p>
                 </div>
+                <button
+                    onClick={() => window.location.href = '/materials/inventory-by-site'}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 shadow-sm"
+                >
+                    <FontAwesomeIcon icon={faSearch} />
+                    현장별 재고 조회
+                </button>
             </div>
 
             {/* 통계 카드 */}
@@ -242,8 +262,8 @@ const MaterialInventoryPage: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <div className="flex-1 overflow-auto min-h-[680px] max-h-[calc(100vh-290px)]">
-                        <table className="w-full text-sm">
+                    <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
+                        <table className="w-full min-w-[1680px] text-sm">
                             <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                 <tr>
                                     <th className="p-3 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
@@ -258,37 +278,46 @@ const MaterialInventoryPage: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
-                                {sortedInventories.map(inv => (
-                                    <tr key={`${inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                        <td className="p-3 sticky left-0 z-10 bg-white font-semibold text-slate-800">{inv.siteName || '미지정 현장'}</td>
-                                        <td className="p-3 sticky left-[180px] z-10 bg-white">{inv.category}</td>
-                                        <td className="p-3 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
-                                        <td className="p-3 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
-                                        <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
-                                        <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
-                                        <td className="p-3 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
-                                        <td className="p-3 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
-                                        <td className="p-3 text-center">
-                                            {inv.status === 'sufficient' && (
-                                                <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">
-                                                    <FontAwesomeIcon icon={faCheckCircle} />
-                                                    충분
-                                                </span>
-                                            )}
-                                            {inv.status === 'warning' && (
-                                                <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-semibold">
-                                                    <FontAwesomeIcon icon={faExclamationTriangle} />
-                                                    주의
-                                                </span>
-                                            )}
-                                            {inv.status === 'shortage' && (
-                                                <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-semibold">
-                                                    <FontAwesomeIcon icon={faExclamationTriangle} />
-                                                    부족
-                                                </span>
-                                            )}
-                                        </td>
-                                    </tr>
+                                {groupedInventoriesBySite.map((group) => (
+                                    <React.Fragment key={group.key}>
+                                        <tr className="bg-sky-50 border-y border-sky-100">
+                                            <td colSpan={9} className="px-4 py-3 text-sm font-bold text-sky-800 sticky top-[49px] z-[5] bg-sky-50">
+                                                {group.label} · {group.rows.length}건
+                                            </td>
+                                        </tr>
+                                        {group.rows.map(inv => (
+                                            <tr key={`${inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
+                                                <td className="p-3 sticky left-0 z-10 bg-white font-semibold text-slate-800">{inv.siteName || '미지정 현장'}</td>
+                                                <td className="p-3 sticky left-[180px] z-10 bg-white">{inv.category}</td>
+                                                <td className="p-3 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                <td className="p-3 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
+                                                <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
+                                                <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
+                                                <td className="p-3 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
+                                                <td className="p-3 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
+                                                <td className="p-3 text-center">
+                                                    {inv.status === 'sufficient' && (
+                                                        <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">
+                                                            <FontAwesomeIcon icon={faCheckCircle} />
+                                                            충분
+                                                        </span>
+                                                    )}
+                                                    {inv.status === 'warning' && (
+                                                        <span className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-semibold">
+                                                            <FontAwesomeIcon icon={faExclamationTriangle} />
+                                                            주의
+                                                        </span>
+                                                    )}
+                                                    {inv.status === 'shortage' && (
+                                                        <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 px-2 py-1 rounded text-xs font-semibold">
+                                                            <FontAwesomeIcon icon={faExclamationTriangle} />
+                                                            부족
+                                                        </span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>

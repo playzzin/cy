@@ -239,9 +239,16 @@ const getDayNumber = (date: string): number => {
   return Number(match[3]) || 0;
 };
 
-const getDefaultClaimUnitPrice = (actualUnitPrice: number): number => {
-  if (!actualUnitPrice) return 0;
-  return actualUnitPrice + 15000;
+const DAILY_WAGE_DEDUCTION_AMOUNT = 15000;
+
+const getDefaultClaimUnitPrice = (unitPrice: number): number => {
+  if (!unitPrice) return 0;
+  return unitPrice;
+};
+
+const getActualUnitPrice = (claimUnitPrice: number): number => {
+  if (!claimUnitPrice) return 0;
+  return Math.max(0, claimUnitPrice - DAILY_WAGE_DEDUCTION_AMOUNT);
 };
 
 const getSalaryTypeLabel = (...values: Array<unknown>): string => {
@@ -592,13 +599,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
           const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
 
-          // 단가도 일보 행 단가를 우선 사용해 과거 월 데이터가 현재 인원마스터 단가에 끌려가지 않게 한다.
-          const actualUnitPrice = toNumber(row.unitPrice || 0);
+          // 청구단가는 일보 행 단가를 우선 사용해 과거 월 데이터가 현재 인원마스터 단가에 끌려가지 않게 한다.
           const profile = nextProfiles[workerId];
           const claimUnitPrice = toNumber(
-            profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(actualUnitPrice)
+            profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(toNumber(row.unitPrice || worker?.unitPrice || 0))
           );
-          const reportUnitPrice = actualUnitPrice;
+          const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
+          const reportUnitPrice = claimUnitPrice;
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
           const day = getDayNumber(date);
@@ -730,11 +737,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     return dailyWageWorkers.map((worker) => {
       const workerId = resolveWorkerStableId(worker);
       const workerEntries = entries.filter((entry) => entry.workerId === workerId);
-      const actualUnitPrice = toNumber(worker.unitPrice);
       const profile = profiles[workerId];
       const claimUnitPrice = toNumber(
-        profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(actualUnitPrice)
+        profile?.claimUnitPrice ?? workerEntries[0]?.claimUnitPrice ?? getDefaultClaimUnitPrice(toNumber(worker.unitPrice))
       );
+      const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
       const memo = displayText(profile?.memo || '');
       const teamName = displayText(worker.teamName || workerEntries[0]?.teamName || '미지정팀');
       const teamKey =
@@ -1256,7 +1263,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         <div>
           <div className="text-sm font-black text-[#4A452A]">인원DB</div>
           <div className="text-xs text-slate-500">
-            청구단가 기본값은 일당 + 15,000원이며 비고를 인원별로 조정합니다.
+            청구단가는 단가값을 그대로 사용하고, 일당은 청구단가에서 15,000원을 차감해 계산합니다.
           </div>
         </div>
         <button
@@ -1629,6 +1636,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                 const recruiterFee = recruiterFeeDraft === undefined
                   ? row.recruiterFee
                   : parseMoneyInput(recruiterFeeDraft);
+                const totalInvoiceAmount = row.selectedAmount + recruiterFee;
 
                 return (
                   <tr key={row.workerId || row.workerName} className="odd:bg-white even:bg-[#faf8ef]">
@@ -1657,7 +1665,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                       />
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
-                      {formatCurrency(row.selectedAmount)}
+                      {formatCurrency(totalInvoiceAmount)}
                     </td>
                   </tr>
                 );
@@ -1689,7 +1697,14 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   )}
                 </td>
                 <td className="border border-[#d5ccb0] px-3 py-2 text-right font-black">
-                  {formatCurrency(statementRows.reduce((sum, row) => sum + row.selectedAmount, 0))}
+                  {formatCurrency(statementRows.reduce((sum, row) => {
+                    const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
+                    const recruiterFeeDraft = statementRecruiterFeeDrafts[storageKey];
+                    const recruiterFee = recruiterFeeDraft === undefined
+                      ? row.recruiterFee
+                      : parseMoneyInput(recruiterFeeDraft);
+                    return sum + row.selectedAmount + recruiterFee;
+                  }, 0))}
                 </td>
               </tr>
             )}

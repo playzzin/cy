@@ -178,6 +178,11 @@ const MaterialInboundPage: React.FC = () => {
             ]);
             setSites(sitesData.filter((s: any) => s.status === 'active'));
             setMaterials(materialsData);
+            setQuantities((prev) => {
+                const validIds = new Set(materialsData.map((m) => m.id));
+                const nextEntries = Object.entries(prev).filter(([id]) => validIds.has(id));
+                return Object.fromEntries(nextEntries);
+            });
         } catch (error) {
             console.error('Failed to load data:', error);
             alert('데이터를 불러오지 못했습니다.');

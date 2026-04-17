@@ -266,7 +266,125 @@ const TEMPLATE_SAMPLE_ROWS: Record<TemplateSheetType, Array<Record<string, strin
     ]
 };
 
-const TEMPLATE_SAMPLE_LIMIT = 4;
+const TEMPLATE_SAMPLE_LIMIT = 6;
+
+const OPERATION_FLOW_ROWS: Array<Record<string, string>> = [
+    {
+        단계: '1. 기준 데이터 준비',
+        작업: 'Company/Site/Team/Worker 시트 작성',
+        핵심포인트: '현장명, 회사명, 팀명은 오탈자 없이 고정 키로 관리',
+        검증위치: '/mass-upload/integrated'
+    },
+    {
+        단계: '2. 기준 데이터 업로드',
+        작업: '통합 업로더에서 미리보기 후 CREATE/UPDATE 확인',
+        핵심포인트: 'Site 시트의 발주사/시공사/협력사, 해당팀 매핑 확인',
+        검증위치: '/database/manpower-db'
+    },
+    {
+        단계: '3. 운영 일보 업로드',
+        작업: 'DailyReport 시트 또는 일보 전용 업로더로 증분 반영',
+        핵심포인트: '날짜+현장명+팀명 그룹 기준으로 merge/overwrite 정책 적용',
+        검증위치: '/reports/daily?tab=list-v2'
+    },
+    {
+        단계: '4. 사후 검증',
+        작업: '필터로 데이터 누락/중복/오입력 점검',
+        핵심포인트: '현장구분/결제구분/해당팀/소속팀 필터 교차 검증',
+        검증위치: '/reports/daily?tab=list-v2'
+    }
+];
+
+const UPLOAD_CHECKLIST_ROWS: Array<Record<string, string>> = [
+    {
+        구분: '업로드 전',
+        체크항목: '회사명 정규화(띄어쓰기/특수문자/법인표기)',
+        성공기준: '같은 회사가 서로 다른 이름으로 중복되지 않음',
+        비고: '예: (주)청연ENG / 청연ENG 통일'
+    },
+    {
+        구분: '업로드 전',
+        체크항목: '현장구분/결제구분 값 검증',
+        성공기준: '현장구분=도급/직영/지원, 결제구분=계산서/노무만 사용',
+        비고: '미허용 값은 INVALID 처리'
+    },
+    {
+        구분: '업로드 중',
+        체크항목: '미리보기 상태 확인',
+        성공기준: 'CONFLICT/INVALID는 0건 또는 사유 확인 후 진행',
+        비고: '충돌 건은 행별 원인 확인'
+    },
+    {
+        구분: '업로드 후',
+        체크항목: '통합DB 현장목록 검증',
+        성공기준: '발주사/시공사/협력사/해당팀/현장구분/결제구분 정상 반영',
+        비고: '/database/manpower-db'
+    },
+    {
+        구분: '업로드 후',
+        체크항목: '일보 목록 v2 검증',
+        성공기준: '날짜/현장/해당팀/소속팀 필터에서 누락 없이 조회',
+        비고: '/reports/daily?tab=list-v2'
+    },
+    {
+        구분: '업로드 후',
+        체크항목: '재처리 판단',
+        성공기준: '오류 행만 수정 후 재업로드, 전체 재업로드는 최소화',
+        비고: 'overwrite는 정정 배치에서만 사용 권장'
+    }
+];
+
+const ERROR_CODE_ROWS: Array<Record<string, string>> = [
+    {
+        코드: 'E-REQUIRED',
+        유형: '필수값 누락',
+        설명: '필수 컬럼(예: 날짜/현장명/팀명/이름)이 비어 있음',
+        원인: '원본 파일 누락 또는 헤더 오타',
+        조치: '가이드 시트 컬럼명에 맞춰 값 보완 후 재업로드'
+    },
+    {
+        코드: 'E-REF-SITE',
+        유형: '참조 누락(현장)',
+        설명: '일보 행의 현장명이 DB/현장시트에 없음',
+        원인: '현장 선등록 누락 또는 현장명 불일치',
+        조치: '현장 시트 먼저 반영하거나 자동생성 허용 후 재시도'
+    },
+    {
+        코드: 'E-REF-TEAM',
+        유형: '참조 누락(팀)',
+        설명: '일보 행의 팀명이 DB/팀시트에 없음',
+        원인: '팀 선등록 누락/오탈자',
+        조치: '팀 시트 반영 후 재업로드'
+    },
+    {
+        코드: 'E-REF-WORKER',
+        유형: '참조 누락(작업자)',
+        설명: '일보 행의 작업자가 DB/작업자시트에 없음',
+        원인: '작업자 선등록 누락/이름 불일치',
+        조치: '작업자 시트 반영 또는 자동생성 정책에 따라 처리'
+    },
+    {
+        코드: 'E-VALUE-SITETYPE',
+        유형: '값 형식 오류',
+        설명: '현장구분 허용값 외 입력',
+        원인: '도급/직영/지원 외 임의값 사용',
+        조치: '허용값으로 정규화'
+    },
+    {
+        코드: 'E-VALUE-PAYMENT',
+        유형: '값 형식 오류',
+        설명: '결제구분 허용값 외 입력',
+        원인: '계산서/노무 외 임의값 사용',
+        조치: '허용값으로 정규화'
+    },
+    {
+        코드: 'E-CONFLICT',
+        유형: '충돌',
+        설명: '기존 데이터와 매핑 충돌로 자동 판단 불가',
+        원인: '동일 키에 상이한 참조값 존재',
+        조치: '충돌행 수동 정리 후 merge 또는 overwrite 선택'
+    }
+];
 
 const buildTemplateSampleRowsFromDb = async (): Promise<Partial<Record<TemplateSheetType, Array<Record<string, string>>>>> => {
     const [companiesRes, teamsRes, sitesRes, workersRes, reportsRes] = await Promise.allSettled([
@@ -398,6 +516,21 @@ const downloadIntegratedTemplateExcel = async (): Promise<void> => {
     const guideWs = XLSX.utils.json_to_sheet(guideRows, { header: guideHeader });
     guideWs['!cols'] = buildSheetColumnWidths(guideHeader);
     XLSX.utils.book_append_sheet(wb, guideWs, '가이드');
+
+    const flowHeader = ['단계', '작업', '핵심포인트', '검증위치'];
+    const flowWs = XLSX.utils.json_to_sheet(OPERATION_FLOW_ROWS, { header: flowHeader });
+    flowWs['!cols'] = buildSheetColumnWidths(flowHeader);
+    XLSX.utils.book_append_sheet(wb, flowWs, '운영플로우');
+
+    const checklistHeader = ['구분', '체크항목', '성공기준', '비고'];
+    const checklistWs = XLSX.utils.json_to_sheet(UPLOAD_CHECKLIST_ROWS, { header: checklistHeader });
+    checklistWs['!cols'] = buildSheetColumnWidths(checklistHeader);
+    XLSX.utils.book_append_sheet(wb, checklistWs, '체크리스트');
+
+    const errorHeader = ['코드', '유형', '설명', '원인', '조치'];
+    const errorWs = XLSX.utils.json_to_sheet(ERROR_CODE_ROWS, { header: errorHeader });
+    errorWs['!cols'] = buildSheetColumnWidths(errorHeader);
+    XLSX.utils.book_append_sheet(wb, errorWs, '오류코드');
 
     const buildSampleRowsForFields = (fields: TemplateField[], count = TEMPLATE_SAMPLE_LIMIT): Array<Record<string, string>> => {
         const rows: Array<Record<string, string>> = [];

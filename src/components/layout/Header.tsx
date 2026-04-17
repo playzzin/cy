@@ -91,13 +91,15 @@ const Header: React.FC<HeaderProps> = ({
     };
 
     const handleTopNavMouseLeave = (event: React.MouseEvent<HTMLElement>) => {
-        const nextTarget = event.relatedTarget as HTMLElement | null;
-        if (
-            nextTarget &&
-            (nextTarget.closest('.cheongyeon-top-nav') || nextTarget.closest('.cheongyeon-top-nav-dropdown'))
-        ) {
-            clearTopNavCloseTimer();
-            return;
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Element) {
+            if (
+                nextTarget.closest('.cheongyeon-top-nav') ||
+                nextTarget.closest('.cheongyeon-top-nav-dropdown')
+            ) {
+                clearTopNavCloseTimer();
+                return;
+            }
         }
         scheduleTopNavClose();
     };
