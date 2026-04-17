@@ -72,6 +72,7 @@ type WorkbookEntry = {
   claimUnitPrice: number;
   claimAmount: number;
   reportUnitPrice: number;
+  workerAmount: number;
   recruiterFee: number;
   note: string;
 };
@@ -599,13 +600,13 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
           const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
 
-          // 청구단가는 일보 행 단가를 우선 사용해 과거 월 데이터가 현재 인원마스터 단가에 끌려가지 않게 한다.
+          // 청구단가는 조회 기간의 출력일보 단가를 기준으로 사용한다.
           const profile = nextProfiles[workerId];
           const claimUnitPrice = toNumber(
-            profile?.claimUnitPrice ?? getDefaultClaimUnitPrice(toNumber(row.unitPrice || worker?.unitPrice || 0))
+            getDefaultClaimUnitPrice(toNumber(row.unitPrice || worker?.unitPrice || 0))
           );
           const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
-          const reportUnitPrice = claimUnitPrice;
+          const reportUnitPrice = toNumber(row.unitPrice || worker?.unitPrice || 0);
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
           const day = getDayNumber(date);
@@ -642,8 +643,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             actualAmount: manDay * actualUnitPrice,
             deductionAmount: 0,
             claimUnitPrice,
-            claimAmount: manDay * claimUnitPrice,
+            claimAmount: manDay * reportUnitPrice,
             reportUnitPrice,
+            workerAmount: toNumber((row as any)?.amount ?? manDay * reportUnitPrice),
             recruiterFee: 0,
             note,
           } satisfies WorkbookEntry;
@@ -738,8 +740,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       const workerId = resolveWorkerStableId(worker);
       const workerEntries = entries.filter((entry) => entry.workerId === workerId);
       const profile = profiles[workerId];
+      const latestWorkerEntry = workerEntries[workerEntries.length - 1];
       const claimUnitPrice = toNumber(
-        profile?.claimUnitPrice ?? workerEntries[0]?.claimUnitPrice ?? getDefaultClaimUnitPrice(toNumber(worker.unitPrice))
+        getDefaultClaimUnitPrice(
+          toNumber(latestWorkerEntry?.claimUnitPrice || latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0)
+        )
       );
       const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
       const memo = displayText(profile?.memo || '');
@@ -763,7 +768,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       const claimTotal = workerEntries.reduce((sum, entry) => {
         const draftValue = manDayDrafts[entry.key];
         const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-        return sum + nextManDay * entry.claimUnitPrice;
+        return sum + nextManDay * entry.reportUnitPrice;
       }, 0);
 
       return {
@@ -803,7 +808,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         memo: row.memo || '',
       };
     });
-    setProfileDrafts((prev) => ({ ...nextDrafts, ...prev }));
+    setProfileDrafts(nextDrafts);
   }, [allWorkerMasterRows]);
 
   const filteredEntries = useMemo(() => {
@@ -829,7 +834,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     const totalClaimAmount = filteredEntries.reduce((sum, entry) => {
       const draftValue = manDayDrafts[entry.key];
       const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-      return sum + nextManDay * entry.claimUnitPrice;
+      return sum + nextManDay * entry.reportUnitPrice;
     }, 0);
     const workerCount = new Set(filteredEntries.map((entry) => entry.workerId)).size;
     const teamCount = new Set(filteredEntries.map((entry) => entry.teamKey)).size;
@@ -1046,12 +1051,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     return allWorkerMasterRows
       .filter((row) => {
         const draft = profileDrafts[row.workerId] || buildEmptyDraft();
-        const baselineClaim = row.claimUnitPrice ? String(row.claimUnitPrice) : '';
         const baselineMemo = row.memo || '';
-        return (
-          String(draft.claimUnitPrice ?? '') !== baselineClaim ||
-          String(draft.memo ?? '') !== baselineMemo
-        );
+        return String(draft.memo ?? '') !== baselineMemo;
       })
       .map((row) => row.workerId);
   }, [allWorkerMasterRows, profileDrafts]);
@@ -1142,7 +1143,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const draft = profileDrafts[row.workerId] || buildEmptyDraft();
           return {
             workerId: row.workerId,
-            claimUnitPrice: parseMoneyInput(draft.claimUnitPrice),
             memo: String(draft.memo || '').trim(),
           };
         })
@@ -1221,7 +1221,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   const draftValue = manDayDrafts[entry.key];
                   const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
                   const actualAmount = nextManDay * entry.actualUnitPrice;
-                  const claimAmount = nextManDay * entry.claimUnitPrice;
+                  const claimAmount = nextManDay * entry.reportUnitPrice;
 
                   return (
                     <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
@@ -1263,7 +1263,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         <div>
           <div className="text-sm font-black text-[#4A452A]">인원DB</div>
           <div className="text-xs text-slate-500">
-            청구단가는 단가값을 그대로 사용하고, 일당은 청구단가에서 15,000원을 차감해 계산합니다.
+            청구단가는 인원DB에 저장된 DB 청구단가를 사용하고, 일당은 청구단가에서 15,000원을 차감해 계산합니다. 청구금액은 일보 작업자금액 기준으로 계산합니다.
           </div>
         </div>
         <button
@@ -1339,10 +1339,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                       <input
                         type="text"
                         value={draft.claimUnitPrice}
-                        onChange={(event) =>
-                          handleProfileDraftChange(row.workerId, 'claimUnitPrice', event.target.value)
-                        }
-                        className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
+                        readOnly
+                        className="w-full cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2 py-1 text-right text-slate-600 outline-none"
                       />
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-center">
@@ -1748,7 +1746,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     (sum, entry) => {
                       const draftValue = manDayDrafts[entry.key];
                       const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                      return sum + nextManDay * entry.actualUnitPrice;
+                      return sum + nextManDay * getActualUnitPrice(entry.claimUnitPrice);
                     },
                     0
                   )
@@ -1762,7 +1760,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   selectedDateEntries.reduce((sum, entry) => {
                     const draftValue = manDayDrafts[entry.key];
                     const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                    return sum + nextManDay * entry.claimUnitPrice;
+                    return sum + nextManDay * entry.reportUnitPrice;
                   }, 0)
                 )}
               </div>
@@ -1800,8 +1798,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   selectedDateEntries.map((entry) => {
                     const draftValue = manDayDrafts[entry.key];
                     const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-                    const actualAmount = nextManDay * entry.actualUnitPrice;
-                    const claimAmount = nextManDay * entry.claimUnitPrice;
+                    const actualAmount = nextManDay * getActualUnitPrice(entry.claimUnitPrice);
+                    const claimAmount = nextManDay * entry.reportUnitPrice;
                     return (
                       <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
                         <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
@@ -2217,7 +2215,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
             <div className="flex items-end">
               <div className="rounded-lg border border-[#d7cfb5] px-4 py-3 text-sm text-slate-600">
-                실지급금은 일당 기준, 노무청구금은 청구단가 기준으로 계산합니다.
+                실지급금은 일당 기준, 노무청구금은 일보 작업자금액(작업자 단가) 기준으로 계산합니다.
               </div>
             </div>
 
