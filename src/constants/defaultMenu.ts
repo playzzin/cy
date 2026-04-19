@@ -159,6 +159,18 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         ]
     },
     // === 직책별 메뉴 (Position Mode) ===
+    nation: {
+        name: "전국시스템인력",
+        icon: "fa-globe",
+        order: 3,
+        menu: [
+            { text: "전국시스템인력 홈", icon: "fa-globe", path: "/dashboard3" },
+            { text: "전국 운영망", icon: "fa-map-location-dot", path: "/jeonkuk/nationwide-partners" },
+            { text: "통합 현황판", icon: "fa-chart-line", path: "/jeonkuk/integrated-status" },
+            { text: "상태 관리", icon: "fa-wave-square", path: "/jeonkuk/status-management" },
+            { text: "인원 전체내역조회", icon: "fa-users", path: "/jeonkuk/total-history" }
+        ]
+    },
     pos_ceo: {
         name: "대표",
         icon: "fa-crown",

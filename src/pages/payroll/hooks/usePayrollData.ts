@@ -542,7 +542,7 @@ export const usePayrollData = (
         workerId: string;
         companyId: string;
         companyName: string;
-        salaryModel: '월급제' | '일급제';
+        salaryModel: '월급제' | '일급제' | '용역팀';
         manDay: number;
         teamId: string;
         teamName: string;
@@ -623,7 +623,8 @@ export const usePayrollData = (
           const salaryModel = (rw.salaryModel || rw.payType || w.salaryModel || '').trim();
           const isMonthly = salaryModel === '월급제';
           const isDaily = salaryModel === '일급제';
-          if (!isMonthly && !isDaily) return;
+          const isService = salaryModel === '용역팀';
+          if (!isMonthly && !isDaily && !isService) return;
 
           const workerTeamId = resolveTeamCanonicalId(w.teamId);
           const resolvedTeamId = reportTeamId || workerTeamId || '';
@@ -657,10 +658,11 @@ export const usePayrollData = (
             paymentMethod: reportSite?.paymentMethod || '-'
           };
 
-          const paymentKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
-          mergeAggregate(workerAggregates, paymentKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
-          const ledgerKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${isDaily ? '일급제' : '월급제'}`;
-          mergeAggregate(ledgerWorkerAggregates, ledgerKey, { ...baseParams, salaryModel: isDaily ? '일급제' : '월급제' });
+          const resolvedModel = isDaily ? '일급제' : isService ? '용역팀' : '월급제';
+          const paymentKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${resolvedModel}`;
+          mergeAggregate(workerAggregates, paymentKey, { ...baseParams, salaryModel: resolvedModel });
+          const ledgerKey = `${reportYM}__${baseParams.workerId}__${safeTeamKey}__${resolvedModel}`;
+          mergeAggregate(ledgerWorkerAggregates, ledgerKey, { ...baseParams, salaryModel: resolvedModel });
         });
       });
 

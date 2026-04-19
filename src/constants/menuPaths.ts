@@ -5,6 +5,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ud1b5\ud569 \ud604\ud669\ud310": "/jeonkuk/integrated-status",
     "\uc804\uad6d\ud398\uc774\uc9c0": "/jeonkuk/nationwide-partners",
     "\uc804\uad6d \ud398\uc774\uc9c0": "/jeonkuk/nationwide-partners",
+    "\uc804\uad6d\uc2dc\uc2a4\ud15c\uc778\ub825": "/dashboard3",
+    "\uc804\uad6d\uc2dc\uc2a4\ud15c\uc778\ub825 \ud648": "/dashboard3",
     "\ud604\ud669 \uadf8\ub798\ud504": "/jeonkuk/status-graph",
     "\ud1b5\ud569 \uc9c0\uc6d0 \ud604\ud669\ud310": "/jeonkuk/integrated-support-status",
     "\uc778\uc6d0\uc804\uccb4\ub0b4\uc5ed\uc870\ud68c": "/jeonkuk/total-history",

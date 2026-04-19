@@ -150,8 +150,10 @@ const Header: React.FC<HeaderProps> = ({
         }
     };
 
-    const isCheongyeon = currentSite === 'test';
-    const headerStyle = isCheongyeon
+    // `test` and `nation` share the SITE-style top navigation shell.
+    const isSiteLayerMode = currentSite === 'test' || currentSite === 'nation';
+    const siteLandingPath = currentSite === 'nation' ? '/dashboard3' : '/dashboard2';
+    const headerStyle = isSiteLayerMode
         ? isDarkMode
             ? { backgroundColor: '#0f172a', color: '#e2e8f0', borderBottom: '1px solid #1e293b' }
             : { backgroundColor: '#ffffff', color: '#1e293b', borderBottom: '1px solid #e2e8f0' }
@@ -232,17 +234,17 @@ const Header: React.FC<HeaderProps> = ({
     };
 
     return (
-        <header id="main-header" style={headerStyle} className={isCheongyeon ? 'cheongyeon-header' : ''}>
+        <header id="main-header" style={headerStyle} className={isSiteLayerMode ? 'cheongyeon-header' : ''}>
             <div className="header-left-group">
                 <button className="header-btn" id="sidebar-toggle" onClick={toggleSidebar} aria-label="메뉴 토글">
                     <FontAwesomeIcon icon={faBars} />
                 </button>
 
-                {isCheongyeon && (
+                {isSiteLayerMode && (
                     <button
                         type="button"
                         className="cheongyeon-header-logo"
-                        onClick={() => navigate('/dashboard2')}
+                        onClick={() => navigate(siteLandingPath)}
                         aria-label="청연 메인으로 이동"
                     >
                         {logoUrl ? (
@@ -274,7 +276,7 @@ const Header: React.FC<HeaderProps> = ({
                 </div>
             </div>
 
-            {isCheongyeon && (
+            {isSiteLayerMode && (
                 <nav
                     className="cheongyeon-top-nav"
                     onMouseEnter={clearTopNavCloseTimer}
@@ -320,7 +322,7 @@ const Header: React.FC<HeaderProps> = ({
             )}
 
             <div className="header-right-group">
-                {isCheongyeon && toggleDarkMode && (
+                {isSiteLayerMode && toggleDarkMode && (
                     <button
                         className="header-btn cheongyeon-theme-toggle"
                         onClick={toggleDarkMode}

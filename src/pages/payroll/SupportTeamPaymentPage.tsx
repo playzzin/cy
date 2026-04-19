@@ -1,4 +1,4 @@
-import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
@@ -16,8 +16,7 @@ import { saveAs } from 'file-saver';
 import {
     generateLaborStatementExcel,
     MAX_DAY_COLUMNS,
-    DAY_LABELS_FIRST,
-    DAY_LABELS_SECOND
+    DAY_LABELS_FIRST
 } from '../../utils/excel/SupportPaymentExcelGenerator';
 import { Team, teamService } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
@@ -28,6 +27,7 @@ import { BANK_CODES } from './team-payment/types';
 import html2canvas from 'html2canvas';
 
 interface SupportLaborExcelRow {
+    aggregateId: string;
     workerId: string;
     workerName: string;
     idNumber: string;
@@ -57,6 +57,7 @@ interface CompanyExcelSheet {
 interface SupportWorkerBreakdown {
     date: string;
     reportId?: string;
+    direction: SupportDirection;
     workerId: string;
     workerName: string;
     role?: string;
@@ -67,12 +68,23 @@ interface SupportWorkerBreakdown {
     siteName?: string;
     teamId?: string;
     teamName?: string;
+    sourceTeamName?: string;
+    targetTeamName?: string;
+    sourceCompanyName?: string;
+    targetCompanyName?: string;
+    counterpartyName?: string;
+    evidenceNote?: string;
 }
 
-// Renamed from SupportTeamRow to SupportSiteRow
+type SupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
+
 interface SupportSiteRow {
     siteId: string;
     siteName: string;
+    direction: SupportDirection;
+    sourceTeamName: string;
+    counterpartyName: string;
+    evidenceNote: string;
     totalManDay: number;
     totalAmount: number;
     unitPriceSamples: number[];
@@ -81,8 +93,14 @@ interface SupportSiteRow {
 }
 
 interface SupportCompanyAggregate {
+    aggregateId: string;
+    direction: SupportDirection;
     companyId: string;
     companyName: string;
+    sourceTeamId: string;
+    sourceTeamName: string;
+    counterpartyName: string;
+    evidenceNote: string;
     bankName: string;
     bankCode: string;
     accountNumber: string;
@@ -106,7 +124,7 @@ interface KBTransferRow {
     description: string;
 }
 
-type DetailTarget = SupportSiteRow | null;
+type DetailTarget = { aggregate: SupportCompanyAggregate; site: SupportSiteRow } | null;
 
 interface SitePreviewBlock {
     aggregate: SupportCompanyAggregate;
@@ -114,9 +132,38 @@ interface SitePreviewBlock {
     rows: SupportLaborExcelRow[];
 }
 
+interface SupportExchangeSummaryRow {
+    aggregateId: string;
+    direction: SupportDirection;
+    sourceTeamName: string;
+    counterpartyName: string;
+    supportOutTeamName: string;
+    supportInTeamName: string;
+    siteResponsibleTeamName: string;
+    companyName: string;
+    bankName: string;
+    accountNumber: string;
+    accountHolder: string;
+    siteId: string;
+    siteName: string;
+    workerCount: number;
+    totalManDay: number;
+    totalAmount: number;
+    evidenceNote: string;
+}
+
 const normalize = (value: string | undefined | null): string => (value ?? '').replace(/\s+/g, '').trim();
 const normalizeName = (value: string | undefined | null): string =>
     (value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
+const normalizeSalaryModel = (value: unknown): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    if (raw.includes('지원')) return '지원팀';
+    if (raw.includes('월급')) return '월급제';
+    if (raw.includes('일급')) return '일급제';
+    if (raw.includes('용역')) return '용역팀';
+    return raw;
+};
 
 const formatNumber = (value: number) => new Intl.NumberFormat('ko-KR').format(value);
 const formatDayValue = (value: number): string => {
@@ -124,8 +171,6 @@ const formatDayValue = (value: number): string => {
     const fixed = Number(value.toFixed(1));
     return fixed % 1 === 0 ? fixed.toFixed(0) : fixed.toFixed(1);
 };
-
-const formatDayLabel = (value: number): string => value.toString().padStart(2, '0');
 
 const getMonthRange = (yearMonth: string): { start: string; end: string } => {
     const [yearStr, monthStr] = yearMonth.split('-');
@@ -146,17 +191,6 @@ const getMonthRange = (yearMonth: string): { start: string; end: string } => {
     return { start: toISO(startDate), end: toISO(endDate) };
 };
 
-const buildPeriodLabel = (yearMonth: string): string => {
-    if (!yearMonth) return '';
-    const { start, end } = getMonthRange(yearMonth);
-    const format = (value: string) => {
-        const [y, m, d] = value.split('-');
-        const shortYear = y ? y.slice(-2) : '';
-        return `${shortYear}.${m}.${d}`;
-    };
-    return `${format(start)}~${format(end)}`;
-};
-
 const maskIdNumber = (value: string): string => {
     if (!value) return '';
     const digits = value.replace(/[^0-9]/g, '');
@@ -170,6 +204,9 @@ const SupportTeamPaymentPage: React.FC = () => {
 
     const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth);
     const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
+    const [selectedDirection, setSelectedDirection] = useState<'all' | '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳'>('all');
+    const [selectedSourceTeamId, setSelectedSourceTeamId] = useState<string>('');
+    const [selectedSiteId, setSelectedSiteId] = useState<string>('');
     const [aggregates, setAggregates] = useState<SupportCompanyAggregate[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [companies, setCompanies] = useState<Company[]>([]);
@@ -241,14 +278,65 @@ const SupportTeamPaymentPage: React.FC = () => {
                     teamById.set(team.id, team);
                 }
             });
+            const teamByName = new Map<string, Team>();
+            teams.forEach((team) => {
+                const key = normalizeName(team.name);
+                if (key && !teamByName.has(key)) {
+                    teamByName.set(key, team);
+                }
+            });
+
+            const companyById = new Map<string, Company>();
+            companies.forEach((company) => {
+                if (company.id) {
+                    companyById.set(company.id, company);
+                }
+            });
+
+            const siteById = new Map<string, Site>();
+            sites.forEach((site) => {
+                if (site.id) {
+                    siteById.set(site.id, site);
+                }
+            });
+
+            const cheongyeonNameKeys = [normalizeName('청연이엔지'), normalizeName('청연')].filter(Boolean);
+            const isCheongyeonCompany = (companyId?: string, companyName?: string): boolean => {
+                const isCheongyeonName = (name?: string): boolean => {
+                    const normalized = normalizeName(name);
+                    if (!normalized) return false;
+                    return cheongyeonNameKeys.some((key) =>
+                        normalized.includes(key) || (normalized.length >= 2 && key.includes(normalized))
+                    );
+                };
+
+                const normalizedCompanyId = normalize(companyId);
+                if (normalizedCompanyId) {
+                    const company = companyById.get(normalizedCompanyId);
+                    if (company) {
+                        if (company.isMyCompany) return true;
+                        if (isCheongyeonName(company.name)) return true;
+                    }
+                }
+                return isCheongyeonName(companyName);
+            };
 
             const aggregateMap = new Map<string, SupportCompanyAggregate>();
             const errorMessages: string[] = [];
 
-            const ensureAggregate = (companyId: string, companyName: string) => {
-                const key = companyId || `__${normalizeName(companyName) || 'unknown'}`;
+            const ensureAggregate = (params: {
+                aggregateId: string;
+                direction: SupportDirection;
+                companyId: string;
+                companyName: string;
+                sourceTeamId: string;
+                sourceTeamName: string;
+                counterpartyName: string;
+                evidenceNote: string;
+            }) => {
+                const key = params.aggregateId;
                 if (!aggregateMap.has(key)) {
-                    const bankInfo = getCompanyBankInfo(companyId, companyName);
+                    const bankInfo = getCompanyBankInfo(params.companyId, params.companyName);
                     const trimmedBankName = bankInfo.bankName.trim();
                     const bankCode = trimmedBankName ? BANK_CODES[trimmedBankName] ?? '' : '';
                     const fieldErrors: SupportCompanyAggregate['errors'] = {};
@@ -258,19 +346,25 @@ const SupportTeamPaymentPage: React.FC = () => {
                     if (!bankInfo.accountHolder) fieldErrors.accountHolder = true;
 
                     if (Object.values(fieldErrors).some(Boolean)) {
-                        errorMessages.push(`${companyName || '협력사 미지정'}의 계좌 정보를 확인해주세요.`);
+                        errorMessages.push(`${params.companyName || '청구 대상 미지정'}의 계좌 정보를 확인해주세요.`);
                     }
 
                     aggregateMap.set(key, {
-                        companyId,
-                        companyName: companyName || '협력사 미지정',
+                        aggregateId: params.aggregateId,
+                        direction: params.direction,
+                        companyId: params.companyId,
+                        companyName: params.companyName || '청구 대상 미지정',
+                        sourceTeamId: params.sourceTeamId,
+                        sourceTeamName: params.sourceTeamName || '팀 미지정',
+                        counterpartyName: params.counterpartyName || '상대 미지정',
+                        evidenceNote: params.evidenceNote,
                         bankName: trimmedBankName,
                         bankCode,
                         accountNumber: bankInfo.accountNumber,
                         accountHolder: bankInfo.accountHolder,
                         totalManDay: 0,
                         totalAmount: 0,
-                        sites: [], // Changed from teams to sites
+                        sites: [],
                         errors: fieldErrors
                     });
                 }
@@ -280,22 +374,124 @@ const SupportTeamPaymentPage: React.FC = () => {
             reports.forEach((report) => {
                 const reportId = report.id ?? '';
                 const reportDate = report.date ?? '';
+                const reportSite = report.siteId ? siteById.get(report.siteId) : undefined;
+
+                const siteConstructorCompanyId =
+                    reportSite?.constructorCompanyId ??
+                    reportSite?.companyId ??
+                    report.companyId ??
+                    '';
+                const siteConstructorCompanyName =
+                    reportSite?.constructorCompanyName ??
+                    reportSite?.companyName ??
+                    report.companyName ??
+                    '';
+                const siteClassification: '청연' | '외부' =
+                    isCheongyeonCompany(siteConstructorCompanyId, siteConstructorCompanyName) ? '청연' : '외부';
+
                 report.workers.forEach((reportWorker: DailyReportWorker) => {
-                    const normalizedSalary = normalize(reportWorker.salaryModel ?? reportWorker.payType);
+                    const normalizedSalary = normalizeSalaryModel(reportWorker.salaryModel ?? reportWorker.payType);
                     const isSupportModel = normalizedSalary === '지원팀';
                     const workerTeamId = (reportWorker.teamId ?? report.teamId ?? '').trim();
-                    const resolvedTeam = workerTeamId ? teamById.get(workerTeamId) : undefined;
+                    const fallbackSourceTeam = teamByName.get(normalizeName(reportWorker.workerTeamName));
+                    const resolvedTeam = (workerTeamId ? teamById.get(workerTeamId) : undefined) ?? fallbackSourceTeam;
                     const isSupportTeam = normalize(resolvedTeam?.type) === '지원팀';
-                    if (!isSupportModel && !isSupportTeam) return;
 
                     const workerCompanyId = (resolvedTeam?.companyId ?? report.companyId ?? '').trim();
                     const fallbackCompanyName =
                         resolvedTeam?.companyName ??
                         report.companyName ??
-                        (workerCompanyId ? companies.find((company) => company.id === workerCompanyId)?.name : '') ??
+                        (workerCompanyId ? companyById.get(workerCompanyId)?.name : '') ??
                         '';
-                    const companyDisplayName = fallbackCompanyName || resolvedTeam?.name || report.teamName || '지원팀';
-                    const aggregate = ensureAggregate(workerCompanyId, companyDisplayName);
+                    const workerIsCheongyeon = isCheongyeonCompany(workerCompanyId, fallbackCompanyName);
+
+                    const sourceTeamId = (resolvedTeam?.id ?? workerTeamId ?? '').trim();
+                    const sourceTeamName = resolvedTeam?.name ?? reportWorker.workerTeamName ?? report.teamName ?? '팀 미지정';
+
+                    const targetTeamNameRaw = report.responsibleTeamName ?? reportSite?.responsibleTeamName ?? report.teamName ?? '';
+                    const targetTeamIdRaw = (report.responsibleTeamId ?? reportSite?.responsibleTeamId ?? report.teamId ?? '').trim();
+                    const fallbackTargetTeamByName = teamByName.get(normalizeName(targetTeamNameRaw));
+                    const resolvedTargetTeam = (targetTeamIdRaw ? teamById.get(targetTeamIdRaw) : undefined) ?? fallbackTargetTeamByName;
+                    const targetTeamId = (resolvedTargetTeam?.id ?? targetTeamIdRaw).trim();
+                    const targetTeamName =
+                        resolvedTargetTeam?.name ??
+                        report.responsibleTeamName ??
+                        reportSite?.responsibleTeamName ??
+                        report.teamName ??
+                        '팀 미지정';
+                    const targetCompanyId =
+                        (resolvedTargetTeam?.companyId ?? siteConstructorCompanyId ?? report.companyId ?? '').trim();
+                    const targetCompanyName =
+                        resolvedTargetTeam?.companyName ??
+                        siteConstructorCompanyName ??
+                        report.companyName ??
+                        '';
+                    const targetIsCheongyeon = isCheongyeonCompany(targetCompanyId, targetCompanyName);
+
+                    type ClassifiedEntry = {
+                        direction: SupportDirection;
+                        companyId: string;
+                        companyName: string;
+                        sourceTeamId: string;
+                        sourceTeamName: string;
+                        counterpartyName: string;
+                        evidenceNote: string;
+                    };
+                    const classifiedEntries: ClassifiedEntry[] = [];
+
+                    if (workerIsCheongyeon && targetIsCheongyeon && sourceTeamId && targetTeamId && sourceTeamId !== targetTeamId) {
+                        // 청연 팀 간 교차지원은 간곳/온곳을 각각 분리해 양방향 정리한다.
+                        classifiedEntries.push({
+                            direction: '내부지원간곳',
+                            companyId: workerCompanyId || targetCompanyId,
+                            companyName: fallbackCompanyName || targetCompanyName || sourceTeamName,
+                            sourceTeamId,
+                            sourceTeamName,
+                            counterpartyName: targetTeamName || '청연 수신팀 미지정',
+                            evidenceNote: '청연이엔지 소속 팀이 다른 청연이엔지 현장/팀으로 지원 나간 건'
+                        });
+                        classifiedEntries.push({
+                            direction: '내부지원온곳',
+                            companyId: targetCompanyId || workerCompanyId,
+                            companyName: targetCompanyName || fallbackCompanyName || targetTeamName,
+                            sourceTeamId: targetTeamId,
+                            sourceTeamName: targetTeamName,
+                            counterpartyName: sourceTeamName || '청연 지원팀 미지정',
+                            evidenceNote: '다른 청연이엔지 팀이 우리 청연이엔지 현장/팀으로 지원 온 건'
+                        });
+                    } else if (siteClassification === '외부' && workerIsCheongyeon) {
+                        classifiedEntries.push({
+                            direction: '외부지원간곳',
+                            companyId: workerCompanyId,
+                            companyName: fallbackCompanyName || sourceTeamName || '청구 대상',
+                            sourceTeamId,
+                            sourceTeamName,
+                            counterpartyName: siteConstructorCompanyName || report.siteName || '외부 현장',
+                            evidenceNote: '청연이엔지 소속 팀이 외부 시공사 현장으로 지원 나간 건'
+                        });
+                    } else if (siteClassification === '청연' && !workerIsCheongyeon) {
+                        // 외부 팀이 청연 현장으로 지원온 경우는 수신 팀(청연)을 기준으로 묶는다.
+                        classifiedEntries.push({
+                            direction: '외부지원온곳',
+                            companyId: workerCompanyId,
+                            companyName: fallbackCompanyName || '외부팀',
+                            sourceTeamId: targetTeamId || sourceTeamId,
+                            sourceTeamName: targetTeamName || sourceTeamName,
+                            counterpartyName: sourceTeamName || fallbackCompanyName || '외부 지원팀',
+                            evidenceNote: '외부팀이 청연이엔지 현장/팀으로 지원 온 건'
+                        });
+                    } else if (siteClassification === '청연' && (isSupportModel || isSupportTeam)) {
+                        classifiedEntries.push({
+                            direction: '외부지원온곳',
+                            companyId: workerCompanyId,
+                            companyName: fallbackCompanyName || sourceTeamName || '청구 대상',
+                            sourceTeamId: targetTeamId || sourceTeamId,
+                            sourceTeamName: targetTeamName || sourceTeamName,
+                            counterpartyName: sourceTeamName || fallbackCompanyName || '외부 지원팀',
+                            evidenceNote: '지원팀 소속 또는 외부팀이 청연이엔지 현장/팀으로 지원 온 건'
+                        });
+                    }
+                    if (classifiedEntries.length === 0) return;
 
                     const unitPrice =
                         typeof reportWorker.unitPrice === 'number' && Number.isFinite(reportWorker.unitPrice)
@@ -307,45 +503,75 @@ const SupportTeamPaymentPage: React.FC = () => {
                             : 0;
                     const amount = Math.round(manDay * unitPrice);
 
-                    aggregate.totalManDay += manDay;
-                    aggregate.totalAmount += amount;
-
-                    // Use siteId for grouping instead of teamId
                     const siteId = report.siteId ?? 'unknown-site';
                     const siteName = report.siteName ?? '현장 미지정';
-                    const workerRecord: SupportWorkerBreakdown = {
-                        date: reportDate,
-                        reportId,
-                        workerId: reportWorker.workerId ?? `${reportId}-${siteId}-${reportWorker.name ?? 'worker'}`,
-                        workerName: reportWorker.name ?? '이름 미상',
-                        role: reportWorker.role,
-                        manDay,
-                        unitPrice,
-                        amount,
-                        siteId: report.siteId,
-                        siteName: report.siteName,
-                        teamId: resolvedTeam?.id,
-                        teamName: resolvedTeam?.name ?? report.teamName
-                    };
+                    classifiedEntries.forEach((entry) => {
+                        const workerRecord: SupportWorkerBreakdown = {
+                            date: reportDate,
+                            reportId,
+                            direction: entry.direction,
+                            workerId: reportWorker.workerId ?? `${reportId}-${siteId}-${reportWorker.name ?? 'worker'}`,
+                            workerName: reportWorker.name ?? '이름 미상',
+                            role: reportWorker.role,
+                            manDay,
+                            unitPrice,
+                            amount,
+                            siteId: report.siteId,
+                            siteName: report.siteName,
+                            teamId: resolvedTeam?.id ?? sourceTeamId,
+                            teamName: resolvedTeam?.name ?? sourceTeamName,
+                            sourceTeamName: entry.sourceTeamName,
+                            targetTeamName,
+                            sourceCompanyName: fallbackCompanyName,
+                            targetCompanyName,
+                            counterpartyName: entry.counterpartyName,
+                            evidenceNote: entry.evidenceNote
+                        };
 
-                    // Group by siteId instead of teamId
-                    const existingSite = aggregate.sites.find((site) => site.siteId === siteId);
-                    if (existingSite) {
-                        existingSite.totalManDay += manDay;
-                        existingSite.totalAmount += amount;
-                        if (unitPrice > 0) existingSite.unitPriceSamples.push(unitPrice);
-                        existingSite.workers.push(workerRecord);
-                    } else {
-                        aggregate.sites.push({
-                            siteId,
-                            siteName,
-                            totalManDay: manDay,
-                            totalAmount: amount,
-                            unitPriceSamples: unitPrice > 0 ? [unitPrice] : [],
-                            displayContent: `${siteName} 지원비`,
-                            workers: [workerRecord]
+                        const companyDisplayName = entry.companyName || entry.sourceTeamName || '청구 대상';
+                        const aggregateId = [
+                            entry.direction,
+                            normalize(entry.companyId) || normalizeName(companyDisplayName) || 'unknown',
+                            normalize(entry.sourceTeamId) || normalizeName(entry.sourceTeamName) || 'unknown',
+                            normalizeName(entry.counterpartyName) || 'counterparty'
+                        ].join('::');
+
+                        const aggregate = ensureAggregate({
+                            aggregateId,
+                            direction: entry.direction,
+                            companyId: entry.companyId,
+                            companyName: companyDisplayName,
+                            sourceTeamId: entry.sourceTeamId,
+                            sourceTeamName: entry.sourceTeamName,
+                            counterpartyName: entry.counterpartyName,
+                            evidenceNote: entry.evidenceNote
                         });
-                    }
+
+                        aggregate.totalManDay += manDay;
+                        aggregate.totalAmount += amount;
+
+                        const existingSite = aggregate.sites.find((site) => site.siteId === siteId);
+                        if (existingSite) {
+                            existingSite.totalManDay += manDay;
+                            existingSite.totalAmount += amount;
+                            if (unitPrice > 0) existingSite.unitPriceSamples.push(unitPrice);
+                            existingSite.workers.push(workerRecord);
+                        } else {
+                            aggregate.sites.push({
+                                siteId,
+                                siteName,
+                                direction: entry.direction,
+                                sourceTeamName: entry.sourceTeamName,
+                                counterpartyName: entry.counterpartyName,
+                                evidenceNote: entry.evidenceNote,
+                                totalManDay: manDay,
+                                totalAmount: amount,
+                                unitPriceSamples: unitPrice > 0 ? [unitPrice] : [],
+                                displayContent: `${siteName} ${entry.direction}`,
+                                workers: [workerRecord]
+                            });
+                        }
+                    });
                 });
             });
 
@@ -354,14 +580,16 @@ const SupportTeamPaymentPage: React.FC = () => {
                 sites: aggregate.sites
                     .map((site: SupportSiteRow) => ({
                         ...site,
-                        workers: [...site.workers].sort((a: SupportWorkerBreakdown, b: SupportWorkerBreakdown) => a.workerName.localeCompare(b.workerName, 'ko-KR'))
+                        workers: [...site.workers].sort((a: SupportWorkerBreakdown, b: SupportWorkerBreakdown) =>
+                            a.workerName.localeCompare(b.workerName, 'ko-KR')
+                        )
                     }))
                     .sort((a: SupportSiteRow, b: SupportSiteRow) => a.siteName.localeCompare(b.siteName, 'ko-KR'))
             }));
 
             return { aggregates: aggregatesList, errorMessages };
         },
-        [companies, getCompanyBankInfo, teams]
+        [companies, getCompanyBankInfo, sites, teams]
     );
 
     const fetchSupportData = useCallback(async () => {
@@ -388,18 +616,77 @@ const SupportTeamPaymentPage: React.FC = () => {
     }, [companies.length, fetchSupportData, teams.length]);
 
     const filteredAggregates = useMemo(() => {
-        if (!selectedCompanyId) return aggregates;
-        return aggregates.filter((aggregate) => normalize(aggregate.companyId) === normalize(selectedCompanyId));
-    }, [aggregates, selectedCompanyId]);
+        let rows = aggregates;
+        if (selectedCompanyId) {
+            rows = rows.filter((aggregate) => normalize(aggregate.aggregateId) === normalize(selectedCompanyId));
+        }
+        if (selectedDirection !== 'all') {
+            rows = rows.filter((aggregate) => aggregate.direction === selectedDirection);
+        }
+        if (selectedSourceTeamId) {
+            rows = rows.filter((aggregate) => normalize(aggregate.sourceTeamId) === normalize(selectedSourceTeamId));
+        }
+        if (selectedSiteId) {
+            rows = rows
+                .map((aggregate) => ({
+                    ...aggregate,
+                    sites: aggregate.sites.filter((site) => normalize(site.siteId) === normalize(selectedSiteId))
+                }))
+                .filter((aggregate) => aggregate.sites.length > 0);
+        }
+        return rows;
+    }, [aggregates, selectedCompanyId, selectedDirection, selectedSiteId, selectedSourceTeamId]);
 
     const availableCompanyOptions = useMemo(() => {
         const optionMap = new Map<string, string>();
         aggregates.forEach((aggregate) => {
-            if (aggregate.companyId) {
-                optionMap.set(normalize(aggregate.companyId), aggregate.companyName);
-            }
+            optionMap.set(
+                normalize(aggregate.aggregateId),
+                `${aggregate.direction} · ${aggregate.sourceTeamName} · ${aggregate.companyName}`
+            );
         });
         return Array.from(optionMap.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+    }, [aggregates]);
+
+    const directionOptions = useMemo(
+        () => [
+            { id: 'all', name: '전체' },
+            { id: '내부지원간곳', name: '내부지원간곳' },
+            { id: '내부지원온곳', name: '내부지원온곳' },
+            { id: '외부지원간곳', name: '외부지원간곳' },
+            { id: '외부지원온곳', name: '외부지원온곳' }
+        ],
+        []
+    );
+
+    const sourceTeamOptions = useMemo(() => {
+        const map = new Map<string, string>();
+        aggregates.forEach((aggregate) => {
+            const teamId = normalize(aggregate.sourceTeamId);
+            if (!teamId) return;
+            if (!map.has(teamId)) {
+                map.set(teamId, aggregate.sourceTeamName || '팀 미지정');
+            }
+        });
+        return Array.from(map.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+    }, [aggregates]);
+
+    const siteOptions = useMemo(() => {
+        const map = new Map<string, string>();
+        aggregates.forEach((aggregate) => {
+            aggregate.sites.forEach((site) => {
+                const id = normalize(site.siteId);
+                if (!id) return;
+                if (!map.has(id)) {
+                    map.set(id, site.siteName || '현장 미지정');
+                }
+            });
+        });
+        return Array.from(map.entries())
             .map(([id, name]) => ({ id, name }))
             .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
     }, [aggregates]);
@@ -411,6 +698,22 @@ const SupportTeamPaymentPage: React.FC = () => {
             setSelectedCompanyId('');
         }
     }, [availableCompanyOptions, selectedCompanyId]);
+
+    useEffect(() => {
+        if (!selectedSourceTeamId) return;
+        const exists = sourceTeamOptions.some((option) => normalize(option.id) === normalize(selectedSourceTeamId));
+        if (!exists) {
+            setSelectedSourceTeamId('');
+        }
+    }, [selectedSourceTeamId, sourceTeamOptions]);
+
+    useEffect(() => {
+        if (!selectedSiteId) return;
+        const exists = siteOptions.some((option) => normalize(option.id) === normalize(selectedSiteId));
+        if (!exists) {
+            setSelectedSiteId('');
+        }
+    }, [selectedSiteId, siteOptions]);
 
     const workerById = useMemo(() => {
         const map = new Map<string, Worker>();
@@ -443,6 +746,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                         const workerInfo = entry.workerId ? workerById.get(entry.workerId) : undefined;
                         const siteInfo = entry.siteId ? siteById.get(entry.siteId) : undefined;
                         workerMap.set(key, {
+                            aggregateId: aggregate.aggregateId,
                             workerId: entry.workerId ?? key,
                             workerName: entry.workerName ?? '이름 미상',
                             idNumber: workerInfo?.idNumber ?? '',
@@ -490,27 +794,80 @@ const SupportTeamPaymentPage: React.FC = () => {
 
     const supportExcelRows = useMemo(() => companyExcelSheets.flatMap((sheet) => sheet.rows), [companyExcelSheets]);
 
-    const laborDayTotals = useMemo(() => {
-        const totals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
-        supportExcelRows.forEach((row) => {
-            row.days.forEach((value, idx) => {
-                totals[idx] += value;
-            });
+    const directionSummaries = useMemo(() => {
+        const directions: SupportDirection[] = ['내부지원간곳', '내부지원온곳', '외부지원간곳', '외부지원온곳'];
+        return directions.map((direction) => {
+            const matched = filteredAggregates.filter((aggregate) => aggregate.direction === direction);
+            return {
+                direction,
+                aggregateCount: matched.length,
+                totalManDay: matched.reduce((sum, aggregate) => sum + aggregate.totalManDay, 0),
+                totalAmount: matched.reduce((sum, aggregate) => sum + aggregate.totalAmount, 0)
+            };
         });
-        return totals;
-    }, [supportExcelRows]);
+    }, [filteredAggregates]);
 
-    const laborTotals = useMemo(
-        () =>
-            supportExcelRows.reduce(
-                (acc, row) => ({
-                    totalManDay: acc.totalManDay + row.totalManDay,
-                    totalAmount: acc.totalAmount + row.totalAmount
-                }),
-                { totalManDay: 0, totalAmount: 0 }
-            ),
-        [supportExcelRows]
-    );
+    const exchangeSummaryRows = useMemo<SupportExchangeSummaryRow[]>(() => {
+        return filteredAggregates
+            .flatMap((aggregate) =>
+                aggregate.sites.map((site) => {
+                    const siteInfo = siteById.get(site.siteId);
+                    const siteResponsibleTeamName =
+                        siteInfo?.responsibleTeamName ??
+                        site.workers.find((worker) => worker.targetTeamName)?.targetTeamName ??
+                        '-';
+
+                    const isIncoming = aggregate.direction.endsWith('온곳');
+                    const supportOutTeamName = (isIncoming ? aggregate.counterpartyName : aggregate.sourceTeamName) || '-';
+                    const supportInTeamName = (isIncoming ? aggregate.sourceTeamName : aggregate.counterpartyName) || '-';
+
+                    return {
+                        aggregateId: aggregate.aggregateId,
+                        direction: aggregate.direction,
+                        sourceTeamName: aggregate.sourceTeamName,
+                        counterpartyName: aggregate.counterpartyName,
+                        supportOutTeamName,
+                        supportInTeamName,
+                        siteResponsibleTeamName,
+                        companyName: aggregate.companyName,
+                        bankName: aggregate.bankName,
+                        accountNumber: aggregate.accountNumber,
+                        accountHolder: aggregate.accountHolder,
+                        siteId: site.siteId,
+                        siteName: site.siteName,
+                        workerCount: new Set(site.workers.map((worker) => worker.workerId)).size,
+                        totalManDay: site.totalManDay,
+                        totalAmount: site.totalAmount,
+                        evidenceNote: aggregate.evidenceNote
+                    };
+                })
+            )
+            .sort((left, right) => {
+                const directionCompare = left.direction.localeCompare(right.direction, 'ko-KR');
+                if (directionCompare !== 0) return directionCompare;
+                const teamCompare = left.sourceTeamName.localeCompare(right.sourceTeamName, 'ko-KR');
+                if (teamCompare !== 0) return teamCompare;
+                return left.siteName.localeCompare(right.siteName, 'ko-KR');
+            });
+    }, [filteredAggregates, siteById]);
+
+    const photoStyleSummaryGroups = useMemo(() => {
+        const orderedDirections: SupportDirection[] = ['외부지원간곳', '외부지원온곳', '내부지원간곳', '내부지원온곳'];
+        const toneMap: Record<SupportDirection, { label: string; cellClass: string }> = {
+            '외부지원간곳': { label: '외부지원간곳', cellClass: 'bg-yellow-100 text-yellow-900' },
+            '외부지원온곳': { label: '외부지원온곳', cellClass: 'bg-orange-100 text-orange-900' },
+            '내부지원간곳': { label: '내부지원간곳', cellClass: 'bg-sky-100 text-sky-900' },
+            '내부지원온곳': { label: '내부지원온곳', cellClass: 'bg-indigo-100 text-indigo-900' }
+        };
+
+        return orderedDirections
+            .map((direction) => ({
+                direction,
+                label: toneMap[direction].label,
+                cellClass: toneMap[direction].cellClass,
+                rows: exchangeSummaryRows.filter((row) => row.direction === direction)
+            }));
+    }, [exchangeSummaryRows]);
 
     const totalSummary = useMemo(
         () =>
@@ -545,7 +902,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                     accountNumber: aggregate.accountNumber,
                     accountHolder: aggregate.accountHolder,
                     amount: site.totalAmount,
-                    description: `${site.displayContent} ${label}`
+                    description: `${aggregate.direction} ${aggregate.sourceTeamName} ${site.displayContent} ${label}`
                 });
             });
         });
@@ -558,7 +915,11 @@ const SupportTeamPaymentPage: React.FC = () => {
         () =>
             filteredAggregates.flatMap((aggregate) =>
                 aggregate.sites.map((site) => {
-                    const rows = supportExcelRows.filter((row) => row.siteId === site.siteId || row.siteName === site.siteName);
+                    const rows = supportExcelRows.filter(
+                        (row) =>
+                            row.aggregateId === aggregate.aggregateId &&
+                            (row.siteId === site.siteId || row.siteName === site.siteName)
+                    );
                     return { aggregate, site, rows };
                 })
             ),
@@ -597,6 +958,20 @@ const SupportTeamPaymentPage: React.FC = () => {
         setShowLaborPreview(true);
     };
 
+    const handleDownloadLabor = async () => {
+        if (filteredAggregates.length === 0) {
+            window.alert('다운로드할 데이터가 없습니다.');
+            return;
+        }
+
+        const exportAggregates = filteredAggregates.map((aggregate) => ({
+            ...aggregate,
+            companyName: `${aggregate.direction}_${aggregate.sourceTeamName}_${aggregate.companyName}`
+        }));
+
+        await generateLaborStatementExcel(exportAggregates as any, selectedMonth);
+    };
+
     const handleDownloadKB = () => {
         if (kbRows.length === 0) {
             window.alert('다운로드할 데이터가 없습니다.');
@@ -623,13 +998,17 @@ const SupportTeamPaymentPage: React.FC = () => {
                     </div>
                     <div>
                         <h1 className="text-2xl font-bold text-slate-800">지원팀 지급 관리</h1>
-                        <p className="text-sm text-slate-500">지원팀 공수 집계 및 노무내역서/국민은행 엑셀 출력</p>
+                        <p className="text-sm text-slate-500">지원간곳/지원온곳 규칙 기반 팀별 청구 집계 및 출력</p>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <ActionButton variant="solid-green" disabled={supportExcelRows.length === 0} onClick={handleOpenLaborPreview}>
                         <FontAwesomeIcon icon={faFileExcel} />
                         노무내역서 미리보기
+                    </ActionButton>
+                    <ActionButton variant="outline-green" disabled={supportExcelRows.length === 0} onClick={handleDownloadLabor}>
+                        <FontAwesomeIcon icon={faFileExcel} />
+                        노무내역서 다운로드
                     </ActionButton>
                     <ActionButton variant="outline-amber" disabled={kbRows.length === 0} onClick={() => setShowKBPreview(true)}>
                         <FontAwesomeIcon icon={faSearch} />
@@ -644,7 +1023,7 @@ const SupportTeamPaymentPage: React.FC = () => {
 
             <div className="space-y-4">
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center flex-wrap">
                         <label className="text-sm font-medium text-slate-600 flex items-center gap-2">
                             <FontAwesomeIcon icon={faCalendarAlt} />
                             지급 월
@@ -655,9 +1034,49 @@ const SupportTeamPaymentPage: React.FC = () => {
                             onChange={(e) => setSelectedMonth(e.target.value)}
                             className="border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
                         />
+
+                        <select
+                            value={selectedDirection}
+                            onChange={(e) => setSelectedDirection(e.target.value as 'all' | '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳')}
+                            className="border border-slate-300 rounded-lg px-3 py-2 min-w-[140px] focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                        >
+                            {directionOptions.map((option) => (
+                                <option key={option.id} value={option.id}>
+                                    분류: {option.name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={selectedSourceTeamId}
+                            onChange={(e) => setSelectedSourceTeamId(e.target.value)}
+                            className="border border-slate-300 rounded-lg px-3 py-2 min-w-[180px] focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                            disabled={sourceTeamOptions.length === 0}
+                        >
+                            <option value="">팀: 전체</option>
+                            {sourceTeamOptions.map((team) => (
+                                <option key={team.id} value={team.id}>
+                                    팀: {team.name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={selectedSiteId}
+                            onChange={(e) => setSelectedSiteId(e.target.value)}
+                            className="border border-slate-300 rounded-lg px-3 py-2 min-w-[180px] focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                            disabled={siteOptions.length === 0}
+                        >
+                            <option value="">현장: 전체</option>
+                            {siteOptions.map((site) => (
+                                <option key={site.id} value={site.id}>
+                                    현장: {site.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <label className="text-sm font-medium text-slate-600">협력사 필터</label>
+                        <label className="text-sm font-medium text-slate-600">팀별 청구 필터</label>
                         <select
                             value={selectedCompanyId}
                             onChange={(e) => setSelectedCompanyId(e.target.value)}
@@ -677,8 +1096,143 @@ const SupportTeamPaymentPage: React.FC = () => {
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <SummaryCard label="총 공수" value={`${formatNumber(totalSummary.totalManDay)} 공`} icon={faCalendarAlt} tone="violet" />
                     <SummaryCard label="총 지급액" value={`${formatNumber(totalSummary.totalAmount)} 원`} icon={faCircleCheck} tone="emerald" />
-                    <SummaryCard label="협력사 수" value={`${formatNumber(totalSummary.partnerCount)} 곳`} icon={faUsers} tone="sky" />
+                    <SummaryCard label="팀 청구 묶음" value={`${formatNumber(totalSummary.partnerCount)} 건`} icon={faUsers} tone="sky" />
                     <SummaryCard label="현장 수" value={`${formatNumber(totalSummary.siteCount)} 곳`} icon={faCircleExclamation} tone="orange" />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {directionSummaries.map((summary) => (
+                        <DirectionSummaryCard
+                            key={summary.direction}
+                            direction={summary.direction}
+                            aggregateCount={summary.aggregateCount}
+                            totalManDay={summary.totalManDay}
+                            totalAmount={summary.totalAmount}
+                        />
+                    ))}
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100">
+                        <h2 className="text-lg font-semibold text-slate-800">사진형 정리표</h2>
+                        <p className="text-sm text-slate-500 mt-1">분류별로 좌측 라벨을 고정해 한눈에 확인할 수 있도록 정리했습니다.</p>
+                    </div>
+                    <div className="overflow-auto">
+                        <table className="w-full text-sm border-collapse">
+                            <thead className="bg-amber-100 text-slate-800">
+                                <tr>
+                                    <th className="px-4 py-3 border border-slate-300 text-center min-w-[120px]">분류</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-left min-w-[160px]">현장</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-left min-w-[120px]">담당</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-left min-w-[140px]">시공사</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-left min-w-[140px]">팀</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-right min-w-[90px]">공수</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-right min-w-[120px]">금액</th>
+                                    <th className="px-4 py-3 border border-slate-300 text-left min-w-[220px]">계좌</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {photoStyleSummaryGroups.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={8} className="px-4 py-8 text-center text-slate-500 border border-slate-200">
+                                            표시할 데이터가 없습니다.
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    photoStyleSummaryGroups.map((group) =>
+                                        group.rows.length === 0 ? (
+                                            <tr key={`${group.direction}-empty`} className="hover:bg-slate-50">
+                                                <td className={`px-3 py-3 border border-slate-300 text-center font-semibold align-middle ${group.cellClass}`}>
+                                                    {group.label}
+                                                </td>
+                                                <td className="px-4 py-3 border border-slate-200 text-slate-400" colSpan={7}>
+                                                    해당 분류 데이터 없음
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            group.rows.map((row, index) => {
+                                                const accountText = [row.bankName, row.accountNumber, row.accountHolder ? `(예금주:${row.accountHolder})` : '']
+                                                    .filter(Boolean)
+                                                    .join(' ');
+
+                                                return (
+                                                    <tr key={`${group.direction}-${row.aggregateId}-${row.siteId}`} className="hover:bg-slate-50">
+                                                        {index === 0 && (
+                                                            <td
+                                                                rowSpan={group.rows.length}
+                                                                className={`px-3 py-3 border border-slate-300 text-center font-semibold align-middle ${group.cellClass}`}
+                                                            >
+                                                                {group.label}
+                                                            </td>
+                                                        )}
+                                                        <td className="px-4 py-3 border border-slate-200 text-slate-700">{row.siteName}</td>
+                                                        <td className="px-4 py-3 border border-slate-200 font-medium text-slate-800">{row.siteResponsibleTeamName}</td>
+                                                        <td className="px-4 py-3 border border-slate-200 text-slate-700">{row.companyName}</td>
+                                                        <td className="px-4 py-3 border border-slate-200 text-slate-700">
+                                                            <div className="font-medium">{row.supportOutTeamName} → {row.supportInTeamName}</div>
+                                                            <div className="text-[11px] text-slate-500">지원간팀 → 지원온팀</div>
+                                                        </td>
+                                                        <td className="px-4 py-3 border border-slate-200 text-right font-mono">{row.totalManDay.toFixed(1)}</td>
+                                                        <td className="px-4 py-3 border border-slate-200 text-right font-mono font-semibold text-slate-800">{formatNumber(row.totalAmount)}</td>
+                                                        <td className="px-4 py-3 border border-slate-200 text-slate-600 text-xs">{accountText || '-'}</td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )
+                                    )
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100">
+                        <h2 className="text-lg font-semibold text-slate-800">주고받은 내역 요약</h2>
+                        <p className="text-sm text-slate-500 mt-1">분류별로 어떤 팀이 누구와 어떤 현장에서 주고받았는지 한 줄씩 검증할 수 있습니다.</p>
+                    </div>
+                    <div className="overflow-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wide">
+                                <tr>
+                                    <th className="px-4 py-3 text-left">분류</th>
+                                    <th className="px-4 py-3 text-left">기준 팀</th>
+                                    <th className="px-4 py-3 text-left">상대</th>
+                                    <th className="px-4 py-3 text-left">청구대상</th>
+                                    <th className="px-4 py-3 text-left">현장</th>
+                                    <th className="px-4 py-3 text-right">인원</th>
+                                    <th className="px-4 py-3 text-right">공수</th>
+                                    <th className="px-4 py-3 text-right">금액</th>
+                                    <th className="px-4 py-3 text-left">판정근거</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {exchangeSummaryRows.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={9} className="px-4 py-8 text-center text-slate-500">표시할 주고받은 내역이 없습니다.</td>
+                                    </tr>
+                                ) : (
+                                    exchangeSummaryRows.map((row) => (
+                                        <tr key={`${row.aggregateId}-${row.siteId}`} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                                            <td className="px-4 py-3">
+                                                <span className="inline-flex items-center rounded bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                                                    {row.direction}
+                                                </span>
+                                            </td>
+                                            <td className="px-4 py-3 font-medium text-slate-700">{row.sourceTeamName}</td>
+                                            <td className="px-4 py-3 text-slate-600">{row.counterpartyName}</td>
+                                            <td className="px-4 py-3 text-slate-600">{row.companyName}</td>
+                                            <td className="px-4 py-3 text-slate-600">{row.siteName}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{formatNumber(row.workerCount)}</td>
+                                            <td className="px-4 py-3 text-right font-mono">{row.totalManDay.toFixed(1)}</td>
+                                            <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{formatNumber(row.totalAmount)}</td>
+                                            <td className="px-4 py-3 text-xs text-slate-500">{row.evidenceNote}</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
                 {errors.length > 0 && (
@@ -706,22 +1260,28 @@ const SupportTeamPaymentPage: React.FC = () => {
                     </div>
                 ) : (
                     filteredAggregates.map((aggregate) => {
-                        const previewBlocks = sitePreviews.filter(
-                            (item: SitePreviewBlock) => item.aggregate.companyId === aggregate.companyId
-                        );
                         const hasAccountError = Object.values(aggregate.errors).some(Boolean);
                         return (
-                            <div key={aggregate.companyId || aggregate.companyName} className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                            <div key={aggregate.aggregateId} className="bg-white rounded-2xl border border-slate-200 shadow-sm">
                                 <div className="px-6 py-4 border-b border-slate-100 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                                     <div>
-                                        <div className="text-sm text-slate-500">협력사</div>
+                                        <div className="text-sm text-slate-500">분류 / 팀 / 청구대상</div>
                                         <div className="text-xl font-semibold text-slate-800 flex items-center gap-2">
-                                            {aggregate.companyName}
+                                            <span className="inline-flex items-center rounded bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-700">
+                                                {aggregate.direction}
+                                            </span>
+                                            <span>{aggregate.sourceTeamName}</span>
+                                            <span className="text-sm text-slate-500">({aggregate.companyName})</span>
                                             {hasAccountError && (
                                                 <span className="text-xs text-amber-600 bg-amber-50 border border-amber-300 rounded px-2 py-0.5">
                                                     계좌정보 확인
                                                 </span>
                                             )}
+                                        </div>
+                                        <div className="mt-2 text-sm text-slate-500">
+                                            상대: <span className="font-medium text-slate-700">{aggregate.counterpartyName}</span>
+                                            <span className="mx-2 text-slate-300">|</span>
+                                            판정근거: <span className="text-slate-600">{aggregate.evidenceNote}</span>
                                         </div>
                                     </div>
                                     <div className="grid gap-2 text-sm text-slate-600 sm:grid-cols-2 lg:auto-cols-fr lg:grid-flow-col">
@@ -760,7 +1320,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                     <td className="px-4 py-3 text-center">
                                                         <button
                                                             type="button"
-                                                            onClick={() => setDetailTarget(site)}
+                                                            onClick={() => setDetailTarget({ aggregate, site })}
                                                             className="text-indigo-600 hover:text-indigo-800 text-sm font-medium"
                                                         >
                                                             상세
@@ -778,13 +1338,22 @@ const SupportTeamPaymentPage: React.FC = () => {
             </div>
 
             {detailTarget && (
-                <Modal title={`${detailTarget.siteName} 상세 내역`} onClose={() => setDetailTarget(null)} widthClass="max-w-4xl">
+                <Modal title={`${detailTarget.site.siteName} 상세 내역`} onClose={() => setDetailTarget(null)} widthClass="max-w-5xl">
                     <div className="flex-1 overflow-auto p-6">
+                        <div className="mb-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-2">
+                            <div>분류: <span className="font-semibold text-slate-800">{detailTarget.aggregate.direction}</span></div>
+                            <div>기준 팀: <span className="font-semibold text-slate-800">{detailTarget.aggregate.sourceTeamName}</span></div>
+                            <div>상대: <span className="font-semibold text-slate-800">{detailTarget.aggregate.counterpartyName}</span></div>
+                            <div>청구대상: <span className="font-semibold text-slate-800">{detailTarget.aggregate.companyName}</span></div>
+                            <div className="md:col-span-2">판정근거: <span className="text-slate-700">{detailTarget.aggregate.evidenceNote}</span></div>
+                        </div>
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 z-10">
                                 <tr>
+                                    <th className="px-3 py-2 border-b border-slate-200 text-left">분류</th>
                                     <th className="px-3 py-2 border-b border-slate-200 text-left">성명</th>
                                     <th className="px-3 py-2 border-b border-slate-200 text-left">직책</th>
+                                    <th className="px-3 py-2 border-b border-slate-200 text-left">상대</th>
                                     <th className="px-3 py-2 border-b border-slate-200 text-center">공수</th>
                                     <th className="px-3 py-2 border-b border-slate-200 text-right">단가</th>
                                     <th className="px-3 py-2 border-b border-slate-200 text-right">금액</th>
@@ -792,10 +1361,16 @@ const SupportTeamPaymentPage: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody>
-                                {detailTarget.workers.map((worker) => (
+                                {detailTarget.site.workers.map((worker) => (
                                     <tr key={`${worker.workerId}-${worker.date}`} className="border-b border-slate-100">
+                                        <td className="px-3 py-2">
+                                            <span className="inline-flex items-center rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                                                {worker.direction}
+                                            </span>
+                                        </td>
                                         <td className="px-3 py-2">{worker.workerName}</td>
                                         <td className="px-3 py-2 text-slate-500">{worker.role || '-'}</td>
+                                        <td className="px-3 py-2 text-slate-500">{worker.counterpartyName || '-'}</td>
                                         <td className="px-3 py-2 text-center font-mono">{worker.manDay.toFixed(1)}</td>
                                         <td className="px-3 py-2 text-right font-mono">{formatNumber(worker.unitPrice)}</td>
                                         <td className="px-3 py-2 text-right font-mono text-slate-800">{formatNumber(worker.amount)}</td>
@@ -821,7 +1396,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                 </div>
                             )}
                             {sitePreviews.map(({ aggregate, site, rows }: SitePreviewBlock) => {
-                                const key = `${normalize(aggregate.companyId || aggregate.companyName)}-${normalize(site.siteId)}`;
+                                const key = `${normalize(aggregate.aggregateId)}-${normalize(site.siteId)}`;
                                 const displayCompanyName = aggregate.companyName || '-';
                                 const displaySiteName = site.siteName || rows[0]?.siteName || '현장 미지정';
                                 const monthRange = getMonthRange(selectedMonth);
@@ -840,7 +1415,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                     <div key={key} className="border border-slate-300 rounded-lg overflow-hidden shadow-sm">
                                         <div className="flex items-center justify-between bg-slate-100 px-4 py-2 border-b border-slate-300">
                                             <div className="text-sm font-semibold text-slate-700">
-                                                {displayCompanyName} / {displaySiteName}
+                                                {aggregate.direction} / {aggregate.sourceTeamName} / {displayCompanyName} / {displaySiteName}
                                             </div>
                                             <ActionButton
                                                 variant="outline-amber"
@@ -1077,6 +1652,31 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ label, value, icon, tone }) =
             </div>
             <p className="text-sm text-gray-500">{label}</p>
             <p className={`text-xl font-semibold ${toneMap[tone].text}`}>{value}</p>
+        </div>
+    );
+};
+
+interface DirectionSummaryCardProps {
+    direction: SupportDirection;
+    aggregateCount: number;
+    totalManDay: number;
+    totalAmount: number;
+}
+
+const DirectionSummaryCard: React.FC<DirectionSummaryCardProps> = ({ direction, aggregateCount, totalManDay, totalAmount }) => {
+    const toneMap: Record<SupportDirection, string> = {
+        '내부지원간곳': 'border-violet-200 bg-violet-50 text-violet-700',
+        '내부지원온곳': 'border-sky-200 bg-sky-50 text-sky-700',
+        '외부지원간곳': 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        '외부지원온곳': 'border-amber-200 bg-amber-50 text-amber-700'
+    };
+
+    return (
+        <div className={`rounded-2xl border p-4 shadow-sm ${toneMap[direction]}`}>
+            <div className="text-sm font-semibold">{direction}</div>
+            <div className="mt-2 text-sm">청구 묶음 {formatNumber(aggregateCount)}건</div>
+            <div className="mt-1 text-sm">공수 {formatNumber(totalManDay)}공</div>
+            <div className="mt-1 text-base font-bold">{formatNumber(totalAmount)}원</div>
         </div>
     );
 };

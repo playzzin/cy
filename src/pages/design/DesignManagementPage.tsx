@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { motion, useAnimation, Variants, AnimatePresence } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
 import logoConstruction from '../../assets/logo_construction.jpg';
 import logoFinished from '../../assets/logo_finished.png';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -14,7 +13,9 @@ import {
     faNetworkWired,
     faArrowRight,
     faXmark,
-    faCheckCircle
+    faCheckCircle,
+    faHelmetSafety,
+    faChartLine
 } from '@fortawesome/free-solid-svg-icons';
 
 // --- Types & Data ---
@@ -64,6 +65,513 @@ const MENUS: MenuItem[] = [
         color: 'teal'
     }
 ];
+
+interface SystemConstructionPhoto {
+    id: string;
+    category: '시스템 동바리' | '시스템 비계';
+    phase: string;
+    title: string;
+    description: string;
+    src: string;
+}
+
+interface MaterialRentalPhoto {
+    id: string;
+    category: '시스템 동바리 자재' | '시스템 비계 자재';
+    phase: string;
+    title: string;
+    description: string;
+    src: string;
+}
+
+interface DetailProcessStep {
+    step: string;
+    title: string;
+    icon: any;
+    desc: string;
+    focus?: string;
+}
+
+const SYSTEM_CONSTRUCTION_PHOTOS: SystemConstructionPhoto[] = [
+    {
+        id: 'dongbari-layout',
+        category: '시스템 동바리',
+        phase: '01 배치선 확인',
+        title: '기준점과 하중 전달선 정리',
+        description: '슬래브와 보 하중이 내려오는 구간에 맞춰 배치선을 먼저 잡아야 동바리 간격과 수직도가 안정적으로 맞춰집니다.',
+        src: 'https://images.pexels.com/photos/17951553/pexels-photo-17951553.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-base',
+        category: '시스템 동바리',
+        phase: '02 하부 받침',
+        title: '잭베이스와 받침면 레벨링',
+        description: '바닥 편차를 정리한 뒤 잭베이스 높이를 동일하게 맞추면 초기 침하와 수평 오차를 줄일 수 있습니다.',
+        src: 'https://images.pexels.com/photos/36162728/pexels-photo-36162728.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-frame',
+        category: '시스템 동바리',
+        phase: '03 수직재 조립',
+        title: '수직재와 수평재 프레임 설치',
+        description: '수직재를 세운 뒤 수평재와 가새를 규격 간격으로 조립해 좌굴 저항과 프레임 강성을 확보합니다.',
+        src: 'https://images.pexels.com/photos/32577705/pexels-photo-32577705.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-uhead',
+        category: '시스템 동바리',
+        phase: '04 상부 지지',
+        title: 'U헤드와 거푸집 지지선 완성',
+        description: 'U헤드, 멍에, 장선을 연결해 상부 거푸집 하중이 균일하게 전달되도록 지지 체계를 마감합니다.',
+        src: 'https://images.pexels.com/photos/35886617/pexels-photo-35886617.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-inspection',
+        category: '시스템 동바리',
+        phase: '05 사용 전 점검',
+        title: '수직도와 체결 상태 최종 확인',
+        description: '체결 상태, 간격, 침하 여부를 체크리스트로 확인한 뒤 콘크리트 타설 전 사용 승인을 진행합니다.',
+        src: 'https://images.pexels.com/photos/5511066/pexels-photo-5511066.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-material',
+        category: '시스템 동바리',
+        phase: '06 자재 반입',
+        title: '부재 분류와 설치 구간별 적치',
+        description: '수직재, 수평재, 가새, U헤드를 구간별로 구분 적치하면 조립 속도와 안전성이 함께 좋아집니다.',
+        src: 'https://images.pexels.com/photos/14989323/pexels-photo-14989323.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-support',
+        category: '시스템 동바리',
+        phase: '07 보강 지지',
+        title: '집중하중 구간 추가 보강',
+        description: '보 단부와 집중하중 구간에는 보강재를 추가해 처짐과 편하중 위험을 줄이는 것이 핵심입니다.',
+        src: 'https://images.pexels.com/photos/7392835/pexels-photo-7392835.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-frame-view',
+        category: '시스템 동바리',
+        phase: '08 전체 구조 확인',
+        title: '격자 프레임 정렬 상태 점검',
+        description: '조립 후에는 격자 간격, 수평 레벨, 통과 동선을 한 번에 보면서 전체 구조를 재확인합니다.',
+        src: 'https://images.pexels.com/photos/4564051/pexels-photo-4564051.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-pour-ready',
+        category: '시스템 동바리',
+        phase: '09 타설 준비',
+        title: '콘크리트 타설 전 최종 준비',
+        description: '타설 직전에는 상부 지지선, 연결부, 통로 확보 상태를 마지막으로 정리해 작업 혼선을 줄여야 합니다.',
+        src: 'https://images.pexels.com/photos/9784169/pexels-photo-9784169.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-maintenance',
+        category: '시스템 동바리',
+        phase: '10 유지관리',
+        title: '사용 중 침하와 체결 상태 관리',
+        description: '타설 중과 양생 중에는 침하, 풀림, 변형 여부를 반복 확인해 구조 안정성을 유지합니다.',
+        src: 'https://images.pexels.com/photos/3086603/pexels-photo-3086603.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-qc',
+        category: '시스템 동바리',
+        phase: '11 품질 검측',
+        title: '작업 구간별 수평·수직 검측',
+        description: '층별로 수평과 수직 오차를 나눠 점검하면 설치 완료 후에도 보강이 필요한 구간을 빠르게 찾을 수 있습니다.',
+        src: 'https://images.pexels.com/photos/17919371/pexels-photo-17919371.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'dongbari-detail',
+        category: '시스템 동바리',
+        phase: '12 디테일 확인',
+        title: '지지 부재 상세 체결 상태 확인',
+        description: '브래킷과 지지 부재의 체결 디테일을 마지막에 확인하면 사용 중 풀림과 편하중 리스크를 줄일 수 있습니다.',
+        src: 'https://images.pexels.com/photos/12704629/pexels-photo-12704629.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-entry',
+        category: '시스템 비계',
+        phase: '01 외곽 프레임',
+        title: '외벽 작업면의 수직 프레임 구성',
+        description: '외곽 작업구간을 따라 비계 수직 프레임을 세우고 작업층별 기준 모듈을 먼저 맞춥니다.',
+        src: 'https://images.pexels.com/photos/9637500/pexels-photo-9637500.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-brace',
+        category: '시스템 비계',
+        phase: '02 가새 보강',
+        title: '수평재와 가새로 구조 강성 확보',
+        description: '연결부를 순차 체결해 횡하중과 진동에 견디는 구조를 만들고 층별 작업면을 확장합니다.',
+        src: 'https://images.pexels.com/photos/10134469/pexels-photo-10134469.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-platform',
+        category: '시스템 비계',
+        phase: '03 작업발판 설치',
+        title: '발판과 통로 확보',
+        description: '근로자 이동 동선과 자재 인양 동선을 분리해 작업발판, 통로, 계단 구간을 안전하게 구성합니다.',
+        src: 'https://images.pexels.com/photos/13227040/pexels-photo-13227040.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-safety',
+        category: '시스템 비계',
+        phase: '04 안전부재 설치',
+        title: '난간, 벽이음, 낙하물 방지 보강',
+        description: '추락방지 난간과 벽이음, 보호망을 추가해 고소 작업 구간의 안전성과 전도 저항을 함께 높입니다.',
+        src: 'https://images.pexels.com/photos/13464875/pexels-photo-13464875.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-finish',
+        category: '시스템 비계',
+        phase: '05 전체 점검',
+        title: '층별 작업면과 접근성 최종 점검',
+        description: '층간 연결, 발판 상태, 적재하중, 안전표지까지 확인해 현장 사용 전 최종 인수 점검을 마무리합니다.',
+        src: 'https://images.pexels.com/photos/11299531/pexels-photo-11299531.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-material',
+        category: '시스템 비계',
+        phase: '06 자재 배치',
+        title: '작업면별 자재 반입과 구획 정리',
+        description: '작업층과 이동 통로를 분리해 부재를 적치하면 설치 중 간섭과 낙하 위험을 낮출 수 있습니다.',
+        src: 'https://images.pexels.com/photos/18080900/pexels-photo-18080900.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-height',
+        category: '시스템 비계',
+        phase: '07 층별 확장',
+        title: '고층 작업 구간 수직 증설',
+        description: '층별 모듈을 반복 증설할 때는 벽이음 위치와 작업 발판 레벨을 동시에 맞춰야 합니다.',
+        src: 'https://images.pexels.com/photos/13227051/pexels-photo-13227051.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-workers',
+        category: '시스템 비계',
+        phase: '08 작업 투입',
+        title: '작업자 접근 동선과 계단 점검',
+        description: '실제 작업자가 투입되기 전 계단, 승하강 동선, 통로 폭을 먼저 확인해야 현장 체감 안전성이 올라갑니다.',
+        src: 'https://images.pexels.com/photos/16853020/pexels-photo-16853020.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-wide',
+        category: '시스템 비계',
+        phase: '09 외벽 전개',
+        title: '외벽 전체 작업면 연결',
+        description: '넓은 외벽 구간은 층별 연결성과 적재하중 배분을 함께 보고 전체 작업면을 조정합니다.',
+        src: 'https://images.pexels.com/photos/8960945/pexels-photo-8960945.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-final-check',
+        category: '시스템 비계',
+        phase: '10 사용 승인',
+        title: '난간과 보호망 포함 최종 승인',
+        description: '사용 승인 전에는 난간, 발판 고정, 보호망, 안전표지까지 묶어서 최종 인수 점검을 마칩니다.',
+        src: 'https://images.pexels.com/photos/33339484/pexels-photo-33339484.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-tower',
+        category: '시스템 비계',
+        phase: '11 고층 작업면',
+        title: '고층 외벽 구간 작업면 점검',
+        description: '고층 구간은 풍하중과 작업 동선을 함께 보고 발판과 난간의 연속성을 별도로 확인해야 합니다.',
+        src: 'https://images.pexels.com/photos/12119852/pexels-photo-12119852.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'scaffolding-skyline',
+        category: '시스템 비계',
+        phase: '12 외벽 마감 대응',
+        title: '외벽 마감 공정 대응 작업 플랫폼',
+        description: '비계는 외벽 마감 공정과 맞물려 이동성과 접근성이 중요하므로 층별 작업 범위를 다시 정리해야 합니다.',
+        src: 'https://images.pexels.com/photos/14326105/pexels-photo-14326105.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    }
+];
+
+const MATERIAL_ONLY_PHOTO_URLS = {
+    pipeRackWide: 'https://images.pexels.com/photos/15508177/pexels-photo-15508177.jpeg?cs=srgb&dl=pexels-zakhar-15508177.jpg&fm=jpg',
+    pipeRackFront: 'https://images.pexels.com/photos/15508178/pexels-photo-15508178.jpeg?cs=srgb&dl=pexels-zakhar-15508178.jpg&fm=jpg',
+    pipeWarehouseWide: 'https://images.pexels.com/photos/36878025/pexels-photo-36878025.jpeg?cs=srgb&dl=pexels-zakhar-36878025.jpg&fm=jpg',
+    assortedBarsTop: 'https://images.pexels.com/photos/19825178/pexels-photo-19825178.jpeg?cs=srgb&dl=pexels-jimmy-liao-3615017-19825178.jpg&fm=jpg',
+    assortedBarsWide: 'https://images.pexels.com/photos/14838208/pexels-photo-14838208.jpeg?cs=srgb&dl=pexels-jimmy-liao-3615017-14838208.jpg&fm=jpg',
+    warehouseSheets: 'https://images.pexels.com/photos/36122954/pexels-photo-36122954.jpeg?cs=srgb&dl=pexels-james-richardson-2159544295-36122954.jpg&fm=jpg',
+    steelBarsDark: 'https://images.pexels.com/photos/36397982/pexels-photo-36397982.jpeg?cs=srgb&dl=pexels-willians-huerta-2157111846-36397982.jpg&fm=jpg',
+    formPanelStacks: 'https://images.pexels.com/photos/36003983/pexels-photo-36003983.jpeg?cs=srgb&dl=pexels-michael-orshan-2159363670-36003983.jpg&fm=jpg',
+    steelBeamClose: 'https://images.pexels.com/photos/36003978/pexels-photo-36003978.jpeg?cs=srgb&dl=pexels-michael-orshan-2159363670-36003978.jpg&fm=jpg',
+    cutPipesClose: 'https://images.pexels.com/photos/36134791/pexels-photo-36134791.jpeg?cs=srgb&dl=pexels-peter-dyllong-2158803154-36134791.jpg&fm=jpg',
+    beamYard: 'https://images.pexels.com/photos/36003989/pexels-photo-36003989.jpeg?cs=srgb&dl=pexels-michael-orshan-2159363670-36003989.jpg&fm=jpg',
+    pipeYardWide: 'https://images.pexels.com/photos/33996166/pexels-photo-33996166.jpeg?cs=srgb&dl=pexels-shuaizhi-tian-485596-33996166.jpg&fm=jpg',
+    pipeYardClose: 'https://images.pexels.com/photos/33996167/pexels-photo-33996167.jpeg?cs=srgb&dl=pexels-shuaizhi-tian-485596-33996167.jpg&fm=jpg'
+} as const;
+
+const MATERIAL_RENTAL_PHOTOS: MaterialRentalPhoto[] = [
+    {
+        id: 'dongbari-jack-base',
+        category: '시스템 동바리 자재',
+        phase: '01 강관 적치',
+        title: '동바리 강관 자재 묶음',
+        description: '원형 강관이 랙에 적치된 형태로, 동바리 수직재와 보조 지지재를 규격별로 분류해 출고하는 장면에 맞는 이미지입니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeRackFront
+    },
+    {
+        id: 'dongbari-standard',
+        category: '시스템 동바리 자재',
+        phase: '02 장척 자재',
+        title: '장척 지지 파이프 적치',
+        description: '길이가 긴 강관 자재를 길이별로 적치한 형태로, 주 지지재와 장척 수평재 보관 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeRackWide
+    },
+    {
+        id: 'dongbari-ledger',
+        category: '시스템 동바리 자재',
+        phase: '03 봉형 부재',
+        title: '봉형 연결 자재 정렬',
+        description: '가늘고 긴 봉형 자재가 모여 있는 사진으로, 동바리 연결재나 보조 부재 적치 설명과 잘 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.assortedBarsTop
+    },
+    {
+        id: 'dongbari-brace',
+        category: '시스템 동바리 자재',
+        phase: '04 보강 부재',
+        title: '보강용 강재 세트',
+        description: '여러 규격의 철재가 한 번에 적치된 형태로, 보강재나 보조 지지부재 세트 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.assortedBarsWide
+    },
+    {
+        id: 'dongbari-u-head',
+        category: '시스템 동바리 자재',
+        phase: '05 빔형 지지재',
+        title: '빔형 상부 지지 자재',
+        description: '빔 단면이 드러난 강재 적치 사진으로, 상부 지지용 강재나 멍에 보조 자재 설명에 맞는 이미지입니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.steelBeamClose
+    },
+    {
+        id: 'dongbari-plate',
+        category: '시스템 동바리 자재',
+        phase: '06 패널 자재',
+        title: '패널형 보조 자재 적치',
+        description: '판형 또는 패널형 부재가 적치된 사진으로, 받침 보강판이나 거푸집 보조 자재 묶음 설명에 어울립니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.formPanelStacks
+    },
+    {
+        id: 'dongbari-pin',
+        category: '시스템 동바리 자재',
+        phase: '07 창고 보관',
+        title: '창고 보관 자재 묶음',
+        description: '창고 안에 정리된 자재 묶음 이미지로, 출고 전 대기 자재나 체결 보조 자재 보관 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.warehouseSheets
+    },
+    {
+        id: 'dongbari-adjust-jack',
+        category: '시스템 동바리 자재',
+        phase: '08 창고 적치',
+        title: '실내 적치 동바리 자재',
+        description: '실내 창고에 규격별로 적치된 강재 사진으로, 정비 완료 후 재출고 대기 자재 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeWarehouseWide
+    },
+    {
+        id: 'dongbari-support-set',
+        category: '시스템 동바리 자재',
+        phase: '09 중량 부재',
+        title: '중량 봉강 자재 묶음',
+        description: '굵은 봉강 형태가 강조된 사진으로, 집중하중 대응용 중량 자재나 보강용 부재 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.steelBarsDark
+    },
+    {
+        id: 'dongbari-qc-set',
+        category: '시스템 동바리 자재',
+        phase: '10 절단 강관',
+        title: '절단면 강관 자재',
+        description: '강관 단면이 모여 있는 사진으로, 규격 절단 자재나 회수 후 분류된 파이프 자재 설명과 잘 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.cutPipesClose
+    },
+    {
+        id: 'dongbari-maint-kit',
+        category: '시스템 동바리 자재',
+        phase: '11 야적장 보관',
+        title: '야적장 빔형 자재',
+        description: '실외 야적장에 보관된 빔형 자재 이미지로, 정비 대기 부재나 대량 보관 자재 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.beamYard
+    },
+    {
+        id: 'dongbari-return-pack',
+        category: '시스템 동바리 자재',
+        phase: '12 회수 적치',
+        title: '회수된 강관 자재 적치',
+        description: '실외 적치장에 회수된 파이프 자재가 모여 있는 형태로, 반납 분류와 재임대 대기 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeYardClose
+    },
+    {
+        id: 'scaffold-base-jack',
+        category: '시스템 비계 자재',
+        phase: '01 파이프 적치',
+        title: '비계용 강관 자재 묶음',
+        description: '비계 수직재와 수평재로 쓰이는 강관이 모여 있는 사진으로, 기본 비계 자재 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeRackWide
+    },
+    {
+        id: 'scaffold-standard',
+        category: '시스템 비계 자재',
+        phase: '02 랙 보관',
+        title: '랙 보관 비계 자재',
+        description: '강관류가 랙에 정렬된 형태로, 수직재와 주 골조 부재를 창고형으로 관리하는 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeRackFront
+    },
+    {
+        id: 'scaffold-ledger',
+        category: '시스템 비계 자재',
+        phase: '03 판형 부재',
+        title: '발판·패널형 자재 적치',
+        description: '판형 부재가 적치된 이미지로, 발판 계열 자재나 패널형 작업면 부재 설명에 잘 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.formPanelStacks
+    },
+    {
+        id: 'scaffold-diagonal',
+        category: '시스템 비계 자재',
+        phase: '04 실외 적치',
+        title: '실외 비계 파이프 적치',
+        description: '야적장에 적치된 파이프류 사진으로, 가새재나 장척 연결재를 대량 보관하는 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeYardWide
+    },
+    {
+        id: 'scaffold-platform',
+        category: '시스템 비계 자재',
+        phase: '05 창고 적치',
+        title: '창고형 작업면 자재',
+        description: '실내에 규격별로 보관된 자재 이미지로, 발판이나 작업면 보조 자재를 분류 저장하는 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.warehouseSheets
+    },
+    {
+        id: 'scaffold-guardrail',
+        category: '시스템 비계 자재',
+        phase: '06 빔형 부재',
+        title: '빔형 안전 보조 자재',
+        description: '빔 단면이 강조된 사진으로, 난간 보조 프레임이나 강재 연결 자재 설명에 맞는 이미지입니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.steelBeamClose
+    },
+    {
+        id: 'scaffold-wall-tie',
+        category: '시스템 비계 자재',
+        phase: '07 야적 보관',
+        title: '야적 보관 프레임 자재',
+        description: '실외에 보관된 프레임형 강재 사진으로, 벽이음 보조재나 구조 연결 자재 묶음 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.beamYard
+    },
+    {
+        id: 'scaffold-stair-unit',
+        category: '시스템 비계 자재',
+        phase: '08 소구경 부재',
+        title: '소구경 봉형 자재',
+        description: '가늘고 긴 철재가 정렬된 이미지로, 보조 난간재나 부속 프레임 계열 설명과 잘 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.assortedBarsTop
+    },
+    {
+        id: 'scaffold-bracket',
+        category: '시스템 비계 자재',
+        phase: '09 혼합 적치',
+        title: '혼합 비계 부재 세트',
+        description: '규격이 다른 부재가 함께 적치된 형태로, 브라켓과 보조 프레임류를 묶음 관리하는 설명에 어울립니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.assortedBarsWide
+    },
+    {
+        id: 'scaffold-toe-board',
+        category: '시스템 비계 자재',
+        phase: '10 중량 부재',
+        title: '중량 안전 보조 자재',
+        description: '중량감 있는 강재 묶음 사진으로, 낙하물 방지 보조재나 고정 보강 부재 설명에 맞습니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.steelBarsDark
+    },
+    {
+        id: 'scaffold-connector',
+        category: '시스템 비계 자재',
+        phase: '11 절단 파이프',
+        title: '절단 비계 파이프 자재',
+        description: '절단면이 보이는 강관 묶음으로, 연결용 파이프 자재와 회수 분류 자재 설명에 적합합니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.cutPipesClose
+    },
+    {
+        id: 'scaffold-net',
+        category: '시스템 비계 자재',
+        phase: '12 회수 적치',
+        title: '회수된 비계 자재 적치',
+        description: '회수 후 야적장에 재정렬된 파이프 자재 이미지로, 반납 분류와 재임대 준비 설명에 맞는 사진입니다.',
+        src: MATERIAL_ONLY_PHOTO_URLS.pipeYardClose
+    }
+];
+
+const PROCESS_STEPS: Record<string, DetailProcessStep[]> = {
+    'system-dongbari-scaffolding': [
+        {
+            step: '01',
+            title: '현장 측량 및 기준선 설정',
+            icon: faSitemap,
+            desc: '하중선, 반입 동선, 기준 레벨을 먼저 잡아 동바리와 비계 설치 위치를 통합 계획합니다.',
+            focus: '기준 레벨 오차와 자재 적치 구간을 선행 확정'
+        },
+        {
+            step: '02',
+            title: '받침면 정리와 잭베이스 설치',
+            icon: faBoxes,
+            desc: '침하 우려 구간을 보강하고 잭베이스를 균일하게 맞춰 초기 변형을 억제합니다.',
+            focus: '지반 상태, 받침목, 베이스플레이트 동시 확인'
+        },
+        {
+            step: '03',
+            title: '수직재·수평재·가새 조립',
+            icon: faHelmetSafety,
+            desc: '수직재를 세운 뒤 수평재와 가새를 규격 간격대로 체결해 프레임 강성을 확보합니다.',
+            focus: '초기 2단 조립 후 수직도와 체결 토크 재점검'
+        },
+        {
+            step: '04',
+            title: 'U헤드·거푸집 지지선 구성',
+            icon: faBuilding,
+            desc: '상부 거푸집 하중이 안전하게 전달되도록 U헤드, 멍에, 장선 연결부를 완성합니다.',
+            focus: '집중하중 구간은 추가 보강재를 별도 배치'
+        },
+        {
+            step: '05',
+            title: '비계 발판·난간·벽이음 설치',
+            icon: faCheckCircle,
+            desc: '작업발판, 계단, 난간, 벽이음을 설치해 고소 작업 구간의 접근성과 안전성을 동시에 확보합니다.',
+            focus: '추락방지 부재와 벽체 고정 상태를 사용 전 승인'
+        },
+        {
+            step: '06',
+            title: '사용 전 검사와 일일 유지관리',
+            icon: faArrowRight,
+            desc: '체결 상태, 침하, 적재하중, 통로 상태를 확인하고 작업 중에도 반복 점검합니다.',
+            focus: '체크리스트 기반 승인 후 일일 TBM과 재점검 수행'
+        }
+    ],
+    'peri-dongbari': [
+        { step: '01', title: '임대 상담', icon: faDatabase, desc: '규격 및 수량 확정' },
+        { step: '02', title: '품질 검수', icon: faCheckCircle, desc: '정품 자재 상태 확인' },
+        { step: '03', title: '현장 출고', icon: faBoxes, desc: '물류 센터 배송' },
+        { step: '04', title: '사용 관리', icon: faSitemap, desc: '일일 임대료 집계' },
+        { step: '05', title: '정밀 회수', icon: faArrowRight, desc: '반납 자재 등급 분류' }
+    ],
+    'peri-scaffolding': [
+        { step: '01', title: '인력 요청', icon: faUsers, desc: '현장 난이도 분석' },
+        { step: '02', title: '팀 매칭', icon: faProjectDiagram, desc: '최적 숙련공 배정' },
+        { step: '03', title: '안전 교육', icon: faHelmetSafety, desc: '작업 전 TBM 수행' },
+        { step: '04', title: '출역 확인', icon: faCheckCircle, desc: '모바일 GPS 근태' },
+        { step: '05', title: '노무 정산', icon: faDatabase, desc: '익월 노무비 지급' }
+    ],
+    'erp-site-management': [
+        { step: '01', title: '시스템 도입', icon: faNetworkWired, desc: '현장 코드 생성' },
+        { step: '02', title: '데이터 입력', icon: faDatabase, desc: '모바일 일보 작성' },
+        { step: '03', title: '실시간 집계', icon: faProjectDiagram, desc: '본사 통합 모니터링' },
+        { step: '04', title: '손익 분석', icon: faChartLine, desc: '원가 대비 기성 분석' },
+        { step: '05', title: '디지털 자산화', icon: faCheckCircle, desc: '준공 데이터 영구 보관' }
+    ],
+    'partner-network': [
+        { step: '01', title: '파트너 모집', icon: faNetworkWired, desc: '역량 평가 및 등록' },
+        { step: '02', title: '견적 입찰', icon: faDatabase, desc: '투명한 온라인 비딩' },
+        { step: '03', title: '계약 체결', icon: faCheckCircle, desc: '전자 계약 시스템' },
+        { step: '04', title: '협업 수행', icon: faUsers, desc: '실시간 소통 채널' },
+        { step: '05', title: '성과 평가', icon: faChartLine, desc: '상호 평점 및 우수사 선정' }
+    ]
+};
 
 // --- Animation Variants ---
 
@@ -147,6 +655,12 @@ const ToolCard: React.FC<ToolCardProps> = ({ title, description, icon, color, on
 const DesignManagementPage: React.FC = () => {
     const controls = useAnimation();
     const [selectedMenu, setSelectedMenu] = useState<MenuItem | null>(null);
+    const [showDeepDive, setShowDeepDive] = useState(false);
+
+    // Reset Deep Dive when menu changes
+    useEffect(() => {
+        setShowDeepDive(false);
+    }, [selectedMenu]);
 
     // Initial SVG Animation
     useEffect(() => {
@@ -173,6 +687,16 @@ const DesignManagementPage: React.FC = () => {
         hidden: { opacity: 0, scale: 0.9 },
         finished: { opacity: 1, scale: 1, transition: { duration: 1.5, delay: 0.5, ease: "easeOut" } }
     };
+
+    const isSystemConstruction = selectedMenu?.id === 'system-dongbari-scaffolding';
+    const isMaterialRental = selectedMenu?.id === 'peri-dongbari';
+    const processSteps = selectedMenu ? PROCESS_STEPS[selectedMenu.id] ?? [] : [];
+    const dongbariPhotos = SYSTEM_CONSTRUCTION_PHOTOS.filter((photo) => photo.category === '시스템 동바리');
+    const scaffoldingPhotos = SYSTEM_CONSTRUCTION_PHOTOS.filter((photo) => photo.category === '시스템 비계');
+    const totalConstructionPhotos = dongbariPhotos.length + scaffoldingPhotos.length;
+    const dongbariMaterialPhotos = MATERIAL_RENTAL_PHOTOS.filter((photo) => photo.category === '시스템 동바리 자재');
+    const scaffoldingMaterialPhotos = MATERIAL_RENTAL_PHOTOS.filter((photo) => photo.category === '시스템 비계 자재');
+    const totalMaterialRentalPhotos = dongbariMaterialPhotos.length + scaffoldingMaterialPhotos.length;
 
     return (
         <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-cyan-500/30 overflow-x-hidden">
@@ -237,68 +761,540 @@ const DesignManagementPage: React.FC = () => {
                             initial="hidden"
                             animate="visible"
                             exit="exit"
-                            className="mb-12 overflow-hidden"
+                            className="mb-16 overflow-hidden"
                         >
-                            <div className={`p-8 md:p-12 bg-slate-800/90 backdrop-blur-xl border-2 border-${selectedMenu.color}-500/30 rounded-3xl shadow-2xl relative`}>
+                            <div className={`p-10 md:p-16 bg-slate-900/95 backdrop-blur-2xl border-2 border-${selectedMenu.color}-500/40 rounded-[40px] shadow-[0_0_80px_rgba(0,0,0,0.5)] relative`}>
                                 {/* Background glow inside the detail panel */}
-                                <div className={`absolute -top-40 -left-40 w-96 h-96 bg-${selectedMenu.color}-500/10 rounded-full blur-[100px] pointer-events-none`} />
+                                <div className={`absolute -top-60 -left-60 w-[600px] h-[600px] bg-${selectedMenu.color}-500/10 rounded-full blur-[120px] pointer-events-none`} />
+                                <div className={`absolute -bottom-60 -right-60 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none`} />
 
-                                <div className="relative z-10 flex flex-col md:flex-row gap-8 items-start">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-4 mb-6">
-                                            <div className={`w-16 h-16 rounded-2xl bg-${selectedMenu.color}-500/15 flex items-center justify-center text-${selectedMenu.color}-400 text-3xl border border-${selectedMenu.color}-500/20`}>
-                                                <FontAwesomeIcon icon={selectedMenu.icon} />
-                                            </div>
-                                            <h2 className={`text-4xl font-extrabold text-white`}>
-                                                {selectedMenu.title}
-                                            </h2>
-                                        </div>
-
-                                        <p className="text-xl text-slate-300 leading-relaxed max-w-3xl mb-8">
-                                            {selectedMenu.description} 이 화면은 {selectedMenu.title}의 상세 기능과 대시보드 진입점입니다. 다양한 차트, 통계, 관리 도구를 이 공간에서 불러와 사용할 수 있습니다.
-                                        </p>
-
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex gap-3">
-                                                <FontAwesomeIcon icon={faCheckCircle} className={`text-${selectedMenu.color}-400 mt-1`} />
+                                <div className="relative z-10">
+                                    {/* Header in Detail */}
+                                    <div className="flex flex-col lg:flex-row justify-between items-start gap-8 mb-12 border-b border-slate-700/50 pb-10">
+                                        <div className="flex-1">
+                                            <div className="flex items-center gap-6 mb-6">
+                                                <div className={`w-20 h-20 rounded-3xl bg-${selectedMenu.color}-500/20 flex items-center justify-center text-${selectedMenu.color}-400 text-4xl border border-${selectedMenu.color}-500/30 shadow-inner`}>
+                                                    <FontAwesomeIcon icon={selectedMenu.icon} />
+                                                </div>
                                                 <div>
-                                                    <h4 className="font-bold text-white mb-1">핵심 기능 A</h4>
-                                                    <p className="text-sm text-slate-400">데이터 실시간 연동 및 동기화 지원 (100ms 지연)으로 정확한 현황 파악.</p>
+                                                    <h2 className="text-5xl font-black text-white tracking-tighter mb-2">
+                                                        {selectedMenu.title}
+                                                    </h2>
+                                                    <div className="flex gap-3">
+                                                        <span className={`px-3 py-1 rounded-full bg-${selectedMenu.color}-500/10 text-${selectedMenu.color}-400 text-xs font-bold uppercase tracking-widest`}>Engineering Level 5</span>
+                                                        <span className="px-3 py-1 rounded-full bg-slate-800 text-slate-400 text-xs font-bold uppercase tracking-widest">Standard Compliance: KOSHA</span>
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-700/50 flex gap-3">
-                                                <FontAwesomeIcon icon={faCheckCircle} className={`text-${selectedMenu.color}-400 mt-1`} />
-                                                <div>
-                                                    <h4 className="font-bold text-white mb-1">핵심 기능 B</h4>
-                                                    <p className="text-sm text-slate-400">통합형 리포팅 도구 제공 및 원클릭 엑셀/PDF 산출물 내보내기.</p>
+                                            <p className="text-2xl text-slate-300 leading-snug font-medium max-w-4xl italic">
+                                                "{selectedMenu.description}"
+                                            </p>
+                                        </div>
+                                        <div className="flex flex-col gap-3 min-w-[240px]">
+                                            <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+                                                <p className="text-slate-500 text-[10px] font-bold uppercase mb-2 tracking-tighter">Current Module Status</p>
+                                                <div className="flex items-center justify-between text-white font-bold">
+                                                    <span>최적화 완료</span>
+                                                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                                                 </div>
                                             </div>
                                         </div>
-
-                                        <button className={`px-8 py-4 bg-${selectedMenu.color}-600 hover:bg-${selectedMenu.color}-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-${selectedMenu.color}-600/30 flex items-center gap-3`}>
-                                            해당 모듈 실행하기 <FontAwesomeIcon icon={faArrowRight} />
-                                        </button>
                                     </div>
 
-                                    {/* Abstract Graphic Area for the detail panel */}
-                                    <div className="hidden lg:flex w-[400px] h-[300px] bg-slate-900/60 rounded-2xl border border-slate-700 items-center justify-center p-6 relative overflow-hidden">
-                                        <div className={`absolute top-0 right-0 w-full h-full bg-${selectedMenu.color}-500/5`} />
-                                        <div className="text-center relative z-10">
-                                            <p className="text-slate-500 text-sm tracking-widest uppercase mb-4">Module Visualizer</p>
-                                            <div className={`text-9xl text-${selectedMenu.color}-500/20`}>
-                                                <FontAwesomeIcon icon={selectedMenu.icon} />
+                                    {/* 1:1 Detailed Content Grid (Dynamic Based on Menu ID) */}
+                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10 mb-12">
+                                        
+                                        {/* Left Side: Professional Specs */}
+                                        <div className="space-y-6">
+                                            <div className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color}-500/30 relative overflow-hidden group/item h-full`}>
+                                                <div className="flex items-center gap-4 mb-6">
+                                                    <div className={`w-12 h-12 rounded-xl bg-${selectedMenu.color}-500/20 flex items-center justify-center text-${selectedMenu.color}-400 border border-${selectedMenu.color}-500/30`}>
+                                                        <FontAwesomeIcon icon={selectedMenu.icon} />
+                                                    </div>
+                                                    <h3 className="text-3xl font-black text-white tracking-tight">
+                                                        {selectedMenu.id === 'system-dongbari-scaffolding' ? '시스템 동바리 (System Shoring)' : 
+                                                         selectedMenu.id === 'peri-dongbari' ? '자재 자산 관리 (Asset MGMT)' :
+                                                         selectedMenu.id === 'peri-scaffolding' ? '인력 매칭 엔진 (Smart Dispatch)' :
+                                                         selectedMenu.id === 'erp-site-management' ? '실시간 데이터 통합 (Live Sync)' : '글로벌 파트너십 (B2B Network)'}
+                                                    </h3>
+                                                </div>
+
+                                                <div className="space-y-6 text-slate-300">
+                                                    <div className={`bg-${selectedMenu.color}-500/5 p-5 rounded-2xl border border-${selectedMenu.color}-500/10`}>
+                                                        <h4 className={`text-${selectedMenu.color}-400 font-bold mb-2 uppercase text-xs tracking-widest`}>기술적 정의 및 핵심 가치</h4>
+                                                        <p className="text-sm leading-relaxed">
+                                                            {selectedMenu.id === 'system-dongbari-scaffolding' && '슬래브 및 보의 거푸집을 지지하기 위해 고안된 가설 구조물입니다. 개별 동바리를 수평재로 연결하여 격자 구조를 형성, 좌굴 저항력을 극대화합니다.'}
+                                                            {selectedMenu.id === 'peri-dongbari' && 'Peri 규격 및 정품 자재의 입출고, 유지보수, 감가상각을 관리합니다. 바코드 기반 추적 시스템으로 현장별 자재 손실률을 0.5% 미만으로 관리합니다.'}
+                                                            {selectedMenu.id === 'peri-scaffolding' && '건설 현장별 필요 숙련도를 분석하여 최적의 팀과 개인을 매칭합니다. 안전 교육 이력 및 시공 평점이 연동된 투명한 인력 수급 생태계를 지향합니다.'}
+                                                            {selectedMenu.id === 'erp-site-management' && '분산된 현장 데이터를 클라우드 기반으로 통합합니다. 노무비, 자재비, 경비를 실시간으로 집계하여 투입 대비 산출물(Yield)을 분석하는 현장 경영의 핵심 도구입니다.'}
+                                                            {selectedMenu.id === 'partner-network' && '검증된 시공사 및 자재사와의 긴밀한 연업을 지원합니다. 입찰 시스템과 성과 기반 등급제를 통해 프로젝트 리스크를 사전 방지하고 시너지를 극대화합니다.'}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-4 text-xs">
+                                                        <div className="space-y-2">
+                                                            <p className="text-slate-500 font-bold uppercase">주요 구성 요소</p>
+                                                            <ul className="space-y-1 ml-1">
+                                                                {selectedMenu.id === 'system-dongbari-scaffolding' && (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span> 수직재/수평재 (Grid)</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span> 잭베이스 (Leveling)</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span> U헤드 (Fixing)</li>
+                                                                    </>
+                                                                )}
+                                                                {selectedMenu.id === 'peri-dongbari' && (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>Peri 정품 규격 자재</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>RFID 태그 추적</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>정비/보수 워크플로우</li>
+                                                                    </>
+                                                                )}
+                                                                {selectedMenu.id === 'peri-scaffolding' && (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>숙련공 DB (Career)</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>안전 교육 인증 (KOSHA)</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>팀 단위 매칭 로직</li>
+                                                                    </>
+                                                                )}
+                                                                {selectedMenu.id === 'erp-site-management' && (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>실시간 모바일 리포팅</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>AI 손익 분석 엔진</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>디지털 증빙 보관소</li>
+                                                                    </>
+                                                                )}
+                                                                {selectedMenu.id === 'partner-network' && (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>파트너 등급 시스템</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>스마트 입찰 모듈</li>
+                                                                        <li className="flex items-start gap-2"><span className={`text-${selectedMenu.color}-500`}>●</span>협업 히스토리 추적</li>
+                                                                    </>
+                                                                )}
+                                                            </ul>
+                                                        </div>
+                                                        <div className="space-y-2 text-slate-400">
+                                                            <p className="text-slate-500 font-bold uppercase">운영 표준 기준</p>
+                                                            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 leading-relaxed">
+                                                                {selectedMenu.id === 'system-dongbari-scaffolding' && <p>허용 하중: 4~6톤<br/>안전율: 2.0 이상</p>}
+                                                                {selectedMenu.id === 'peri-dongbari' && <p>검수 주기: 반납 즉시<br/>정비율: 98% 이상 유지</p>}
+                                                                {selectedMenu.id === 'peri-scaffolding' && <p>배치 속도: 24시간 이내<br/>사고 발생율: 0% 지향</p>}
+                                                                {selectedMenu.id === 'erp-site-management' && <p>데이터 지연: 100ms 미만<br/>가동시간: 99.9% 보장</p>}
+                                                                {selectedMenu.id === 'partner-network' && <p>파트너사: 500+ 보유<br/>매칭 성공률: 95% 이상</p>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
+
+                                        {/* Right Side: Secondary Detail */}
+                                        <div className="space-y-6">
+                                            <div className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/30 relative overflow-hidden group/item h-full`}>
+                                                <div className="flex items-center gap-4 mb-6">
+                                                    <div className={`w-12 h-12 rounded-xl bg-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/20 flex items-center justify-center text-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-400 border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/30`}>
+                                                        <FontAwesomeIcon icon={selectedMenu.id === 'system-dongbari-scaffolding' ? faBuilding : faCheckCircle} />
+                                                    </div>
+                                                    <h3 className="text-3xl font-black text-white tracking-tight">
+                                                        {selectedMenu.id === 'system-dongbari-scaffolding' ? '시스템 비계 (System Scaffolding)' : 
+                                                         selectedMenu.id === 'peri-dongbari' ? '물류 및 운송 최적화 (Logistics)' :
+                                                         selectedMenu.id === 'peri-scaffolding' ? '노무비 자동 정산 (Payroll)' :
+                                                         selectedMenu.id === 'erp-site-management' ? '모바일 현장 관제 (App)' : '상생 협력 가치 (Shared Growth)'}
+                                                    </h3>
+                                                </div>
+
+                                                <div className="space-y-6 text-slate-300">
+                                                    <div className={`bg-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/5 p-5 rounded-2xl border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/10`}>
+                                                        <h4 className={`text-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-400 font-bold mb-2 uppercase text-xs tracking-widest`}>심층 분석 및 응용</h4>
+                                                        <p className="text-sm leading-relaxed">
+                                                            {selectedMenu.id === 'system-dongbari-scaffolding' && '건축물 외벽 시공 및 고소 작업을 위한 일체형 가설 발판 시스템입니다. 벽이음과 전용 계단을 통해 안전성과 공기 단축을 획기적으로 개선합니다.'}
+                                                            {selectedMenu.id === 'peri-dongbari' && '현장별 이동 거리와 물량을 계산하여 최적의 운송 루트를 제안합니다. 자재 대기 시간을 최소화하여 전체 공정 속도를 15% 이상 향상시킵니다.'}
+                                                            {selectedMenu.id === 'peri-scaffolding' && '일일 투입 인력을 기반으로 노무비를 실시간 계산합니다. 복잡한 수당 체계를 자동화하여 정산 오류를 배제하고 투명한 금융 환경을 구축합니다.'}
+                                                            {selectedMenu.id === 'erp-site-management' && '현장 소장부터 근로자까지 사용하는 멀티 디바이스 환경을 지원합니다. 오프라인 상태에서도 데이터 입력이 가능하며 연결 시 자동 동기화됩니다.'}
+                                                            {selectedMenu.id === 'partner-network' && '단순 협력을 넘어 기술 공유와 금융 지원 프로그램을 운영합니다. 우수 파트너사에게는 장기 계약 및 우선 배차권을 부여하여 동반 성장을 실현합니다.'}
+                                                        </p>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-4 text-xs">
+                                                        <div className="space-y-2">
+                                                            <p className="text-slate-500 font-bold uppercase">전문 기능 명세</p>
+                                                            <ul className="space-y-1 ml-1">
+                                                                {selectedMenu.id === 'system-dongbari-scaffolding' ? (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className="text-cyan-500">●</span> 전용 통로 발판</li>
+                                                                        <li className="flex items-start gap-2"><span className="text-cyan-500">●</span> 벽이음 (Wall-Tie)</li>
+                                                                        <li className="flex items-start gap-2"><span className="text-cyan-500">●</span> 추락방지 난간</li>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <li className="flex items-start gap-2"><span className="text-emerald-500">●</span> 고급 분석 알고리즘</li>
+                                                                        <li className="flex items-start gap-2"><span className="text-emerald-500">●</span> 커스텀 대시보드</li>
+                                                                        <li className="flex items-start gap-2"><span className="text-emerald-500">●</span> API 확장 연동</li>
+                                                                    </>
+                                                                )}
+                                                            </ul>
+                                                        </div>
+                                                        <div className="space-y-2 text-slate-400">
+                                                            <p className="text-slate-500 font-bold uppercase">사용자 환경</p>
+                                                            <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                                                                <p>환경: Web / Mobile / Tablet</p>
+                                                                <p>접근: 직책별 차등 권한</p>
+                                                                <p>보안: AES-256 암호화</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Bottom Process Visualizer (Dynamic Labels) */}
+                                    <div className="bg-slate-800/40 p-10 rounded-[32px] border border-slate-700/50 mb-12">
+                                        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                                            <h4 className="flex items-center gap-3 text-xl font-bold text-white">
+                                                <FontAwesomeIcon icon={faProjectDiagram} className="text-slate-500" />
+                                                {isSystemConstruction
+                                                    ? '시스템 동바리 · 시스템 비계 설치 순서'
+                                                    : `${selectedMenu.title} 운영 프로세스 (Business Pipeline)`}
+                                            </h4>
+                                            {isSystemConstruction && (
+                                                <p className="max-w-2xl text-sm leading-relaxed text-slate-400">
+                                                    동바리와 비계를 따로 보지 않고 하중 전달 구조와 작업 안전 구조를 동시에 설계해야
+                                                    설치 품질과 공정 안정성이 함께 올라갑니다.
+                                                </p>
+                                            )}
+                                        </div>
+                                        <div className={isSystemConstruction ? 'grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-6' : 'grid grid-cols-2 gap-6 md:grid-cols-5'}>
+                                            {processSteps.map((item, i) => (
+                                                <div key={i} className="relative group/step">
+                                                    <div className="flex h-full flex-col rounded-[28px] border border-slate-700/60 bg-slate-950/70 p-5 text-center">
+                                                        <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-xl text-slate-400 transition-all group-hover/step:border-${selectedMenu.color}-500/50 group-hover/step:text-${selectedMenu.color}-400`}>
+                                                            <FontAwesomeIcon icon={item.icon} />
+                                                        </div>
+                                                        <span className={`text-[10px] font-black text-${selectedMenu.color}-500 mb-1`}>{item.step}</span>
+                                                        <h5 className="text-sm font-bold text-white mb-1">{item.title}</h5>
+                                                        <p className="text-[11px] text-slate-500 leading-tight">{item.desc}</p>
+                                                        {item.focus && (
+                                                            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-3 text-left">
+                                                                <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-500">
+                                                                    체크포인트
+                                                                </p>
+                                                                <p className="mt-2 text-[11px] leading-relaxed text-slate-300">
+                                                                    {item.focus}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    {i < processSteps.length - 1 && (
+                                                        <div className="absolute left-[calc(50%+40px)] top-8 hidden h-px w-[calc(100%-80px)] bg-slate-700 xl:block" />
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    {/* Extreme Technical Deep Dive Section (Toggleable) */}
+                                    <AnimatePresence>
+                                        {showDeepDive && (
+                                            <motion.div
+                                                initial={{ opacity: 0, y: 20 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                exit={{ opacity: 0, y: 10 }}
+                                                className="mb-12 space-y-8"
+                                            >
+                                                {isSystemConstruction && (
+                                                    <div className="space-y-8">
+                                                        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                                                            <div>
+                                                                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.35em] text-cyan-300/80">
+                                                                    Installation Photo Flow
+                                                                </p>
+                                                                <h4 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                                                                    시스템 동바리 · 시스템 비계 사진으로 보는 설치 과정
+                                                                </h4>
+                                                                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 md:text-base">
+                                                                    기준점 확인, 하부 레벨링, 프레임 조립, 상부 지지, 작업발판, 난간 및 벽이음, 최종 점검까지
+                                                                    현장에서 반드시 보는 장면을 {totalConstructionPhotos}장으로 정리했습니다.
+                                                                </p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                                                                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">동바리 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{dongbariPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">비계 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{scaffoldingPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">설치 단계</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">6단계</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 gap-8 2xl:grid-cols-2">
+                                                            {[
+                                                                {
+                                                                    title: '시스템 동바리 사진',
+                                                                    description: '슬래브와 보 하중을 안정적으로 지지하기 위한 하부 준비와 상부 지지 흐름입니다.',
+                                                                    accent: 'blue',
+                                                                    photos: dongbariPhotos
+                                                                },
+                                                                {
+                                                                    title: '시스템 비계 사진',
+                                                                    description: '외벽 작업면, 발판, 난간, 벽이음까지 안전하게 완성하는 외부 작업 플랫폼 흐름입니다.',
+                                                                    accent: 'cyan',
+                                                                    photos: scaffoldingPhotos
+                                                                }
+                                                            ].map((section) => (
+                                                                <div
+                                                                    key={section.title}
+                                                                    className={`rounded-[32px] border p-6 md:p-8 ${
+                                                                        section.accent === 'blue'
+                                                                            ? 'border-blue-500/25 bg-blue-500/[0.03]'
+                                                                            : 'border-cyan-500/25 bg-cyan-500/[0.03]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="mb-6">
+                                                                        <h5 className="text-2xl font-black tracking-tight text-white">{section.title}</h5>
+                                                                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{section.description}</p>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        {section.photos.map((photo) => (
+                                                                            <article
+                                                                                key={photo.id}
+                                                                                className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 shadow-[0_10px_30px_rgba(2,6,23,0.35)]"
+                                                                            >
+                                                                                <div className="group relative">
+                                                                                    <img
+                                                                                        src={photo.src}
+                                                                                        alt={`${photo.category} ${photo.title}`}
+                                                                                        loading="lazy"
+                                                                                        className="h-52 w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
+                                                                                    <div
+                                                                                        className={`absolute left-4 top-4 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] ${
+                                                                                            section.accent === 'blue'
+                                                                                                ? 'border border-blue-300/30 bg-blue-500/15 text-blue-100'
+                                                                                                : 'border border-cyan-300/30 bg-cyan-500/15 text-cyan-100'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {photo.phase}
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-4 right-4">
+                                                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                                                                                            {photo.category}
+                                                                                        </p>
+                                                                                        <h6 className="mt-1 text-base font-black leading-tight text-white">
+                                                                                            {photo.title}
+                                                                                        </h6>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <p className="text-sm leading-relaxed text-slate-400">
+                                                                                        {photo.description}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </article>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isMaterialRental && (
+                                                    <div className="space-y-8">
+                                                        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                                                            <div>
+                                                                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.35em] text-violet-300/80">
+                                                                    Material Rental Gallery
+                                                                </p>
+                                                                <h4 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                                                                    시스템 동바리 자재 · 시스템 비계 자재 사진으로 보는 임대 구성
+                                                                </h4>
+                                                                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 md:text-base">
+                                                                    출고 전 검수, 규격 분류, 현장 반입, 회수 후 정비까지 자재임대 실무에서 자주 보는 품목을
+                                                                    {totalMaterialRentalPhotos}장으로 정리했습니다.
+                                                                </p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                                                                <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">동바리 자재</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{dongbariMaterialPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">비계 자재</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{scaffoldingMaterialPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">총 자재 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{totalMaterialRentalPhotos}컷</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 gap-8 2xl:grid-cols-2">
+                                                            {[
+                                                                {
+                                                                    title: '시스템 동바리 자재',
+                                                                    description: '잭베이스, 수직재, 수평재, U헤드, 연결핀 등 동바리 임대 핵심 품목을 정리했습니다.',
+                                                                    accent: 'violet',
+                                                                    photos: dongbariMaterialPhotos
+                                                                },
+                                                                {
+                                                                    title: '시스템 비계 자재',
+                                                                    description: '베이스잭, 수직재, 발판, 난간, 벽이음, 계단 유닛 등 비계 임대 핵심 품목을 정리했습니다.',
+                                                                    accent: 'cyan',
+                                                                    photos: scaffoldingMaterialPhotos
+                                                                }
+                                                            ].map((section) => (
+                                                                <div
+                                                                    key={section.title}
+                                                                    className={`rounded-[32px] border p-6 md:p-8 ${
+                                                                        section.accent === 'violet'
+                                                                            ? 'border-violet-500/25 bg-violet-500/[0.03]'
+                                                                            : 'border-cyan-500/25 bg-cyan-500/[0.03]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="mb-6">
+                                                                        <h5 className="text-2xl font-black tracking-tight text-white">{section.title}</h5>
+                                                                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{section.description}</p>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        {section.photos.map((photo) => (
+                                                                            <article
+                                                                                key={photo.id}
+                                                                                className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 shadow-[0_10px_30px_rgba(2,6,23,0.35)]"
+                                                                            >
+                                                                                <div className="group relative">
+                                                                                    <img
+                                                                                        src={photo.src}
+                                                                                        alt={`${photo.category} ${photo.title}`}
+                                                                                        loading="lazy"
+                                                                                        className="h-52 w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
+                                                                                    <div
+                                                                                        className={`absolute left-4 top-4 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] ${
+                                                                                            section.accent === 'violet'
+                                                                                                ? 'border border-violet-300/30 bg-violet-500/15 text-violet-100'
+                                                                                                : 'border border-cyan-300/30 bg-cyan-500/15 text-cyan-100'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {photo.phase}
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-4 right-4">
+                                                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                                                                                            {photo.category}
+                                                                                        </p>
+                                                                                        <h6 className="mt-1 text-base font-black leading-tight text-white">
+                                                                                            {photo.title}
+                                                                                        </h6>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <p className="text-sm leading-relaxed text-slate-400">
+                                                                                        {photo.description}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </article>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {!isSystemConstruction && !isMaterialRental && (
+                                                    <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+                                                        <div className="bg-slate-900/80 p-6 rounded-2xl border border-slate-700/50">
+                                                            <h5 className={`text-xs font-bold text-${selectedMenu.color}-400 uppercase tracking-widest mb-4`}>Technical Data Sheet</h5>
+                                                            <div className="space-y-3">
+                                                                {selectedMenu.id === 'peri-dongbari' ? (
+                                                                    <div className="text-[11px] font-mono text-slate-400 space-y-1">
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Tracking Method</span> <span className="text-white">RFID / UHF 900MHz</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Depreciation Rate</span> <span className="text-white">15% Annually</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Quality Grading</span> <span className="text-white">A, B, C Grade ISO</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Inventory Accuracy</span> <span className="text-white">99.8% 실시간</span></p>
+                                                                    </div>
+                                                                ) : selectedMenu.id === 'peri-scaffolding' ? (
+                                                                    <div className="text-[11px] font-mono text-slate-400 space-y-1">
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Scoring Algorithm</span> <span className="text-white">V2 Experience Match</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Dispatch Latency</span> <span className="text-white">Avg. 120min</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Safety Score Weight</span> <span className="text-white">40% Priority</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Retention Rate</span> <span className="text-white">88% (LTV)</span></p>
+                                                                    </div>
+                                                                ) : selectedMenu.id === 'erp-site-management' ? (
+                                                                    <div className="text-[11px] font-mono text-slate-400 space-y-1">
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Encryption Standard</span> <span className="text-white">AES-256 GCM</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Sync Protocol</span> <span className="text-white">WebSocket / gRPC</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>DB Architecture</span> <span className="text-white">Multi-tenant Cloud</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>API Throughput</span> <span className="text-white">5k Req/sec</span></p>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="text-[11px] font-mono text-slate-400 space-y-1">
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Vetting Index</span> <span className="text-white">D&B Credit Grade</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Matching KPI</span> <span className="text-white">Lead Time -12%</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Contract Type</span> <span className="text-white">Blockchain Smart</span></p>
+                                                                        <p className="flex justify-between border-b border-slate-800 pb-1"><span>Dispute Resolve</span> <span className="text-white">Avg. 48h SLA</span></p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        <div className="col-span-2 bg-slate-900/80 p-6 rounded-2xl border border-slate-700/50">
+                                                            <h5 className={`text-xs font-bold text-${selectedMenu.color}-400 uppercase tracking-widest mb-4`}>Performance Metrics & Logic</h5>
+                                                            <div className="grid grid-cols-2 gap-8 h-full items-center">
+                                                                <div className="space-y-4">
+                                                                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
+                                                                        <motion.div initial={{ width: 0 }} animate={{ width: "85%" }} className={`h-full bg-${selectedMenu.color}-500`} />
+                                                                    </div>
+                                                                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                                                                        현장 데이터 집계 및 분석 로직이 백그라운드에서 실시간으로 작동 중입니다. 하드웨어 센서와 소프트웨어 에이전트 간의 동기화를 통해 현장의 모든 변수를 수치화합니다.
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex flex-col gap-2">
+                                                                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                                                                        <p className="text-[10px] text-slate-500 uppercase">System Integrity</p>
+                                                                        <p className="text-lg font-black text-emerald-400">OPTIMAL</p>
+                                                                    </div>
+                                                                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                                                                        <p className="text-[10px] text-slate-500 uppercase">Latency Impact</p>
+                                                                        <p className="text-lg font-black text-blue-400">&lt; 12ms</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+
+                                    {/* Action Button at the bottom */}
+                                    <div className="flex justify-center">
+                                        <button 
+                                            onClick={() => setShowDeepDive(!showDeepDive)}
+                                            className={`px-12 py-5 bg-gradient-to-r from-${selectedMenu.color}-600 to-${selectedMenu.color}-800 hover:scale-[1.02] active:scale-95 text-white rounded-2xl font-black text-xl transition-all shadow-2xl shadow-${selectedMenu.color}-600/40 flex items-center justify-center gap-6 group`}
+                                        >
+                                            {showDeepDive ? '닫기' : '더 자세히보기'} 
+                                            <FontAwesomeIcon icon={faArrowRight} className={`transition-transform duration-500 ${showDeepDive ? '-rotate-90' : 'rotate-90 group-hover:translate-y-1'}`} />
+                                        </button>
                                     </div>
                                 </div>
 
                                 {/* Close Button */}
                                 <button
                                     onClick={() => setSelectedMenu(null)}
-                                    className="absolute top-6 right-6 w-10 h-10 rounded-full bg-slate-700/50 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition-colors border border-slate-600"
+                                    className="absolute top-10 right-10 w-12 h-12 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all border border-slate-700 shadow-2xl z-50 group"
                                     aria-label="닫기"
                                 >
-                                    <FontAwesomeIcon icon={faXmark} className="text-xl" />
+                                    <FontAwesomeIcon icon={faXmark} className="text-2xl group-hover:rotate-90 transition-transform" />
                                 </button>
                             </div>
                         </motion.div>

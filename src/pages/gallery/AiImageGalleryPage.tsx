@@ -9,13 +9,16 @@ import {
     faUserAstronaut,
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
+import { useSiteMode } from '../../contexts/SiteModeContext';
 import {
     generateImage, saveGeneratedImage, listGalleryImages, deleteSavedImage, updateImageMetadata,
     uploadImageFile, applyAsFavicon, applyAsLogo, getCurrentFaviconUrl, getCurrentLogoUrl,
     getCustomCategories, addCustomCategory, deleteCustomCategory,
     migrateStorageToFirestore, applyAsDashboardBanner,
+    BrandingTarget,
     IMAGE_PRESETS, ImageCategory, GalleryImage, CustomCategory
 } from '../../services/geminiImageService';
+
 import { manpowerService } from '../../services/manpowerService';
 import { teamService } from '../../services/teamService';
 import { siteService } from '../../services/siteService';
@@ -81,8 +84,8 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
     onClose: () => void;
     onDelete: (img: GalleryImage) => void;
     onUpdate: (img: GalleryImage, updates: { customName?: string; tags?: string[] }) => void;
-    onApplyFavicon: (img: GalleryImage, target: 'erp' | 'site') => void;
-    onApplyLogo: (img: GalleryImage, target: 'erp' | 'site') => void;
+    onApplyFavicon: (img: GalleryImage, target: BrandingTarget) => void;
+    onApplyLogo: (img: GalleryImage, target: BrandingTarget) => void;
     onAssignLeader: (img: GalleryImage) => void;
     assigningLeader: boolean;
     onApplySiteImage: (img: GalleryImage) => void;
@@ -231,6 +234,12 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
                         <button onClick={() => onApplyLogo(image, 'erp')} className="py-2.5 bg-indigo-900/50 hover:bg-indigo-800/50 text-indigo-300 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
                             <FontAwesomeIcon icon={faCrown} /> ERP 로고 적용
                         </button>
+                        <button onClick={() => onApplyFavicon(image, 'nation')} className="py-2.5 bg-yellow-900/50 hover:bg-yellow-800/50 text-yellow-300 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+                            <FontAwesomeIcon icon={faGlobe} /> 전국 파비콘 적용
+                        </button>
+                        <button onClick={() => onApplyLogo(image, 'nation')} className="py-2.5 bg-orange-900/50 hover:bg-orange-800/50 text-orange-300 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1.5">
+                            <FontAwesomeIcon icon={faCrown} /> 전국 로고 적용
+                        </button>
                         {image.category === 'birdseye' && (
                             <button
                                 onClick={() => onApplySiteImage(image)}
@@ -280,6 +289,7 @@ const SkeletonCard = () => (
 
 // --- Main Page ---
 export const AiImageGalleryPage = () => {
+    const { currentSite } = useSiteMode();
     // Generation state
     const [category, setCategory] = useState<ImageCategory>('logo');
     const [prompt, setPrompt] = useState('');
@@ -330,8 +340,10 @@ export const AiImageGalleryPage = () => {
     // Applied favicon/logo
     const [currentSiteFavicon, setCurrentSiteFavicon] = useState<string | null>(null);
     const [currentErpFavicon, setCurrentErpFavicon] = useState<string | null>(null);
+    const [currentNationFavicon, setCurrentNationFavicon] = useState<string | null>(null);
     const [currentSiteLogo, setCurrentSiteLogo] = useState<string | null>(null);
     const [currentErpLogo, setCurrentErpLogo] = useState<string | null>(null);
+    const [currentNationLogo, setCurrentNationLogo] = useState<string | null>(null);
 
     // Business Card State
     const [bizName, setBizName] = useState('');
@@ -407,8 +419,10 @@ export const AiImageGalleryPage = () => {
         setCustomCategories(getCustomCategories());
         getCurrentFaviconUrl('site').then(setCurrentSiteFavicon);
         getCurrentFaviconUrl('erp').then(setCurrentErpFavicon);
+        getCurrentFaviconUrl('nation').then(setCurrentNationFavicon);
         getCurrentLogoUrl('site').then(setCurrentSiteLogo);
         getCurrentLogoUrl('erp').then(setCurrentErpLogo);
+        getCurrentLogoUrl('nation').then(setCurrentNationLogo);
     }, []);
 
     // File upload handlers
@@ -444,33 +458,37 @@ export const AiImageGalleryPage = () => {
     };
 
     // Favicon/Logo handlers
-    const handleApplyFavicon = async (img: GalleryImage, target: 'erp' | 'site') => {
+    const handleApplyFavicon = async (img: GalleryImage, target: BrandingTarget) => {
+        const targetLabel = target === 'site' ? 'SITE' : target === 'erp' ? 'ERP' : '전국시스템';
         const confirm = await Swal.fire({
-            title: '파비콘 적용', text: `이 이미지를 ${target === 'site' ? 'SITE' : 'ERP'} 파비콘으로 적용하시겠습니까?`,
+            title: `${targetLabel} 파비콘 적용`, text: `이 이미지를 ${targetLabel} 파비콘으로 적용하시겠습니까?`,
             icon: 'question', showCancelButton: true, confirmButtonText: '적용', cancelButtonText: '취소'
         });
         if (!confirm.isConfirmed) return;
         const result = await applyAsFavicon(img.url, target);
         if (result.success) {
             if (target === 'site') setCurrentSiteFavicon(img.url);
-            else setCurrentErpFavicon(img.url);
-            Swal.fire({ icon: 'success', title: '파비콘 적용 완료!', text: `${target === 'site' ? 'SITE' : 'ERP'} 파비콘이 반영되었습니다.`, timer: 2000, showConfirmButton: false });
+            else if (target === 'erp') setCurrentErpFavicon(img.url);
+            else setCurrentNationFavicon(img.url);
+            Swal.fire({ icon: 'success', title: '파비콘 적용 완료!', text: `${targetLabel} 파비콘이 반영되었습니다.`, timer: 2000, showConfirmButton: false });
         } else {
             Swal.fire('오류', result.error || '파비콘 적용 실패', 'error');
         }
     };
 
-    const handleApplyLogo = async (img: GalleryImage, target: 'erp' | 'site') => {
+    const handleApplyLogo = async (img: GalleryImage, target: BrandingTarget) => {
+        const targetLabel = target === 'site' ? 'SITE' : target === 'erp' ? 'ERP' : '전국시스템';
         const confirm = await Swal.fire({
-            title: '로고 적용', text: `이 이미지를 ${target === 'site' ? 'SITE' : 'ERP'} 로고로 적용하시겠습니까?`,
+            title: `${targetLabel} 로고 적용`, text: `이 이미지를 ${targetLabel} 로고로 적용하시겠습니까?`,
             icon: 'question', showCancelButton: true, confirmButtonText: '적용', cancelButtonText: '취소'
         });
         if (!confirm.isConfirmed) return;
         const result = await applyAsLogo(img.url, target);
         if (result.success) {
             if (target === 'site') setCurrentSiteLogo(result.url || img.url);
-            else setCurrentErpLogo(result.url || img.url);
-            Swal.fire({ icon: 'success', title: '로고 적용 완료!', text: `${target === 'site' ? 'SITE' : 'ERP'} 로고가 변경됩니다.`, timer: 2000, showConfirmButton: false });
+            else if (target === 'erp') setCurrentErpLogo(result.url || img.url);
+            else setCurrentNationLogo(result.url || img.url);
+            Swal.fire({ icon: 'success', title: '로고 적용 완료!', text: `${targetLabel} 로고가 반영되었습니다.`, timer: 2000, showConfirmButton: false });
         } else {
             Swal.fire('오류', result.error || '로고 적용 실패', 'error');
         }
@@ -799,7 +817,7 @@ export const AiImageGalleryPage = () => {
                     </div>
                     <div className="flex items-center gap-3">
                         {/* Current Favicon/Logo Status */}
-                        {(currentSiteFavicon || currentErpFavicon || currentSiteLogo || currentErpLogo) && (
+                        {(currentSiteFavicon || currentErpFavicon || currentNationFavicon || currentSiteLogo || currentErpLogo || currentNationLogo) && (
                             <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 rounded-xl border border-slate-700/50">
                                 {currentSiteFavicon && (
                                     <div className="flex items-center gap-1.5" title="현재 SITE 파비콘">
@@ -815,7 +833,14 @@ export const AiImageGalleryPage = () => {
                                         <img src={currentErpFavicon} alt="ERP Favicon" className="w-5 h-5 rounded object-cover" />
                                     </div>
                                 )}
-                                {(currentSiteFavicon || currentErpFavicon) && (currentSiteLogo || currentErpLogo) && <div className="w-px h-4 bg-slate-700" />}
+                                {currentNationFavicon && (
+                                    <div className="flex items-center gap-1.5" title="현재 전국시스템 파비콘">
+                                        <FontAwesomeIcon icon={faGlobe} className="text-yellow-400 text-[10px]" />
+                                        <span className="text-[10px] text-yellow-300">전국</span>
+                                        <img src={currentNationFavicon} alt="Nation Favicon" className="w-5 h-5 rounded object-cover" />
+                                    </div>
+                                )}
+                                {(currentSiteFavicon || currentErpFavicon || currentNationFavicon) && (currentSiteLogo || currentErpLogo || currentNationLogo) && <div className="w-px h-4 bg-slate-700" />}
                                 {currentSiteLogo && (
                                     <div className="flex items-center gap-1.5" title="현재 SITE 로고">
                                         <FontAwesomeIcon icon={faCrown} className="text-purple-400 text-[10px]" />
@@ -828,6 +853,13 @@ export const AiImageGalleryPage = () => {
                                         <FontAwesomeIcon icon={faCrown} className="text-indigo-400 text-[10px]" />
                                         <span className="text-[10px] text-indigo-300">ERP</span>
                                         <img src={currentErpLogo} alt="ERP Logo" className="w-5 h-5 rounded object-cover" />
+                                    </div>
+                                )}
+                                {currentNationLogo && (
+                                    <div className="flex items-center gap-1.5" title="현재 전국시스템 로고">
+                                        <FontAwesomeIcon icon={faCrown} className="text-orange-400 text-[10px]" />
+                                        <span className="text-[10px] text-orange-300">전국</span>
+                                        <img src={currentNationLogo} alt="Nation Logo" className="w-5 h-5 rounded object-cover" />
                                     </div>
                                 )}
                             </div>

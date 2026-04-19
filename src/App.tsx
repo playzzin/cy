@@ -141,6 +141,7 @@ import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
 import CheongyeonHistoryPage from './pages/cheongyeon/CheongyeonHistoryPage';
 import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
+import NationwideDashboardHome from './pages/jeonkuk/NationwideDashboardHome';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
 import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 import AccountManagementPage from './pages/database/AccountManagementPage';
@@ -235,6 +236,7 @@ const App: React.FC = () => {
             <Route path="/dashboard-v2" element={<DashboardExecutiveView />} />
             {/* 청연사이트 전용 대시보드 */}
             <Route path="/dashboard2" element={<CheongyeonHome />} />
+            <Route path="/dashboard3" element={<NationwideDashboardHome />} />
             <Route path="/cheongyeon/home" element={<Navigate to="/dashboard2" replace />} />
 
             {/* Reports */}

@@ -57,6 +57,9 @@ const TEAM_ACCENT_LIGHT = {
     accounting: { card: 'border-violet-200 bg-violet-50', icon: 'bg-violet-100 text-violet-700', leader: 'border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50', title: 'text-violet-700' },
     support: { card: 'border-amber-200 bg-amber-50', icon: 'bg-amber-100 text-amber-700', leader: 'border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50', title: 'text-amber-700' },
     construction: { card: 'border-emerald-200 bg-emerald-50', icon: 'bg-emerald-100 text-emerald-700', leader: 'border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50', title: 'text-emerald-700' },
+    hr: { card: 'border-pink-200 bg-pink-50', icon: 'bg-pink-100 text-pink-700', leader: 'border-pink-200 bg-gradient-to-r from-pink-50 to-rose-50', title: 'text-pink-700' },
+    sales: { card: 'border-orange-200 bg-orange-50', icon: 'bg-orange-100 text-orange-700', leader: 'border-orange-200 bg-gradient-to-r from-orange-50 to-amber-50', title: 'text-orange-700' },
+    dev: { card: 'border-blue-200 bg-blue-50', icon: 'bg-blue-100 text-blue-700', leader: 'border-blue-200 bg-gradient-to-r from-blue-50 to-cyan-50', title: 'text-blue-700' },
     default: { card: 'border-slate-200 bg-white', icon: 'bg-slate-100 text-slate-600', leader: 'border-slate-200 bg-gradient-to-r from-slate-50 to-slate-100', title: 'text-slate-700' }
 };
 
@@ -65,6 +68,9 @@ const TEAM_ACCENT_DARK = {
     accounting: { card: 'border-violet-400/30 bg-violet-500/10', icon: 'bg-violet-400/20 text-violet-200', leader: 'border-violet-300/30 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20', title: 'text-violet-200' },
     support: { card: 'border-amber-400/30 bg-amber-500/10', icon: 'bg-amber-400/20 text-amber-200', leader: 'border-amber-300/30 bg-gradient-to-r from-amber-500/20 to-orange-500/20', title: 'text-amber-200' },
     construction: { card: 'border-emerald-400/30 bg-emerald-500/10', icon: 'bg-emerald-400/20 text-emerald-200', leader: 'border-emerald-300/30 bg-gradient-to-r from-emerald-500/20 to-teal-500/20', title: 'text-emerald-200' },
+    hr: { card: 'border-pink-400/30 bg-pink-500/10', icon: 'bg-pink-400/20 text-pink-200', leader: 'border-pink-300/30 bg-gradient-to-r from-pink-500/20 to-rose-500/20', title: 'text-pink-200' },
+    sales: { card: 'border-orange-400/30 bg-orange-500/10', icon: 'bg-orange-400/20 text-orange-200', leader: 'border-orange-300/30 bg-gradient-to-r from-orange-500/20 to-amber-500/20', title: 'text-orange-200' },
+    dev: { card: 'border-blue-400/30 bg-blue-500/10', icon: 'bg-blue-400/20 text-blue-200', leader: 'border-blue-300/30 bg-gradient-to-r from-blue-500/20 to-cyan-500/20', title: 'text-blue-200' },
     default: { card: 'border-slate-700 bg-slate-800/70', icon: 'bg-slate-700 text-slate-200', leader: 'border-slate-600 bg-gradient-to-r from-slate-800 to-slate-700', title: 'text-slate-200' }
 };
 
@@ -74,6 +80,9 @@ const getTeamAccentKey = (teamName: string): keyof typeof TEAM_ACCENT_LIGHT => {
     if (name.includes('회계')) return 'accounting';
     if (name.includes('지원')) return 'support';
     if (name.includes('시공') || name.includes('공사')) return 'construction';
+    if (name.includes('인사')) return 'hr';
+    if (name.includes('영업')) return 'sales';
+    if (name.includes('개발')) return 'dev';
     return 'default';
 };
 

@@ -348,6 +348,8 @@ export const generateLaborStatementExcel = async (
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
             cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
         });
+        // --- Remove AutoFilter if set ---
+        worksheet.autoFilter = undefined;
     }
 
     // Write and Save

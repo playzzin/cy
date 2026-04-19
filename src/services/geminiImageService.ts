@@ -1,11 +1,3 @@
-/**
- * Gemini Image Generation Service
- * 
- * Gemini 2.5 Flash Image를 사용하여 다양한 용도의 이미지를 생성합니다.
- * - 파비콘, 로고, 아이콘, 배너, 카카오 친구톡 등 다양한 프리셋 지원
- * - Firebase Storage에 카테고리별 저장 및 관리
- */
-
 import { storage, db } from '../config/firebase';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject, getMetadata, updateMetadata } from 'firebase/storage';
 import { 
@@ -14,6 +6,15 @@ import {
     DocumentData, QueryDocumentSnapshot
 } from 'firebase/firestore';
 import { aiSettingsService } from './aiSettingsService';
+
+// --- 전국시스템인력(NATION) 파비콘/로고 적용 ---
+export async function applyAsNationFavicon(imageUrl: string): Promise<{ success: boolean; error?: string }> {
+    return applyAsFavicon(imageUrl, 'nation');
+}
+
+export async function applyAsNationLogo(imageUrl: string): Promise<{ success: boolean; url?: string; error?: string }> {
+    return applyAsLogo(imageUrl, 'nation');
+}
 
 // --- Types ---
 export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'dashboard-banner' | 'custom';
@@ -244,6 +245,8 @@ export async function saveGeneratedImage(
 
         // --- Firestore Indexing ---
         try {
+            const { db } = await import('../config/firebase');
+            const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
             const docId = fileName.replace(/\.[^/.]+$/, ""); // Use filename without extension as ID
             await setDoc(doc(db, METADATA_COLLECTION, docId), {
                 ...metadata,
@@ -273,6 +276,9 @@ export async function listGalleryImages(
     lastVisible?: QueryDocumentSnapshot<DocumentData>
 ): Promise<{ images: GalleryImage[], lastDoc?: QueryDocumentSnapshot<DocumentData> }> {
     try {
+        const { db } = await import('../config/firebase');
+        const { collection, query, orderBy, limit, where, startAfter, getDocs, Timestamp } = await import('firebase/firestore');
+        
         let q = query(
             collection(db, METADATA_COLLECTION),
             orderBy('createdAt', 'desc'),
@@ -321,6 +327,9 @@ export async function listGalleryImages(
 // Helper for one-time migration
 export async function migrateStorageToFirestore() {
     console.log('[GeminiImage] Starting migration...');
+    const { db } = await import('../config/firebase');
+    const { doc, getDoc, setDoc, serverTimestamp, Timestamp } = await import('firebase/firestore');
+    
     const paths: string[] = [];
     const categories: ImageCategory[] = ['favicon', 'logo', 'icon', 'banner', 'og-image', 'character', 'birdseye', 'business-card', 'dashboard-banner', 'custom'];
     categories.forEach(c => paths.push(`${STORAGE_BASE_PATH}/${c}`));
@@ -389,6 +398,8 @@ export async function updateImageMetadata(
         await updateMetadata(imageRef, { customMetadata: newCustomMeta });
 
         // Update Firestore
+        const { db } = await import('../config/firebase');
+        const { doc, updateDoc } = await import('firebase/firestore');
         const docId = fullPath.split('/').pop()?.replace(/\.[^/.]+$/, "");
         if (docId) {
             await updateDoc(doc(db, METADATA_COLLECTION, docId), {
@@ -409,6 +420,8 @@ export async function deleteSavedImage(fullPath: string): Promise<boolean> {
         await deleteObject(imageRef);
         
         // Delete from Firestore
+        const { db } = await import('../config/firebase');
+        const { doc, deleteDoc } = await import('firebase/firestore');
         const docId = fullPath.split('/').pop()?.replace(/\.[^/.]+$/, "");
         if (docId) {
             await deleteDoc(doc(db, METADATA_COLLECTION, docId));
@@ -451,6 +464,8 @@ export async function uploadImageFile(
 
         // Firestore Indexing
         try {
+            const { db } = await import('../config/firebase');
+            const { doc, setDoc, serverTimestamp } = await import('firebase/firestore');
             const docId = fileName.replace(/\.[^/.]+$/, "");
             await setDoc(doc(db, METADATA_COLLECTION, docId), {
                 category,
@@ -519,7 +534,7 @@ export function deleteCustomCategory(key: string): CustomCategory[] {
 
 // --- Favicon & Logo Application ---
 
-export type BrandingTarget = 'erp' | 'site';
+export type BrandingTarget = 'erp' | 'site' | 'nation';
 
 const BRANDING_PATHS: Record<BrandingTarget, { faviconPath: string; logoPath: string; faviconField: string; logoField: string }> = {
     erp: {
@@ -533,6 +548,12 @@ const BRANDING_PATHS: Record<BrandingTarget, { faviconPath: string; logoPath: st
         logoPath: 'settings/site_logo',
         faviconField: 'siteFaviconUrl',
         logoField: 'siteLogoUrl',
+    },
+    nation: {
+        faviconPath: 'settings/nation_favicon',
+        logoPath: 'settings/nation_logo',
+        faviconField: 'nationFaviconUrl',
+        logoField: 'nationLogoUrl',
     },
 };
 
@@ -613,6 +634,7 @@ export async function applyAsLogo(imageUrl: string, target: BrandingTarget = 'si
         return { success: false, error: error instanceof Error ? error.message : '로고 적용 실패' };
     }
 }
+
 
 export async function getCurrentFaviconUrl(target: BrandingTarget = 'site'): Promise<string | null> {
     try {

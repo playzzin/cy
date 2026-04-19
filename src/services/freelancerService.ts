@@ -21,6 +21,12 @@ const isCorporateInvoiceSiteRow = (row: Partial<DailyReportWorkerRow>): boolean 
     return isInvoicePayment && isSiteWork;
 };
 
+const isServiceTeamWorkRow = (row: Partial<DailyReportWorkerRow>): boolean => {
+    const salaryModel = normalizeKoreanToken(row.salaryModel);
+    const payType = normalizeKoreanToken(row.payType);
+    return salaryModel.includes('용역') || payType.includes('용역');
+};
+
 /**
  * FreelancerService - Firestore 통합 버전
  * 모든 요청을 freelancerFirestoreService로 위임합니다.
@@ -279,8 +285,8 @@ export const freelancerService = {
         freelancersRaw.forEach(addWorkerMaster);
 
         (reportRows as DailyReportWorkerRow[]).forEach(row => {
-            // 세무 프리랜서 집계는 "법인 계산서 현장" 금액만 반영한다.
-            if (!isCorporateInvoiceSiteRow(row)) return;
+            // 프리랜서 집계는 법인 계산서 현장 + 용역팀 작업을 반영한다.
+            if (!isCorporateInvoiceSiteRow(row) && !isServiceTeamWorkRow(row)) return;
 
             const date = String(row.date || '');
             if (date.length < 7) return;
@@ -507,8 +513,8 @@ export const freelancerService = {
             freelancersMaster.forEach(addWorkerToMap);
 
             rows.forEach((row: DailyReportWorkerRow) => {
-                // 세무 프리랜서 집계는 "법인 계산서 현장" 금액만 반영한다.
-                if (!isCorporateInvoiceSiteRow(row)) return;
+                // 세무 프리랜서 집계는 법인 계산서 현장 + 용역팀 작업을 반영한다.
+                if (!isCorporateInvoiceSiteRow(row) && !isServiceTeamWorkRow(row)) return;
 
                 const date = row.date ? String(row.date) : '';
                 if (!date || date.length < 7) return;

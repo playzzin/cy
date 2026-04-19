@@ -80,6 +80,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
+    const siteModeDashboards: Record<string, string> = {
+        test: '/dashboard2',
+        nation: '/dashboard3',
+    };
+    const siteModeDashboardPath = siteModeDashboards[currentSite];
+    const isSiteLayerMode = Boolean(siteModeDashboardPath);
+    const usesSiteBranding = currentSite === 'test' || currentSite === 'nation';
     const navigateSync = useCallback((to: string, options?: NavigateOptions) => {
         navigate(to, {
             ...options,
@@ -132,10 +139,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     // 청연사이트 모드일 때 /dashboard 접근 시 /dashboard2로 리다이렉트
     useEffect(() => {
-        if (currentSite === 'test' && location.pathname === '/dashboard') {
-            navigateSync('/dashboard2', { replace: true });
+        if (siteModeDashboardPath && location.pathname === '/dashboard') {
+            navigateSync(siteModeDashboardPath, { replace: true });
         }
-    }, [currentSite, location.pathname, navigateSync]);
+    }, [siteModeDashboardPath, location.pathname, navigateSync]);
 
     useEffect(() => {
         const setupAdminListener = async () => {
@@ -221,6 +228,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         siteLogoUrl?: string;
         erpFaviconUrl?: string;
         siteFaviconUrl?: string;
+        nationLogoUrl?: string;
+        nationFaviconUrl?: string;
     }>({});
 
     useEffect(() => {
@@ -238,6 +247,8 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                         siteLogoUrl: data.siteLogoUrl,
                         erpFaviconUrl: data.erpFaviconUrl,
                         siteFaviconUrl: data.siteFaviconUrl,
+                        nationLogoUrl: data.nationLogoUrl,
+                        nationFaviconUrl: data.nationFaviconUrl,
                     });
                 }
             });
@@ -255,14 +266,22 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         };
     }, []);
 
-    const activeLogoUrl = currentSite === 'test'
-        ? (systemConfig.siteLogoUrl || systemConfig.logoUrl)
-        : (systemConfig.erpLogoUrl || systemConfig.logoUrl);
+    // 전국시스템인력(nation)만 별도 로고/파비콘 우선 적용
+    const activeLogoUrl = currentSite === 'nation'
+        ? (systemConfig.nationLogoUrl || systemConfig.siteLogoUrl || systemConfig.logoUrl)
+        : usesSiteBranding
+            ? (systemConfig.siteLogoUrl || systemConfig.logoUrl)
+            : (systemConfig.erpLogoUrl || systemConfig.logoUrl);
 
     useEffect(() => {
-        const faviconUrl = currentSite === 'test'
-            ? (systemConfig.siteFaviconUrl || systemConfig.faviconUrl)
-            : (systemConfig.erpFaviconUrl || systemConfig.faviconUrl);
+        let faviconUrl: string = '';
+        if (currentSite === 'nation') {
+            faviconUrl = systemConfig.nationFaviconUrl ?? systemConfig.siteFaviconUrl ?? systemConfig.faviconUrl ?? '';
+        } else if (usesSiteBranding) {
+            faviconUrl = systemConfig.siteFaviconUrl ?? systemConfig.faviconUrl ?? '';
+        } else {
+            faviconUrl = systemConfig.erpFaviconUrl ?? systemConfig.faviconUrl ?? '';
+        }
 
         if (!faviconUrl) return;
 
@@ -275,7 +294,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             newLink.href = faviconUrl;
             document.head.appendChild(newLink);
         }
-    }, [currentSite, systemConfig.siteFaviconUrl, systemConfig.erpFaviconUrl, systemConfig.faviconUrl]);
+    }, [currentSite, usesSiteBranding, systemConfig.nationFaviconUrl, systemConfig.siteFaviconUrl, systemConfig.erpFaviconUrl, systemConfig.faviconUrl]);
 
     const toggleSidebar = () => {
         closePanels();
@@ -327,7 +346,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const handleLogoClick = () => {
         setActiveMenuItems({});
         // 청연사이트 모드이면 /dashboard2로, 아니면 /dashboard로 이동
-        navigateSync(currentSite === 'test' ? '/dashboard2' : '/dashboard');
+        navigateSync(siteModeDashboardPath || '/dashboard');
     };
 
     // Position to Site mapping - 직책별로 전용 메뉴 사용
@@ -425,9 +444,10 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         localStorage.setItem('cy_site_manual', 'true');
 
         // 청연사이트(test)로 전환 시 /dashboard2로 이동
-        if (siteKey === 'test') {
-            navigateSync('/dashboard2');
-        } else if (location.pathname === '/dashboard2') {
+        const nextDashboardPath = siteModeDashboards[siteKey];
+        if (nextDashboardPath) {
+            navigateSync(nextDashboardPath);
+        } else if (location.pathname === '/dashboard2' || location.pathname === '/dashboard3') {
             // 다른 사이트로 전환 시 /dashboard2에 있으면 /dashboard로 이동
             navigateSync('/dashboard');
         }
@@ -495,10 +515,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     }
 
     // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
-    if (currentSite === 'test' && currentSiteData) {
+    if (isSiteLayerMode && currentSiteData) {
+        const isNation = currentSite === 'nation';
         return (
             <SiteModeProvider {...siteModeValue}>
-                <div className={`app cheongyeon-mode ${isDarkMode ? '' : 'cy-light'} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
+                <div className={`app cheongyeon-mode ${isNation ? 'nation-mode' : ''} ${isDarkMode ? '' : 'cy-light'} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''} ${isMobileOpen ? 'mobile-open' : ''}`}>
                     <div className="backdrop" id="backdrop" onClick={closeAll}></div>
 
                     {/* Same Header as Admin ERP */}
@@ -562,7 +583,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
 
                     {/* Main Content with Video Background for Dashboard2 */}
-                    <main id="main-content" className={location.pathname === '/dashboard2' ? 'cheongyeon-main' : ''} onClick={() => {
+                    <main id="main-content" className={location.pathname === siteModeDashboardPath ? 'cheongyeon-main' : ''} onClick={() => {
                         if (isBottomPanelOpen || isAdminPanelOpen || isPositionPanelOpen || isMobileOpen || !isSidebarCollapsed) {
                             closeAll();
                         }

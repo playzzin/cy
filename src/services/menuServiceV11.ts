@@ -36,6 +36,8 @@ let unsubscribeSnapshot: Unsubscribe | null = null;
 const listeners: Set<MenuListener> = new Set();
 
 const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const configsEqual = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+const NATION_SITE_NAME = '전국시스템인력';
 
 const MENU_TEXT_ALIASES: Record<string, string> = {
     "\uC6D4\uAE09\uC81Cv2": "\uC6D4\uAE09\uC81C",
@@ -176,6 +178,7 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
             ...site,
             name: safeName,
             icon: safeIcon,
+            order: typeof site.order === 'number' ? site.order : undefined, // Ensure order is preserved
             menu: rawMenu
                 .map((item: any) => normalizeMenuItem(item, siteKey))
                 .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
@@ -240,6 +243,97 @@ const ensureMenuChild = (config: SiteDataType, parentText: string, childText: st
     return changed;
 };
 
+const createNationSiteConfig = (sourceSite?: any) => {
+    const fallbackMenu: MenuItem[] = [
+        { text: '전국시스템인력 홈', icon: 'fa-globe', path: '/dashboard3' },
+        { text: '전국 운영망', icon: 'fa-map-location-dot', path: '/jeonkuk/nationwide-partners' },
+        { text: '통합 현황판', icon: 'fa-chart-line', path: '/jeonkuk/integrated-status' },
+        { text: '상태 관리', icon: 'fa-wave-square', path: '/jeonkuk/status-management' },
+        { text: '인원 전체내역조회', icon: 'fa-users', path: '/jeonkuk/total-history' },
+    ];
+
+    const clonedSource = sourceSite ? deepClone(sourceSite) : {};
+    const nextMenu = Array.isArray(clonedSource.menu) && clonedSource.menu.length > 0
+        ? clonedSource.menu
+        : fallbackMenu;
+
+    return {
+        ...clonedSource,
+        name: '전국시스템인력',
+        icon: clonedSource.icon || 'fa-globe',
+        order: typeof clonedSource.order === 'number' ? clonedSource.order : 3,
+        menu: nextMenu,
+    };
+};
+
+const ensureNationSiteConfig = (config: SiteDataType): boolean => {
+    if (config.nation) {
+        return false;
+    }
+
+    config.nation = createNationSiteConfig(config.test);
+    return true;
+};
+
+const ensureCanonicalNationSiteConfig = (config: SiteDataType): boolean => {
+    const fallbackMenu: MenuItem[] = [
+        { text: '전국시스템인력 홈', icon: 'fa-globe', path: '/dashboard3' },
+        { text: '전국 운영망', icon: 'fa-map-location-dot', path: '/jeonkuk/nationwide-partners' },
+        { text: '통합 현황판', icon: 'fa-chart-line', path: '/jeonkuk/integrated-status' },
+        { text: '상태 관리', icon: 'fa-wave-square', path: '/jeonkuk/status-management' },
+        { text: '인원 전체내역조회', icon: 'fa-users', path: '/jeonkuk/total-history' },
+    ];
+
+    const matchingKeys = Object.keys(config).filter((key) => {
+        if (key.startsWith('pos_')) return false;
+        const siteName = String(config[key]?.name ?? '').trim();
+        return key === 'nation' || siteName === NATION_SITE_NAME;
+    });
+
+    if (matchingKeys.length === 0) {
+        const testSite: Record<string, any> = config.test ? deepClone(config.test) : {};
+        config.nation = {
+            ...testSite,
+            name: NATION_SITE_NAME,
+            icon: testSite.icon || 'fa-globe',
+            order: typeof testSite.order === 'number' ? testSite.order : 3,
+            menu: Array.isArray(testSite.menu) && testSite.menu.length > 0 ? testSite.menu : fallbackMenu,
+        };
+        return true;
+    }
+
+    const preferredKey = [...matchingKeys].sort((a, b) => {
+        const menuLengthDiff = (Array.isArray(config[b]?.menu) ? config[b].menu.length : 0)
+            - (Array.isArray(config[a]?.menu) ? config[a].menu.length : 0);
+
+        if (menuLengthDiff !== 0) return menuLengthDiff;
+        if (a === 'nation') return -1;
+        if (b === 'nation') return 1;
+        return 0;
+    })[0];
+
+    const preferredSite: Record<string, any> = deepClone(config[preferredKey] || {});
+    const nextNation = {
+        ...preferredSite,
+        name: NATION_SITE_NAME,
+        icon: preferredSite.icon || 'fa-globe',
+        order: typeof preferredSite.order === 'number' ? preferredSite.order : 3,
+        menu: Array.isArray(preferredSite.menu) && preferredSite.menu.length > 0 ? preferredSite.menu : fallbackMenu,
+    };
+
+    let changed = !configsEqual(config.nation, nextNation);
+    config.nation = nextNation;
+
+    matchingKeys.forEach((key) => {
+        if (key !== 'nation') {
+            delete config[key];
+            changed = true;
+        }
+    });
+
+    return changed;
+};
+
 const getMenuText = (item: MenuItem | string | undefined): string => {
     if (!item) return '';
     return typeof item === 'string' ? item : String(item.text ?? '');
@@ -269,54 +363,27 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
         if (siteKey !== 'admin') return;
         if (!site || !Array.isArray(site.menu)) return;
 
-        let hasSupportAssetGroup = false;
-
         site.menu.forEach((menuItem) => {
             if (typeof menuItem === 'string' || !Array.isArray(menuItem.sub)) return;
 
             const childTexts = menuItem.sub.map((child) => getMenuText(child));
             const isSupportAssetGroup = childTexts.some((text) => supportGroupSignals.has(text));
             if (!isSupportAssetGroup) return;
-            hasSupportAssetGroup = true;
 
+            // Only unify if legacy labels exist, but don't force create the whole group if missing
             const nextSub = menuItem.sub.filter((child) => !legacyAssetLabels.has(getMenuText(child)));
-            const insertAfterIndex = nextSub.findIndex((child) => getMenuText(child) === '숙소 관리');
-            const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : nextSub.length;
+            if (nextSub.length !== menuItem.sub.length) {
+                const insertAfterIndex = nextSub.findIndex((child) => getMenuText(child) === '숙소 관리');
+                const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : nextSub.length;
 
-            nextSub.splice(insertIndex, 0, unifiedAssetLabel);
-
-            const nextTexts = nextSub.map((child) => getMenuText(child));
-            if (JSON.stringify(childTexts) !== JSON.stringify(nextTexts)) {
+                nextSub.splice(insertIndex, 0, unifiedAssetLabel);
                 menuItem.sub = nextSub;
                 changed = true;
             }
         });
-
-        if (hasSupportAssetGroup) return;
-
-        const firstSupportMenu = site.menu.find(
-            (menuItem) => typeof menuItem !== 'string' && menuItem.text === '지원 관리' && Array.isArray(menuItem.sub)
-        );
-
-        if (firstSupportMenu && Array.isArray(firstSupportMenu.sub)) {
-            const hasUnifiedAssetLabel = firstSupportMenu.sub.some((child) => getMenuText(child) === unifiedAssetLabel);
-            if (!hasUnifiedAssetLabel) {
-                firstSupportMenu.sub = [...firstSupportMenu.sub, unifiedAssetLabel];
-                changed = true;
-            }
-            return;
-        }
-
-        const supportMenuItem: MenuItem = {
-            text: '지원 관리',
-            icon: 'fa-life-ring',
-            sub: [unifiedAssetLabel]
-        };
-
-        const insertAfterIndex = site.menu.findIndex((menuItem) => typeof menuItem !== 'string' && menuItem.text === '출력 관리');
-        const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : site.menu.length;
-        site.menu.splice(insertIndex, 0, supportMenuItem);
-        changed = true;
+        
+        // AUTO-INJECTION LOGIC REMOVED: 
+        // We no longer force '지원 관리' to exist if it was deleted by the user.
     });
 
     return changed;
@@ -332,6 +399,8 @@ const processIncomingConfig = (incomingConfig: SiteDataType): SiteDataType => {
 
     // Removed normalizePayrollStructure to allow dynamic configuration
     const final = normalized;
+
+    ensureCanonicalNationSiteConfig(final);
 
     // 3. Ensure Position Config exists (Migration)
     if (final['admin'] && !final['admin'].positionConfig) {
@@ -387,9 +456,15 @@ const setupSnapshotListener = () => {
             const rawData = snapshot.data();
             const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
 
+            const processedConfig = processIncomingConfig(normalizedIncoming);
             currentRawConfig = deepClone(normalizedIncoming);
-            // Important: Just process, DO NOT MERGE with local defaults
-            currentConfig = processIncomingConfig(normalizedIncoming);
+            currentConfig = processedConfig;
+
+            if (!configsEqual(processedConfig, normalizedIncoming)) {
+                menuServiceV11.saveMenuConfig(processedConfig).catch(err => {
+                    console.error('[MenuService] Failed to persist normalized snapshot config:', err);
+                });
+            }
 
             notifyListeners();
         },
@@ -445,7 +520,13 @@ export const menuServiceV11 = {
                         activeDocId = candidate;
                         const rawData = docSnapshot.data();
                         const normalizedIncoming = normalizeSiteDataType(rawData as SiteDataType);
-                        return processIncomingConfig(normalizedIncoming);
+                        const processedConfig = processIncomingConfig(normalizedIncoming);
+                        if (!configsEqual(processedConfig, normalizedIncoming)) {
+                            menuServiceV11.saveMenuConfig(processedConfig).catch(err => {
+                                console.error('[MenuService] Failed to persist normalized menu config:', err);
+                            });
+                        }
+                        return processedConfig;
                     }
 
                     if (!firstReadableMissing) {
@@ -752,8 +833,9 @@ export const menuServiceV11 = {
             if (!config) return;
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
+            const ensuredNationSite = ensureCanonicalNationSiteConfig(config);
             const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
-            const changed = addedNationwidePage || normalizedSupportAssetMenu;
+            const changed = addedNationwidePage || ensuredNationSite || normalizedSupportAssetMenu;
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

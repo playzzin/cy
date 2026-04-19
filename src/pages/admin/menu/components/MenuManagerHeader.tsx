@@ -130,11 +130,11 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
     // Prepare Lists
     const sites = Object.keys(menuData)
         .filter(key => !key.startsWith('pos_'))
-        .sort((a, b) => (menuData[a].order || 999) - (menuData[b].order || 999))
+        .sort((a, b) => (menuData[a].order ?? 999) - (menuData[b].order ?? 999))
         .map(key => ({ id: key, name: menuData[key].name }));
 
     const roles = (menuData.admin?.positionConfig || [])
-        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
         .map(pos => ({ id: pos.id, name: pos.name, fullId: pos.id === 'full' ? 'admin' : (pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`) }));
 
     // Handlers
@@ -143,15 +143,17 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
         if (over && active.id !== over.id) {
             const oldIndex = sites.findIndex(s => s.id === active.id);
             const newIndex = sites.findIndex(s => s.id === over.id);
-            // We need to reorder the *keys* in menuData basically effectively by updating 'order' prop
-            // Actually better to just update 'order' prop on all items based on new sequence
+
             const newOrder = [...sites];
             const movedItem = newOrder.splice(oldIndex, 1)[0];
             newOrder.splice(newIndex, 0, movedItem);
 
-            const newData = { ...menuData };
+            // Deep clone to ensure React state update and avoid mutation
+            const newData = JSON.parse(JSON.stringify(menuData));
             newOrder.forEach((site, index) => {
-                if (newData[site.id]) newData[site.id].order = index;
+                if (newData[site.id]) {
+                    newData[site.id].order = index;
+                }
             });
             onUpdateMenuData(newData);
         }
@@ -161,17 +163,17 @@ const MenuManagerHeader: React.FC<MenuManagerHeaderProps> = ({
         const { active, over } = event;
         if (over && active.id !== over.id) {
             const config = [...(menuData.admin?.positionConfig || [])];
-            // Sort first to match display
-            config.sort((a, b) => (a.order || 0) - (b.order || 0));
+            // Sort first to match display order for accurate indexing
+            config.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
             const oldIndex = config.findIndex(p => p.id === active.id);
             const newIndex = config.findIndex(p => p.id === over.id);
 
             const newConfig = arrayMove(config, oldIndex, newIndex);
-            // Update order
+            // Update order field explicitly
             const finalConfig = newConfig.map((item, index) => ({ ...item, order: index }));
 
-            const newData = { ...menuData };
+            const newData = JSON.parse(JSON.stringify(menuData));
             if (!newData.admin) newData.admin = { name: 'Admin', icon: 'fa-cog', menu: [] };
             newData.admin.positionConfig = finalConfig;
 

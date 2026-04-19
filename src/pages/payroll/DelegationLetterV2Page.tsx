@@ -24,6 +24,12 @@ interface DelegationWorker {
     signatureUrl?: string;
 }
 
+const DELEGATION_BODY_STORAGE_KEY = 'delegationLetterV2:bodyText';
+const DEFAULT_DELEGATION_BODY_TEXT = [
+    '상기 수임인을 대리인으로 정하여 노무비 청구 및 수령에 관한 모든 권한을 위임합니다.',
+    '또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 이에 대하여 어떠한 이의도 제기하지 않겠습니다.'
+].join('\n');
+
 const DelegationLetterV2Page: React.FC = () => {
     // --- State: Selections ---
     const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
@@ -32,7 +38,11 @@ const DelegationLetterV2Page: React.FC = () => {
     const [selectedLeaderId, setSelectedLeaderId] = useState<string>('');
 
     // --- State: Document Settings ---
-    const [delegationText, setDelegationText] = useState<string>('노무비 청구 및 수령에 대한 권한 일체');
+    const [delegationText, setDelegationText] = useState<string>(() => {
+        if (typeof window === 'undefined') return DEFAULT_DELEGATION_BODY_TEXT;
+        const savedText = window.localStorage.getItem(DELEGATION_BODY_STORAGE_KEY);
+        return savedText && savedText.trim().length > 0 ? savedText : DEFAULT_DELEGATION_BODY_TEXT;
+    });
     const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
     const [workersPerPage, setWorkersPerPage] = useState<number>(18);
@@ -85,6 +95,16 @@ const DelegationLetterV2Page: React.FC = () => {
         loadStaticData();
     }, []);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const trimmedText = delegationText.trim();
+        if (!trimmedText) {
+            window.localStorage.removeItem(DELEGATION_BODY_STORAGE_KEY);
+            return;
+        }
+        window.localStorage.setItem(DELEGATION_BODY_STORAGE_KEY, delegationText);
+    }, [delegationText]);
+
     // --- 2. Cascade Step 1: Month Selection -> Fetch Reports ---
     useEffect(() => {
         const fetchReportsForMonth = async () => {
@@ -118,7 +138,14 @@ const DelegationLetterV2Page: React.FC = () => {
     // --- 3. Derived Logic: Active Sites ---
     const activeSites = useMemo(() => {
         const siteIdsInReports = new Set(allReports.map(r => r.siteId));
-        return sites.filter(s => siteIdsInReports.has(s.id!));
+        // "외부팀"(siteType이 '외부팀' 또는 partnerName에 '외부' 포함) 제외
+        return sites.filter(s => {
+            if (!siteIdsInReports.has(s.id!)) return false;
+            // siteType이 '외부팀'이거나 partnerName에 '외부'가 포함되면 제외
+            if (String(s.siteType ?? '').includes('외부팀')) return false;
+            if (String(s.partnerName ?? '').includes('외부')) return false;
+            return true;
+        });
     }, [allReports, sites]);
 
     // --- 4. Derived Logic: Active Teams (Dependent on Site) ---
@@ -458,7 +485,7 @@ const DelegationLetterV2Page: React.FC = () => {
             3,
             1 +
             (showManDays ? 1 : 0) +
-            (mandataryAddress.length > 35 || delegationText.length > 18 ? 1 : 0)
+            (mandataryAddress.length > 35 || delegationText.length > 90 ? 1 : 0)
         );
         const firstPageWorkers = Math.max(1, cappedWorkersPerPage - firstPageReserve);
 
@@ -958,17 +985,17 @@ const DelegationLetterV2Page: React.FC = () => {
                             <div>
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
                                     <FontAwesomeIcon icon={faEdit} className="mr-2 text-purple-400" />
-                                    위임사항 내용
+                                    위임장 본문 내용
                                 </label>
                                 <textarea
                                     value={delegationText}
                                     onChange={(e) => setDelegationText(e.target.value)}
-                                    rows={3}
+                                    rows={7}
                                     className="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all resize-none"
-                                    placeholder="위임사항 내용을 입력하세요"
+                                    placeholder="업체 요구 문구(예: 민/형사상 책임, 이의 제기 불가 등)를 포함해 본문 전체를 입력하세요"
                                 />
                                 <p className="text-xs text-slate-500 mt-2">
-                                    기본: "노무비 청구 및 수령에 대한 권한 일체"
+                                    입력한 본문은 자동 저장되며, 수정하기 전까지 계속 동일 문구가 표시됩니다.
                                 </p>
                             </div>
 
@@ -1033,22 +1060,22 @@ const DelegationLetterV2Page: React.FC = () => {
                                 <p className="text-purple-300 text-sm font-medium mb-3">빠른 설정</p>
                                 <div className="flex flex-wrap gap-2">
                                     <button
-                                        onClick={() => setDelegationText('노무비 청구 및 수령에 대한 권한 일체')}
+                                        onClick={() => setDelegationText(DEFAULT_DELEGATION_BODY_TEXT)}
                                         className="px-3 py-1.5 bg-purple-600/30 text-purple-300 text-xs rounded-lg hover:bg-purple-600/50 transition-colors"
                                     >
-                                        노무비 수령 권한
+                                        기본 문구
                                     </button>
                                     <button
-                                        onClick={() => setDelegationText('급여 청구 및 수령에 대한 권한 일체')}
+                                        onClick={() => setDelegationText('상기 수임인을 대리인으로 정하여 급여 청구 및 수령에 관한 모든 권한을 위임합니다.\n또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 민형사상 이의를 포함한 어떠한 이의도 제기하지 않겠습니다.')}
                                         className="px-3 py-1.5 bg-purple-600/30 text-purple-300 text-xs rounded-lg hover:bg-purple-600/50 transition-colors"
                                     >
-                                        급여 수령 권한
+                                        급여 수령 + 민형사
                                     </button>
                                     <button
-                                        onClick={() => setDelegationText('일용직 노무비 청구 및 수령에 대한 권한 일체')}
+                                        onClick={() => setDelegationText('상기 수임인을 대리인으로 정하여 일용직 노무비 청구 및 수령에 관한 모든 권한을 위임합니다.\n수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 추후 정산, 민형사상 책임 및 기타 분쟁을 사유로 어떠한 이의도 제기하지 않겠습니다.')}
                                         className="px-3 py-1.5 bg-purple-600/30 text-purple-300 text-xs rounded-lg hover:bg-purple-600/50 transition-colors"
                                     >
-                                        일용직 노무비
+                                        일용직 + 분쟁 방지
                                     </button>
                                 </div>
                             </div>
@@ -1390,9 +1417,8 @@ const DelegationLetterV2Page: React.FC = () => {
                                                 </div>
 
                                                 {/* Delegation Content */}
-                                                <div className="delegation-body-paragraph !mb-[3mm] !text-[11px]">
-                                                    상기 수임인을 대리인으로 정하여 <span className="delegation-underline">{delegationText}</span>에 관한 권한 일체를 위임합니다.
-                                                    또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 이에 대하여 어떠한 이의도 제기하지 않겠습니다.
+                                                <div className="delegation-body-paragraph !mb-[3mm] !text-[11px] whitespace-pre-line">
+                                                    {delegationText.trim() || DEFAULT_DELEGATION_BODY_TEXT}
                                                 </div>
                                             </>
                                         )}

@@ -11,7 +11,7 @@ import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typ
 import OutputManagementTabs from '../../components/common/OutputManagementTabs';
 
 type CompanyTypeFilter = 'construction' | 'partner';
-type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀';
+type SalaryModelFilter = '전체' | '일급제' | '월급제' | '지원팀' | '용역팀';
 
 interface PersonnelHistoryRow {
     workerId: string;
@@ -33,6 +33,7 @@ const resolveWorkerSalaryModel = (worker: Worker): SalaryModelFilter => {
     const raw = String(worker.salaryModel ?? worker.payType ?? '').trim();
     if (raw.includes('월급')) return '월급제';
     if (raw.includes('지원')) return '지원팀';
+    if (raw.includes('용역')) return '용역팀';
     return '일급제';
 };
 
@@ -44,6 +45,7 @@ const resolveSnapshotSalaryModel = (params: {
     const snapshotRaw = String(params.reportSalaryModel ?? params.reportPayType ?? '').trim();
     if (snapshotRaw.includes('월급')) return '월급제';
     if (snapshotRaw.includes('지원')) return '지원팀';
+    if (snapshotRaw.includes('용역')) return '용역팀';
     if (snapshotRaw.includes('일급')) return '일급제';
     return resolveWorkerSalaryModel(params.worker);
 };
@@ -280,12 +282,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
 
                 const model = resolveWorkerSalaryModel(worker);
                 if (companyType === 'partner') return model === '지원팀';
-                return model === '일급제' || model === '월급제';
+                return model === '일급제' || model === '월급제' || model === '용역팀';
             })
             .filter((worker) => {
                 const model = resolveWorkerSalaryModel(worker);
                 if (companyType === 'partner') return model === '지원팀';
-                if (salaryModel === '전체') return model === '일급제' || model === '월급제';
+                if (salaryModel === '전체') return model === '일급제' || model === '월급제' || model === '용역팀';
                 return model === salaryModel;
             })
             .slice()
@@ -513,18 +515,12 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     if (companyType === 'partner') {
                         if (model !== '지원팀') return;
                     } else {
-                        if (model !== '일급제' && model !== '월급제' && model !== '지원팀') return; // All allowed for internal search
+                        if (model !== '일급제' && model !== '월급제' && model !== '지원팀' && model !== '용역팀') return;
 
                         if (salaryModel === '전체') {
-                            if (model !== '일급제' && model !== '월급제') return;
+                            if (model !== '일급제' && model !== '월급제' && model !== '용역팀') return;
                         } else {
-                            if (salaryModel !== '지원팀' && model === '지원팀') {
-                                // If filtering by labor but found invoice entry, we check if we should skip
-                                // Actually, keep it for split view
-                            }
-                            if (salaryModel !== '지원팀' && salaryModel !== model && model !== '지원팀') {
-                                return;
-                            }
+                            if (model !== salaryModel) return;
                         }
                     }
 
@@ -722,13 +718,6 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                         세무용 Excel
                     </button>
                     <button
-                        onClick={handleSyncPartner}
-                        className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all shadow-sm font-medium text-sm"
-                    >
-                        <FontAwesomeIcon icon={faSync} />
-                        협력사
-                    </button>
-                    <button
                         onClick={handleSyncReports}
                         className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all shadow-sm font-medium text-sm"
                     >
@@ -848,6 +837,7 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                                         <option value="전체">전체</option>
                                         <option value="일급제">일급제</option>
                                         <option value="월급제">월급제</option>
+                                        <option value="용역팀">용역팀</option>
                                     </>
                                 )}
                             </select>

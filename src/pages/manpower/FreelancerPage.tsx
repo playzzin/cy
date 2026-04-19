@@ -24,8 +24,7 @@ const FreelancerPage: React.FC = () => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [allFreelancers, setAllFreelancers] = useState<any[]>([]);
     const [displayData, setDisplayData] = useState<any[]>([]);
-    const [currentPage, setCurrentPage] = useState(1);
-    const PAGE_SIZE = 30;
+    const EXTRA_EDIT_ROWS = 10;
     const { teams: masterTeams, companies: masterCompanies, loading: masterLoading } = useMasterData();
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
     const [reportTeams, setReportTeams] = useState<Array<{ id: string; name: string }>>([]);
@@ -105,6 +104,7 @@ const FreelancerPage: React.FC = () => {
         if (!raw) return '';
         if (raw.includes('월급')) return '월급제';
         if (raw.includes('일급')) return '일급제';
+        if (raw.includes('용역')) return '용역팀';
         return raw;
     }, []);
 
@@ -112,7 +112,8 @@ const FreelancerPage: React.FC = () => {
         const salaryModel = normalizeSalaryModel(value);
         if (salaryModel === '월급제') return 0;
         if (salaryModel === '일급제') return 1;
-        return 2;
+        if (salaryModel === '용역팀') return 2;
+        return 3;
     }, [normalizeSalaryModel]);
 
     const sortFreelancers = useCallback((left: any, right: any) => {
@@ -274,17 +275,16 @@ const FreelancerPage: React.FC = () => {
             window.clearTimeout(timer);
             window.removeEventListener('resize', onResize);
         };
-    }, [recalcTableHeight, selectedTeamId, currentPage, displayData.length, loading]);
+    }, [recalcTableHeight, selectedTeamId, displayData.length, loading]);
 
-    // 초기 로드 시 첫 번째 팀 자동 선택 및 페이지 리셋
+    // 초기 로드 시 첫 번째 팀 자동 선택
     useEffect(() => {
         if (!selectedTeamId && visibleTeams.length > 0) {
             setSelectedTeamId(visibleTeams[0].id || null);
         }
-        setCurrentPage(1);
     }, [visibleTeams, selectedTeamId]);
 
-    // 표시 데이터 필터링 (페이징 적용) 및 합계 행 추가
+    // 표시 데이터 필터링 (전체 보기) 및 합계 행 추가
     useEffect(() => {
         let filtered = allFreelancers;
         if (selectedTeamId) {
@@ -292,10 +292,15 @@ const FreelancerPage: React.FC = () => {
         }
         filtered = [...filtered].sort(sortFreelancers);
 
-        // 1. 현재 페이지용 30개 빈 슬롯 기반 데이터 배치 (Excel 방식)
-        const startIndex = (currentPage - 1) * PAGE_SIZE;
-        const slots = Array.from({ length: PAGE_SIZE }, (_, i) => ({
-            no: startIndex + i + 1,
+        const maxGridNo = filtered.reduce((max, item) => {
+            const gridNo = Number(item?.gridNo) || 0;
+            return gridNo > max ? gridNo : max;
+        }, 0);
+        const totalSlots = Math.max(filtered.length, maxGridNo) + EXTRA_EDIT_ROWS;
+
+        // 전체 데이터를 한 번에 보여주되, 하단 입력용 빈 행은 소량만 남긴다.
+        const slots = Array.from({ length: totalSlots }, (_, i) => ({
+            no: i + 1,
             name: '',
             isEmpty: true,
             readOnly: false,
@@ -304,23 +309,22 @@ const FreelancerPage: React.FC = () => {
             performanceBonus: null, reportingBalance: null, reportableAmount: null
         }));
 
-        // 고정 위치(gridNo)가 있는 데이터 배치
-        const anchored = filtered.filter(f => f.gridNo && Math.ceil(f.gridNo / PAGE_SIZE) === currentPage);
+        // gridNo가 있는 데이터는 전체 리스트에서 지정된 위치에 고정 배치한다.
+        const anchored = filtered.filter(f => (Number(f?.gridNo) || 0) > 0);
         anchored.forEach(item => {
-            const slotIdx = (item.gridNo - 1) % PAGE_SIZE;
-            if (slotIdx >= 0 && slotIdx < PAGE_SIZE) {
+            const slotIdx = (Number(item.gridNo) || 0) - 1;
+            if (slotIdx >= 0 && slotIdx < totalSlots) {
                 slots[slotIdx] = { ...item, isEmpty: false };
             }
         });
 
-        // 고정 위치가 없는 데이터(DB 로드 등) 빈 자리에 순차 배치
-        const standard = filtered.filter(f => !f.gridNo || Math.ceil(f.gridNo / PAGE_SIZE) !== currentPage);
-        // 이미 anchored로 배치된 항목은 제외 (ID 기준)
+        // gridNo가 없는 데이터는 남은 빈 자리에 순차 배치한다.
+        const standard = filtered.filter(f => !(Number(f?.gridNo) || 0));
         const anchoredIds = new Set(anchored.map(a => a.id));
         const standardToPlace = standard.filter(f => !anchoredIds.has(f.id));
 
         let standardIdx = 0;
-        for (let i = 0; i < PAGE_SIZE; i++) {
+        for (let i = 0; i < totalSlots; i++) {
             if (slots[i].isEmpty && standardIdx < standardToPlace.length) {
                 slots[i] = { ...standardToPlace[standardIdx], isEmpty: false };
                 standardIdx++;
@@ -344,7 +348,7 @@ const FreelancerPage: React.FC = () => {
 
             return {
                 ...displayItem,
-                no: startIndex + index + 1,
+                no: index + 1,
                 total: (monthlySum + bonus) || null,
                 reportingBalance: (reportable - monthlySum) || null,
                 reportableAmount: reportable || null,
@@ -369,9 +373,7 @@ const FreelancerPage: React.FC = () => {
         formatted.push(footer);
 
         setDisplayData(formatted);
-    }, [allFreelancers, selectedTeamId, currentPage, normalizeTeamId, sortFreelancers, toFiniteAmount]);
-
-    const totalPages = Math.ceil((selectedTeamId ? allFreelancers.filter(f => normalizeTeamId(f.teamId) === selectedTeamId).length : allFreelancers.length) / PAGE_SIZE);
+    }, [EXTRA_EDIT_ROWS, allFreelancers, selectedTeamId, normalizeTeamId, sortFreelancers, toFiniteAmount]);
 
     const colors = [
         'linear-gradient(135deg, #FF5252 0%, #D32F2F 100%)', // Red
@@ -642,7 +644,6 @@ const FreelancerPage: React.FC = () => {
         modifiedRowsRef.current.clear();
         setModifiedRows(new Set());
         setCurrentDate(prev => offset > 0 ? addYears(prev, offset) : subYears(prev, Math.abs(offset)));
-        setCurrentPage(1);
     };
 
     const handleTeamChange = async (teamId: string | null) => {
@@ -667,7 +668,6 @@ const FreelancerPage: React.FC = () => {
         modifiedRowsRef.current.clear();
         setModifiedRows(new Set());
         setSelectedTeamId(teamId);
-        setCurrentPage(1);
     };
 
     const handleDownloadExcel = useCallback(async () => {
@@ -828,32 +828,6 @@ const FreelancerPage: React.FC = () => {
                 ))}
             </div>
 
-            {/* 페이징 컨트롤 */}
-            <div className="flex items-center justify-center gap-4 bg-white py-2 border-b">
-                <button
-                    disabled={currentPage === 1}
-                    onClick={() => { syncRefToState(); setCurrentPage(prev => prev - 1); }}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded border ${currentPage === 1 ? 'text-gray-300 bg-gray-50 border-gray-200 cursor-not-allowed' : 'text-blue-600 border-blue-200 hover:bg-blue-50'}`}
-                >
-                    <FontAwesomeIcon icon={faChevronLeft} size="sm" />
-                    이전
-                </button>
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 rounded-full border border-blue-100">
-                    <span className="text-sm font-black text-blue-800">
-                        {currentPage} / {totalPages || 1} 페이지
-                    </span>
-                    <span className="text-xs text-blue-400">(30건씩 보기)</span>
-                </div>
-                <button
-                    disabled={currentPage >= totalPages}
-                    onClick={() => { syncRefToState(); setCurrentPage(prev => prev + 1); }}
-                    className={`flex items-center gap-2 px-4 py-1.5 rounded border ${currentPage >= totalPages ? 'text-gray-300 bg-gray-50 border-gray-200 cursor-not-allowed' : 'text-blue-600 border-blue-200 hover:bg-blue-50'}`}
-                >
-                    다음
-                    <FontAwesomeIcon icon={faChevronRight} size="sm" />
-                </button>
-            </div>
-
             {/* 검은색 타이틀 바 */}
             <div
                 className="black-title-bar"
@@ -869,6 +843,7 @@ const FreelancerPage: React.FC = () => {
                 <span className="freelancer-salary-legend-label">급여형태 표시</span>
                 <span className="freelancer-salary-legend-chip is-daily">일급제</span>
                 <span className="freelancer-salary-legend-chip is-monthly">월급제</span>
+                <span className="freelancer-salary-legend-chip is-agency">용역팀</span>
             </div>
 
             <main className="excel-main">
@@ -914,12 +889,18 @@ const FreelancerPage: React.FC = () => {
                             const rowData = displayData[row];
                             const salaryModel = normalizeSalaryModel(rowData?.[`${prop}_salaryModel`]);
 
-                            TD.classList.remove('freelancer-salary-daily-cell', 'freelancer-salary-monthly-cell');
+                            TD.classList.remove('freelancer-salary-daily-cell', 'freelancer-salary-monthly-cell', 'freelancer-salary-agency-cell');
                             TD.removeAttribute('data-salary-model');
 
-                            if (salaryModel === '일급제' || salaryModel === '월급제') {
+                            if (salaryModel === '일급제' || salaryModel === '월급제' || salaryModel === '용역팀') {
                                 TD.dataset.salaryModel = salaryModel;
-                                TD.classList.add(salaryModel === '월급제' ? 'freelancer-salary-monthly-cell' : 'freelancer-salary-daily-cell');
+                                TD.classList.add(
+                                    salaryModel === '월급제'
+                                        ? 'freelancer-salary-monthly-cell'
+                                        : salaryModel === '용역팀'
+                                            ? 'freelancer-salary-agency-cell'
+                                            : 'freelancer-salary-daily-cell'
+                                );
                             }
                         }}
                         height={tableHeight}

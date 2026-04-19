@@ -2007,7 +2007,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const paymentDataByLedgerKey = useMemo(() => {
         const map = new Map<string, PaymentData>();
         paymentData.forEach((item) => {
-            const salaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+            const salaryModel = item.id.endsWith('__일급제') ? '일급제' : item.id.endsWith('__용역팀') ? '용역팀' : '월급제';
             map.set(`${item.month}__${item.workerId}__${item.teamId}__${salaryModel}`, item);
         });
         return map;
@@ -2027,7 +2027,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const ledgerRows = useMemo<MonthlyAdvanceLedgerRow[]>(
         () =>
             filteredLedgerRows.map((row) => {
-                const rowSalaryModel = (row.salaryModel ?? '').trim() === '일급제' ? '일급제' : '월급제';
+                const _rawModel = (row.salaryModel ?? '').trim();
+                const rowSalaryModel = _rawModel === '일급제' ? '일급제' : _rawModel === '용역팀' ? '용역팀' : '월급제';
                 const key = `${row.month}__${row.workerId}__${row.teamId}__${rowSalaryModel}`;
                 let statementItem = paymentDataByLedgerKey.get(key);
 
@@ -2037,7 +2038,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     const normalizedRowTeam = normalizeTeamName(workerTeam?.teamName || row.teamName);
                     const targetCanonicalTeamId = resolveCanonicalTeamId(workerTeam?.teamId || row.teamId);
                     const candidates = (paymentDataByWorkerMonthKey.get(looseKey) ?? []).filter((candidate) => {
-                        const candidateSalaryModel = candidate.id.endsWith('__일급제') ? '일급제' : '월급제';
+                        const candidateSalaryModel = candidate.id.endsWith('__일급제') ? '일급제' : candidate.id.endsWith('__용역팀') ? '용역팀' : '월급제';
                         return candidateSalaryModel === rowSalaryModel;
                     });
 
@@ -2259,7 +2260,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         };
 
         Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
-            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
+            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : ledgerRowKey.endsWith('__용역팀') ? '용역팀' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
             if (!salaryModel) return;
 
             const input = manual as LedgerUtilityInputLike;
@@ -2298,7 +2299,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const grouped = new Map<string, LedgerUtilityInputLike[]>();
 
         Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
-            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
+            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : ledgerRowKey.endsWith('__용역팀') ? '용역팀' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
             if (!salaryModel) return;
             const parts = ledgerRowKey.split('__');
             if (parts.length < 4) return;
@@ -2342,7 +2343,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     }, []);
 
     const resolveUtilityInputForPaymentItem = (item: PaymentData): LedgerUtilityInputLike | undefined => {
-        const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+        const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : item.id.endsWith('__용역팀') ? '용역팀' : '월급제';
         const itemRowKey = item.id;
         const direct = itemRowKey ? (ledgerInputsRef.current[itemRowKey] as LedgerUtilityInputLike | undefined) : undefined;
         const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
@@ -3128,6 +3129,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             .filter((w) => {
                 const model = (w.salaryModel ?? w.payType ?? '').trim();
                 if (model === '월급제') return true;
+                if (model === '용역팀') return true;
                 if (shouldIncludeDailyWage && model === '일급제') return true;
                 return false;
             })

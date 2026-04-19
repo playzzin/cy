@@ -625,8 +625,97 @@ a {
 }
 
 /* =========================================
-   4. Sidebar
+   전국시스템인력 모드 (nation-mode) - Gray Style
    ========================================= */
+.app.nation-mode {
+    background-color: #334155 !important; /* Slate-700 */
+    color: #f1f5f9 !important; /* Slate-100 */
+}
+
+/* Header - Gray */
+.app.nation-mode #main-header {
+    background-color: #1e293b !important; /* Slate-800 */
+    border-bottom: 1px solid #475569 !important; /* Slate-600 */
+}
+
+.app.nation-mode #main-header .header-btn {
+    color: #94a3b8 !important; /* Slate-400 */
+}
+
+.app.nation-mode #main-header .header-btn:hover {
+    background-color: #334155 !important;
+    color: #ffffff !important;
+}
+
+.app.nation-mode .cheongyeon-top-nav-link {
+    color: #94a3b8 !important;
+}
+
+.app.nation-mode .cheongyeon-top-nav-link:hover,
+.app.nation-mode .cheongyeon-top-nav-link.active {
+    color: #f1f5f9 !important;
+    border-bottom-color: #f1f5f9 !important;
+}
+
+/* Sidebar - Gray */
+.app.nation-mode #sidebar {
+    background-color: #0f172a !important; /* Slate-900 (Darker gray) */
+    border-right: 1px solid #1e293b !important;
+}
+
+.app.nation-mode #sidebar .menu-item > a,
+.app.nation-mode #sidebar .menu-item > button {
+    color: #94a3b8 !important;
+}
+
+.app.nation-mode #sidebar .menu-item > a:hover,
+.app.nation-mode #sidebar .menu-item > button:hover {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+}
+
+.app.nation-mode #sidebar .menu-item.active > a,
+.app.nation-mode #sidebar .menu-item.active > button {
+    background-color: #334155 !important;
+    color: #ffffff !important;
+    border-left-color: #94a3b8 !important;
+}
+
+/* Content Area - Gray */
+.app.nation-mode #main-content {
+    background-color: #334155 !important;
+    color: #f1f5f9 !important;
+}
+
+/* Content Component Overrides */
+.app.nation-mode #main-content .bg-white,
+.app.nation-mode #main-content [style*="background-color: white"],
+.app.nation-mode #main-content [style*="background: white"],
+.app.nation-mode #main-content [style*="background-color: #fff"],
+.app.nation-mode #main-content [style*="background-color: #ffffff"] {
+    background-color: #1e293b !important;
+    color: #f1f5f9 !important;
+    border-color: #475569 !important;
+}
+
+.app.nation-mode #main-content .bg-gray-50,
+.app.nation-mode #main-content .bg-gray-100 {
+    background-color: #1e293b !important;
+    color: #f1f5f9 !important;
+}
+
+.app.nation-mode #main-content .text-gray-500,
+.app.nation-mode #main-content .text-gray-600,
+.app.nation-mode #main-content .text-gray-700,
+.app.nation-mode #main-content .text-gray-800,
+.app.nation-mode #main-content .text-gray-900 {
+    color: #f1f5f9 !important;
+}
+
+/* Scrollbar for nation-mode */
+.app.nation-mode ::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3) !important;
+}
 #sidebar {
     position: fixed;
     top: 0;
