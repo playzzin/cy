@@ -478,15 +478,26 @@ export const dailyReportService = {
         const report = await dailyReportService.getReport(reportId);
         if (!report) throw new Error('Report not found');
 
-        const updatedWorkers = report.workers.filter(worker => worker.workerId !== workerId);
-        const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
-        const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
+                // undefined 필드를 null로 치환하되 타입 보존
+                const cleanWorker = (worker: any): DailyReportWorker => {
+                    const cleaned: any = { ...worker };
+                    Object.keys(cleaned).forEach((k) => {
+                        if (cleaned[k] === undefined) cleaned[k] = null;
+                    });
+                    return cleaned as DailyReportWorker;
+                };
 
-        await dailyReportService.updateReport(reportId, {
-            workers: updatedWorkers,
-            totalManDay,
-            totalAmount,
-        });
+                const updatedWorkers = report.workers
+                    .filter(worker => worker.workerId !== workerId)
+                    .map(cleanWorker);
+                const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
+                const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
+
+                await dailyReportService.updateReport(reportId, {
+                        workers: updatedWorkers,
+                        totalManDay,
+                        totalAmount,
+                });
     },
 
     getDBStats: async () => {

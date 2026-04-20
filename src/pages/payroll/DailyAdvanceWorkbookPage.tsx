@@ -1,5 +1,4 @@
-
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBuilding,
@@ -9,8 +8,6 @@ import {
   faSpinner,
   faTable,
   faUsers,
-  faArrowRight,
-  faCheckCircle,
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService } from '../../services/dailyReportService';
 import {
@@ -20,8 +17,34 @@ import {
 import { manpowerService, type Worker } from '../../services/manpowerService';
 import { teamService, type Team } from '../../services/teamService';
 import { storageService } from '../../services/storageService';
+type WorkbookTabKey =
+  | 'workers'
+  | 'team-summary'
+  | 'statement'
+  | 'day-lookup'
+  | 'daily-wage';
 
-// 인원DB/일급제/용역팀 등에서 공통적으로 사용하는 엔트리 타입 (WorkerMasterRow와 동일 구조)
+type StatementPriceMode = 'actual' | 'claim' | 'report';
+
+type GoyunjungCelebrationBurst = {
+  id: number;
+  imageUrl: string;
+  messages: string[];
+  position: {
+    left: string;
+    top: string;
+    align: 'left' | 'center' | 'right';
+  };
+  hearts: Array<{
+    id: string;
+    left: number;
+    size: number;
+    duration: number;
+    delay: number;
+    drift: number;
+  }>;
+};
+
 type WorkbookEntry = {
   key: string;
   reportId: string;
@@ -52,36 +75,6 @@ type WorkbookEntry = {
   workerAmount: number;
   recruiterFee: number;
   note: string;
-  cumulativeCount?: number;
-};
-
-type WorkbookTabKey =
-  | 'workers'
-  | 'team-summary'
-  | 'statement'
-  | 'day-lookup'
-  | 'daily-wage'
-  | 'service-team';
-
-type StatementPriceMode = 'actual' | 'claim' | 'report';
-
-type GoyunjungCelebrationBurst = {
-  id: number;
-  imageUrl: string;
-  messages: string[];
-  position: {
-    left: string;
-    top: string;
-    align: 'left' | 'center' | 'right';
-  };
-  hearts: Array<{
-    id: string;
-    left: number;
-    size: number;
-    duration: number;
-    delay: number;
-    drift: number;
-  }>;
 };
 
 type WorkerProfileDraft = {
@@ -93,7 +86,6 @@ type TeamOption = {
   key: string;
   name: string;
   team: Team | null;
-  isServiceTeam?: boolean;
 };
 
 type WorkerMasterRow = {
@@ -116,7 +108,6 @@ type WorkerMasterRow = {
   totalManDay: number;
   actualTotal: number;
   claimTotal: number;
-  isServiceTeam?: boolean;
 };
 
 const COLORS = {
@@ -140,7 +131,6 @@ const TAB_OPTIONS: Array<{ key: WorkbookTabKey; label: string }> = [
   { key: 'workers', label: '인원DB' },
   { key: 'team-summary', label: '팀별출력' },
   { key: 'statement', label: '청구서' },
-  { key: 'service-team', label: '용역팀' },
   { key: 'day-lookup', label: '일자별조회' },
   { key: 'daily-wage', label: '일급제' },
 ];
@@ -185,23 +175,10 @@ const normalizeTeamName = (value: unknown): string =>
 
 const displayText = (value: unknown): string => String(value ?? '').trim();
 
-const isStrictDailyWageLabel = (value: unknown): boolean => {
+const isDailyWageLabel = (value: unknown): boolean => {
   const normalized = normalizeText(value);
   return normalized.includes('일급제') || normalized.includes('일급');
 };
-
-const isStrictServiceTeamLabel = (value: unknown): boolean => {
-  const normalized = normalizeText(value);
-  return (
-    normalized.includes('용역') ||
-    normalized.includes('인력') ||
-    normalized.includes('소개') ||
-    normalized.includes('agency')
-  );
-};
-
-const isDailyWageLabel = (value: unknown): boolean => 
-  isStrictDailyWageLabel(value) || isStrictServiceTeamLabel(value);
 
 const toNumber = (value: unknown): number => {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -277,15 +254,8 @@ const getActualUnitPrice = (claimUnitPrice: number): number => {
 
 const getSalaryTypeLabel = (...values: Array<unknown>): string => {
   const labels = values.map((value) => displayText(value)).filter(Boolean);
-  const matched = labels.find((label) => isStrictDailyWageLabel(label) || isStrictServiceTeamLabel(label));
+  const matched = labels.find((label) => isDailyWageLabel(label));
   return matched || labels[0] || '일급제';
-};
-
-const getNormalizedSalaryTypeLabel = (...values: Array<unknown>): string => {
-  const label = getSalaryTypeLabel(...values);
-  if (isStrictServiceTeamLabel(label)) return '용역팀';
-  if (isStrictDailyWageLabel(label)) return '일급제';
-  return label || '일급제';
 };
 
 const resolveWorkerStableId = (worker?: Partial<Worker> | null): string => {
@@ -329,21 +299,6 @@ const GOYUNJUNG_SAFE_POSITIONS: Array<{
 
 const buildStatementRecruiterFeeKey = (month: string, teamKey: string, workerId: string): string =>
   `${month}__${teamKey}__${workerId}`;
-
-const isServiceTeamNode = (team: Team | null): boolean => {
-  if (!team) return false;
-  const target = normalizeText(`${team.type || ''} ${team.name || ''} ${team.defaultSalaryModel || ''} ${team.companyName || ''}`);
-  return (
-    target.includes('용역') ||
-    target.includes('인력') ||
-    target.includes('소개') ||
-    target.includes('outsourcing') ||
-    target.includes('agency') ||
-    target.includes('daily') ||
-    // 특정 팀 명칭 예외 허용 (사용자 데이터 기반)
-    target.includes('덕기') 
-  );
-};
 
 const DailyAdvanceWorkbookPage: React.FC = () => {
   const currentMonth = getCurrentMonth();
@@ -462,7 +417,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           imagePathSet.add(item.fullPath);
         }
       });
-
     }
 
     const imagePaths = Array.from(imagePathSet);
@@ -599,64 +553,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         if (nameKey && !workerByName.has(nameKey)) workerByName.set(nameKey, worker);
       });
 
-      // --- 신규: 누적 작업일수 계산을 위한 과거 데이터 로드 ---
-      // 1. 현재 표시될 모든 작업자의 안정적인 ID 추출
-      const getWorkerForRow = (row: any) =>
-        workerByAnyId.get(String(row.workerId ?? '').trim()) ||
-        workerByName.get(normalizeText(row.workerName || row.name));
-
-      const getRowSalaryType = (row: any, worker?: Worker | null) =>
-        getNormalizedSalaryTypeLabel(
-          row.salaryModel,
-          row.payType,
-          worker?.salaryModel,
-          worker?.payType
-        );
-
-      const getStableIdForRow = (row: any) => {
-        const worker = getWorkerForRow(row);
-        return (
-          resolveWorkerStableId(worker) ||
-          String(row.workerId ?? '').trim() ||
-          normalizeText(row.workerName || row.name)
-        );
-      };
-
-      const activeWorkerStableIds = new Set(reportRows.map(r => getStableIdForRow(r)).filter(Boolean));
-      
-      // 2. 전체 히스토리를 가져옴 (조회 월 말일까지)
-      const rawHistoryRows = await dailyReportService.getWorkerRows({
-        endDate: period.endDate
-      });
-
-      // 3. 작업자별로 날짜순 정렬하여 누적 번호 매기기
-      const workerDateMap = new Map<string, string[]>(); // stableId -> [serviceDates]
-      rawHistoryRows.forEach(row => {
-        const stableId = getStableIdForRow(row);
-        if (!stableId || !activeWorkerStableIds.has(stableId)) return;
-        const worker = getWorkerForRow(row);
-        const salaryType = getRowSalaryType(row, worker);
-        if (salaryType !== '용역팀') return;
-        
-        const date = String(row.date || '').trim();
-        if (!workerDateMap.has(stableId)) workerDateMap.set(stableId, []);
-        const dates = workerDateMap.get(stableId)!;
-        if (!dates.includes(date)) dates.push(date);
-      });
-
-      // 각 작업자별 날짜 정렬
-      workerDateMap.forEach((dates, sid) => {
-        workerDateMap.set(sid, dates.sort());
-      });
-
-      const getCumulativeIndex = (sid: string, date: string): number => {
-        const dates = workerDateMap.get(sid);
-        if (!dates) return 999;
-        const idx = dates.indexOf(date);
-        return idx >= 0 ? idx + 1 : 999;
-      };
-      // ----------------------------------------------------
-
       const teamByAnyId = new Map<string, Team>();
       const teamByName = new Map<string, Team>();
       teamRows.forEach((team) => {
@@ -675,13 +571,21 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         nextProfiles[workerId] = profile;
       });
 
-      const nextEntries: WorkbookEntry[] = reportRows
+      const nextEntries = reportRows
         .map((row) => {
-          const worker = getWorkerForRow(row);
-          const salaryType = getRowSalaryType(row, worker);
-          if (!isDailyWageLabel(salaryType)) return null;
+          const worker =
+            workerByAnyId.get(String(row.workerId ?? '').trim()) ||
+            workerByName.get(normalizeText(row.workerName || row.name));
 
-          const workerId = getStableIdForRow(row);
+          // 일급제 판정은 조회 월의 일보 행 데이터(급여구분/지급유형) 우선으로 제한한다.
+          const labels = [row.salaryModel, row.payType];
+          if (!labels.some((label) => isDailyWageLabel(label))) return null;
+
+          const workerId =
+            resolveWorkerStableId(worker) ||
+            String(row.workerId ?? '').trim() ||
+            normalizeText(row.workerName || row.name);
+
           const workerName = displayText(worker?.name || row.workerName || row.name || '');
           const team =
             teamByAnyId.get(String(row.workerTeamId ?? '').trim()) ||
@@ -696,6 +600,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const teamId = String(team?.id ?? row.workerTeamId ?? row.teamId ?? worker?.teamId ?? '').trim();
           const teamKey = teamId || `unresolved:${normalizeTeamName(teamName || workerName || 'unknown')}`;
 
+          // 청구단가는 조회 기간의 출력일보 단가를 기준으로 사용한다.
+          const profile = nextProfiles[workerId];
           const claimUnitPrice = toNumber(
             getDefaultClaimUnitPrice(toNumber(row.unitPrice || worker?.unitPrice || 0))
           );
@@ -704,16 +610,15 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const manDay = toNumber(row.manDay);
           const date = displayText(row.date);
           const day = getDayNumber(date);
-          const note = displayText(row.workContent || nextProfiles[workerId]?.memo || '');
-          
-          // 누적 순번 계산
-          const cumulativeCount = getCumulativeIndex(workerId, date);
-          
-          // --- 핵심 수정: 용역팀 소속이거나 급여구분이 용역인 경우 모두 소개비 대상 ---
-          const isServiceEntry = salaryType === '용역팀';
-          const recruiterFee = (isServiceEntry && cumulativeCount <= 5) ? 60000 : 0;
+          const note = displayText(row.workContent || profile?.memo || '');
+          const salaryType = getSalaryTypeLabel(
+            row.salaryModel,
+            row.payType,
+            worker?.salaryModel,
+            worker?.payType
+          );
 
-          const entry: WorkbookEntry = {
+          return {
             key: `${date}__${teamKey}__${workerId}__${String(row.reportId ?? '')}`,
             reportId: String(row.reportId ?? ''),
             date,
@@ -741,13 +646,18 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             claimAmount: manDay * reportUnitPrice,
             reportUnitPrice,
             workerAmount: toNumber((row as any)?.amount ?? manDay * reportUnitPrice),
-            recruiterFee,
+            recruiterFee: 0,
             note,
-            cumulativeCount,
-          };
-          return entry;
+          } satisfies WorkbookEntry;
         })
-        .filter((entry): entry is WorkbookEntry => entry !== null);
+        .filter((entry): entry is WorkbookEntry => Boolean(entry))
+        .sort((left, right) => {
+          const dateCompare = left.date.localeCompare(right.date);
+          if (dateCompare !== 0) return dateCompare;
+          const teamCompare = left.teamName.localeCompare(right.teamName, 'ko');
+          if (teamCompare !== 0) return teamCompare;
+          return left.workerName.localeCompare(right.workerName, 'ko');
+        });
 
       setEntries(nextEntries);
       setWorkers(workerRows);
@@ -801,13 +711,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     entries.forEach((entry) => {
       if (!entry.teamKey || optionMap.has(entry.teamKey)) return;
       const team = teams.find((candidate) => String(candidate.id ?? '').trim() === entry.teamId) || null;
-      const isServiceTeam = isServiceTeamNode(team);
-      
       optionMap.set(entry.teamKey, {
         key: entry.teamKey,
         name: entry.teamName,
         team,
-        isServiceTeam,
       });
     });
     return Array.from(optionMap.values()).sort((left, right) => left.name.localeCompare(right.name, 'ko'));
@@ -828,95 +735,70 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     }
   }, [selectedTeamKey, statementTeamKey, teamOptions]);
 
-  const filteredEntries = useMemo(() => {
-    let result = entries;
-    if (activeTab === 'service-team') {
-      // 급여 구분이 '용역팀'인 경우만 필터링
-      result = entries.filter(e => e.salaryType === '용역팀');
-    } else {
-      result = entries.filter(e => isStrictDailyWageLabel(e.salaryType));
-    }
-
-    if (selectedTeamKey !== 'ALL') {
-      result = result.filter((entry) => entry.teamKey === selectedTeamKey);
-    }
-    return result;
-  }, [entries, activeTab, selectedTeamKey, teamOptions, workers]);
-
   const allWorkerMasterRows = useMemo<WorkerMasterRow[]>(() => {
-    const workerIds = new Set(filteredEntries.map(e => e.workerId));
-    
-    return dailyWageWorkers
-      .filter(w => workerIds.has(resolveWorkerStableId(w)))
-      .map((worker) => {
-        const workerId = resolveWorkerStableId(worker);
-        const workerEntries = filteredEntries.filter((entry) => entry.workerId === workerId);
-        const profile = profiles[workerId];
-        const latestWorkerEntry = workerEntries[workerEntries.length - 1];
-        const claimUnitPrice = toNumber(
-          getDefaultClaimUnitPrice(
-            toNumber(latestWorkerEntry?.claimUnitPrice || latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0)
-          )
-        );
-        const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
-        const memo = displayText(profile?.memo || '');
-        const teamName = displayText(worker.teamName || workerEntries[0]?.teamName || '미지정팀');
-        const teamKey =
-          String(worker.teamId ?? '').trim() ||
-          workerEntries[0]?.teamKey ||
-          `unresolved:${normalizeTeamName(teamName || worker.name)}`;
+    return dailyWageWorkers.map((worker) => {
+      const workerId = resolveWorkerStableId(worker);
+      const workerEntries = entries.filter((entry) => entry.workerId === workerId);
+      const profile = profiles[workerId];
+      const latestWorkerEntry = workerEntries[workerEntries.length - 1];
+      const claimUnitPrice = toNumber(
+        getDefaultClaimUnitPrice(
+          toNumber(latestWorkerEntry?.claimUnitPrice || latestWorkerEntry?.reportUnitPrice || worker.unitPrice || 0)
+        )
+      );
+      const actualUnitPrice = getActualUnitPrice(claimUnitPrice);
+      const memo = displayText(profile?.memo || '');
+      const teamName = displayText(worker.teamName || workerEntries[0]?.teamName || '미지정팀');
+      const teamKey =
+        String(worker.teamId ?? '').trim() ||
+        workerEntries[0]?.teamKey ||
+        `unresolved:${normalizeTeamName(teamName || worker.name)}`;
+      const recruiterFee =
+        statementRecruiterFeeValues[buildStatementRecruiterFeeKey(month, teamKey, workerId)] || 0;
+      const totalManDay = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay;
+      }, 0);
+      const actualTotal = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay * entry.actualUnitPrice;
+      }, 0);
+      const claimTotal = workerEntries.reduce((sum, entry) => {
+        const draftValue = manDayDrafts[entry.key];
+        const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
+        return sum + nextManDay * entry.reportUnitPrice;
+      }, 0);
 
-        const isServiceTeam = teamOptions.find(t => t.key === teamKey)?.isServiceTeam;
+      return {
+        workerId,
+        teamKey,
+        teamName,
+        workerName: displayText(worker.name),
+        salaryType: getSalaryTypeLabel(worker.salaryModel, worker.payType, workerEntries[0]?.salaryType),
+        idNumber: displayText(worker.idNumber || ''),
+        address: displayText(worker.address || ''),
+        contact: displayText(worker.contact || ''),
+        bankName: displayText(worker.bankName || ''),
+        accountNumber: displayText(worker.accountNumber || ''),
+        accountHolder: displayText(worker.accountHolder || worker.name || ''),
+        actualUnitPrice,
+        claimUnitPrice,
+        recruiterFee,
+        memo,
+        status: displayText(worker.status || ''),
+        totalManDay,
+        actualTotal,
+        claimTotal,
+      };
+    });
+  }, [dailyWageWorkers, entries, manDayDrafts, month, profiles, statementRecruiterFeeValues]);
 
-        // 누적 1~5회차에 대해 recruiterFee 자동 60,000원씩 부과 (service-team 탭에서만)
-        const totalManDay = workerEntries.reduce((sum, entry) => {
-          const draftValue = manDayDrafts[entry.key];
-          const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-          return sum + nextManDay;
-        }, 0);
-        let recruiterFee = 0;
-        if (activeTab === 'service-team') {
-          recruiterFee = workerEntries.reduce((sum, entry) => sum + entry.recruiterFee, 0);
-        } else {
-          recruiterFee = statementRecruiterFeeValues[buildStatementRecruiterFeeKey(month, teamKey, workerId)] || 0;
-        }
-        const actualTotal = workerEntries.reduce((sum, entry) => {
-          const draftValue = manDayDrafts[entry.key];
-          const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-          return sum + nextManDay * entry.actualUnitPrice;
-        }, 0);
-        const claimTotal = workerEntries.reduce((sum, entry) => {
-          const draftValue = manDayDrafts[entry.key];
-          const nextManDay = draftValue === undefined ? entry.manDay : toNumber(draftValue);
-          return sum + nextManDay * entry.reportUnitPrice;
-        }, 0);
-
-        return {
-          workerId,
-          teamKey,
-          teamName,
-          workerName: displayText(worker.name),
-          salaryType: getNormalizedSalaryTypeLabel(worker.salaryModel, worker.payType, workerEntries[0]?.salaryType),
-          idNumber: displayText(worker.idNumber || ''),
-          address: displayText(worker.address || ''),
-          contact: displayText(worker.contact || ''),
-          bankName: displayText(worker.bankName || ''),
-          accountNumber: displayText(worker.accountNumber || ''),
-          accountHolder: displayText(worker.accountHolder || worker.name || ''),
-          actualUnitPrice,
-          claimUnitPrice,
-          recruiterFee,
-          memo,
-          status: displayText(worker.status || ''),
-          totalManDay,
-          actualTotal,
-          claimTotal,
-          isServiceTeam,
-        };
-      });
-  }, [dailyWageWorkers, filteredEntries, manDayDrafts, month, profiles, statementRecruiterFeeValues, teamOptions]);
-
-  const workerMasterRows = allWorkerMasterRows;
+  const workerMasterRows = useMemo(() => {
+    if (selectedTeamKey === 'ALL') return allWorkerMasterRows;
+    return allWorkerMasterRows.filter((row) => row.teamKey === selectedTeamKey);
+  }, [allWorkerMasterRows, selectedTeamKey]);
 
   useEffect(() => {
     const nextDrafts: Record<string, WorkerProfileDraft> = {};
@@ -928,6 +810,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     });
     setProfileDrafts(nextDrafts);
   }, [allWorkerMasterRows]);
+
+  const filteredEntries = useMemo(() => {
+    if (selectedTeamKey === 'ALL') return entries;
+    return entries.filter((entry) => entry.teamKey === selectedTeamKey);
+  }, [entries, selectedTeamKey]);
 
   const selectedDateEntries = useMemo(() => {
     return filteredEntries.filter((entry) => entry.date === selectedDate);
@@ -1014,8 +901,8 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   const statementEntries = useMemo(() => {
     if (!statementTeamKey) return [];
-    return filteredEntries.filter((entry) => entry.teamKey === statementTeamKey);
-  }, [filteredEntries, statementTeamKey]);
+    return entries.filter((entry) => entry.teamKey === statementTeamKey);
+  }, [entries, statementTeamKey]);
 
   const statementLastDay = useMemo(() => monthToPeriod(month).lastDay, [month]);
   const statementDayNumbers = useMemo(
@@ -1031,7 +918,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         workerName: string;
         idNumber: string;
         address: string;
-        salaryType: string;
         days: number[];
         totalManDay: number;
         recruiterFee: number;
@@ -1047,10 +933,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           workerName: entry.workerName,
           idNumber: entry.idNumber,
           address: entry.address,
-          salaryType: entry.salaryType,
           days: Array.from({ length: statementLastDay }, () => 0),
           totalManDay: 0,
-          recruiterFee: entry.recruiterFee || (statementRecruiterFeeValues[buildStatementRecruiterFeeKey(month, statementTeamKey, entry.workerId)] || 0),
+          recruiterFee:
+            statementRecruiterFeeValues[
+              buildStatementRecruiterFeeKey(month, statementTeamKey, entry.workerId)
+            ] || 0,
           selectedAmount: 0,
         });
       }
@@ -1065,7 +953,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       target.selectedAmount += getStatementAmount(entry, statementPriceMode);
       if (!target.idNumber && entry.idNumber) target.idNumber = entry.idNumber;
       if (!target.address && entry.address) target.address = entry.address;
-      if (!target.salaryType && entry.salaryType) target.salaryType = entry.salaryType;
     });
 
     return Array.from(rowMap.values()).sort((left, right) =>
@@ -1129,7 +1016,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
   const teamSummaryRows = useMemo(() => {
     const rowMap = new Map<string, { name: string; days: number[]; total: number }>();
-    filteredEntries.forEach((entry) => {
+    entries.forEach((entry) => {
       if (!rowMap.has(entry.teamKey)) {
         rowMap.set(entry.teamKey, {
           name: entry.teamName,
@@ -1149,8 +1036,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     return Array.from(rowMap.entries())
       .map(([teamKey, row]) => ({ teamKey, ...row }))
       .sort((left, right) => left.name.localeCompare(right.name, 'ko'));
-  }, [filteredEntries, manDayDrafts, statementLastDay]);
-
+  }, [entries, manDayDrafts, statementLastDay]);
   const teamSummaryTotals = useMemo(() => {
     const totals = Array.from({ length: statementLastDay }, () => 0);
     teamSummaryRows.forEach((row) => {
@@ -1313,12 +1199,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       <div className="overflow-x-auto">
         <table className="min-w-[900px] border-collapse text-sm">
           <thead>
-            <tr style={{ backgroundColor: COLORS.olive }} className="text-white">
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">팀</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">이름</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">일자</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">공수</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">일당</th>
+            <tr style={{ backgroundColor: COLORS.darkBrown }} className="text-white">
+              {['일자', '팀', '이름', '공수', '일당'].map((header) => (
+                <th key={header} className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">{header}</th>
+              ))}
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">실지급액</th>
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold" style={{ backgroundColor: COLORS.aqua, color: COLORS.blackBrown }}>청구금액</th>
               <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
@@ -1341,10 +1225,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
 
                   return (
                     <tr key={entry.key} className="odd:bg-white even:bg-[#faf8ef]">
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.teamName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.workerName}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.date}</td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-center">{entry.date}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.teamName}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{entry.workerName}</td>
+                      <td className="border border-[#e3dcc4] px-2 py-1.5">
                         <input
                           type="number"
                           min="0"
@@ -1354,16 +1238,16 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                           className="w-20 rounded border border-[#d7cfb5] px-2 py-1 text-right text-xs outline-none focus:border-[#948A54]"
                         />
                       </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-bold text-[#4A452A]">
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
                         {formatCurrency(entry.actualUnitPrice)}
                       </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-black text-[#4A452A]">
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
                         {formatCurrency(actualAmount)}
                       </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center font-semibold text-sky-700">
+                      <td className="border border-[#e3dcc4] px-3 py-2 text-right font-semibold text-sky-700">
                         {formatCurrency(claimAmount)}
                       </td>
-                      <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{entry.note || '-'}</td>
+                      <td className="border border-[#e3dcc4] px-3 py-2">{entry.note || '-'}</td>
                     </tr>
                   );
                 })}
@@ -1399,24 +1283,32 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         <table className="min-w-[1480px] border-collapse text-sm">
           <thead>
             <tr style={{ backgroundColor: COLORS.olive }} className="text-white">
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">팀</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">이름</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">주민등록번호</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">급여구분</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">주소</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">연락처</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">은행명(예금주)</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">계좌번호</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">일당</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">청구단가</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">상태</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 text-center font-bold">비고</th>
+              {[
+                '팀',
+                '이름',
+                '주민등록번호',
+                '주소',
+                '연락처',
+                '은행명(예금주)',
+                '계좌번호',
+                '일당',
+                '청구단가',
+                '상태',
+                '비고',
+              ].map((header) => (
+                <th
+                  key={header}
+                  className="border border-[#d5ccb0] px-3 py-2 text-center font-bold"
+                >
+                  {header}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {workerMasterRows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-4 py-10 text-center text-sm text-slate-500">
+                <td colSpan={11} className="px-4 py-10 text-center text-sm text-slate-500">
                   표시할 일급제 작업자가 없습니다.
                 </td>
               </tr>
@@ -1429,11 +1321,10 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     key={row.workerId}
                     className={isDirty ? 'bg-[#fff7df]' : 'odd:bg-white even:bg-[#faf8ef]'}
                   >
-                    <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{row.teamName}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{row.workerName}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{row.idNumber || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 align-middle text-center">{row.salaryType || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2 align-middle">{row.address || '-'}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{row.teamName}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{row.idNumber || '-'}</td>
+                    <td className="border border-[#e3dcc4] px-3 py-2">{row.address || '-'}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2">{row.contact || '-'}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2">
                       {row.bankName
@@ -1676,12 +1567,21 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="border-b border-[#d5ccb0] p-4">
+      <div className="grid gap-4 border-b border-[#d5ccb0] p-4 lg:grid-cols-[320px_1fr]">
+        <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.beige }}>
+          <div className="text-xs font-bold text-[#4A452A]">입금 계좌</div>
+          <div className="mt-2 space-y-1 text-sm leading-6 text-[#1E1C11]">
+            <div>은행명: {statementTeamOption?.team?.bankName || '-'}</div>
+            <div>예금주: {statementTeamOption?.team?.accountHolder || '-'}</div>
+            <div>계좌번호: {statementTeamOption?.team?.accountNumber || '-'}</div>
+          </div>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
             <div className="text-xs font-bold text-[#4A452A]">회사</div>
             <div className="mt-2 text-base font-black text-[#1E1C11]">
-              {statementTeamOption?.team?.companyName || filteredEntries.find(e => e.teamKey === statementTeamKey)?.companyName || '-'}
+              {statementTeamOption?.team?.companyName || statementEntries[0]?.companyName || '-'}
             </div>
           </div>
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
@@ -1702,7 +1602,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">번호</th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">이름</th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">주민등록번호</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 font-bold">급여구분</th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">주소</th>
               {statementDayNumbers.map((day) => (
                 <th key={day} className="border border-[#d5ccb0] px-2 py-2 font-bold">
@@ -1742,35 +1641,26 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                     <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2">{row.idNumber || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{row.salaryType || '-'}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2">{row.address || '-'}</td>
-                    {row.days.map((value, dayIndex) => {
-                      // 누적 1~5회차 작업일 파란색 표시
-                      const isBlue = activeTab === 'service-team' && value && value > 0 && row.totalManDay >= 1 && row.totalManDay <= 5;
-                      return (
-                        <td
-                          key={`${row.workerId}-${dayIndex}`}
-                          className="border border-[#e3dcc4] px-2 py-2 text-center align-middle"
-                          style={isBlue ? { color: '#0070C0', fontWeight: 700 } : {}}
-                        >
-                          {value ? formatNumber(value) : '-'}
-                        </td>
-                      );
-                    })}
+                    {row.days.map((value, dayIndex) => (
+                      <td
+                        key={`${row.workerId}-${dayIndex}`}
+                        className="border border-[#e3dcc4] px-2 py-2 text-center"
+                      >
+                        {value ? formatNumber(value) : '-'}
+                      </td>
+                    ))}
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#4A452A]">
                       {formatNumber(row.totalManDay)}
                     </td>
                     <td className="border border-[#e3dcc4] px-2 py-2 text-right">
-                      {activeTab === 'service-team'
-                        ? <span style={{ color: row.totalManDay >= 1 && row.totalManDay <= 5 ? '#0070C0' : undefined, fontWeight: row.totalManDay >= 1 && row.totalManDay <= 5 ? 700 : undefined }}>{row.totalManDay >= 1 && row.totalManDay <= 5 ? '60,000' : '0'}</span>
-                        : <input
-                            type="text"
-                            value={recruiterFeeDraft ?? (recruiterFee ? String(recruiterFee) : '')}
-                            onChange={(event) => handleStatementRecruiterFeeDraftChange(storageKey, event.target.value)}
-                            className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
-                            placeholder="0"
-                          />
-                      }
+                      <input
+                        type="text"
+                        value={recruiterFeeDraft ?? (recruiterFee ? String(recruiterFee) : '')}
+                        onChange={(event) => handleStatementRecruiterFeeDraftChange(storageKey, event.target.value)}
+                        className="w-full rounded border border-[#d7cfb5] px-2 py-1 text-right outline-none focus:border-[#948A54]"
+                        placeholder="0"
+                      />
                     </td>
                     <td className="border border-[#e3dcc4] px-3 py-2 text-right font-black text-[#7a2c2c]">
                       {formatCurrency(totalInvoiceAmount)}
@@ -1781,7 +1671,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             )}
             {statementRows.length > 0 && (
               <tr style={{ backgroundColor: COLORS.pink }}>
-                <td colSpan={5} className="border border-[#d5ccb0] px-3 py-2 font-black">
+                <td colSpan={4} className="border border-[#d5ccb0] px-3 py-2 font-black">
                   일자별 공수합계
                 </td>
                 {statementDailyTotals.map((value, index) => (
@@ -1992,10 +1882,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
               workerMasterRows.map((row, index) => (
                 <tr key={row.workerId} className="odd:bg-white even:bg-[#faf8ef]">
                   <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
-                  <td className="border border-[#e3dcc4] px-3 py-2 align-middle">
-                    <span>{row.teamName}</span>
-                    <span className="ml-2 text-xs text-slate-500 align-middle">[{row.salaryType}]</span>
-                  </td>
+                  <td className="border border-[#e3dcc4] px-3 py-2">{row.teamName}</td>
                   <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
                   <td className="border border-[#e3dcc4] px-3 py-2 text-center font-bold">{formatNumber(row.totalManDay)}</td>
                   <td className="border border-[#e3dcc4] px-3 py-2 text-right font-bold text-[#4A452A]">
@@ -2025,141 +1912,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     </div>
   );
 
-  const renderServiceTeamTab = () => {
-    const groupedRows = new Map<string, {
-      teamKey: string;
-      teamName: string;
-      workerId: string;
-      workerName: string;
-      idNumber: string;
-      entriesByDay: Record<number, WorkbookEntry>;
-      totalManDay: number;
-      totalRecruiterFee: number;
-    }>();
-
-    filteredEntries.forEach((entry) => {
-      const rowKey = `${entry.teamKey}__${entry.workerId || normalizeText(entry.workerName)}`;
-      if (!groupedRows.has(rowKey)) {
-        groupedRows.set(rowKey, {
-          teamKey: entry.teamKey,
-          teamName: entry.teamName,
-          workerId: entry.workerId,
-          workerName: entry.workerName,
-          idNumber: entry.idNumber,
-          entriesByDay: {},
-          totalManDay: 0,
-          totalRecruiterFee: 0,
-        });
-      }
-
-      const workerRow = groupedRows.get(rowKey)!;
-      workerRow.entriesByDay[entry.day] = entry;
-      workerRow.totalManDay += entry.manDay;
-      workerRow.totalRecruiterFee += entry.recruiterFee;
-    });
-
-    const serviceRows = Array.from(groupedRows.values()).sort((left, right) => {
-      const teamCompare = left.teamName.localeCompare(right.teamName, 'ko');
-      if (teamCompare !== 0) return teamCompare;
-      return left.workerName.localeCompare(right.workerName, 'ko');
-    });
-
-    const serviceStickyHeaderStyle = {
-      backgroundColor: COLORS.blue,
-      height: '48px',
-      minHeight: '48px',
-    } as const;
-
-    const serviceStickyCellStyle = {
-      height: '48px',
-      minHeight: '48px',
-    } as const;
-
-    return (
-      <div className="overflow-hidden rounded-xl border border-[#d5ccb0] bg-white shadow-sm">
-        <div className="border-b border-[#d5ccb0] bg-blue-50 px-4 py-3">
-          <div className="text-sm font-black text-blue-900">용역팀 정산 관리 (인력소개비 자동계산)</div>
-          <div className="text-xs text-blue-700">
-            작업자별 생애 누적 1~5회차 작업일에 일 60,000원의 소개비를 자동 부과하며, 해당 일자는 파란색으로 표시됩니다.
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-[1800px] border-collapse text-sm">
-            <thead>
-              <tr style={{ backgroundColor: COLORS.blue }} className="text-white">
-                <th
-                  className="h-12 w-[120px] min-w-[120px] max-w-[120px] border border-white/20 px-3 py-2 font-bold sticky left-0 z-10 align-middle whitespace-nowrap"
-                  style={serviceStickyHeaderStyle}
-                >
-                  팀명
-                </th>
-                <th
-                  className="h-12 w-[120px] min-w-[120px] max-w-[120px] border border-white/20 px-3 py-2 font-bold sticky left-[120px] z-10 align-middle whitespace-nowrap"
-                  style={serviceStickyHeaderStyle}
-                >
-                  이름
-                </th>
-                {statementDayNumbers.map((day) => (
-                  <th key={day} className="h-12 border border-white/20 px-2 py-2 font-bold align-middle">{day}</th>
-                ))}
-                <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle">총공수</th>
-                <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle" style={{ backgroundColor: COLORS.orange }}>인력소개비</th>
-                <th className="h-12 border border-white/20 px-3 py-2 font-bold text-center align-middle">비고</th>
-              </tr>
-            </thead>
-            <tbody>
-              {serviceRows.length === 0 ? (
-                <tr>
-                  <td colSpan={statementDayNumbers.length + 5} className="px-4 py-10 text-center text-sm text-slate-500">
-                    용역팀 데이터가 없습니다. (팀 유형을 '용역'으로 설정해주세요)
-                  </td>
-                </tr>
-              ) : (
-                serviceRows.map((row) => (
-                  <tr key={`${row.teamKey}__${row.workerId || normalizeText(row.workerName)}`} className="h-12 hover:bg-blue-50/30">
-                    <td
-                      className="h-12 w-[120px] min-w-[120px] max-w-[120px] border border-[#e3dcc4] px-3 py-2 font-bold text-[#4A452A] bg-[#faf8ef] sticky left-0 z-10 align-middle whitespace-nowrap"
-                      style={serviceStickyCellStyle}
-                    >
-                      {row.teamName}
-                    </td>
-                    <td
-                      className="h-12 w-[120px] min-w-[120px] max-w-[120px] border border-[#e3dcc4] px-3 py-2 font-semibold bg-white sticky left-[120px] z-10 align-middle whitespace-nowrap"
-                      style={serviceStickyCellStyle}
-                    >
-                      {row.workerName}
-                    </td>
-                    {statementDayNumbers.map((day) => {
-                      const entry = row.entriesByDay[day];
-                      const isIntroFeeDay = !!entry && entry.recruiterFee > 0;
-                      return (
-                        <td
-                          key={day}
-                          className={`h-12 border border-[#e3dcc4] px-2 py-2 text-center align-middle ${isIntroFeeDay ? 'bg-blue-100 font-bold text-blue-700' : ''}`}
-                          title={isIntroFeeDay ? `누적 ${entry?.cumulativeCount}일차` : ''}
-                        >
-                          {entry ? formatNumber(entry.manDay) : '-'}
-                        </td>
-                      );
-                    })}
-                    <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-right font-black align-middle">{formatNumber(row.totalManDay)}</td>
-                    <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-right font-black text-orange-600 bg-orange-50 align-middle">
-                      {formatCurrency(row.totalRecruiterFee)}
-                    </td>
-                    <td className="h-12 border border-[#e3dcc4] px-3 py-2 text-xs text-slate-400 italic align-middle">
-                      {row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / 60000)}일분 포함` : '-'}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  };
-
   const renderActiveTab = () => {
     switch (activeTab) {
       case 'workers':
@@ -2172,8 +1924,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         return renderDayLookupTab();
       case 'daily-wage':
         return renderDailyWageTab();
-      case 'service-team':
-        return renderServiceTeamTab();
       default:
         return null;
     }
