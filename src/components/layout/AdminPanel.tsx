@@ -74,39 +74,5 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
                         <FontAwesomeIcon icon={faSitemap} className="w-5" />
                         <span className="font-bold">통합프로젝트 구조도</span>
                     </button>
-                    <button
-                        onClick={() => handleNavigation('/admin/console')}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
-                    >
-                        <FontAwesomeIcon icon={faDatabase} className="w-5" />
-                        <span className="font-bold">통합 데이터 콘솔</span>
-                    </button>
-                    <button
-                        onClick={() => handleNavigation('/admin/activity-logs')}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
-                    >
-                        <FontAwesomeIcon icon={faHistory} className="w-5" />
-                        <span className="font-bold">시스템 활동 로그</span>
-                    </button>
-                    <button
-                        onClick={() => handleNavigation('/design-system')}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
-                    >
-                        <FontAwesomeIcon icon={faCube} className="w-5" />
-                        <span className="font-bold">컴포넌트 라이브러리</span>
-                    </button>
-                    <button
-                        onClick={() => handleNavigation('/admin/component-management')}
-                        className="flex items-center gap-3 p-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition text-left"
-                    >
-                        <FontAwesomeIcon icon={faToggleOn} className="w-5" />
-                        <span className="font-bold">기능/컴포넌트 관리</span>
-                    </button>
-                    
-                </div>
-            </div>
-        </aside>
-    );
-};
-
+                    {/* 삭제된 관리자 메뉴: 데이터 백업 및 초기화, 통합프로젝트 구조도, 통합 데이터 콘솔, 컴포넌트 라이브러리, 기능/컴포넌트 관리 */}
 export default AdminPanel;
