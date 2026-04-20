@@ -60,5 +60,5 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
                         <FontAwesomeIcon icon={faUserTag} className="w-5" />
                         <span className="font-bold">직책 관리</span>
                     </button>
-                    {/* 삭제된 관리자 메뉴: 데이터 백업 및 초기화, 통합프로젝트 구조도, 통합 데이터 콘솔, 컴포넌트 라이브러리, 기능/컴포넌트 관리 */}
+
 export default AdminPanel;
