@@ -1781,7 +1781,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             )}
             {statementRows.length > 0 && (
               <tr style={{ backgroundColor: COLORS.pink }}>
-                <td colSpan={4} className="border border-[#d5ccb0] px-3 py-2 font-black">
+                <td colSpan={5} className="border border-[#d5ccb0] px-3 py-2 font-black">
                   일자별 공수합계
                 </td>
                 {statementDailyTotals.map((value, index) => (
