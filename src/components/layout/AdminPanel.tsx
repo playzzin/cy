@@ -60,5 +60,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, togglePanel, siteData, 
                         <FontAwesomeIcon icon={faUserTag} className="w-5" />
                         <span className="font-bold">직책 관리</span>
                     </button>
+                </div>
+            </div>
+        </aside>
+    );
+};
 
 export default AdminPanel;
