@@ -264,6 +264,16 @@ const DailyReportTable: React.FC<{
     }, [buildDuplicateInputNames, ledger.id, ledger.rows, onUpdate, teams, workerMap]);
 
     const normalizedLedgerSiteId = String(ledger.siteId ?? '').trim();
+    const siteOptions = useMemo(
+        () =>
+            sites
+                .map((site) => ({
+                    id: String(site.id ?? '').trim(),
+                    name: String(site.name ?? '').trim()
+                }))
+                .filter((site) => Boolean(site.id) && Boolean(site.name)),
+        [sites]
+    );
     const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
 
     // Filter teams assigned to this site (via Site.responsibleTeamId)
@@ -346,11 +356,12 @@ const DailyReportTable: React.FC<{
                         <span className="font-bold text-xs whitespace-nowrap">장부{ledgerIndex}</span>
                                                 <div style={{ minWidth: 180, flex: 1 }}>
                                                     <SingleSelectPopover
-                                                        options={sites
-                                                            .filter((site) => Boolean(site.id))
-                                                            .map((site) => ({ id: String(site.id), name: site.name }))}
+                                                        options={siteOptions}
                                                         selectedId={normalizedLedgerSiteId || null}
                                                         onSelect={(siteId) => onUpdate(ledger.id, { siteId: String(siteId ?? '').trim() })}
+                                                        renderSelected={(selectedOption) => (
+                                                            <span className="text-slate-800 font-medium">{selectedOption.name}</span>
+                                                        )}
                                                         placeholder="현장명을 검색/선택하세요"
                                                     />
                                                 </div>
@@ -1010,6 +1021,7 @@ const DailyReportGridInput: React.FC = () => {
         try {
             const allReports: Omit<DailyReport, 'id'>[] = [];
             const involvedTeamIds = new Set<string>();
+            let skippedGroupCount = 0;
 
             for (const ledger of ledgers) {
                 const normalizedLedgerSiteId = normalizeSiteId(ledger.siteId);
@@ -1021,7 +1033,7 @@ const DailyReportGridInput: React.FC = () => {
                 // Group by Team within this Ledger
                 const groups: { [key: string]: GridRow[] } = {};
                 validRows.forEach(row => {
-                    const key = row.teamId || 'no-team';
+                    const key = normalizeSiteId(row.teamId) || 'no-team';
                     if (!groups[key]) groups[key] = [];
                     groups[key].push(row);
                 });
@@ -1029,10 +1041,20 @@ const DailyReportGridInput: React.FC = () => {
                 const site = sites.find((s) => normalizeSiteId(s.id) === normalizedLedgerSiteId);
 
                 Object.entries(groups).forEach(([teamKey, rows]) => {
-                    const realTeamId = teamKey === 'no-team' ? '' : teamKey;
-                    const team = teams.find(t => t.id === realTeamId);
+                    const realTeamId = teamKey === 'no-team' ? '' : normalizeSiteId(teamKey);
+                    const fallbackTeamId =
+                        normalizeSiteId(site?.responsibleTeamId) ||
+                        normalizeSiteId(rows[0]?.workerTeamId) ||
+                        normalizeSiteId(rows[0]?.teamId);
+                    const resolvedTeamId = realTeamId || fallbackTeamId;
+                    const team = teams.find((t) => normalizeSiteId(t.id) === resolvedTeamId);
 
-                    involvedTeamIds.add(realTeamId);
+                    if (!resolvedTeamId) {
+                        skippedGroupCount += 1;
+                        return;
+                    }
+
+                    involvedTeamIds.add(resolvedTeamId);
 
                     const totalManDay = rows.reduce((sum, r) => sum + r.manDay, 0);
                     const reportWorkers = rows.map(r => ({
@@ -1054,23 +1076,28 @@ const DailyReportGridInput: React.FC = () => {
                         status: 'attendance' as const,
                         manDay: r.manDay,
                         workContent: r.description, // User removed individual work content input, but logic remains if needed
-                        teamId: r.teamId, // ✅ 작업자의 실제 소속팀 저장 (인력교류 추적용)
+                        teamId: normalizeSiteId(r.teamId) || resolvedTeamId,
                         unitPrice: r.unitPrice ?? 0,
-                        workerTeamId: r.workerTeamId || r.teamId,
-                        workerTeamName: r.workerTeamName || r.teamName
+                        workerTeamId: normalizeSiteId(r.workerTeamId) || normalizeSiteId(r.teamId) || resolvedTeamId,
+                        workerTeamName:
+                            r.workerTeamName ||
+                            r.teamName ||
+                            team?.name ||
+                            site?.responsibleTeamName ||
+                            ''
                     }));
 
                     allReports.push({
                         date,
-                        teamId: realTeamId,
-                        teamName: team?.name || '',
+                        teamId: resolvedTeamId,
+                        teamName: team?.name || site?.responsibleTeamName || rows[0]?.teamName || '',
                         siteId: normalizedLedgerSiteId,
                         siteName: site?.name || '',
                         writerId: currentUser?.uid || 'unknown',
                         workers: reportWorkers,
                         totalManDay,
-                        responsibleTeamId: site?.responsibleTeamId || '',
-                        responsibleTeamName: site?.responsibleTeamName || '',
+                        responsibleTeamId: normalizeSiteId(site?.responsibleTeamId) || resolvedTeamId,
+                        responsibleTeamName: site?.responsibleTeamName || team?.name || '',
 
                         // Site Metadata Saving (Corrected Mapping)
                         // DailyReport.companyId refers to CLIENT (발주사) based on services/dailyReportService.ts
@@ -1090,16 +1117,22 @@ const DailyReportGridInput: React.FC = () => {
                 });
             }
 
-            // Clear Temp Data on Success
-            clearTempData();
-
             if (allReports.length > 0) {
                 // Use overwriteReports to delete existing reports for these teams/date before saving
                 // This prevents duplicates if user clicks save multiple times
                 await dailyReportService.overwriteReports(date, allReports, Array.from(involvedTeamIds));
-                alert(`${allReports.length}건의 일보가 저장되었습니다.`);
+                clearTempData();
+                alert(
+                    skippedGroupCount > 0
+                        ? `${allReports.length}건의 일보가 저장되었습니다.\n팀 정보를 찾지 못한 ${skippedGroupCount}개 그룹은 제외되었습니다.`
+                        : `${allReports.length}건의 일보가 저장되었습니다.`
+                );
             } else {
-                alert('저장할 데이터가 없습니다. (현장 선택 및 이름 입력 필수)');
+                alert(
+                    skippedGroupCount > 0
+                        ? `팀 정보를 찾지 못해 저장할 수 있는 데이터가 없습니다.\n제외된 그룹 수: ${skippedGroupCount}`
+                        : '저장할 데이터가 없습니다. (현장 선택 및 이름 입력 필수)'
+                );
             }
 
         } catch (error) {

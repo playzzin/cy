@@ -78,6 +78,15 @@ const filterReportsByParams = (reports: DailyReport[], params: {
     });
 };
 
+// undefined를 null로 치환 (타입 보존)
+const cleanWorker = (worker: any): DailyReportWorker => {
+    const cleaned: any = { ...worker };
+    Object.keys(cleaned).forEach((k) => {
+        if (cleaned[k] === undefined) cleaned[k] = null;
+    });
+    return cleaned as DailyReportWorker;
+};
+
 export const dailyReportService = {
     addReport: async (report: DailyReportInput): Promise<string> => {
         const normalized = normalizeReport(report as any);
@@ -90,10 +99,17 @@ export const dailyReportService = {
         const oldSnap = await getDoc(doc(db, 'daily_reports', id));
         if (!oldSnap.exists()) throw new Error('Report not found');
         const oldData = normalizeReport(oldSnap.data() as any);
-        const normalizedUpdates = {
+        let normalizedUpdates = {
             ...updates,
             ...(updates.date !== undefined ? { date: normalizeLooseDateText(updates.date) } : {})
         };
+        // workers 필드가 있으면 undefined -> null 치환
+        if (Array.isArray(normalizedUpdates.workers)) {
+          normalizedUpdates = {
+            ...normalizedUpdates,
+            workers: normalizedUpdates.workers.map(cleanWorker)
+          };
+        }
 
         await dailyReportService._updateStats(oldData, -1);
         await dailyReportFirestoreService.updateReport(id, normalizedUpdates);
