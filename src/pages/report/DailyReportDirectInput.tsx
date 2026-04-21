@@ -75,7 +75,8 @@ const DailyReportDirectInput: React.FC = () => {
     }, [selectedTeamId, allWorkers]);
 
     const loadTeamWorkers = (teamId: string) => {
-        const teamWorkers = allWorkers.filter(w => w.teamId === teamId);
+        // '퇴사' 상태가 아닌 작업자만 로드
+        const teamWorkers = allWorkers.filter(w => w.teamId === teamId && w.status !== '퇴사' && w.status !== '퇴사자');
         const newRows: GridRow[] = teamWorkers.map(w => ({
             id: w.id || '',
             name: w.name,

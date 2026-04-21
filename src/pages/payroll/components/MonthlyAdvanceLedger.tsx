@@ -1738,73 +1738,73 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-auto bg-white">
-                <table className="w-full border-collapse text-[13px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
-                    <thead className="sticky top-0 z-20">
+            <div className="flex-1 min-h-0 overflow-auto bg-white custom-scrollbar">
+                <table className="w-full border-separate border-spacing-0 text-[13px] leading-tight" style={{ minWidth: `${tableMinWidth}px` }}>
+                    <thead>
                         <tr className="bg-slate-200 text-slate-800">
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-10">No</th>
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-20">이름</th>
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-14">구분</th>
-                            <th className="border border-slate-400 px-1.5 py-1.5 whitespace-nowrap w-[88px]">공제 분류</th>
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-16 bg-sky-100">공수</th>
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-[80px]">단가</th>
-                            <th className="border border-slate-400 px-1.5 py-1 whitespace-nowrap w-[92px] bg-yellow-100">세전 금액</th>
+                            <th className="sticky top-0 left-0 z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-10 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">No</th>
+                            <th className="sticky top-0 left-[40px] z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-20 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
+                            <th className="sticky top-0 left-[120px] z-[60] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-14 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">구분</th>
+                            <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1.5 whitespace-nowrap w-[88px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공제 분류</th>
+                            <th className="sticky top-0 z-[50] bg-sky-100 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-16 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공수</th>
+                            <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-[80px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">단가</th>
+                            <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-1.5 py-1 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">세전 금액</th>
                             {showUtilities && (
                                 <>
-                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">숙소비</span>
-                                            <span className="block text-[13px]">인터넷</span>
-                                        </th>
-                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                        <span className="block text-[13px]">인터넷</span>
+                                    </th>
+                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">전기료</span>
-                                            <span className="block text-[13px]">관리비</span>
-                                        </th>
-                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
+                                        <span className="block text-[13px]">관리비</span>
+                                    </th>
+                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">가스비</span>
-                                            <span className="block text-[13px]">과태료</span>
-                                        </th>
-                                        <th className="border border-slate-400 px-1 py-1.5 w-[98px]">
-                                            <span className="block text-[13px]">수도세</span>
-                                            <span className="block text-[13px]">기타</span>
-                                        </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-slate-300">합계</th>
+                                        <span className="block text-[13px]">과태료</span>
+                                    </th>
+                                    <th className="sticky top-0 z-[50] bg-slate-200 border-b border-r border-slate-400 px-1 py-1.5 w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
+                                        <span className="block text-[13px]">수도세</span>
+                                        <span className="block text-[13px]">기타</span>
+                                    </th>
+                                    <th className="sticky top-0 z-[50] bg-slate-300 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">합계</th>
                                 </>
                             )}
                             {showAdvances && (
                                 <>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance1}</span>
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance1}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance2}</span>
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance2}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance3}</span>
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance3}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-1 py-1.5 w-[112px] bg-yellow-200">
+                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-1 py-1.5 w-[112px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.corporateAdvance4}</span>
                                         <span className="block text-[13px]">{resolvedAdvanceItemLabels.laborAdvance4}</span>
                                     </th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] bg-emerald-200">가불 합계</th>
+                                    <th className="sticky top-0 z-[50] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[98px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">가불 합계</th>
                                 </>
                             )}
                             {showTaxes && (
                                 <>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">국민연금/장기요양</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] bg-yellow-100">건강보험/+고용보험</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] bg-amber-100">갑근세/지방세</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] bg-green-100">사업소득세/지방소득세</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[94px] bg-fuchsia-100">일급제 수수료</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[106px] bg-yellow-200">4대 보험 합계</th>
-                                    <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-green-200">3.3% 합계</th>
+                                    <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">국민연금/장기요양</th>
+                                    <th className="sticky top-0 z-[50] bg-yellow-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[104px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">건강보험/+고용보험</th>
+                                    <th className="sticky top-0 z-[50] bg-amber-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[96px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">갑근세/지방세</th>
+                                    <th className="sticky top-0 z-[50] bg-green-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[116px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">사업소득세/지방소득세</th>
+                                    <th className="sticky top-0 z-[50] bg-fuchsia-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[94px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">일급제 수수료</th>
+                                    <th className="sticky top-0 z-[50] bg-yellow-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[106px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">4대 보험 합계</th>
+                                    <th className="sticky top-0 z-[50] bg-green-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">3.3% 합계</th>
                                 </>
                             )}
-                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-emerald-200">법 인</th>
-                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] bg-lime-200">개 인</th>
-                            <th className="border border-slate-400 px-2 py-1.5 whitespace-nowrap w-[140px] bg-lime-100">메모</th>
+                            <th className="sticky top-0 z-[50] bg-emerald-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">법 인</th>
+                            <th className="sticky top-0 z-[50] bg-lime-200 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[92px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">개 인</th>
+                            <th className="sticky top-0 z-[50] bg-lime-100 border-b border-r border-slate-400 px-2 py-1.5 whitespace-nowrap w-[140px] shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">메모</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1818,8 +1818,10 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                         {groupedRows.map((group) => (
                             <React.Fragment key={group.teamName}>
                                 <tr className="bg-slate-700 text-white">
-                                    <td colSpan={totalColumnCount} className="border border-slate-600 px-3 py-1.5 text-xs font-bold">
-                                        {group.teamName} · {group.rows.length}명
+                                    <td colSpan={totalColumnCount} className="sticky top-[31px] z-30 border border-slate-600 px-3 py-1.5 text-xs font-bold shadow-md">
+                                        <div className="sticky left-3 inline-block">
+                                            {group.teamName} · {group.rows.length}명
+                                        </div>
                                     </td>
                                 </tr>
                                 {group.rows.map((row, idx) => {
@@ -1835,11 +1837,11 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                                     return (
                                         <React.Fragment key={row.rowKey}>
                                             {/* 윗칸(법인) 행: 파란색 계열 배경 + 상단/좌/우 굵은 검정 테두리 */}
-                                            <tr className="bg-blue-50/40 border-t-2 border-l-2 border-r-2 border-black">
-                                                <td rowSpan={2} className="border border-slate-300 px-1 text-center font-semibold">{runningNo}</td>
-                                                <td rowSpan={2} className="border border-slate-300 px-2 text-center font-semibold">{row.workerName}</td>
-                                                <td rowSpan={2} className={`border border-slate-300 px-1 text-center font-semibold ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
-                                                <td className="border border-slate-300 px-1.5 py-1 text-center bg-blue-50/20">
+                                            <tr className="bg-blue-50/40">
+                                                <td rowSpan={2} className="sticky left-0 z-20 bg-white border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)]">{runningNo}</td>
+                                                <td rowSpan={2} className="sticky left-[40px] z-20 bg-white border-b border-r border-slate-300 px-2 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)]">{row.workerName}</td>
+                                                <td rowSpan={2} className={`sticky left-[120px] z-20 border-b border-r border-slate-300 px-1 text-center font-semibold shadow-[1px_0_0_rgba(0,0,0,0.1)] ${getSalaryModelLabelClassName(row.salaryModel)}`}>{row.salaryModel || '월급제'}</td>
+                                                <td className="border-b border-r border-slate-300 px-1.5 py-1 text-center bg-blue-50/20">
                                                     <label className="flex items-center justify-center gap-1.5 cursor-pointer h-full">
                                                         <input 
                                                             type="radio" 
@@ -2066,7 +2068,7 @@ const MonthlyAdvanceLedger = React.forwardRef(function MonthlyAdvanceLedger({
                     </tbody>
                     <tfoot>
                         <tr className="bg-blue-100 font-bold text-slate-900">
-                            <td colSpan={4} className="border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
+                            <td colSpan={4} className="sticky left-0 z-20 bg-blue-100 border border-slate-400 px-2 py-2 text-center text-base">합 계</td>
                             <td className="border border-slate-400 px-2 py-2 text-right">
                                 <div className="text-sky-700">{totals.invoiceManDay.toFixed(1)}</div>
                                 <div className="text-amber-700">{totals.laborManDay.toFixed(1)}</div>

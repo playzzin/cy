@@ -914,6 +914,7 @@ const DailyReportDragDropPage = () => {
             // B. Process Unassigned Workers (from All Workers DB)
             // Filter only workers belonging to the loaded teams
             const teamWorkers = allWorkers
+                .filter(w => w.status !== '퇴사' && w.status !== '퇴사자') // 퇴사자 필터링
                 .map((w) => {
                     const raw = w?.teamId ? String(w.teamId) : '';
                     const resolved = raw ? (teamIdToUuid.get(raw) ?? raw) : '';

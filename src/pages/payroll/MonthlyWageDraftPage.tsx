@@ -4270,34 +4270,34 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     </div>
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+                <div className="flex-1 min-h-0 overflow-auto">
                     <table
                         className="w-full table-fixed text-[13px] text-left border-separate border-spacing-0"
                     >
-                        <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-40">
+                        <thead className="text-slate-500 font-medium sticky top-0 z-40">
                             <tr className="border-b border-slate-200">
-                                <th className="px-2 py-1.5 text-center w-10 border-b border-slate-200"></th>
-                                <th className="px-2 py-1.5 border-b border-slate-200">월</th>
-                                <th className="px-2 py-1.5 border-b border-slate-200">이름</th>
-                                <th className="px-2 py-1.5 border-b border-slate-200">팀명</th>
-                                <th className="px-2 py-1.5 border-b border-slate-200">주민번호</th>
-                                <th className="px-2 py-1.5 border-b border-slate-200">시공사</th>
-                                <th className="px-2 py-1.5">총 공수</th>
-                                <th className="px-2 py-1.5 text-right">단가</th>
-                                <th className="px-2 py-1.5 text-right">지급전</th>
+                                <th className="sticky top-0 left-0 z-50 bg-slate-50 px-2 py-1.5 text-center w-10 border-b border-slate-200 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]"></th>
+                                <th className="sticky top-0 left-[40px] z-50 bg-slate-50 px-2 py-1.5 border-b border-slate-200 w-16 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">월</th>
+                                <th className="sticky top-0 left-[104px] z-50 bg-slate-50 px-2 py-1.5 border-b border-slate-200 w-32 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">팀명</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">주민번호</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">시공사</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">총 공수</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">단가</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">지급전</th>
                                 {showCalculationLabor && (
                                     <>
-                                        <th className="px-2 py-1.5 text-center bg-blue-50/50 text-blue-700">계산서 공수</th>
-                                        <th className="px-2 py-1.5 text-right bg-blue-50/50 text-blue-700">계산서 금액</th>
-                                        <th className="px-2 py-1.5 text-center bg-indigo-50/50 text-indigo-700">노무 공수</th>
-                                        <th className="px-2 py-1.5 text-right bg-indigo-50/50 text-indigo-700">노무 금액</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-center bg-blue-50 text-blue-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계산서 공수</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-right bg-blue-50 text-blue-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계산서 금액</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-center bg-indigo-50 text-indigo-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">노무 공수</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-right bg-indigo-50 text-indigo-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">노무 금액</th>
                                     </>
                                 )}
-                                <th className="px-2 py-1.5 text-right">공제</th>
-                                <th className="px-2 py-1.5 text-right">실지급</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공제</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">실지급</th>
                                 {showAccountColumns && (
                                     <>
-                                        <th className="px-2 py-1.5">
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                             코드
                                             <button
                                                 type="button"
@@ -4307,12 +4307,12 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                 📋
                                             </button>
                                         </th>
-                                        <th className="px-2 py-1.5">은행명</th>
-                                        <th className="px-2 py-1.5">계좌번호</th>
-                                        <th className="px-2 py-1.5">예금주</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">은행명</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계좌번호</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">예금주</th>
                                     </>
                                 )}
-                                <th className="px-2 py-1.5 border-b border-slate-200">표시내용</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">표시내용</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -4384,7 +4384,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                     return (
                                         <React.Fragment key={rowKey}>
                                             <tr className={`transition ${rowBgClass} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
-                                                <td className="px-2 py-1.5 text-center border-b border-slate-100">
+                                                <td className="sticky left-0 z-20 bg-inherit px-2 py-1.5 text-center border-b border-slate-100 shadow-[inset_-1px_0_0_rgba(0,0,0,0.1)]">
                                                     <button
                                                         onClick={() => toggleRow(item.id)}
                                                         className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${isExpanded ? 'bg-brand-100 text-brand-600' : 'text-slate-400 hover:bg-slate-100'}`}
@@ -4392,8 +4392,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                         <FontAwesomeIcon icon={isExpanded ? faChevronUp : faChevronDown} className="text-xs" />
                                                     </button>
                                                 </td>
-                                                <td className="px-2 py-1.5 font-mono text-slate-600 text-[11px] border-b border-slate-100">{item.month}</td>
-                                                <td className="px-2 py-1.5 font-medium text-slate-800 border-b border-slate-100">
+                                                <td className="sticky left-[40px] z-20 bg-inherit px-2 py-1.5 font-mono text-slate-600 text-[11px] border-b border-slate-100">{item.month}</td>
+                                                <td className="sticky left-[104px] z-20 bg-inherit px-2 py-1.5 font-medium text-slate-800 border-b border-slate-100 shadow-[inset_-1px_0_0_rgba(0,0,0,0.1)]">
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{item.workerName}</span>
                                                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badgeClass}`}>
