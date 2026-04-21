@@ -19,7 +19,7 @@ const FIELD_MAPPING: { [key: string]: string[] } = {
     companyName: ['회사', '회사명', '소속회사', '업체명'],
     leaderName: ['팀장', '팀장명', '직반장', '대표', '대표자'],
     unitPrice: ['단가', '일당', '임금'],
-    salaryModel: ['급여', '급여형태', '지급유형', '임금형태'],
+    payType: ['급여', '급여형태', '지급유형', '임금형태'],
     teamType: ['팀구분', '소속구분'],
     category: ['구분', '분류', '타입', '비고', '참고사항'] // New generic category
 };
@@ -37,7 +37,7 @@ const FIELD_LABELS: { [key: string]: string } = {
     companyName: '회사명',
     leaderName: '대표',
     unitPrice: '단가',
-    salaryModel: '급여형태',
+    payType: '급여형태',
     teamType: '팀구분',
     category: '통합구분'
 };

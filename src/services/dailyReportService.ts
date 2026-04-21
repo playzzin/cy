@@ -374,8 +374,8 @@ export const dailyReportService = {
                     .map(worker => [
                         String(worker.id),
                         {
-                            salaryModel: worker.salaryModel ?? worker.payType,
-                            payType: worker.payType ?? worker.salaryModel,
+                            //
+                            payType: worker.payType,
                         },
                     ])
             );
@@ -389,15 +389,15 @@ export const dailyReportService = {
                     const current = workerMap.get(String(worker.workerId));
                     if (!current) return worker;
 
-                    const nextSalaryModel = current.salaryModel ?? worker.salaryModel;
+
                     const nextPayType = current.payType ?? worker.payType;
-                    if (nextSalaryModel !== worker.salaryModel || nextPayType !== worker.payType) {
+                    if (nextPayType !== worker.payType) {
                         changed = true;
                     }
 
                     return {
                         ...worker,
-                        salaryModel: nextSalaryModel,
+                        //
                         payType: nextPayType,
                     };
                 });

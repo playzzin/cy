@@ -614,7 +614,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           const salaryType = getSalaryTypeLabel(
             row.salaryModel,
             row.payType,
-            worker?.salaryModel,
+            worker?.payType,
             worker?.payType
           );
 
@@ -776,7 +776,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         teamKey,
         teamName,
         workerName: displayText(worker.name),
-        salaryType: getSalaryTypeLabel(worker.salaryModel, worker.payType, workerEntries[0]?.salaryType),
+        salaryType: getSalaryTypeLabel(worker.payType, undefined, workerEntries[0]?.salaryType),
         idNumber: displayText(worker.idNumber || ''),
         address: displayText(worker.address || ''),
         contact: displayText(worker.contact || ''),

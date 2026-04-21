@@ -624,7 +624,15 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }
   };
 
-  const handleExcelDownload = useCallback(async () => {
+  const getDayOfWeek = (month: string, day: number): string => {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return '';
+  const date = new Date(y, m - 1, day);
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return days[date.getDay()];
+};
+
+const handleExcelDownload = useCallback(async () => {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Codex';
     workbook.lastModifiedBy = 'Codex';
@@ -710,7 +718,10 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     // --- Header Row ---
     const headerCells: string[] = ['No', '성명', '주민등록번호', '전화번호', '주소'];
-    for (let d = 1; d <= lastDay; d++) headerCells.push(String(d));
+    for (let d = 1; d <= lastDay; d++) {
+      const dow = getDayOfWeek(month, d);
+      headerCells.push(`${String(d).padStart(2, '0')}\n(${dow})`);
+    }
     headerCells.push('공수', '단가', '총액', ...trailingHeaders);
 
     const headerRow = ws.addRow(headerCells);
@@ -720,7 +731,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
       cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
     });
-    headerRow.height = 24;
+    headerRow.height = 36; // 요일 추가로 인한 높이 증가
     ws.views = [{ state: 'frozen', ySplit: headerRow.number, xSplit: 5, showGridLines: false }];
 
     ws.getColumn(1).width = 5;   // No
@@ -728,7 +739,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     ws.getColumn(3).width = 16;  // 주민등록번호
     ws.getColumn(4).width = 14;  // 전화번호
     ws.getColumn(5).width = showBankUnderAddress ? 48 : 40;  // 주소
-    for (let d = 1; d <= lastDay; d++) ws.getColumn(5 + d).width = 4;
+    for (let d = 1; d <= lastDay; d++) ws.getColumn(5 + d).width = 5.5; // 요일 표시를 위해 약간 넓힘
     ws.getColumn(afterDays + 1).width = 6;  // 공수
     ws.getColumn(afterDays + 2).width = 8; // 단가
     ws.getColumn(afterDays + 3).width = 10; // 총액
@@ -743,12 +754,17 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
     for (let d = 1; d <= lastDay; d += 1) {
       const dayCell = headerRow.getCell(5 + d);
+      const dow = getDayOfWeek(month, d);
+      let bgColor = d <= daySplitPoint ? 'FF334155' : 'FF475569';
+      if (dow === '일') bgColor = 'FFA52A2A'; // 일요일 강조
+      if (dow === '토') bgColor = 'FF000080'; // 토요일 강조
+
       dayCell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: d <= daySplitPoint ? 'FF334155' : 'FF475569' }
+        fgColor: { argb: bgColor }
       };
-      dayCell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+      dayCell.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
     }
     [1, 2, 3, 4, 5].forEach((col) => {
       headerRow.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
@@ -876,10 +892,8 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
     }
     ws.getCell(footerRow.number, 1).alignment = { horizontal: 'center', vertical: 'middle' };
 
-    ws.autoFilter = {
-      from: { row: headerRow.number, column: 1 },
-      to: { row: headerRow.number, column: totalColumns }
-    };
+    // 자동 필터 삭제 요청 반영: ws.autoFilter 설정 제거
+
     const printAreaEndColumn = ws.getColumn(totalColumns).letter;
     if (printAreaEndColumn) {
       ws.pageSetup.printArea = `A1:${printAreaEndColumn}${footerRow.number}`;

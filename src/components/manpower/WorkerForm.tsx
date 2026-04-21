@@ -39,6 +39,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         accountNumber: '',
         accountHolder: '',
         fileNameSaved: '',
+        payType: '일급제',
         salaryModel: '일급제',
         color: '#0f766e',
         bloodType: ''
@@ -87,6 +88,7 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 accountNumber: '',
                 accountHolder: '',
                 fileNameSaved: '',
+                payType: '일급제',
                 salaryModel: '일급제',
                 color: '#0f766e',
                 bloodType: ''
@@ -102,6 +104,11 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
 
             if (name === 'unitPrice') {
                 updates.unitPrice = parseInt(value) || 0;
+            }
+
+            if (name === 'payType' || name === 'salaryModel') {
+                updates.payType = value;
+                updates.salaryModel = value;
             }
 
             if (name === 'teamId') {
@@ -120,7 +127,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                     }
 
                     // 팀의 기본 지급구분이 설정되어 있고 현재 salaryModel이 비어있으면 자동 설정
-                    if (!formData.salaryModel && team.defaultSalaryModel) {
+                    if (!formData.payType && team.defaultSalaryModel) {
+                        updates.payType = team.defaultSalaryModel;
                         updates.salaryModel = team.defaultSalaryModel;
                     }
                 } else {
@@ -595,8 +603,8 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                             </div>
                             <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200">
                                 <select
-                                    name="salaryModel"
-                                    value={formData.salaryModel || '일급제'}
+                                    name="payType"
+                                    value={formData.payType || '일급제'}
                                     onChange={handleChange}
                                     className="w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
                                 >

@@ -3127,7 +3127,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const rows = allWorkers
             .filter((w): w is Worker & { id: string } => typeof w.id === 'string' && w.id.trim().length > 0)
             .filter((w) => {
-                const model = (w.salaryModel ?? w.payType ?? '').trim();
+                const model = (w.payType ?? '').trim(); // salaryModel 완전 제거
                 if (model === '월급제') return true;
                 if (model === '용역팀') return true;
                 if (shouldIncludeDailyWage && model === '일급제') return true;
@@ -4365,9 +4365,25 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         withholdingDetailText,
                                     } = rowDisplay;
 
+                                    const isMonthly = item.id.endsWith('__월급제');
+                                    const isService = item.id.endsWith('__용역팀');
+                                    const salaryLabel = isMonthly ? '월급제' : isService ? '용역팀' : '일급제';
+                                    
+                                    const rowBgClass = isMonthly 
+                                        ? 'bg-blue-50/25 hover:bg-blue-50/40' 
+                                        : isService 
+                                            ? 'bg-orange-50/25 hover:bg-orange-50/40' 
+                                            : 'bg-emerald-50/25 hover:bg-emerald-50/40';
+
+                                    const badgeClass = isMonthly 
+                                        ? 'bg-blue-100 text-blue-700' 
+                                        : isService 
+                                            ? 'bg-orange-100 text-orange-700' 
+                                            : 'bg-emerald-100 text-emerald-700';
+
                                     return (
                                         <React.Fragment key={rowKey}>
-                                            <tr className={`transition ${item.id.endsWith('__월급제') ? 'bg-blue-50/25 hover:bg-blue-50/40' : 'bg-emerald-50/25 hover:bg-emerald-50/40'} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
+                                            <tr className={`transition ${rowBgClass} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
                                                 <td className="px-2 py-1.5 text-center border-b border-slate-100">
                                                     <button
                                                         onClick={() => toggleRow(item.id)}
@@ -4380,8 +4396,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                 <td className="px-2 py-1.5 font-medium text-slate-800 border-b border-slate-100">
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{item.workerName}</span>
-                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${item.id.endsWith('__월급제') ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                                            {item.id.endsWith('__월급제') ? '월급제' : '일급제'}
+                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badgeClass}`}>
+                                                            {salaryLabel}
                                                         </span>
                                                     </div>
                                                 </td>

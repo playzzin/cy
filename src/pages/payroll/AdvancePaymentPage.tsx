@@ -1377,7 +1377,7 @@ const AdvancePaymentPage: React.FC = () => {
         const matchesSalaryModel = (worker: Worker): boolean => {
             if (salaryModelFilter === 'all') return true;
 
-            const model = String(worker.salaryModel ?? worker.payType ?? '').trim();
+            const model = String(worker.payType ?? '').trim();
             if (!model) return salaryModelFilter === 'daily';
             if (salaryModelFilter === 'monthly') return model.includes('월급');
             return model.includes('일급');

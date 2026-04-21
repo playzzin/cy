@@ -620,7 +620,7 @@ export const usePayrollData = (
           if (!w) return;
           if (selectedWorkerId && canonicalWorkerId !== resolveWorkerCanonicalId(selectedWorkerId)) return;
 
-          const salaryModel = (rw.salaryModel || rw.payType || w.salaryModel || '').trim();
+          const salaryModel = (rw.payType || '').trim();
           const isMonthly = salaryModel === '월급제';
           const isDaily = salaryModel === '일급제';
           const isService = salaryModel === '용역팀';

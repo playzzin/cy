@@ -30,7 +30,7 @@ interface PersonnelHistoryRow {
 }
 
 const resolveWorkerSalaryModel = (worker: Worker): SalaryModelFilter => {
-    const raw = String(worker.salaryModel ?? worker.payType ?? '').trim();
+    const raw = String(worker.payType ?? '').trim();
     if (raw.includes('월급')) return '월급제';
     if (raw.includes('지원')) return '지원팀';
     if (raw.includes('용역')) return '용역팀';
@@ -39,10 +39,9 @@ const resolveWorkerSalaryModel = (worker: Worker): SalaryModelFilter => {
 
 const resolveSnapshotSalaryModel = (params: {
     worker: Worker;
-    reportSalaryModel?: string;
     reportPayType?: string;
 }): SalaryModelFilter => {
-    const snapshotRaw = String(params.reportSalaryModel ?? params.reportPayType ?? '').trim();
+    const snapshotRaw = String(params.reportPayType ?? '').trim();
     if (snapshotRaw.includes('월급')) return '월급제';
     if (snapshotRaw.includes('지원')) return '지원팀';
     if (snapshotRaw.includes('용역')) return '용역팀';
@@ -507,8 +506,11 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                 const report = row as any;
 
                 const model = resolveSnapshotSalaryModel({
-                    worker: worker ?? ({ salaryModel: row.salaryModel, payType: row.payType } as Worker),
-                    reportSalaryModel: row.salaryModel,
+                    worker: worker ?? ({
+                        name: row.name ?? '',
+                        payType: row.payType ?? '',
+                    }),
+                    // reportSalaryModel 완전 제거
                     reportPayType: row.payType
                 });
 

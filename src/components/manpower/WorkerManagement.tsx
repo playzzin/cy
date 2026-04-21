@@ -35,7 +35,7 @@ const WORKER_COLUMNS = [
     { key: 'contact', label: '연락처' },
     { key: 'address', label: '주소' },
     { key: 'role', label: '직책' },
-    { key: 'salaryModel', label: '구분' },
+    { key: 'payType', label: '구분' },
     { key: 'teamName', label: '팀명' },
     { key: 'companyName', label: '회사' },
     { key: 'status', label: '상태' },
@@ -46,7 +46,7 @@ const WORKER_COLUMNS = [
 ];
 
 const QUICK_VIEW_PERSONAL_COLUMNS = ['name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
-const QUICK_VIEW_WORK_COLUMNS = ['name', 'role', 'salaryModel', 'teamName', 'companyName', 'status'];
+const QUICK_VIEW_WORK_COLUMNS = ['name', 'role', 'payType', 'teamName', 'companyName', 'status'];
 
 // 드래그 가능한 열 아이템 컴포넌트
 
@@ -161,7 +161,7 @@ const WorkerManagement: React.FC = () => {
             // 회사 유형에 따라 급여방식 결정 (협력사면 지원팀, 아니면 팀의 defaultSalaryModel 우선 적용)
             const worker = workers.find(w => w.id === workerId);
             const isPartnerCompany = teamCompany?.type === '협력사';
-            const newSalaryModel = isPartnerCompany ? '지원팀' : (worker?.salaryModel || team.defaultSalaryModel || '일급제');
+            const newSalaryModel = isPartnerCompany ? '지원팀' : (worker?.payType || team.defaultSalaryModel || '일급제');
 
             const updates = {
                 teamId: team.id,
@@ -169,7 +169,8 @@ const WorkerManagement: React.FC = () => {
                 teamType: team.type,
                 companyId: team.companyId || '',
                 companyName: team.companyName || '',
-                salaryModel: newSalaryModel
+                salaryModel: newSalaryModel,
+                payType: newSalaryModel
             };
 
             setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...updates } : w));
@@ -905,16 +906,16 @@ const WorkerManagement: React.FC = () => {
                                                                             </div>
                                                                         );
                                                                     }
-                                                                    case 'salaryModel': {
+                                                                    case 'payType': {
                                                                         const companyType = workerCompany?.type;
                                                                         const isPartner = companyType === '협력사';
-                                                                        const currentValue = isPartner ? '지원팀' : (worker.salaryModel || '일급제');
+                                                                        const currentValue = isPartner ? '지원팀' : (worker.payType || '일급제');
                                                                         return isEditMode ? (
                                                                             <select
                                                                                 value={currentValue}
                                                                                 onChange={(e) => {
-                                                                                    handleWorkerChange(worker.id!, 'salaryModel', e.target.value);
-                                                                                    handleWorkerBlur(worker.id!, 'salaryModel', e.target.value);
+                                                                                    handleWorkerChange(worker.id!, 'payType', e.target.value);
+                                                                                    handleWorkerBlur(worker.id!, 'payType', e.target.value);
                                                                                 }}
                                                                                 disabled={isPartner}
                                                                                 className={`w-full border rounded px-2 py-1 text-sm ${isPartner ? 'bg-gray-100 text-gray-500' : ''}`}

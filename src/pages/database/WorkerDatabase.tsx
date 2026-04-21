@@ -217,7 +217,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 teamType: team.type,
                 companyId: team.companyId || '',
                 companyName: team.companyName || '',
-                salaryModel: newSalaryModel
+                salaryModel: newSalaryModel,
+                payType: newSalaryModel
             };
 
             setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...updates } : w));

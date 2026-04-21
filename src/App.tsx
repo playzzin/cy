@@ -139,7 +139,7 @@ import CheongyeonGreetingPage from './pages/cheongyeon/CheongyeonGreetingPage';
 import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPage';
 import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
-import CheongyeonHistoryPage from './pages/cheongyeon/CheongyeonHistoryPage';
+import CheongyeonHistoryPage from './pages/cheongyeon/history';
 import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
 import NationwideDashboardHome from './pages/jeonkuk/NationwideDashboardHome';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';

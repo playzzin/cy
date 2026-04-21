@@ -153,6 +153,14 @@ const SiteLaborCostInvoice: React.FC<Props> = ({ hideHeader }) => {
         fetchData();
     };
 
+    const getDayOfWeek = (month: string, day: number): string => {
+        const [y, m] = month.split('-').map(Number);
+        if (!y || !m) return '';
+        const date = new Date(y, m - 1, day);
+        const days = ['일', '월', '화', '수', '목', '금', '토'];
+        return days[date.getDay()];
+    };
+
     const handleDownload = async () => {
         if (invoiceData.length === 0) {
             alert("출력할 데이터가 없습니다.");
@@ -165,16 +173,11 @@ const SiteLaborCostInvoice: React.FC<Props> = ({ hideHeader }) => {
             const workbook = new ExcelJS.Workbook();
             const worksheet = workbook.addWorksheet('노무내역서');
 
-            // Columns (Corrected width and count)
-            // A:Name, B:Jumin, C:Address -> 3
-            // D-S: Days 1-16 (16 days) -> 16. (D=1..S=16. Wait. D is 4th letter.. S is 19th. 19-4+1=16. Correct)
-            // T:Days, U:Unit, V:Gross, W:Deductions, X:NetPay -> 5
-            // Total 3 + 16 + 5 = 24.
             worksheet.columns = [
                 { width: 12 }, // A: Name
-                { width: 16 }, // B: JuminID/Phone
-                { width: 30 }, // C: Address
-                ...Array(16).fill({ width: 3.5 }), // D-S: Days (1-15 on top, 16-31 on bottom)
+                { width: 18 }, // B: JuminID/Phone
+                { width: 40 }, // C: Address
+                ...Array(16).fill({ width: 5.5 }), // D-S: Days (increased for dow)
                 { width: 8 },  // T: Total Days
                 { width: 12 }, // U: Unit Price
                 { width: 15 }, // V: Gross Pay
@@ -183,67 +186,83 @@ const SiteLaborCostInvoice: React.FC<Props> = ({ hideHeader }) => {
             ];
 
             // Title
-            worksheet.mergeCells('A1:X1'); // Fixed: A-X is 24 columns
+            worksheet.mergeCells('A1:X1');
             const titleCell = worksheet.getCell('A1');
             titleCell.value = '노무내역서';
             titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            titleCell.font = { size: 20, bold: true };
-            worksheet.getRow(1).height = 40;
+            titleCell.font = { size: 22, bold: true, underline: true };
+            worksheet.getRow(1).height = 50;
 
             // Metadata
+            const lastDayDate = new Date(new Date(selectedMonth).getFullYear(), new Date(selectedMonth).getMonth() + 1, 0).toISOString().slice(0, 10);
             worksheet.mergeCells('A2:C2');
-            worksheet.getCell('A2').value = `기간: ${selectedMonth}`;
+            worksheet.getCell('A2').value = `기간: ${selectedMonth}-01 ~ ${lastDayDate}`;
             worksheet.getCell('A2').font = { bold: true };
             worksheet.getCell('A2').alignment = { vertical: 'middle' };
 
-            worksheet.mergeCells('D2:X2'); // Fixed: A-X
+            worksheet.mergeCells('D2:X2');
             worksheet.getCell('D2').value = `현장명: ${siteName}`;
             worksheet.getCell('D2').alignment = { horizontal: 'right', vertical: 'middle' };
             worksheet.getCell('D2').font = { bold: true };
+            worksheet.getRow(2).height = 25;
 
             // Header Rows
             const headerRow1 = worksheet.getRow(3);
             const headerRow2 = worksheet.getRow(4);
 
-            // Row 1 values: Name, Jumin, Address, 1..15, Spacer, Days, Unit, Gross, Ded, Net
-            headerRow1.values = ['성명', '주민등록번호', '주소', ...Array.from({ length: 15 }, (_, i) => i + 1), '', '출역일수', '단가', '총액', '공제', '실지급액'];
+            // Build Day Headers with DOW
+            const dayHeaders1: string[] = [];
+            for (let i = 1; i <= 15; i++) {
+                const dow = getDayOfWeek(selectedMonth, i);
+                dayHeaders1.push(`${String(i).padStart(2, '0')}\n(${dow})`);
+            }
 
-            // Row 2 values: Name, Phone, Address, D16..D31
-            headerRow2.values = ['', '전화번호', '', ...Array.from({ length: 16 }, (_, i) => i + 16 <= 31 ? i + 16 : ''), ''];
+            const dayHeaders2: string[] = [];
+            const maxDay = new Date(new Date(selectedMonth).getFullYear(), new Date(selectedMonth).getMonth() + 1, 0).getDate();
+            for (let i = 16; i <= 31; i++) {
+                if (i <= maxDay) {
+                    const dow = getDayOfWeek(selectedMonth, i);
+                    dayHeaders2.push(`${String(i).padStart(2, '0')}\n(${dow})`);
+                } else {
+                    dayHeaders2.push('');
+                }
+            }
+
+            headerRow1.values = ['성명', '주민등록번호', '주소', ...dayHeaders1, '', '출역일수', '단가', '총액', '공제', '실지급액'];
+            headerRow2.values = ['', '전화번호', '', ...dayHeaders2, ''];
 
             // Header Merges
-            // Vertically merge: Name(A), Address(C), Financials(T-X)
             ['A', 'C', 'T', 'U', 'V', 'W', 'X'].forEach(col => {
                 worksheet.mergeCells(`${col}3:${col}4`);
             });
 
             // Style Headers
-            [headerRow1, headerRow2].forEach(row => {
-                row.eachCell((cell) => {
+            [headerRow1, headerRow2].forEach((row, rowIdx) => {
+                row.height = 35; // Increased for two lines
+                row.eachCell((cell, colIdx) => {
                     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-                    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                    cell.font = { bold: true };
+                    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                    cell.font = { bold: true, size: 9 };
                     cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+
+                    // Color Coding Days
+                    if (colIdx >= 4 && colIdx <= 19) {
+                        const dayNum = rowIdx === 0 ? (colIdx - 3) : (colIdx - 3 + 15);
+                        if (dayNum >= 1 && dayNum <= maxDay) {
+                            const dow = getDayOfWeek(selectedMonth, dayNum);
+                            let bgColor = rowIdx === 0 ? 'FF0070C0' : 'FFC00000'; // Default Blue/Red
+                            if (dow === '일') bgColor = 'FFA52A2A'; // Dark Red for Sunday
+                            if (dow === '토') bgColor = 'FF000080'; // Navy for Saturday
+                            
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+                            cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 8 };
+                        } else if (colIdx === 19 && rowIdx === 0) {
+                            // Spacer
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
+                        }
+                    }
                 });
             });
-
-            // Specific Color for Day headers
-            // Row 1 Days (D-R): Blue
-            for (let c = 4; c <= 18; c++) {
-                const cell = headerRow1.getCell(c);
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-                cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-            }
-            // Row 1 Spacer (S): Blue (Matches Top Row Style)
-            const spacerCell = headerRow1.getCell(19);
-            spacerCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } };
-
-            // Row 2 Days (D-S): Red
-            for (let c = 4; c <= 19; c++) {
-                const cell = headerRow2.getCell(c);
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC00000' } };
-                cell.font = { color: { argb: 'FFFFFFFF' }, bold: true };
-            }
 
             // Data Rows
             let currentRow = 5;
@@ -262,116 +281,75 @@ const SiteLaborCostInvoice: React.FC<Props> = ({ hideHeader }) => {
                 worksheet.mergeCells(`C${currentRow}:C${currentRow + 1}`);
                 worksheet.getCell(`C${currentRow}`).value = item.address || '';
 
-                // Days 1-15 (Cols 4-18)
+                // Days 1-15
                 for (let i = 1; i <= 15; i++) {
                     if (days.includes(i)) {
-                        // D is col 4. i=1 -> 4.
                         const cell = row1.getCell(i + 3);
                         cell.value = 1.0;
-                        cell.alignment = { horizontal: 'center', vertical: 'middle' };
                     }
                 }
-                // Spacer (Col 19) Row 1
                 row1.getCell(19).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
 
-                // Days 16-31 (Cols 4-19)
+                // Days 16-31
                 for (let i = 16; i <= 31; i++) {
-                    // Start at D(4).
-                    // i=16 -> 4. i=30 -> 18. i=31 -> 19.
                     if (days.includes(i)) {
                         const cell = row2.getCell(i - 16 + 4);
                         cell.value = 1.0;
-                        cell.alignment = { horizontal: 'center', vertical: 'middle' };
                     }
                 }
 
-                // Financials (T-X)
-                // T(20)
+                // Financials
                 worksheet.mergeCells(`T${currentRow}:T${currentRow + 1}`);
                 worksheet.getCell(`T${currentRow}`).value = item.gongsu.total;
-
-                // U(21)
                 worksheet.mergeCells(`U${currentRow}:U${currentRow + 1}`);
                 worksheet.getCell(`U${currentRow}`).value = item.unitPrice;
                 worksheet.getCell(`U${currentRow}`).numFmt = '#,##0';
-
-                // V(22)
                 worksheet.mergeCells(`V${currentRow}:V${currentRow + 1}`);
                 worksheet.getCell(`V${currentRow}`).value = item.grossPay;
                 worksheet.getCell(`V${currentRow}`).numFmt = '#,##0';
-
-                // W(23) Ded
                 worksheet.mergeCells(`W${currentRow}:W${currentRow + 1}`);
                 worksheet.getCell(`W${currentRow}`).value = item.deductions.advance + item.deductions.other;
                 worksheet.getCell(`W${currentRow}`).numFmt = '#,##0';
-                worksheet.getCell(`W${currentRow}`).font = { color: { argb: 'FFFF0000' } }; // Red
-
-                // X(24) Net
+                worksheet.getCell(`W${currentRow}`).font = { color: { argb: 'FFFF0000' } };
                 worksheet.mergeCells(`X${currentRow}:X${currentRow + 1}`);
                 worksheet.getCell(`X${currentRow}`).value = item.netPay;
                 worksheet.getCell(`X${currentRow}`).numFmt = '#,##0';
-                worksheet.getCell(`X${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F0FF' } }; // Blue bg
-                worksheet.getCell(`X${currentRow}`).font = { color: { argb: 'FF0000FF' }, bold: true }; // Blue text
+                worksheet.getCell(`X${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F0FF' } };
+                worksheet.getCell(`X${currentRow}`).font = { color: { argb: 'FF0000FF' }, bold: true };
 
-                // Styling borders
                 [row1, row2].forEach(row => {
                     row.eachCell({ includeEmpty: true }, (cell) => {
                         cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-                        // Default alignment
-                        if (!cell.alignment) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+                        cell.font = { size: 9 };
                     });
                 });
-
                 currentRow += 2;
             });
 
-            // Footer (Sum)
+            // Footer
             const footerRow = worksheet.getRow(currentRow);
-            footerRow.height = 30;
-
-            // Merge A-C (Label)
+            footerRow.height = 35;
             worksheet.mergeCells(`A${currentRow}:C${currentRow}`);
-            const labelCell = worksheet.getCell(`A${currentRow}`);
-            labelCell.value = '합 계';
-            labelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            labelCell.font = { size: 12, bold: true };
-            labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8CBAD' } };
-
-            // Merge D-S (Empty)
+            worksheet.getCell(`A${currentRow}`).value = '합 계';
             worksheet.mergeCells(`D${currentRow}:S${currentRow}`);
-            worksheet.getCell(`D${currentRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8CBAD' } };
+            
+            footerRow.getCell(20).value = invoiceData.reduce((sum, item) => sum + item.gongsu.total, 0);
+            footerRow.getCell(22).value = invoiceData.reduce((sum, item) => sum + item.grossPay, 0);
+            footerRow.getCell(23).value = invoiceData.reduce((sum, item) => sum + (item.deductions.advance + item.deductions.other), 0);
+            footerRow.getCell(24).value = invoiceData.reduce((sum, item) => sum + item.netPay, 0);
 
-            // T: Total Days
-            const tDays = invoiceData.reduce((sum, item) => sum + item.gongsu.total, 0);
-            footerRow.getCell(20).value = tDays;
-
-            // U: Unit (Empty)
-            footerRow.getCell(21).value = '';
-
-            // V: Gross
-            const tGross = invoiceData.reduce((sum, item) => sum + item.grossPay, 0);
-            footerRow.getCell(22).value = tGross;
-            footerRow.getCell(22).numFmt = '#,##0';
-
-            // W: Ded
-            const tDed = invoiceData.reduce((sum, item) => sum + (item.deductions.advance + item.deductions.other), 0);
-            footerRow.getCell(23).value = tDed;
-            footerRow.getCell(23).numFmt = '#,##0';
-
-            // X: Net
-            const tNet = invoiceData.reduce((sum, item) => sum + item.netPay, 0);
-            footerRow.getCell(24).value = tNet;
-            footerRow.getCell(24).numFmt = '#,##0';
-            footerRow.getCell(24).font = { color: { argb: 'FF0000FF' }, bold: true };
-
-            // Footer Styles
-            footerRow.eachCell({ includeEmpty: true }, (cell) => {
+            footerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8CBAD' } };
                 cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-                cell.font = { bold: true };
+                cell.font = { bold: true, size: 10 };
+                cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                if (colNumber >= 22) cell.numFmt = '#,##0';
             });
 
-            // Generate
+            // Remove AutoFilter (Ensuring no filter is applied)
+            worksheet.autoFilter = undefined;
+
             const buffer = await workbook.xlsx.writeBuffer();
             const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
             saveAs(blob, `노무내역서_${siteName}_${selectedMonth}.xlsx`);

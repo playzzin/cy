@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+    faHardHat, faChevronDown, faChevronRight, faSearch, 
+    faCheck, faExclamationTriangle, faProjectDiagram, faBuilding, faUser 
+} from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import { manpowerService } from '../../services/manpowerService';
 import { Team } from '../../services/teamService';
@@ -276,6 +282,30 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
         return 'Unknown error';
     };
 
+    const [teamSearch, setTeamSearch] = useState('');
+    const [clientSearch, setClientSearch] = useState('');
+    const [isTeamMenuOpen, setIsTeamMenuOpen] = useState(false);
+    const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
+
+    // Filtered lists for search UI
+    const searchedTeams = useMemo(() => {
+        if (!teamSearch.trim()) return filteredTeams;
+        const lower = teamSearch.toLowerCase();
+        return filteredTeams.filter(t => t.name.toLowerCase().includes(lower));
+    }, [filteredTeams, teamSearch]);
+
+    const searchedClients = useMemo(() => {
+        const base = companyOptions.filter(c => {
+            const t = String((c as any)?.type ?? '').trim();
+            const selectedId = currentSite.clientCompanyId ? String(currentSite.clientCompanyId) : '';
+            if (selectedId && c.id === selectedId) return true;
+            return t === '건설사' || t === '발주사' || t === '발주처' || t === '미지정';
+        });
+        if (!clientSearch.trim()) return base;
+        const lower = clientSearch.toLowerCase();
+        return base.filter(c => c.name.toLowerCase().includes(lower));
+    }, [companyOptions, clientSearch, currentSite.clientCompanyId]);
+
     const handleSave = async () => {
         try {
             if (!currentSite.name) {
@@ -351,10 +381,9 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                 </div>
             </div>
 
-            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
-                {/* 1. Basic Information */}
+            <div className={`p-6 space-y-6 max-h-[75vh] overflow-y-auto custom-scrollbar transition-all duration-500 ${isClientMenuOpen ? 'pb-80' : isTeamMenuOpen ? 'pb-40' : 'pb-6'}`}>
                 {/* 1. Basic Information Table */}
-                <section className="border border-slate-300 rounded-lg overflow-hidden shadow-sm">
+                <section className="border border-slate-300 rounded-lg overflow-visible shadow-sm relative z-0">
                     <div className="bg-slate-800 px-4 py-2.5 flex items-center justify-between">
                         <h3 className="text-sm font-bold text-white flex items-center gap-2">
                             <span className="w-2 h-2 rounded-full bg-brand-400"></span>
@@ -485,69 +514,100 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
 
                     <div className="grid grid-cols-12 text-sm divide-y divide-slate-200 border-t border-slate-200">
 
-                        {/* Row 1: Responsible Team */}
-                        <div className="col-span-12 grid grid-cols-12">
+                        {/* Row 1: Responsible Team (Searchable) */}
+                        <div className="col-span-12 grid grid-cols-12 relative">
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex flex-col justify-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 <span>담당 팀</span>
-                                <span className="text-[10px] text-slate-400 font-normal mt-0.5">자동완성 기준</span>
+                                <span className="text-[10px] text-slate-400 font-normal mt-0.5 tracking-tighter text-indigo-500 font-black">SEARCHABLE</span>
                             </div>
-                            <div className="col-span-9 md:col-span-10 p-2">
-                                <div className="flex flex-col gap-2">
-                                    <select
-                                        value={currentSite.responsibleTeamId || ''}
-                                        onChange={(e) => {
-                                            const v = e.target.value;
-                                            setIsCompanyTouched(false);
-                                            setIsPartnerTouched(false);
-                                            setIsClientCompanyTouched(false);
-                                            setCurrentSite(prev => {
-                                                if (!v) {
-                                                    return {
-                                                        ...prev,
-                                                        responsibleTeamId: '',
-                                                        companyId: '',
-                                                        partnerId: ''
-                                                    };
-                                                }
-                                                return { ...prev, responsibleTeamId: v };
-                                            });
-                                        }}
-                                        className="w-full border-indigo-200 hover:border-indigo-400 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 text-sm py-2 px-3 shadow-sm bg-indigo-50/20 font-medium text-slate-800 cursor-pointer transition-colors"
+                            <div className="col-span-9 md:col-span-10 p-2 relative">
+                                <div className="relative group">
+                                    <div 
+                                        className={`flex items-center justify-between w-full border-2 rounded-xl px-4 py-2.5 cursor-pointer transition-all ${isTeamMenuOpen ? 'border-indigo-500 ring-4 ring-indigo-50 bg-white' : 'border-slate-100 bg-slate-50/50 hover:border-indigo-300'}`}
+                                        onClick={() => setIsTeamMenuOpen(!isTeamMenuOpen)}
                                     >
-                                        <option value="">▼ 담당 팀을 선택하세요 (필수)</option>
-                                        {filteredTeams.map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
-                                    </select>
-                                    {currentSite.partnerId && (
-                                        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] text-emerald-700">
-                                            협력사가 선택되었습니다. 협력사 소속 담당팀을 선택해주세요.
+                                        <div className="flex items-center gap-2 overflow-hidden">
+                                            <FontAwesomeIcon icon={faHardHat} className={currentSite.responsibleTeamId ? 'text-indigo-500' : 'text-slate-300'} />
+                                            <span className={`font-bold truncate ${currentSite.responsibleTeamId ? 'text-slate-800' : 'text-slate-400'}`}>
+                                                {teams.find(t => t.id === currentSite.responsibleTeamId)?.name || '팀 이름을 입력하거나 선택하세요...'}
+                                            </span>
                                         </div>
-                                    )}
-                                    {!currentSite.partnerId && (
-                                        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-700">
-                                            협력사 현장이라면 먼저 협력사를 선택하면 담당팀 목록이 협력사 기준으로 좁혀집니다.
-                                        </div>
-                                    )}
+                                        <FontAwesomeIcon icon={isTeamMenuOpen ? faChevronDown : faChevronRight} className={`text-xs transition-transform duration-300 ${isTeamMenuOpen ? 'rotate-180 text-indigo-500' : 'text-slate-300'}`} />
+                                    </div>
 
-                                    {/* Auto-selection Feedback */}
-                                    {currentSite.responsibleTeamId && (() => {
-                                        const team = teams.find(t => t.id === currentSite.responsibleTeamId);
-                                        const company = team?.companyId ? companyOptions.find(c => c.id === team.companyId) : null;
-                                        if (company) {
-                                            return (
-                                                <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded border border-indigo-100 animate-in fade-in slide-in-from-top-1">
-                                                    <span className="font-bold">✨ Auto-Fill:</span>
-                                                    <span>
-                                                        <span className="font-bold">'{team?.name}'</span>은 <span className="font-bold underline">{company.name}</span> 소속입니다.
-                                                        ({company.type === '협력사' ? '협력사' : '시공사'} 필드가 자동으로 선택되었습니다)
-                                                    </span>
+                                    <AnimatePresence>
+                                        {isTeamMenuOpen && (
+                                            <motion.div 
+                                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-50 overflow-hidden"
+                                            >
+                                                <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                                                    <div className="relative">
+                                                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
+                                                        <input 
+                                                            autoFocus
+                                                            type="text"
+                                                            value={teamSearch}
+                                                            onChange={(e) => setTeamSearch(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && searchedTeams.length > 0) {
+                                                                    const t = searchedTeams[0];
+                                                                    setCurrentSite({...currentSite, responsibleTeamId: t.id});
+                                                                    setIsTeamMenuOpen(false);
+                                                                    setTeamSearch('');
+                                                                }
+                                                            }}
+                                                            placeholder="단어 하나만 쳐보세요 (예: 인사, 1팀...)"
+                                                            className="w-full pl-9 pr-4 py-2 text-sm border-2 border-slate-100 rounded-lg focus:border-indigo-400 focus:ring-0 font-bold"
+                                                        />
+                                                    </div>
                                                 </div>
-                                            );
-                                        }
-                                        return null;
-                                    })()}
+                                                <div className="max-h-60 overflow-y-auto custom-scrollbar p-1">
+                                                    {searchedTeams.length > 0 ? searchedTeams.map(t => (
+                                                        <div 
+                                                            key={t.id}
+                                                            onClick={() => {
+                                                                setCurrentSite({...currentSite, responsibleTeamId: t.id});
+                                                                setIsTeamMenuOpen(false);
+                                                                setTeamSearch('');
+                                                            }}
+                                                            className="flex items-center justify-between px-4 py-2.5 hover:bg-indigo-50 rounded-xl cursor-pointer transition-colors group"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-lg bg-slate-100 group-hover:bg-white flex items-center justify-center text-xs text-slate-400 group-hover:text-indigo-600 transition-all">
+                                                                    <FontAwesomeIcon icon={faHardHat} />
+                                                                </div>
+                                                                <span className="font-bold text-slate-700 group-hover:text-indigo-700">{t.name}</span>
+                                                            </div>
+                                                            {currentSite.responsibleTeamId === t.id && <FontAwesomeIcon icon={faCheck} className="text-indigo-500 text-xs" />}
+                                                        </div>
+                                                    )) : (
+                                                        <div className="py-10 text-center text-slate-400 text-xs font-bold italic">
+                                                            검색 결과가 없습니다.
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
                                 </div>
+
+                                {/* Current Context Helpers */}
+                                {currentSite.responsibleTeamId && (() => {
+                                    const team = teams.find(t => t.id === currentSite.responsibleTeamId);
+                                    const company = team?.companyId ? companyOptions.find(c => c.id === team.companyId) : null;
+                                    if (company) {
+                                        return (
+                                            <div className="mt-2 flex items-center gap-2 text-[11px] text-indigo-700 bg-indigo-50/50 px-3 py-1.5 rounded-lg border border-indigo-100 animate-in fade-in slide-in-from-top-1">
+                                                <span className="font-black tracking-widest uppercase text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded">Auto-Context</span>
+                                                <span className="font-bold">'{team?.name}'</span>은 <span className="font-black underline">{company.name}</span> 소속입니다.
+                                            </div>
+                                        );
+                                    }
+                                    return null;
+                                })()}
                             </div>
                         </div>
 
@@ -559,15 +619,14 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                             </div>
                             {/* Constructor Input */}
                             <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200">
-                                <div className={`relative w-full rounded border ${currentSite.companyId ? 'border-slate-300 bg-slate-100' : 'border-slate-200 bg-slate-50/50'}`}>
+                                <div className={`relative w-full rounded-xl border ${currentSite.companyId ? 'border-slate-300 bg-slate-100' : 'border-slate-200 bg-slate-50/50'}`}>
                                     <select
                                         value={currentSite.companyId || ''}
                                         onChange={(e) => {
                                             setIsCompanyTouched(true);
                                             setCurrentSite({ ...currentSite, companyId: e.target.value });
                                         }}
-                                        disabled={false}
-                                        className="w-full bg-transparent border-none rounded text-slate-600 text-sm py-1.5 px-3 appearance-none disabled:cursor-not-allowed font-medium"
+                                        className="w-full bg-transparent border-none rounded-xl text-slate-600 text-sm py-2 px-3 appearance-none font-bold focus:ring-0"
                                     >
                                         <option value="">(자동 선택)</option>
                                         {companyOptions
@@ -591,7 +650,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                             </div>
                             {/* Partner Input */}
                             <div className="col-span-12 md:col-span-4 p-2 border-t md:border-t-0">
-                                <div className={`relative w-full rounded border ${currentSite.partnerId ? 'border-slate-300 bg-slate-100' : 'border-slate-200 bg-slate-50/50'}`}>
+                                <div className={`relative w-full rounded-xl border ${currentSite.partnerId ? 'border-slate-300 bg-slate-100' : 'border-slate-200 bg-slate-50/50'}`}>
                                     <select
                                         value={currentSite.partnerId || ''}
                                         onChange={(e) => {
@@ -604,8 +663,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                             setShowInlinePartnerForm(false);
                                             setCurrentSite({ ...currentSite, partnerId: next });
                                         }}
-                                        disabled={false}
-                                        className="w-full bg-transparent border-none rounded text-slate-600 text-sm py-1.5 px-3 appearance-none disabled:cursor-not-allowed font-medium"
+                                        className="w-full bg-transparent border-none rounded-xl text-slate-600 text-sm py-2 px-3 appearance-none font-bold focus:ring-0"
                                     >
                                         <option value="">(자동 선택)</option>
                                         {companyOptions
@@ -622,109 +680,126 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                         <option value={CREATE_PARTNER_VALUE}>+ 신규 협력사 등록</option>
                                     </select>
                                 </div>
-                                <div className="mt-2 space-y-2">
-                                    <div className="text-[12px] text-slate-500">
-                                        신규 협력사면 먼저 등록해주세요. 새 창 없이 현재 등록 페이지에서 바로 등록할 수 있습니다.
-                                    </div>
-                                    {!showInlinePartnerForm && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowInlinePartnerForm(true)}
-                                            className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
-                                        >
-                                            + 협력사 등록
-                                        </button>
-                                    )}
-                                </div>
+                                {!showInlinePartnerForm && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowInlinePartnerForm(true)}
+                                        className="mt-2 inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-black text-emerald-700 hover:bg-emerald-100 uppercase tracking-tighter"
+                                    >
+                                        + Quick Register Partner
+                                    </button>
+                                )}
                                 {showInlinePartnerForm && (
-                                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
-                                        <div className="mb-2 text-xs font-bold text-emerald-800">협력사 먼저 등록</div>
-                                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                                            <input
-                                                type="text"
-                                                value={partnerDraft.name}
-                                                onChange={(e) => setPartnerDraft((prev) => ({ ...prev, name: e.target.value }))}
-                                                placeholder="협력사명 *"
-                                                className="w-full border border-emerald-200 bg-white rounded px-2.5 py-1.5 text-sm"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={partnerDraft.code}
-                                                onChange={(e) => setPartnerDraft((prev) => ({ ...prev, code: e.target.value }))}
-                                                placeholder="회사코드(선택)"
-                                                className="w-full border border-emerald-200 bg-white rounded px-2.5 py-1.5 text-sm"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={partnerDraft.ceoName}
-                                                onChange={(e) => setPartnerDraft((prev) => ({ ...prev, ceoName: e.target.value }))}
-                                                placeholder="대표자명(선택)"
-                                                className="w-full border border-emerald-200 bg-white rounded px-2.5 py-1.5 text-sm"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={partnerDraft.phone}
-                                                onChange={(e) => setPartnerDraft((prev) => ({ ...prev, phone: e.target.value }))}
-                                                placeholder="연락처(선택)"
-                                                className="w-full border border-emerald-200 bg-white rounded px-2.5 py-1.5 text-sm"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={partnerDraft.address}
-                                                onChange={(e) => setPartnerDraft((prev) => ({ ...prev, address: e.target.value }))}
-                                                placeholder="주소(선택)"
-                                                className="w-full border border-emerald-200 bg-white rounded px-2.5 py-1.5 text-sm md:col-span-2"
-                                            />
+                                    <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 shadow-sm">
+                                        <div className="mb-3 text-[11px] font-black text-emerald-800 uppercase tracking-widest flex items-center gap-2">
+                                            <div className="w-1 h-3 bg-emerald-500 rounded-full" />
+                                            협력사 즉시 등록
                                         </div>
-                                        <div className="mt-3 flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={handleInlinePartnerSave}
-                                                disabled={isPartnerSaving}
-                                                className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-                                            >
-                                                {isPartnerSaving ? '등록 중...' : '협력사 등록 후 선택'}
+                                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                            <input type="text" value={partnerDraft.name} onChange={(e) => setPartnerDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="협력사명 *" className="w-full border-2 border-emerald-100 bg-white rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:ring-0" />
+                                            <input type="text" value={partnerDraft.code} onChange={(e) => setPartnerDraft((prev) => ({ ...prev, code: e.target.value }))} placeholder="회사코드" className="w-full border-2 border-emerald-100 bg-white rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:ring-0" />
+                                            <input type="text" value={partnerDraft.ceoName} onChange={(e) => setPartnerDraft((prev) => ({ ...prev, ceoName: e.target.value }))} placeholder="대표자" className="w-full border-2 border-emerald-100 bg-white rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:ring-0" />
+                                            <input type="text" value={partnerDraft.phone} onChange={(e) => setPartnerDraft((prev) => ({ ...prev, phone: e.target.value }))} placeholder="연락처" className="w-full border-2 border-emerald-100 bg-white rounded-xl px-3 py-2 text-sm font-bold focus:border-emerald-400 focus:ring-0" />
+                                        </div>
+                                        <div className="mt-4 flex items-center gap-2">
+                                            <button type="button" onClick={handleInlinePartnerSave} disabled={isPartnerSaving} className="flex-1 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50 shadow-lg shadow-emerald-200">
+                                                {isPartnerSaving ? '처리 중...' : '등록 및 선택'}
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setShowInlinePartnerForm(false)}
-                                                className="rounded border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                                            >
-                                                닫기
-                                            </button>
+                                            <button type="button" onClick={() => setShowInlinePartnerForm(false)} className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-50">닫기</button>
                                         </div>
                                     </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Row 3: Client (Full Width) */}
-                        <div className="col-span-12 grid grid-cols-12">
+                        {/* Row 3: Client (Searchable) */}
+                        <div className="col-span-12 grid grid-cols-12 relative">
                             <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
                                 발주사 (Client)
                             </div>
                             <div className="col-span-9 md:col-span-10 p-2">
-                                <select
-                                    value={currentSite.clientCompanyId || ''}
-                                    onChange={(e) => {
-                                        setIsClientTouched(true);
-                                        setIsClientCompanyTouched(true);
-                                        setCurrentSite({ ...currentSite, clientCompanyId: e.target.value });
-                                    }}
-                                    className="w-full border-slate-200 bg-white hover:border-brand-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-2 px-3 transition-colors cursor-pointer"
-                                >
-                                    <option value="">선택안함 (선택사항)</option>
-                                    {companyOptions
-                                        .filter(c => {
-                                            const t = String((c as any)?.type ?? '').trim();
-                                            const selectedId = currentSite.clientCompanyId ? String(currentSite.clientCompanyId) : '';
-                                            if (selectedId && c.id === selectedId) return true;
-                                            return t === '건설사' || t === '발주사' || t === '발주처' || t === '미지정';
-                                        })
-                                        .map(c => (
-                                            <option key={c.id} value={c.id}>🏗️ {c.name}</option>
-                                        ))}
-                                </select>
+                                <div className="relative group">
+                                    <div 
+                                        className={`flex items-center justify-between w-full border-2 rounded-xl px-4 py-2.5 cursor-pointer transition-all ${isClientMenuOpen ? 'border-brand-500 ring-4 ring-brand-50 bg-white' : 'border-slate-100 bg-slate-50/50 hover:border-brand-300'}`}
+                                        onClick={() => setIsClientMenuOpen(!isClientMenuOpen)}
+                                    >
+                                        <div className="flex items-center gap-2 overflow-hidden">
+                                            <FontAwesomeIcon icon={faBuilding} className={currentSite.clientCompanyId ? 'text-brand-500' : 'text-slate-300'} />
+                                            <span className={`font-bold truncate ${currentSite.clientCompanyId ? 'text-slate-800' : 'text-slate-400'}`}>
+                                                {companyOptions.find(c => c.id === currentSite.clientCompanyId)?.name || '발주사명을 입력하거나 선택하세요...'}
+                                            </span>
+                                        </div>
+                                        <FontAwesomeIcon icon={isClientMenuOpen ? faChevronDown : faChevronRight} className={`text-xs transition-transform duration-300 ${isClientMenuOpen ? 'rotate-180 text-brand-500' : 'text-slate-300'}`} />
+                                    </div>
+
+                                    <AnimatePresence>
+                                        {isClientMenuOpen && (
+                                            <motion.div 
+                                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-50 overflow-hidden"
+                                            >
+                                                <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                                                    <div className="relative">
+                                                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
+                                                        <input 
+                                                            autoFocus
+                                                            type="text"
+                                                            value={clientSearch}
+                                                            onChange={(e) => setClientSearch(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter' && searchedClients.length > 0) {
+                                                                    const c = searchedClients[0];
+                                                                    setCurrentSite({...currentSite, clientCompanyId: c.id});
+                                                                    setIsClientMenuOpen(false);
+                                                                    setClientSearch('');
+                                                                }
+                                                            }}
+                                                            placeholder="발주사명 검색 (예: 현대, 삼성...)"
+                                                            className="w-full pl-9 pr-4 py-2 text-sm border-2 border-slate-100 rounded-lg focus:border-brand-400 focus:ring-0 font-bold"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="max-h-60 overflow-y-auto custom-scrollbar p-1">
+                                                    <div 
+                                                        onClick={() => {
+                                                            setCurrentSite({...currentSite, clientCompanyId: ''});
+                                                            setIsClientMenuOpen(false);
+                                                            setClientSearch('');
+                                                        }}
+                                                        className="px-4 py-2.5 hover:bg-slate-50 rounded-xl cursor-pointer text-xs font-bold text-slate-400 italic"
+                                                    >
+                                                        선택 안함 (초기화)
+                                                    </div>
+                                                    {searchedClients.length > 0 ? searchedClients.map(c => (
+                                                        <div 
+                                                            key={c.id}
+                                                            onClick={() => {
+                                                                setCurrentSite({...currentSite, clientCompanyId: c.id});
+                                                                setIsClientMenuOpen(false);
+                                                                setClientSearch('');
+                                                            }}
+                                                            className="flex items-center justify-between px-4 py-2.5 hover:bg-brand-50 rounded-xl cursor-pointer transition-colors group"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-lg bg-slate-100 group-hover:bg-white flex items-center justify-center text-xs text-slate-400 group-hover:text-brand-600 transition-all">
+                                                                    🏗️
+                                                                </div>
+                                                                <span className="font-bold text-slate-700 group-hover:text-brand-700">{c.name}</span>
+                                                            </div>
+                                                            {currentSite.clientCompanyId === c.id && <FontAwesomeIcon icon={faCheck} className="text-brand-500 text-xs" />}
+                                                        </div>
+                                                    )) : (
+                                                        <div className="py-10 text-center text-slate-400 text-xs font-bold italic">
+                                                            검색 결과가 없습니다.
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
                             </div>
                         </div>
 

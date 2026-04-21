@@ -23,6 +23,35 @@ const WORKER_CACHE_TTL = 300000; // 5 minutes
 let cachedWorkers: Worker[] | null = null;
 let lastWorkerFetchTime = 0;
 
+const hasOwn = (value: object, key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(value, key);
+
+const normalizeWorkerSalaryFields = (worker: Worker): Worker => {
+    const salaryModel = typeof worker.salaryModel === 'string' ? worker.salaryModel.trim() : '';
+    const payType = typeof worker.payType === 'string' ? worker.payType.trim() : '';
+    const resolved = salaryModel || payType;
+
+    if (!resolved) return worker;
+
+    return {
+        ...worker,
+        salaryModel: resolved,
+        payType: resolved,
+    };
+};
+
+const syncWorkerSalaryFields = (updates: Partial<Worker>): Partial<Worker> => {
+    const nextUpdates: Partial<Worker> = { ...updates };
+
+    if (hasOwn(nextUpdates as object, 'salaryModel') && !hasOwn(nextUpdates as object, 'payType')) {
+        nextUpdates.payType = nextUpdates.salaryModel;
+    } else if (hasOwn(nextUpdates as object, 'payType') && !hasOwn(nextUpdates as object, 'salaryModel')) {
+        nextUpdates.salaryModel = nextUpdates.payType;
+    }
+
+    return nextUpdates;
+};
+
 export const manpowerService = {
     // Get all workers (Paginated)
     getWorkersPaginated: async (limitCount: number, lastDoc: any = null): Promise<{ workers: Worker[], lastDoc: any }> => {
@@ -45,8 +74,20 @@ export const manpowerService = {
             }
         }
         const snapshot = await getDocs(q);
-        const workers = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Worker));
+        const workers = snapshot.docs.map(d => normalizeWorkerSalaryFields({ id: d.id, ...d.data() } as Worker));
         return { workers, lastDoc: snapshot.docs[snapshot.docs.length - 1] };
+    },
+
+    /**
+     * 실시간 근로자 목록 구독 (onSnapshot)
+     * @param {(workers: Worker[]) => void} callback
+     * @returns {() => void} unsubscribe 함수 반환
+     */
+    subscribeWorkers(callback: (workers: Worker[]) => void): () => void {
+        // workerFirestoreService의 subscribeWorkers 사용
+        return workerFirestoreService.subscribeWorkers((workers) => {
+            callback(workers.map((worker) => normalizeWorkerSalaryFields(worker as Worker)));
+        });
     },
 
     // Get all workers
@@ -56,14 +97,15 @@ export const manpowerService = {
             return cachedWorkers;
         }
 
-        cachedWorkers = await workerFirestoreService.getWorkers();
+        cachedWorkers = (await workerFirestoreService.getWorkers()).map((worker) => normalizeWorkerSalaryFields(worker as Worker));
         lastWorkerFetchTime = now;
         return cachedWorkers;
     },
 
     // Get a single worker by ID
     getWorker: async (id: string): Promise<Worker | null> => {
-        return workerFirestoreService.getWorker(id);
+        const worker = await workerFirestoreService.getWorker(id);
+        return worker ? normalizeWorkerSalaryFields(worker as Worker) : null;
     },
 
     // Find worker for manual linking
@@ -77,7 +119,7 @@ export const manpowerService = {
             const data = d.data();
             return (data.idNumber ?? data.residentNumber ?? '') === idNumber.trim();
         });
-        return found ? ({ id: found.id, ...found.data() } as Worker) : null;
+        return found ? normalizeWorkerSalaryFields({ id: found.id, ...found.data() } as Worker) : null;
     },
 
     // Get workers by team for tax reporting
@@ -88,7 +130,7 @@ export const manpowerService = {
             where('teamId', 'in', teamIds.slice(0, 10))
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Worker));
+        return snapshot.docs.map(d => normalizeWorkerSalaryFields({ id: d.id, ...d.data() } as Worker));
     },
 
     // Get worker by email
@@ -100,7 +142,7 @@ export const manpowerService = {
         );
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
-        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker;
+        return normalizeWorkerSalaryFields({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker);
     },
 
     // Get worker by Firebase Auth UID
@@ -112,7 +154,7 @@ export const manpowerService = {
         );
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
-        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker;
+        return normalizeWorkerSalaryFields({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker);
     },
 
     // Link a worker record to a Firebase Auth UID
@@ -133,19 +175,19 @@ export const manpowerService = {
         );
         const snapshot = await getDocs(q);
         if (snapshot.empty) return null;
-        return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker;
+        return normalizeWorkerSalaryFields({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Worker);
     },
 
     // Add a new worker
     addWorker: async (worker: any, _silent?: boolean): Promise<string> => {
-        const id = await workerFirestoreService.addWorker(worker);
+        const id = await workerFirestoreService.addWorker(syncWorkerSalaryFields(worker) as any);
         cachedWorkers = null;
         return id;
     },
 
     // Update a worker
     updateWorker: async (id: string, updates: Partial<Worker>): Promise<void> => {
-        await workerFirestoreService.updateWorker(id, updates);
+        await workerFirestoreService.updateWorker(id, syncWorkerSalaryFields(updates));
         cachedWorkers = null;
     },
 
@@ -201,7 +243,7 @@ export const manpowerService = {
 
     // Get workers by team
     getWorkersByTeam: async (teamId: string): Promise<Worker[]> => {
-        return workerFirestoreService.getWorkersByTeam(teamId);
+        return (await workerFirestoreService.getWorkersByTeam(teamId)).map((worker) => normalizeWorkerSalaryFields(worker as Worker));
     },
 
     // Get worker identity map (uid/email by workerId)
@@ -233,8 +275,9 @@ export const manpowerService = {
         const q = query(collection(db, 'workers'), where('teamId', '==', teamId));
         const snapshot = await getDocs(q);
         const batch = writeBatch(db);
+        const syncedUpdates = syncWorkerSalaryFields({ salaryModel });
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { salaryModel, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { ...syncedUpdates, updatedAt: Timestamp.now() });
         });
         await batch.commit();
     },
@@ -318,7 +361,7 @@ export const manpowerService = {
         updates.forEach(({ id, updates: workerUpdates }) => {
             const workerRef = doc(db, 'workers', id);
             batch.update(workerRef, {
-                ...stripUndefinedFields(workerUpdates as Record<string, unknown>),
+                ...stripUndefinedFields(syncWorkerSalaryFields(workerUpdates) as Record<string, unknown>),
                 updatedAt: Timestamp.now()
             });
         });

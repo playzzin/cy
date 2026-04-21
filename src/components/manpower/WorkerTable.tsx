@@ -183,7 +183,7 @@ const WorkerTable: React.FC<WorkerTableProps> = ({
                                         if (col.id === 'salaryModel') return (
                                             <td key={col.id} className="px-4 py-3 whitespace-nowrap">
                                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
-                                                    {worker.salaryModel || '일급제'}
+                                                     {worker.payType || '일급제'}
                                                 </span>
                                             </td>
                                         );

@@ -346,37 +346,65 @@ const IntegratedSupportStatusBoard: React.FC = () => {
         return teams.find(t => t.id === selectedTeamId);
     }, [teams, selectedTeamId]);
 
+    // 외부 지원 나간 우리 팀들의 공수 합계 계산
+    const outboundTeamSummary = useMemo(() => {
+        if (viewMode !== 'outbound') return [];
+
+        const teamMap = new Map<string, { teamName: string; companyName: string; totalManDay: number; sitesCount: number }>();
+
+        outboundStats.forEach(site => {
+            site.teams.forEach(team => {
+                const existing = teamMap.get(team.teamId);
+                if (existing) {
+                    existing.totalManDay += team.manDay;
+                    existing.sitesCount += 1;
+                } else {
+                    teamMap.set(team.teamId, {
+                        teamName: team.name,
+                        companyName: team.companyName,
+                        totalManDay: team.manDay,
+                        sitesCount: 1
+                    });
+                }
+            });
+        });
+
+        return Array.from(teamMap.values()).sort((a, b) => b.totalManDay - a.totalManDay);
+    }, [outboundStats, viewMode]);
+
     return (
         <div className="flex flex-col h-full bg-slate-100">
             {/* Header */}
             <div className="bg-white border-b border-slate-200 p-4 shadow-sm">
                 <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-4">
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-                        <FontAwesomeIcon icon={viewMode === 'inbound' ? faUserTag : faTruckPlane} className={textTheme} />
-                        통합 지원 현황판
+                    <h1 className="text-2xl font-black text-slate-900 flex items-center gap-3 tracking-tighter">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-lg ${viewMode === 'inbound' ? 'bg-orange-600 text-white' : 'bg-teal-600 text-white'}`}>
+                            <FontAwesomeIcon icon={viewMode === 'inbound' ? faUserTag : faTruckPlane} />
+                        </div>
+                        통합 지원 현황 리포트
                     </h1>
 
                     {/* View Mode Toggle */}
-                    <div className="flex bg-slate-100 p-1 rounded-lg">
+                    <div className="flex bg-slate-100 p-1.5 rounded-[14px] shadow-inner border border-slate-200">
                         <button
                             onClick={() => setViewMode('inbound')}
-                            className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'inbound'
-                                ? 'bg-white text-orange-600 shadow-sm'
+                            className={`px-6 py-2.5 rounded-lg text-sm font-black transition-all ${viewMode === 'inbound'
+                                ? 'bg-white text-orange-600 shadow-md ring-1 ring-black/5'
                                 : 'text-slate-500 hover:text-slate-700'
                                 }`}
                         >
                             <FontAwesomeIcon icon={faUserTag} className="mr-2" />
-                            지원온 현황 (타사 → 우리현장)
+                            지원받은 현황 (Inbound)
                         </button>
                         <button
                             onClick={() => setViewMode('outbound')}
-                            className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${viewMode === 'outbound'
-                                ? 'bg-white text-teal-600 shadow-sm'
+                            className={`px-6 py-2.5 rounded-lg text-sm font-black transition-all ${viewMode === 'outbound'
+                                ? 'bg-white text-teal-600 shadow-md ring-1 ring-black/5'
                                 : 'text-slate-500 hover:text-slate-700'
                                 }`}
                         >
                             <FontAwesomeIcon icon={faTruckPlane} className="mr-2" />
-                            지원간 현황 (우리팀 → 타사현장)
+                            외부팀 지원 현황 (Outbound)
                         </button>
                     </div>
 
@@ -388,9 +416,9 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                                     setActionMessage('지원비 지급 기능이 준비중입니다');
                                     setTimeout(() => setActionMessage(''), 3000);
                                 }}
-                                className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"
+                                className="bg-slate-900 hover:bg-black text-white px-5 py-2.5 rounded-xl text-sm font-black transition-all flex items-center gap-2 shadow-xl active:scale-95"
                             >
-                                💸 지원비 지급
+                                💸 지원비 지급 정산
                             </button>
                         ) : (
                             <button
@@ -398,33 +426,27 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                                     setActionMessage('지원비 청구 기능이 준비중입니다');
                                     setTimeout(() => setActionMessage(''), 3000);
                                 }}
-                                className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"
+                                className="bg-teal-700 hover:bg-teal-800 text-white px-5 py-2.5 rounded-xl text-sm font-black transition-all flex items-center gap-2 shadow-xl active:scale-95"
                             >
-                                📋 지원비 청구
+                                📋 외부 지원비 청구
                             </button>
-                        )}
-                        {actionMessage && (
-                            <span className={`text-xs px-2 py-1 rounded-full animate-pulse ${viewMode === 'inbound' ? 'bg-orange-100 text-orange-700' : 'bg-teal-100 text-teal-700'}`}>
-                                {actionMessage}
-                            </span>
                         )}
                     </div>
                 </div>
 
                 {/* Filters */}
-                <div className="flex flex-wrap items-end gap-4 bg-gradient-to-r from-slate-50 to-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    {/* My Company Selector - 시공사만 표시 */}
-                    <div className="flex flex-col min-w-[200px]">
-                        <label className="text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                            <FontAwesomeIcon icon={faBuilding} /> 기준 시공사
+                <div className="flex flex-wrap items-end gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200 shadow-inner">
+                    <div className="flex flex-col min-w-[220px]">
+                        <label className="text-[10px] font-black text-slate-400 mb-1.5 flex items-center gap-1 uppercase tracking-widest">
+                            <FontAwesomeIcon icon={faBuilding} className="text-indigo-500" /> 기준 소속 회사
                         </label>
                         <select
                             value={myCompanyId}
                             onChange={(e) => {
                                 setMyCompanyId(e.target.value);
-                                setSelectedTeamId(''); // 회사 변경 시 팀 선택 초기화
+                                setSelectedTeamId('');
                             }}
-                            className="border-2 border-blue-100 bg-blue-50 rounded-lg px-3 py-2 text-sm font-bold text-blue-900 focus:outline-none focus:border-blue-500 shadow-sm"
+                            className="border-2 border-white bg-white rounded-xl px-4 py-2.5 text-sm font-black text-slate-800 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-sm transition-all"
                         >
                             {companies
                                 .filter(c => c.type === '시공사')
@@ -434,14 +456,13 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                         </select>
                     </div>
 
-                    {/* Date Filter */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                         <div className="flex flex-col">
-                            <label className="text-xs font-bold text-slate-500 mb-1">검색년도</label>
+                            <label className="text-[10px] font-black text-slate-400 mb-1.5 uppercase tracking-widest text-center">Year</label>
                             <select
                                 value={year}
                                 onChange={(e) => setYear(Number(e.target.value))}
-                                className="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                                className="border border-slate-200 bg-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none shadow-sm"
                             >
                                 {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i).map(y => (
                                     <option key={y} value={y}>{y}년</option>
@@ -449,11 +470,11 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                             </select>
                         </div>
                         <div className="flex flex-col">
-                            <label className="text-xs font-bold text-slate-500 mb-1">검색월</label>
+                            <label className="text-[10px] font-black text-slate-400 mb-1.5 uppercase tracking-widest text-center">Month</label>
                             <select
                                 value={month}
                                 onChange={(e) => setMonth(Number(e.target.value))}
-                                className="border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                                className="border border-slate-200 bg-white rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none shadow-sm"
                             >
                                 {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                                     <option key={m} value={m}>{m}월</option>
@@ -462,61 +483,77 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Summary Box */}
-                    <div className="flex items-center gap-2 ml-auto">
-                        <div className={`text-white px-4 py-2 rounded shadow-sm text-center min-w-[100px] ${viewMode === 'inbound' ? 'bg-orange-600' : 'bg-teal-600'}`}>
-                            <div className="text-xs font-bold opacity-80">
-                                {viewMode === 'inbound' ? '지원받은 총공수' : '지원나간 총공수'}
+                    <div className="flex items-center gap-3 ml-auto">
+                        <div className={`p-1 rounded-2xl bg-white border border-slate-200 flex items-center gap-1 shadow-sm`}>
+                            <div className={`px-5 py-2.5 rounded-xl text-white shadow-lg text-center min-w-[140px] ${viewMode === 'inbound' ? 'bg-orange-600 shadow-orange-200' : 'bg-teal-600 shadow-teal-200'}`}>
+                                <div className="text-[9px] font-black opacity-80 uppercase tracking-tighter">Total Support Man-Days</div>
+                                <div className="text-2xl font-black">{totalManDay.toFixed(1)}</div>
                             </div>
-                            <div className="text-xl font-bold">{totalManDay.toFixed(1)}</div>
                         </div>
                     </div>
 
-                    {/* Other Sites Toggle */}
-                    {selectedTeamId && otherSites.length > 0 && (
-                        <div className="flex items-center gap-2 ml-auto">
-                            <button
-                                onClick={() => setShowOtherSites(!showOtherSites)}
-                                className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium text-slate-600 transition-colors"
-                            >
-                                <FontAwesomeIcon icon={showOtherSites ? faEye : faEyeSlash} />
-                                기타 현장 {showOtherSites ? '숨기기' : '보기'}
-                                <span className="bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full text-xs font-bold">
-                                    {otherSites.length}
-                                </span>
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Buttons */}
                     <div className="flex gap-2">
-                        <button
-                            onClick={fetchStats}
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"
-                        >
+                        <button onClick={fetchStats} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-black transition-all flex items-center gap-2 shadow-lg shadow-indigo-100 active:scale-95">
                             <FontAwesomeIcon icon={faSearch} />
-                            조회
-                        </button>
-                        <button
-                            onClick={handleClear}
-                            className="bg-slate-500 hover:bg-slate-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 shadow-sm"
-                        >
-                            <FontAwesomeIcon icon={faEraser} />
-                            CLEAR
+                            현황 조회
                         </button>
                     </div>
                 </div>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-auto p-4 bg-gradient-to-br from-slate-50 to-white">
+            <div className="flex-1 overflow-auto p-6 bg-[#f8fafc]">
                 {loading ? (
-                    <div className="flex justify-center items-center h-full text-slate-500">
-                        <div className={`animate-spin rounded-full h-8 w-8 border-b-2 mr-2 ${viewMode === 'inbound' ? 'border-orange-600' : 'border-teal-600'}`}></div>
-                        데이터를 불러오는 중입니다...
+                    <div className="flex flex-col justify-center items-center h-full gap-4 text-slate-400 font-black italic">
+                        <div className={`animate-spin rounded-full h-12 w-12 border-b-4 ${viewMode === 'inbound' ? 'border-orange-600' : 'border-teal-600'}`}></div>
+                        ANALYZING SUPPORT DATA...
                     </div>
                 ) : (
-                    <div className="space-y-8">
+                    <div className="space-y-12 max-w-[1600px] mx-auto">
+                        
+                        {/* [요청 사항 반영] 외부 지원 나간 우리 팀별 요약 그리드 */}
+                        {viewMode === 'outbound' && outboundTeamSummary.length > 0 && (
+                            <div>
+                                <div className="flex items-center gap-3 mb-6">
+                                    <div className="bg-teal-600 text-white px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest shadow-md shadow-teal-100">Our Teams Summary</div>
+                                    <h2 className="text-xl font-black text-slate-800 tracking-tight italic">팀별 외부 지원 실적 합계</h2>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                    {outboundTeamSummary.map((team, idx) => (
+                                        <div key={idx} className="bg-white border-2 border-teal-50 rounded-[24px] p-5 shadow-sm hover:shadow-xl transition-all group relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                                                <FontAwesomeIcon icon={faUsers} size="3x" className="text-teal-900" />
+                                            </div>
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center text-xl font-black shadow-inner group-hover:bg-teal-600 group-hover:text-white transition-colors duration-300">
+                                                    {team.teamName.charAt(0)}
+                                                </div>
+                                                <div>
+                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{team.companyName}</div>
+                                                    <h3 className="text-lg font-black text-slate-800 leading-tight group-hover:text-teal-700">{team.teamName}</h3>
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-between items-end mt-6">
+                                                <div>
+                                                    <div className="text-[10px] font-bold text-slate-400">지원 현장수</div>
+                                                    <div className="text-sm font-black text-slate-600 tracking-tighter">{team.sitesCount}개 현장</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[10px] font-bold text-teal-500 uppercase">Support Man-Day</div>
+                                                    <div className="text-2xl font-black text-teal-600 tracking-tighter">{team.totalManDay.toFixed(1)}</div>
+                                                </div>
+                                            </div>
+                                            <div className="mt-4 h-1 bg-teal-50 rounded-full overflow-hidden">
+                                                <div 
+                                                    className="h-full bg-teal-500 transition-all duration-1000" 
+                                                    style={{ width: `${(team.totalManDay / totalManDay) * 100}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                         {/* All Sites - Large Cards */}
                         {currentStats.length > 0 && (
                             <div>

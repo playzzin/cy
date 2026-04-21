@@ -306,6 +306,7 @@ const getSalaryModelOrder = (salaryModel?: string): number => {
 const getSalaryModelLabelClassName = (salaryModel?: string): string => {
     const normalized = (salaryModel ?? '').trim();
     if (normalized === '일급제') return 'bg-sky-100 text-sky-900';
+    if (normalized === '용역팀') return 'bg-orange-100 text-orange-900';
     return 'bg-amber-100 text-amber-900';
 };
 

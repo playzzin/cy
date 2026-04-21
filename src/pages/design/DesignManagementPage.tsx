@@ -84,6 +84,33 @@ interface MaterialRentalPhoto {
     src: string;
 }
 
+interface ManpowerSupplyPhoto {
+    id: string;
+    category: '현장 집결' | '작업 투입';
+    phase: string;
+    title: string;
+    description: string;
+    src: string;
+}
+
+interface ErpSiteManagementPhoto {
+    id: string;
+    category: '현장 입력' | '통합 관제';
+    phase: string;
+    title: string;
+    description: string;
+    src: string;
+}
+
+interface PartnerNetworkPhoto {
+    id: string;
+    category: '파트너 미팅' | '비즈니스 협업';
+    phase: string;
+    title: string;
+    description: string;
+    src: string;
+}
+
 interface DetailProcessStep {
     step: string;
     title: string;
@@ -498,6 +525,303 @@ const MATERIAL_RENTAL_PHOTOS: MaterialRentalPhoto[] = [
     }
 ];
 
+const MANPOWER_SUPPLY_PHOTOS: ManpowerSupplyPhoto[] = [
+    {
+        id: 'manpower-assembly-01',
+        category: '현장 집결',
+        phase: '01 출근 집결',
+        title: '작업 시작 전 인부 집결',
+        description: '아침 작업 시작 전 인부들이 한곳에 모여 인원 점검과 작업 구역 배치를 기다리는 장면입니다.',
+        src: 'https://images.pexels.com/photos/13005576/pexels-photo-13005576.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-assembly-02',
+        category: '현장 집결',
+        phase: '02 안전 조회',
+        title: 'TBM 전 안전장비 확인',
+        description: '안전모와 형광조끼 착용 상태를 맞추고, 인부들이 조회선에 모여 당일 안전수칙을 확인하는 흐름입니다.',
+        src: 'https://images.pexels.com/photos/20452662/pexels-photo-20452662.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-assembly-03',
+        category: '현장 집결',
+        phase: '03 작업 브리핑',
+        title: '작업반장 중심 사전 브리핑',
+        description: '현장 반장과 작업 인부들이 도면과 작업 범위를 함께 확인하며 투입 전 브리핑을 진행하는 장면입니다.',
+        src: 'https://images.pexels.com/photos/17797264/pexels-photo-17797264.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-assembly-04',
+        category: '현장 집결',
+        phase: '04 배치 협의',
+        title: '공종별 투입 인원 협의',
+        description: '여러 명의 현장 인력이 한곳에 모여 공종별 담당 구간과 장비 연계 순서를 조율하는 모습입니다.',
+        src: 'https://images.pexels.com/photos/30719069/pexels-photo-30719069.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-assembly-05',
+        category: '현장 집결',
+        phase: '05 대기 인원 정렬',
+        title: '투입 전 대기 인원 정렬',
+        description: '장비 반입과 이동 동선을 고려해 작업자들이 정렬된 상태로 대기하며 순차 투입을 준비하는 구간입니다.',
+        src: 'https://images.pexels.com/photos/11790051/pexels-photo-11790051.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-assembly-06',
+        category: '현장 집결',
+        phase: '06 현장 공유',
+        title: '현장 상황 공유 및 역할 분담',
+        description: '인부들이 한곳에 모여 작업 위험 요소와 자재 위치, 이동 동선을 공유하며 역할을 분담하는 장면입니다.',
+        src: 'https://images.pexels.com/photos/14367421/pexels-photo-14367421.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-01',
+        category: '작업 투입',
+        phase: '07 동시 투입',
+        title: '다수 인부 동시 작업 투입',
+        description: '여러 작업자가 같은 구간에 동시에 투입되어 콘크리트와 바닥 작업을 병행하는 현장 운영 장면입니다.',
+        src: 'https://images.pexels.com/photos/7509167/pexels-photo-7509167.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-02',
+        category: '작업 투입',
+        phase: '08 고소 구간 투입',
+        title: '상부 구조물 작업반 배치',
+        description: '상부 구조물 구간에 인부들이 넓게 배치되어 동시 시공을 진행하는 장면으로, 대규모 투입 느낌을 보여줍니다.',
+        src: 'https://images.pexels.com/photos/30514132/pexels-photo-30514132.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-03',
+        category: '작업 투입',
+        phase: '09 기초 공정',
+        title: '기초 공정 인부 동시 작업',
+        description: '기초와 하부 구조 작업에 여러 인부가 분산 배치되어 동시에 움직이는 현장의 실제 투입 장면입니다.',
+        src: 'https://images.pexels.com/photos/17410739/pexels-photo-17410739.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-04',
+        category: '작업 투입',
+        phase: '10 구조 작업',
+        title: '콘크리트 구조부 작업반 운영',
+        description: '한 팀 단위로 모여 구조부 시공을 진행하는 장면으로, 현장 인력 공급 이후 실제 운영 상태를 보여줍니다.',
+        src: 'https://images.pexels.com/photos/15794723/pexels-photo-15794723.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-05',
+        category: '작업 투입',
+        phase: '11 목공 협업',
+        title: '다인 협업 작업 장면',
+        description: '여러 인부가 한 구조물에 동시에 붙어 협업하는 장면으로, 공종별 팀 단위 운영 흐름에 잘 맞습니다.',
+        src: 'https://images.pexels.com/photos/11293626/pexels-photo-11293626.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    },
+    {
+        id: 'manpower-deploy-06',
+        category: '작업 투입',
+        phase: '12 외부 현장 작업',
+        title: '외부 공정 인력 다수 투입',
+        description: '외부 현장에 인력과 장비가 함께 배치된 장면으로, 인부 공급 이후 실제 현장 가동 분위기를 전달합니다.',
+        src: 'https://images.pexels.com/photos/14846150/pexels-photo-14846150.jpeg?auto=compress&cs=tinysrgb&w=1200'
+    }
+];
+
+const ERP_SITE_MANAGEMENT_PHOTOS: ErpSiteManagementPhoto[] = [
+    {
+        id: 'erp-mobile-report',
+        category: '현장 입력',
+        phase: '01 모바일 일보',
+        title: '모바일 일보 입력',
+        description: '현장 반장과 소장이 스마트폰이나 태블릿으로 출역, 공수, 작업내용을 즉시 입력하는 ERP 현장 화면에 맞춘 카드입니다.',
+        src: 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-attendance-check',
+        category: '현장 입력',
+        phase: '02 출역 확인',
+        title: '출역·근태 실시간 체크',
+        description: '근로자 출역 여부와 팀별 인원 현황을 현장에서 바로 체크하고 본사로 넘기는 근태 관리 흐름을 보여줍니다.',
+        src: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-safety-log',
+        category: '현장 입력',
+        phase: '03 안전 점검',
+        title: '안전 점검 이력 기록',
+        description: '점검 체크리스트, 사진 첨부, 시정조치 내역을 현장에서 즉시 기록해 ERP 안전관리 이력으로 남기는 구간입니다.',
+        src: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-material-scan',
+        category: '현장 입력',
+        phase: '04 자재 입출고',
+        title: '자재 반입·반출 스캔',
+        description: '현장에 반입된 자재와 회수 자재를 스캔 또는 수기로 기록해 재고 흐름을 ERP에 연결하는 자재 입력 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1556740749-887f6717d7e4?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-photo-evidence',
+        category: '현장 입력',
+        phase: '05 사진 증빙',
+        title: '공정 사진과 증빙 업로드',
+        description: '작업 전후 사진, 이슈 현황, 품질 증빙 이미지를 현장에서 바로 올려 보고 체계를 표준화하는 기능에 맞는 카드입니다.',
+        src: 'https://images.unsplash.com/photo-1516321165247-4aa89a48be28?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-offline-sync',
+        category: '현장 입력',
+        phase: '06 오프라인 동기화',
+        title: '오프라인 입력 후 자동 동기화',
+        description: '통신이 약한 현장에서도 데이터를 먼저 적재하고 연결 시 본사와 자동 동기화하는 ERP 모바일 운용 흐름입니다.',
+        src: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-dashboard-monitor',
+        category: '통합 관제',
+        phase: '07 통합 대시보드',
+        title: '본사 통합 운영 대시보드',
+        description: '여러 현장의 인력, 원가, 공정, 이슈를 한 화면에서 실시간으로 모니터링하는 ERP 관제 핵심 화면입니다.',
+        src: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-cost-analysis',
+        category: '통합 관제',
+        phase: '08 원가 분석',
+        title: '노무·자재 원가 분석',
+        description: '현장별 투입 원가와 기성, 수익성을 실시간으로 비교 분석해 경영 판단에 연결하는 ERP 분석 기능을 표현합니다.',
+        src: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-control-room',
+        category: '통합 관제',
+        phase: '09 상황실 관제',
+        title: '본사 상황실형 현장 관제',
+        description: '본사 담당자가 여러 현장의 상태를 모니터링하며 이상징후를 빠르게 파악하는 통합 관제 운영 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-collaboration',
+        category: '통합 관제',
+        phase: '10 협업 워크플로',
+        title: '팀간 승인·협업 워크플로',
+        description: '현장, 공무, 관리, 경영지원이 같은 데이터를 기준으로 승인과 피드백을 주고받는 ERP 협업 흐름을 보여줍니다.',
+        src: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-executive-view',
+        category: '통합 관제',
+        phase: '11 경영 리포트',
+        title: '경영진용 요약 리포트',
+        description: '누적 매출, 공정 진척률, 리스크 지표를 요약 리포트로 보여주는 ERP 경영 보고 화면에 맞춘 카드입니다.',
+        src: 'https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'erp-data-hub',
+        category: '통합 관제',
+        phase: '12 데이터 허브',
+        title: '클라우드 기반 데이터 허브',
+        description: '현장 데이터가 클라우드에 모여 문서, 서명, 정산, 보고서까지 한 흐름으로 이어지는 ERP 허브 구조를 표현합니다.',
+        src: 'https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&w=1200&q=80'
+    }
+];
+
+const PARTNER_NETWORK_PHOTOS: PartnerNetworkPhoto[] = [
+    {
+        id: 'partner-meeting-01',
+        category: '파트너 미팅',
+        phase: '01 제안 미팅',
+        title: '초기 파트너 제안 미팅',
+        description: '협력사와 첫 미팅을 통해 사업 범위, 수행 경험, 공사 대응력, 공급 가능 품목을 점검하는 장면에 맞춘 카드입니다.',
+        src: 'https://images.unsplash.com/photo-1515169067868-5387ec356754?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-meeting-02',
+        category: '파트너 미팅',
+        phase: '02 조건 협의',
+        title: '단가와 수행 조건 협의',
+        description: '공정 범위, 견적 조건, 지급 기준, 일정 대응 범위를 실무진끼리 조율하는 비즈니스 협상 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-meeting-03',
+        category: '파트너 미팅',
+        phase: '03 역량 검토',
+        title: '시공 역량과 실적 검토',
+        description: '파트너사의 과거 수행 실적과 보유 인력, 장비, 자재 대응 능력을 프레젠테이션으로 검토하는 흐름입니다.',
+        src: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-meeting-04',
+        category: '파트너 미팅',
+        phase: '04 계약 검토',
+        title: '계약서와 리스크 조항 검토',
+        description: '계약 전 권한, 책임, 하자 대응, 정산 기준을 문서 중심으로 맞춰보는 협력사 계약 검토 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-meeting-05',
+        category: '파트너 미팅',
+        phase: '05 입찰 브리핑',
+        title: '입찰 전 제안 브리핑',
+        description: '프로젝트 요구사항과 납기, 원가, 품질 조건을 공유하며 입찰 참여 여부를 결정하는 미팅에 적합한 사진입니다.',
+        src: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-meeting-06',
+        category: '파트너 미팅',
+        phase: '06 파트너 등록',
+        title: '협력사 등록 및 승인 협의',
+        description: '신규 협력사를 등록하고 등급, 거래 조건, 승인 절차를 맞추는 파트너 온보딩 단계와 잘 맞습니다.',
+        src: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-01',
+        category: '비즈니스 협업',
+        phase: '07 일정 연동',
+        title: '공정 일정과 공급 일정 연동',
+        description: '본사와 협력사가 같은 일정표를 보며 자재 반입과 인력 투입 시점을 조율하는 운영 협업 화면입니다.',
+        src: 'https://images.unsplash.com/photo-1531403009284-440f080d1e12?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-02',
+        category: '비즈니스 협업',
+        phase: '08 공급망 운영',
+        title: '공급망과 물류 운영 협업',
+        description: '여러 파트너가 공급 일정과 재고 흐름을 공유하며 프로젝트 납기를 맞추는 비즈니스 운영 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-03',
+        category: '비즈니스 협업',
+        phase: '09 성과 리뷰',
+        title: '월간 성과와 KPI 리뷰',
+        description: '협력사별 납기 준수율, 품질, 원가 절감, 재발주 여부를 수치로 검토하는 성과 리뷰 회의에 맞춘 카드입니다.',
+        src: 'https://images.unsplash.com/photo-1553877522-43269d4ea984?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-04',
+        category: '비즈니스 협업',
+        phase: '10 공동 대응',
+        title: '이슈 발생 시 공동 대응 회의',
+        description: '현장 이슈, 납기 지연, 품질 문제에 대해 본사와 협력사가 즉시 대응책을 정리하는 협업 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-05',
+        category: '비즈니스 협업',
+        phase: '11 장기 파트너십',
+        title: '장기 파트너십 전략 미팅',
+        description: '단기 거래가 아닌 장기 협력과 공동 성장 계획을 논의하는 전략 회의 장면으로 사업 제휴 분위기를 보여줍니다.',
+        src: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&w=1200&q=80'
+    },
+    {
+        id: 'partner-business-06',
+        category: '비즈니스 협업',
+        phase: '12 경영 공유',
+        title: '경영진과 파트너 비즈니스 공유',
+        description: '경영진과 핵심 파트너가 프로젝트 포트폴리오, 매출 계획, 투자 방향을 함께 논의하는 장면입니다.',
+        src: 'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1200&q=80'
+    }
+];
+
 const PROCESS_STEPS: Record<string, DetailProcessStep[]> = {
     'system-dongbari-scaffolding': [
         {
@@ -579,33 +903,69 @@ const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
         opacity: 1,
-        transition: { staggerChildren: 0.08 }
+        transition: { staggerChildren: 0.08, delayChildren: 0.05 }
     }
 };
 
 const itemVariants: Variants = {
-    hidden: { y: 20, opacity: 0 },
+    hidden: { y: 20, opacity: 0, scale: 0.98 },
     visible: {
         y: 0,
         opacity: 1,
+        scale: 1,
         transition: { type: "spring", stiffness: 300, damping: 24 }
     }
 };
 
 const detailVariants: Variants = {
-    hidden: { opacity: 0, height: 0, scale: 0.95 },
+    hidden: { opacity: 0, height: 0, scale: 0.96, y: 28, filter: 'blur(16px)' },
     visible: {
         opacity: 1,
         height: 'auto',
         scale: 1,
-        transition: { type: "spring", bounce: 0, duration: 0.5 }
+        y: 0,
+        filter: 'blur(0px)',
+        transition: { type: "spring", bounce: 0, duration: 0.58, staggerChildren: 0.06, delayChildren: 0.06 }
     },
     exit: {
         opacity: 0,
         height: 0,
-        scale: 0.95,
-        transition: { type: "spring", bounce: 0, duration: 0.4 }
+        scale: 0.97,
+        y: 18,
+        filter: 'blur(14px)',
+        transition: { type: "spring", bounce: 0, duration: 0.36 }
     }
+};
+
+const sectionStaggerVariants: Variants = {
+    hidden: { opacity: 0 },
+    visible: {
+        opacity: 1,
+        transition: {
+            staggerChildren: 0.07,
+            delayChildren: 0.04
+        }
+    }
+};
+
+const revealBlockVariants: Variants = {
+    hidden: { opacity: 0, y: 28, scale: 0.985, filter: 'blur(12px)' },
+    visible: {
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        filter: 'blur(0px)',
+        transition: {
+            duration: 0.55,
+            ease: 'easeOut'
+        }
+    }
+};
+
+const floatingGlowTransition = {
+    duration: 16,
+    repeat: Infinity,
+    ease: 'easeInOut' as const
 };
 
 // --- Helper Components ---
@@ -616,22 +976,42 @@ interface ToolCardProps extends MenuItem {
     isSelected: boolean;
 }
 
-const ToolCard: React.FC<ToolCardProps> = ({ title, description, icon, color, onClick, isSelected }) => {
+const ToolCard: React.FC<ToolCardProps> = ({ title, description, icon, color, onClick, isSelected, delay }) => {
     return (
         <motion.div
             layout
-            variants={itemVariants}
-            whileHover={{ y: -5, scale: 1.02 }}
+            initial={{ opacity: 0, y: 30, scale: 0.96, filter: 'blur(12px)' }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+            transition={{ type: 'spring', stiffness: 240, damping: 24, delay }}
+            whileHover={{ y: -8, scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className={`group relative p-6 bg-slate-800/80 backdrop-blur-md rounded-2xl border ${isSelected ? `border-${color}-500 ring-1 ring-${color}-500/50 shadow-lg shadow-${color}-500/20` : 'border-slate-700/50 hover:border-slate-500/50 hover:shadow-cyan-500/10'} cursor-pointer overflow-hidden transition-all`}
             onClick={onClick}
         >
-            <div className={`absolute top-0 right-0 w-32 h-32 bg-${color}-500/10 rounded-full blur-3xl -mr-10 -mt-10 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-50 group-hover:opacity-100'}`} />
+            <motion.div
+                className={`absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-${color}-400/80 to-transparent`}
+                animate={{ opacity: isSelected ? [0.45, 1, 0.45] : [0.2, 0.75, 0.2], scaleX: isSelected ? [0.92, 1.04, 0.92] : [0.88, 1, 0.88] }}
+                transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.div
+                className={`absolute top-0 right-0 w-32 h-32 bg-${color}-500/10 rounded-full blur-3xl -mr-10 -mt-10`}
+                animate={{ x: [0, -10, 0], y: [0, 12, 0], opacity: isSelected ? [0.55, 0.9, 0.55] : [0.32, 0.62, 0.32], scale: [1, 1.08, 1] }}
+                transition={{ duration: 7.5, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.div
+                className={`absolute -bottom-10 -left-10 h-28 w-28 rounded-full bg-${color}-500/10 blur-3xl`}
+                animate={{ x: [0, 12, 0], y: [0, -10, 0], opacity: [0.18, 0.36, 0.18], scale: [0.96, 1.06, 0.96] }}
+                transition={{ duration: 8.8, repeat: Infinity, ease: 'easeInOut' }}
+            />
 
             <div className="relative z-10 flex flex-col h-full">
-                <div className={`w-12 h-12 rounded-xl bg-${color}-500/15 flex items-center justify-center mb-4 text-${color}-400 transition-colors ${isSelected ? `ring-2 ring-${color}-500/50` : `group-hover:text-${color}-300`}`}>
+                <motion.div
+                    className={`w-12 h-12 rounded-xl bg-${color}-500/15 flex items-center justify-center mb-4 text-${color}-400 transition-colors ${isSelected ? `ring-2 ring-${color}-500/50` : `group-hover:text-${color}-300`}`}
+                    animate={isSelected ? { rotate: [0, -4, 4, 0], scale: [1, 1.08, 1] } : { rotate: 0, scale: 1 }}
+                    transition={{ duration: 2.8, repeat: isSelected ? Infinity : 0, ease: 'easeInOut' }}
+                >
                     <FontAwesomeIcon icon={icon} className="text-xl" />
-                </div>
+                </motion.div>
 
                 <h3 className={`text-xl font-bold mb-2 transition-colors ${isSelected ? `text-${color}-400` : 'text-white group-hover:text-slate-200'}`}>
                     {title}
@@ -690,6 +1070,9 @@ const DesignManagementPage: React.FC = () => {
 
     const isSystemConstruction = selectedMenu?.id === 'system-dongbari-scaffolding';
     const isMaterialRental = selectedMenu?.id === 'peri-dongbari';
+    const isManpowerSupply = selectedMenu?.id === 'peri-scaffolding';
+    const isErpSiteManagement = selectedMenu?.id === 'erp-site-management';
+    const isPartnerNetwork = selectedMenu?.id === 'partner-network';
     const processSteps = selectedMenu ? PROCESS_STEPS[selectedMenu.id] ?? [] : [];
     const dongbariPhotos = SYSTEM_CONSTRUCTION_PHOTOS.filter((photo) => photo.category === '시스템 동바리');
     const scaffoldingPhotos = SYSTEM_CONSTRUCTION_PHOTOS.filter((photo) => photo.category === '시스템 비계');
@@ -697,13 +1080,47 @@ const DesignManagementPage: React.FC = () => {
     const dongbariMaterialPhotos = MATERIAL_RENTAL_PHOTOS.filter((photo) => photo.category === '시스템 동바리 자재');
     const scaffoldingMaterialPhotos = MATERIAL_RENTAL_PHOTOS.filter((photo) => photo.category === '시스템 비계 자재');
     const totalMaterialRentalPhotos = dongbariMaterialPhotos.length + scaffoldingMaterialPhotos.length;
+    const manpowerAssemblyPhotos = MANPOWER_SUPPLY_PHOTOS.filter((photo) => photo.category === '현장 집결');
+    const manpowerDeploymentPhotos = MANPOWER_SUPPLY_PHOTOS.filter((photo) => photo.category === '작업 투입');
+    const totalManpowerSupplyPhotos = manpowerAssemblyPhotos.length + manpowerDeploymentPhotos.length;
+    const erpFieldPhotos = ERP_SITE_MANAGEMENT_PHOTOS.filter((photo) => photo.category === '현장 입력');
+    const erpControlPhotos = ERP_SITE_MANAGEMENT_PHOTOS.filter((photo) => photo.category === '통합 관제');
+    const totalErpPhotos = erpFieldPhotos.length + erpControlPhotos.length;
+    const partnerMeetingPhotos = PARTNER_NETWORK_PHOTOS.filter((photo) => photo.category === '파트너 미팅');
+    const partnerBusinessPhotos = PARTNER_NETWORK_PHOTOS.filter((photo) => photo.category === '비즈니스 협업');
+    const totalPartnerNetworkPhotos = partnerMeetingPhotos.length + partnerBusinessPhotos.length;
 
     return (
         <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-cyan-500/30 overflow-x-hidden">
             {/* Background Mesh */}
             <div className="fixed inset-0 z-0 pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-blue-900/20 blur-[100px]" />
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-900/20 blur-[100px]" />
+                <motion.div
+                    className="absolute top-[-10%] left-[-10%] h-[40%] w-[40%] rounded-full bg-blue-900/20 blur-[100px]"
+                    animate={{ x: [0, 40, -24, 0], y: [0, -22, 12, 0], scale: [1, 1.08, 0.96, 1] }}
+                    transition={floatingGlowTransition}
+                />
+                <motion.div
+                    className="absolute bottom-[-10%] right-[-10%] h-[40%] w-[40%] rounded-full bg-cyan-900/20 blur-[100px]"
+                    animate={{ x: [0, -36, 18, 0], y: [0, 26, -12, 0], scale: [1, 0.95, 1.06, 1] }}
+                    transition={{ ...floatingGlowTransition, duration: 18 }}
+                />
+                <motion.div
+                    className="absolute left-[18%] top-[12%] h-[26rem] w-[26rem] rounded-full bg-violet-500/8 blur-[120px]"
+                    animate={{ x: [0, 18, -12, 0], y: [0, 20, -16, 0], opacity: [0.25, 0.42, 0.25] }}
+                    transition={{ duration: 20, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <div
+                    className="absolute inset-0 opacity-[0.14]"
+                    style={{
+                        backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.18) 1px, transparent 0)',
+                        backgroundSize: '36px 36px'
+                    }}
+                />
+                <motion.div
+                    className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/70 to-transparent"
+                    animate={{ opacity: [0.18, 0.65, 0.18], scaleX: [0.92, 1, 0.92] }}
+                    transition={{ duration: 4.8, repeat: Infinity, ease: 'easeInOut' }}
+                />
             </div>
 
             <div className="relative z-10 w-full px-4 py-12 md:px-8 xl:px-10">
@@ -713,24 +1130,50 @@ const DesignManagementPage: React.FC = () => {
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.8 }}
-                    className="flex flex-col md:flex-row items-center justify-between mb-10"
+                    className="mb-10 flex flex-col items-center justify-between gap-10 md:flex-row"
                 >
-                    <div className="text-center md:text-left mb-8 md:mb-0">
+                    <motion.div
+                        variants={sectionStaggerVariants}
+                        initial="hidden"
+                        animate="visible"
+                        className="text-center md:mb-0 md:text-left"
+                    >
                         <div className="flex items-center justify-center md:justify-start gap-3 mb-2">
                             <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-bold uppercase tracking-widest">
                                 청연ENG 사업영역
                             </span>
                         </div>
-                        <h1 className="text-5xl font-extrabold text-white mb-4">
+                        <motion.h1 variants={revealBlockVariants} className="mb-4 text-5xl font-extrabold text-white">
                             청연ENG 사업영역
-                        </h1>
-                        <p className="text-lg text-slate-400 max-w-lg">
+                        </motion.h1>
+                        <motion.p variants={revealBlockVariants} className="max-w-lg text-lg text-slate-400">
                             시스템 동바리비계 시공, 시스템 자재임대, 시스템 인력공급, ERP 실시간 현장관리, 협력사 네트워크까지 청연ENG의 핵심 사업영역을 통합 운영합니다.
-                        </p>
-                    </div>
+                        </motion.p>
+                        <motion.div variants={revealBlockVariants} className="mt-6 flex flex-wrap items-center justify-center gap-3 md:justify-start">
+                            <span className="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-300">
+                                {MENUS.length} Core Modules
+                            </span>
+                            <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-300">
+                                Engineering Workflow
+                            </span>
+                            <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-300">
+                                Operations Intelligence
+                            </span>
+                        </motion.div>
+                    </motion.div>
 
                     {/* Animated Stage Visualizer */}
-                    <div className="relative w-64 h-48 md:w-80 md:h-60">
+                    <motion.div
+                        initial={{ opacity: 0, x: 24, scale: 0.96 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        transition={{ duration: 0.85, delay: 0.16, ease: 'easeOut' }}
+                        className="relative h-48 w-64 md:h-60 md:w-80"
+                    >
+                        <motion.div
+                            className="absolute inset-0 rounded-[34px] border border-cyan-400/15 bg-gradient-to-br from-white/5 via-transparent to-cyan-500/10 backdrop-blur-sm"
+                            animate={{ boxShadow: ['0 0 0 rgba(34,211,238,0.05)', '0 0 36px rgba(34,211,238,0.12)', '0 0 0 rgba(34,211,238,0.05)'] }}
+                            transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+                        />
                         <svg className="absolute w-full h-full pointer-events-none opacity-50" viewBox="0 0 800 600">
                             <motion.path
                                 d="M200,500 L200,200 L600,200 L600,500"
@@ -749,28 +1192,40 @@ const DesignManagementPage: React.FC = () => {
                         <motion.div className="absolute inset-0 flex items-center justify-center" variants={finalLogoVariants} initial="hidden" animate={controls}>
                             <img src={logoFinished} alt="Finished" className="w-full h-full object-contain drop-shadow-[0_0_15px_rgba(56,189,248,0.3)]" />
                         </motion.div>
-                    </div>
+                    </motion.div>
                 </motion.div>
 
                 {/* Expanded Detail Panel Section */}
                 <AnimatePresence mode="wait">
                     {selectedMenu && (
                         <motion.div
-                            key="detail-panel"
+                            key={selectedMenu.id}
                             variants={detailVariants}
                             initial="hidden"
                             animate="visible"
                             exit="exit"
+                            layout
                             className="mb-16 overflow-hidden"
                         >
                             <div className={`p-10 md:p-16 bg-slate-900/95 backdrop-blur-2xl border-2 border-${selectedMenu.color}-500/40 rounded-[40px] shadow-[0_0_80px_rgba(0,0,0,0.5)] relative`}>
                                 {/* Background glow inside the detail panel */}
                                 <div className={`absolute -top-60 -left-60 w-[600px] h-[600px] bg-${selectedMenu.color}-500/10 rounded-full blur-[120px] pointer-events-none`} />
                                 <div className={`absolute -bottom-60 -right-60 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-[120px] pointer-events-none`} />
+                                <motion.div
+                                    className={`absolute inset-x-[18%] top-0 h-px bg-gradient-to-r from-transparent via-${selectedMenu.color}-400/90 to-transparent`}
+                                    animate={{ opacity: [0.3, 0.95, 0.3], scaleX: [0.92, 1.03, 0.92] }}
+                                    transition={{ duration: 4.4, repeat: Infinity, ease: 'easeInOut' }}
+                                />
+                                <div className="absolute inset-0 opacity-[0.08] pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
 
-                                <div className="relative z-10">
+                                <motion.div
+                                    variants={sectionStaggerVariants}
+                                    initial="hidden"
+                                    animate="visible"
+                                    className="relative z-10"
+                                >
                                     {/* Header in Detail */}
-                                    <div className="flex flex-col lg:flex-row justify-between items-start gap-8 mb-12 border-b border-slate-700/50 pb-10">
+                                    <motion.div variants={revealBlockVariants} className="mb-12 flex flex-col items-start justify-between gap-8 border-b border-slate-700/50 pb-10 lg:flex-row">
                                         <div className="flex-1">
                                             <div className="flex items-center gap-6 mb-6">
                                                 <div className={`w-20 h-20 rounded-3xl bg-${selectedMenu.color}-500/20 flex items-center justify-center text-${selectedMenu.color}-400 text-4xl border border-${selectedMenu.color}-500/30 shadow-inner`}>
@@ -791,22 +1246,29 @@ const DesignManagementPage: React.FC = () => {
                                             </p>
                                         </div>
                                         <div className="flex flex-col gap-3 min-w-[240px]">
-                                            <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50">
+                                            <motion.div
+                                                whileHover={{ y: -4, scale: 1.01 }}
+                                                className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50"
+                                            >
                                                 <p className="text-slate-500 text-[10px] font-bold uppercase mb-2 tracking-tighter">Current Module Status</p>
                                                 <div className="flex items-center justify-between text-white font-bold">
                                                     <span>최적화 완료</span>
                                                     <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                                                 </div>
-                                            </div>
+                                            </motion.div>
                                         </div>
-                                    </div>
+                                    </motion.div>
 
                                     {/* 1:1 Detailed Content Grid (Dynamic Based on Menu ID) */}
-                                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-10 mb-12">
+                                    <motion.div variants={revealBlockVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-10 mb-12">
                                         
                                         {/* Left Side: Professional Specs */}
                                         <div className="space-y-6">
-                                            <div className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color}-500/30 relative overflow-hidden group/item h-full`}>
+                                            <motion.div
+                                                whileHover={{ y: -6, scale: 1.005 }}
+                                                transition={{ duration: 0.28, ease: 'easeOut' }}
+                                                className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color}-500/30 relative overflow-hidden group/item h-full`}
+                                            >
                                                 <div className="flex items-center gap-4 mb-6">
                                                     <div className={`w-12 h-12 rounded-xl bg-${selectedMenu.color}-500/20 flex items-center justify-center text-${selectedMenu.color}-400 border border-${selectedMenu.color}-500/30`}>
                                                         <FontAwesomeIcon icon={selectedMenu.icon} />
@@ -884,12 +1346,16 @@ const DesignManagementPage: React.FC = () => {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </motion.div>
                                         </div>
 
                                         {/* Right Side: Secondary Detail */}
                                         <div className="space-y-6">
-                                            <div className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/30 relative overflow-hidden group/item h-full`}>
+                                            <motion.div
+                                                whileHover={{ y: -6, scale: 1.005 }}
+                                                transition={{ duration: 0.28, ease: 'easeOut' }}
+                                                className={`bg-slate-950/60 p-8 rounded-[32px] border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/30 relative overflow-hidden group/item h-full`}
+                                            >
                                                 <div className="flex items-center gap-4 mb-6">
                                                     <div className={`w-12 h-12 rounded-xl bg-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/20 flex items-center justify-center text-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-400 border border-${selectedMenu.color === 'blue' ? 'cyan' : 'emerald'}-500/30`}>
                                                         <FontAwesomeIcon icon={selectedMenu.id === 'system-dongbari-scaffolding' ? faBuilding : faCheckCircle} />
@@ -943,12 +1409,12 @@ const DesignManagementPage: React.FC = () => {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </motion.div>
                                         </div>
-                                    </div>
+                                    </motion.div>
 
                                     {/* Bottom Process Visualizer (Dynamic Labels) */}
-                                    <div className="bg-slate-800/40 p-10 rounded-[32px] border border-slate-700/50 mb-12">
+                                    <motion.div variants={revealBlockVariants} className="bg-slate-800/40 p-10 rounded-[32px] border border-slate-700/50 mb-12">
                                         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                                             <h4 className="flex items-center gap-3 text-xl font-bold text-white">
                                                 <FontAwesomeIcon icon={faProjectDiagram} className="text-slate-500" />
@@ -965,7 +1431,13 @@ const DesignManagementPage: React.FC = () => {
                                         </div>
                                         <div className={isSystemConstruction ? 'grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-6' : 'grid grid-cols-2 gap-6 md:grid-cols-5'}>
                                             {processSteps.map((item, i) => (
-                                                <div key={i} className="relative group/step">
+                                                <motion.div
+                                                    key={i}
+                                                    variants={revealBlockVariants}
+                                                    whileHover={{ y: -8, scale: 1.02 }}
+                                                    transition={{ duration: 0.24, ease: 'easeOut' }}
+                                                    className="relative group/step"
+                                                >
                                                     <div className="flex h-full flex-col rounded-[28px] border border-slate-700/60 bg-slate-950/70 p-5 text-center">
                                                         <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-slate-700 bg-slate-900 text-xl text-slate-400 transition-all group-hover/step:border-${selectedMenu.color}-500/50 group-hover/step:text-${selectedMenu.color}-400`}>
                                                             <FontAwesomeIcon icon={item.icon} />
@@ -987,10 +1459,10 @@ const DesignManagementPage: React.FC = () => {
                                                     {i < processSteps.length - 1 && (
                                                         <div className="absolute left-[calc(50%+40px)] top-8 hidden h-px w-[calc(100%-80px)] bg-slate-700 xl:block" />
                                                     )}
-                                                </div>
+                                                </motion.div>
                                             ))}
                                         </div>
-                                    </div>
+                                    </motion.div>
 
                                     {/* Extreme Technical Deep Dive Section (Toggleable) */}
                                     <AnimatePresence>
@@ -1211,7 +1683,322 @@ const DesignManagementPage: React.FC = () => {
                                                     </div>
                                                 )}
 
-                                                {!isSystemConstruction && !isMaterialRental && (
+                                                {isManpowerSupply && (
+                                                    <div className="space-y-8">
+                                                        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                                                            <div>
+                                                                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.35em] text-cyan-300/80">
+                                                                    Workforce Photo Board
+                                                                </p>
+                                                                <h4 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                                                                    건설현장 인부 집결 · 작업 투입 사진으로 보는 시스템 인력공급
+                                                                </h4>
+                                                                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 md:text-base">
+                                                                    새벽 집결, TBM 브리핑, 안전 조회, 반별 배치, 동시 투입, 외부 공정 운영까지
+                                                                    건설현장 인부들이 많이 모여 있는 장면을 중심으로 {totalManpowerSupplyPhotos}장의 사진을 정리했습니다.
+                                                                </p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                                                                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">현장 집결 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{manpowerAssemblyPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">작업 투입 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{manpowerDeploymentPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">총 인력 사진</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{totalManpowerSupplyPhotos}컷</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 gap-8 2xl:grid-cols-2">
+                                                            {[
+                                                                {
+                                                                    title: '현장 집결 사진',
+                                                                    description: '현장 도착 직후 인부들이 모여 출근 확인, TBM, 안전장비 점검, 공종별 배치를 준비하는 장면을 정리했습니다.',
+                                                                    accent: 'cyan',
+                                                                    photos: manpowerAssemblyPhotos
+                                                                },
+                                                                {
+                                                                    title: '작업 투입 사진',
+                                                                    description: '브리핑을 마친 뒤 각 공정으로 다수 인부가 투입되어 실제 시공을 수행하는 현장 운영 장면을 정리했습니다.',
+                                                                    accent: 'emerald',
+                                                                    photos: manpowerDeploymentPhotos
+                                                                }
+                                                            ].map((section) => (
+                                                                <div
+                                                                    key={section.title}
+                                                                    className={`rounded-[32px] border p-6 md:p-8 ${
+                                                                        section.accent === 'cyan'
+                                                                            ? 'border-cyan-500/25 bg-cyan-500/[0.03]'
+                                                                            : 'border-emerald-500/25 bg-emerald-500/[0.03]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="mb-6">
+                                                                        <h5 className="text-2xl font-black tracking-tight text-white">{section.title}</h5>
+                                                                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{section.description}</p>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        {section.photos.map((photo) => (
+                                                                            <article
+                                                                                key={photo.id}
+                                                                                className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 shadow-[0_10px_30px_rgba(2,6,23,0.35)]"
+                                                                            >
+                                                                                <div className="group relative">
+                                                                                    <img
+                                                                                        src={photo.src}
+                                                                                        alt={`${photo.category} ${photo.title}`}
+                                                                                        loading="lazy"
+                                                                                        className="h-52 w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
+                                                                                    <div
+                                                                                        className={`absolute left-4 top-4 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] ${
+                                                                                            section.accent === 'cyan'
+                                                                                                ? 'border border-cyan-300/30 bg-cyan-500/15 text-cyan-100'
+                                                                                                : 'border border-emerald-300/30 bg-emerald-500/15 text-emerald-100'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {photo.phase}
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-4 right-4">
+                                                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                                                                                            {photo.category}
+                                                                                        </p>
+                                                                                        <h6 className="mt-1 text-base font-black leading-tight text-white">
+                                                                                            {photo.title}
+                                                                                        </h6>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <p className="text-sm leading-relaxed text-slate-400">
+                                                                                        {photo.description}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </article>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isErpSiteManagement && (
+                                                    <div className="space-y-8">
+                                                        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                                                            <div>
+                                                                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.35em] text-emerald-300/80">
+                                                                    ERP Operations Gallery
+                                                                </p>
+                                                                <h4 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                                                                    ERP 현장 입력 · 통합 관제 사진으로 보는 실시간 현장관리
+                                                                </h4>
+                                                                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 md:text-base">
+                                                                    모바일 일보, 출역 확인, 자재 입출고, 안전 점검, 본사 대시보드, 원가 분석, 경영 리포트까지
+                                                                    ERP 운영 실무에 맞는 장면을 {totalErpPhotos}장의 사진과 정보 카드로 정리했습니다.
+                                                                </p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                                                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">현장 입력 화면</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{erpFieldPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-teal-500/20 bg-teal-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">통합 관제 화면</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{erpControlPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-sky-500/20 bg-sky-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">총 ERP 카드</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{totalErpPhotos}컷</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 gap-8 2xl:grid-cols-2">
+                                                            {[
+                                                                {
+                                                                    title: '현장 입력 화면',
+                                                                    description: '현장 소장과 반장이 직접 사용하는 모바일 입력 화면 중심으로 출역, 공수, 자재, 안전, 증빙 데이터를 정리했습니다.',
+                                                                    accent: 'emerald',
+                                                                    photos: erpFieldPhotos
+                                                                },
+                                                                {
+                                                                    title: '통합 관제 화면',
+                                                                    description: '본사와 관리자가 여러 현장을 한 번에 보는 대시보드, 원가 분석, 협업 승인, 경영 보고 화면 흐름을 정리했습니다.',
+                                                                    accent: 'teal',
+                                                                    photos: erpControlPhotos
+                                                                }
+                                                            ].map((section) => (
+                                                                <div
+                                                                    key={section.title}
+                                                                    className={`rounded-[32px] border p-6 md:p-8 ${
+                                                                        section.accent === 'emerald'
+                                                                            ? 'border-emerald-500/25 bg-emerald-500/[0.03]'
+                                                                            : 'border-teal-500/25 bg-teal-500/[0.03]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="mb-6">
+                                                                        <h5 className="text-2xl font-black tracking-tight text-white">{section.title}</h5>
+                                                                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{section.description}</p>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        {section.photos.map((photo) => (
+                                                                            <article
+                                                                                key={photo.id}
+                                                                                className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 shadow-[0_10px_30px_rgba(2,6,23,0.35)]"
+                                                                            >
+                                                                                <div className="group relative">
+                                                                                    <img
+                                                                                        src={photo.src}
+                                                                                        alt={`${photo.category} ${photo.title}`}
+                                                                                        loading="lazy"
+                                                                                        className="h-52 w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
+                                                                                    <div
+                                                                                        className={`absolute left-4 top-4 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] ${
+                                                                                            section.accent === 'emerald'
+                                                                                                ? 'border border-emerald-300/30 bg-emerald-500/15 text-emerald-100'
+                                                                                                : 'border border-teal-300/30 bg-teal-500/15 text-teal-100'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {photo.phase}
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-4 right-4">
+                                                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                                                                                            {photo.category}
+                                                                                        </p>
+                                                                                        <h6 className="mt-1 text-base font-black leading-tight text-white">
+                                                                                            {photo.title}
+                                                                                        </h6>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <p className="text-sm leading-relaxed text-slate-400">
+                                                                                        {photo.description}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </article>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isPartnerNetwork && (
+                                                    <div className="space-y-8">
+                                                        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                                                            <div>
+                                                                <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.35em] text-teal-300/80">
+                                                                    Partner Business Gallery
+                                                                </p>
+                                                                <h4 className="text-3xl font-black tracking-tight text-white md:text-4xl">
+                                                                    협력사 미팅 · 비즈니스 협업 사진으로 보는 파트너 네트워크
+                                                                </h4>
+                                                                <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-400 md:text-base">
+                                                                    제안 미팅, 조건 협의, 계약 검토, 입찰 브리핑, 공급망 운영, 성과 리뷰, 장기 파트너십까지
+                                                                    협력사 네트워크 실무와 맞는 비즈니스 장면을 {totalPartnerNetworkPhotos}장의 사진과 정보 카드로 구성했습니다.
+                                                                </p>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
+                                                                <div className="rounded-2xl border border-teal-500/20 bg-teal-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">파트너 미팅</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{partnerMeetingPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">비즈니스 협업</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{partnerBusinessPhotos.length}컷</p>
+                                                                </div>
+                                                                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                                                                    <p className="text-slate-500">총 파트너 카드</p>
+                                                                    <p className="mt-1 text-lg font-black text-white">{totalPartnerNetworkPhotos}컷</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-1 gap-8 2xl:grid-cols-2">
+                                                            {[
+                                                                {
+                                                                    title: '파트너 미팅',
+                                                                    description: '신규 협력사 제안 검토, 단가 협의, 계약 검토, 입찰 설명, 등록 승인처럼 관계 형성 초기에 필요한 미팅 장면을 모았습니다.',
+                                                                    accent: 'teal',
+                                                                    photos: partnerMeetingPhotos
+                                                                },
+                                                                {
+                                                                    title: '비즈니스 협업',
+                                                                    description: '일정 연동, 공급망 운영, 성과 리뷰, 이슈 대응, 장기 파트너십 논의처럼 실제 거래 이후 협업 운영 장면을 정리했습니다.',
+                                                                    accent: 'cyan',
+                                                                    photos: partnerBusinessPhotos
+                                                                }
+                                                            ].map((section) => (
+                                                                <div
+                                                                    key={section.title}
+                                                                    className={`rounded-[32px] border p-6 md:p-8 ${
+                                                                        section.accent === 'teal'
+                                                                            ? 'border-teal-500/25 bg-teal-500/[0.03]'
+                                                                            : 'border-cyan-500/25 bg-cyan-500/[0.03]'
+                                                                    }`}
+                                                                >
+                                                                    <div className="mb-6">
+                                                                        <h5 className="text-2xl font-black tracking-tight text-white">{section.title}</h5>
+                                                                        <p className="mt-2 text-sm leading-relaxed text-slate-400">{section.description}</p>
+                                                                    </div>
+
+                                                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                                                                        {section.photos.map((photo) => (
+                                                                            <article
+                                                                                key={photo.id}
+                                                                                className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 shadow-[0_10px_30px_rgba(2,6,23,0.35)]"
+                                                                            >
+                                                                                <div className="group relative">
+                                                                                    <img
+                                                                                        src={photo.src}
+                                                                                        alt={`${photo.category} ${photo.title}`}
+                                                                                        loading="lazy"
+                                                                                        className="h-52 w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                                                                    />
+                                                                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
+                                                                                    <div
+                                                                                        className={`absolute left-4 top-4 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.24em] ${
+                                                                                            section.accent === 'teal'
+                                                                                                ? 'border border-teal-300/30 bg-teal-500/15 text-teal-100'
+                                                                                                : 'border border-cyan-300/30 bg-cyan-500/15 text-cyan-100'
+                                                                                        }`}
+                                                                                    >
+                                                                                        {photo.phase}
+                                                                                    </div>
+                                                                                    <div className="absolute bottom-4 left-4 right-4">
+                                                                                        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-200/80">
+                                                                                            {photo.category}
+                                                                                        </p>
+                                                                                        <h6 className="mt-1 text-base font-black leading-tight text-white">
+                                                                                            {photo.title}
+                                                                                        </h6>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="p-4">
+                                                                                    <p className="text-sm leading-relaxed text-slate-400">
+                                                                                        {photo.description}
+                                                                                    </p>
+                                                                                </div>
+                                                                            </article>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {!isSystemConstruction && !isMaterialRental && !isManpowerSupply && !isErpSiteManagement && !isPartnerNetwork && (
                                                     <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
                                                         <div className="bg-slate-900/80 p-6 rounded-2xl border border-slate-700/50">
                                                             <h5 className={`text-xs font-bold text-${selectedMenu.color}-400 uppercase tracking-widest mb-4`}>Technical Data Sheet</h5>
@@ -1277,16 +2064,20 @@ const DesignManagementPage: React.FC = () => {
                                     </AnimatePresence>
 
                                     {/* Action Button at the bottom */}
-                                    <div className="flex justify-center">
-                                        <button 
+                                    <motion.div variants={revealBlockVariants} className="flex justify-center">
+                                        <motion.button 
                                             onClick={() => setShowDeepDive(!showDeepDive)}
-                                            className={`px-12 py-5 bg-gradient-to-r from-${selectedMenu.color}-600 to-${selectedMenu.color}-800 hover:scale-[1.02] active:scale-95 text-white rounded-2xl font-black text-xl transition-all shadow-2xl shadow-${selectedMenu.color}-600/40 flex items-center justify-center gap-6 group`}
+                                            whileHover={{ y: -4, scale: 1.02 }}
+                                            whileTap={{ scale: 0.985 }}
+                                            animate={{ boxShadow: [`0 18px 40px rgba(2,6,23,0.24)`, `0 18px 52px rgba(2,6,23,0.38)`, `0 18px 40px rgba(2,6,23,0.24)`] }}
+                                            transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+                                            className={`px-12 py-5 bg-gradient-to-r from-${selectedMenu.color}-600 to-${selectedMenu.color}-800 text-white rounded-2xl font-black text-xl transition-all shadow-2xl shadow-${selectedMenu.color}-600/40 flex items-center justify-center gap-6 group`}
                                         >
                                             {showDeepDive ? '닫기' : '더 자세히보기'} 
                                             <FontAwesomeIcon icon={faArrowRight} className={`transition-transform duration-500 ${showDeepDive ? '-rotate-90' : 'rotate-90 group-hover:translate-y-1'}`} />
-                                        </button>
-                                    </div>
-                                </div>
+                                        </motion.button>
+                                    </motion.div>
+                                </motion.div>
 
                                 {/* Close Button */}
                                 <button

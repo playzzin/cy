@@ -43,7 +43,7 @@ const BulkEditWorkerModal: React.FC<BulkEditWorkerModalProps> = ({ isOpen, onClo
             switch (field) {
                 case 'status': defaultValue = 'active'; break;
                 case 'role': defaultValue = '일반'; break;
-                case 'salaryModel': defaultValue = '일급제'; break;
+                case 'payType': defaultValue = '일급제'; break;
                 case 'unitPrice': defaultValue = 0; break;
                 case 'teamId':
                 case 'siteId':
@@ -230,21 +230,21 @@ const BulkEditWorkerModal: React.FC<BulkEditWorkerModalProps> = ({ isOpen, onClo
                         </select>
                     </div>
 
-                    {/* Salary Model */}
+                    {/* PayType */}
                     <div className="flex items-center gap-3">
                         <input
                             type="checkbox"
-                            id="chk-salaryModel"
-                            checked={selectedFields.includes('salaryModel')}
-                            onChange={() => handleFieldToggle('salaryModel')}
+                            id="chk-payType"
+                            checked={selectedFields.includes('payType')}
+                            onChange={() => handleFieldToggle('payType')}
                             className="w-4 h-4 text-blue-600 rounded border-gray-300"
                         />
-                        <label htmlFor="chk-salaryModel" className="w-20 text-sm font-medium text-gray-700">급여방식</label>
+                        <label htmlFor="chk-payType" className="w-20 text-sm font-medium text-gray-700">급여방식</label>
                         <select
                             className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-                            disabled={!selectedFields.includes('salaryModel')}
-                            value={updates.salaryModel || '일급제'}
-                            onChange={(e) => handleChange('salaryModel', e.target.value)}
+                            disabled={!selectedFields.includes('payType')}
+                            value={updates.payType || '일급제'}
+                            onChange={(e) => handleChange('payType', e.target.value)}
                         >
                             <option value="일급제">일급제</option>
                             <option value="주급제">주급제</option>

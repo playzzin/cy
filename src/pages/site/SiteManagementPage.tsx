@@ -62,6 +62,10 @@ interface MaterialTransactionSummary {
 }
 
 const getContractorDisplayName = (site: Site): string => {
+    // siteType이 '외부팀'이거나 partnerName에 '외부'가 포함된 경우 빈 문자열 반환
+    const siteType = String(site.siteType ?? '').trim();
+    const partnerName = String(site.partnerName ?? '').trim();
+    if (siteType.includes('외부팀') || partnerName.includes('외부')) return '';
     const candidates = [site.companyName, site.constructorCompanyName, site.partnerName]
         .map((value) => String(value || '').trim())
         .filter(Boolean);
@@ -610,9 +614,21 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                     siteService.getSites(),
                     dailyReportService.getReports(),
                 ]);
-                const sourceSites = closedOnly ? data.filter(isClosedSite) : data;
-                setSites(sourceSites);
-                setFilteredSites(sourceSites);
+                // '외부팀' 현장 제외
+                let filtered = closedOnly ? data.filter(isClosedSite) : data;
+                filtered = filtered.filter(site => {
+                    // ㈜청연이엔지 현장만 포함
+                    const companyName = String(site.companyName ?? '').trim();
+                    if (companyName !== '㈜청연이엔지') return false;
+                    const siteType = String(site.siteType ?? '').trim();
+                    const partnerName = String(site.partnerName ?? '').trim();
+                    // siteType에 '외부팀'이 포함되거나 partnerName에 '외부'가 포함되면 제외
+                    if (siteType.includes('외부팀')) return false;
+                    if (partnerName.includes('외부')) return false;
+                    return true;
+                });
+                setSites(filtered);
+                setFilteredSites(filtered);
 
                 const summaryMap: Record<string, SiteReportSummary> = {};
                 allReports.forEach((report) => {
@@ -637,7 +653,7 @@ const SiteManagementPageBase: React.FC<SiteManagementPageProps> = ({ closedOnly 
                 // Auto-open modal if siteId is present in URL
                 const targetSiteId = searchParams.get('siteId');
                 if (targetSiteId) {
-                    const targetSite = sourceSites.find(s => s.id === targetSiteId);
+                    const targetSite = filtered.find(s => s.id === targetSiteId);
                     if (targetSite) {
                         setSelectedSite(targetSite);
                     }

@@ -838,7 +838,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ node, onClose, companies, tea
                             <div className="p-3 rounded-lg" style={{ background: COLORS.glass }}>
                                 <div className="text-xs" style={{ color: COLORS.textMuted }}>급여방식</div>
                                 <div className="font-medium" style={{ color: COLORS.textPrimary }}>
-                                    {worker?.salaryModel || '-'}
+                                     {worker?.payType || '-'}
                                 </div>
                             </div>
                         </div>

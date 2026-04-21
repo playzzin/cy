@@ -348,7 +348,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
 
     const companyOptions = companies.filter((company) => {
         const type = String(company.type ?? '').trim();
-        return type === '시공사' || type === '미지정';
+        return type === '시공사' || type === '미지정' || type === '협력사';
     });
 
     return (

@@ -13,6 +13,7 @@ import {
     serverTimestamp,
     increment,
     writeBatch,
+    onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { WorkerSchema, WorkerZod } from '../types/zod/workerSchema';
@@ -26,6 +27,24 @@ const workerConverter = createConverter(WorkerSchema);
 export const workerFirestoreService = {
     getCollection() {
         return collection(db, COLLECTION_NAME).withConverter(workerConverter);
+    },
+
+    /**
+     * 실시간 근로자 목록 구독 (onSnapshot)
+     * @param {(workers: WorkerZod[]) => void} callback
+     * @returns {() => void} unsubscribe 함수 반환
+     */
+    subscribeWorkers(callback: (workers: WorkerZod[]) => void): () => void {
+        // onSnapshot은 firebase/firestore에서 import 필요
+        // orderBy('name', 'asc') 기준
+        // withConverter 적용
+        // 반환값: unsubscribe 함수
+        const q = query(this.getCollection(), orderBy('name', 'asc'));
+        const unsubscribe = onSnapshot(q, (snap: any) => {
+            const workers = snap.docs.map((d: any) => d.data());
+            callback(workers);
+        });
+        return unsubscribe;
     },
 
     async getWorker(id: string): Promise<WorkerZod | null> {

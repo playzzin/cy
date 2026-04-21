@@ -39,6 +39,43 @@ interface Ledger {
     description: string; // Ledger-level Work Content
 }
 
+const normalizeSalaryType = (value?: string | null): string => {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) return '';
+    if (normalized === '일급') return '일급제';
+    if (normalized === '월급') return '월급제';
+    return normalized;
+};
+
+const resolveWorkerSalaryType = (worker?: Partial<Worker> | null): string => {
+    if (!worker) return '일급제';
+
+    const teamType = normalizeSalaryType(worker.teamType);
+    if (teamType === '지원팀') return '지원팀';
+    if (teamType === '용역팀') return '용역팀';
+
+    const salaryModel = normalizeSalaryType(worker.salaryModel);
+    if (salaryModel) return salaryModel;
+
+    const payType = normalizeSalaryType(worker.payType);
+    if (payType) return payType;
+
+    return '일급제';
+};
+
+const resolveReportWorkerSalaryType = (
+    reportWorker?: { payType?: string | null; salaryModel?: string | null } | null,
+    worker?: Partial<Worker> | null
+): string => {
+    const payType = normalizeSalaryType(reportWorker?.payType);
+    if (payType) return payType;
+
+    const salaryModel = normalizeSalaryType(reportWorker?.salaryModel);
+    if (salaryModel) return salaryModel;
+
+    return resolveWorkerSalaryType(worker);
+};
+
 // --- Child Component: DailyReportTable ---
 const DailyReportTable: React.FC<{
     ledger: Ledger;
@@ -194,7 +231,7 @@ const DailyReportTable: React.FC<{
                     if (matchedWorker) {
                         newRows[row].workerId = matchedWorker.id || '';
                         newRows[row].unitPrice = matchedWorker.unitPrice || 0;
-                        newRows[row].payType = matchedWorker.payType || matchedWorker.salaryModel || '일급'; // Map PayType
+                        newRows[row].payType = resolveWorkerSalaryType(matchedWorker);
                         newRows[row].role = matchedWorker.role || '작업자';
 
                         const team = matchedWorker.teamId ? teams.find(t => t.id === matchedWorker.teamId) : undefined;
@@ -317,7 +354,7 @@ const DailyReportTable: React.FC<{
                     teamId: team.id || '',
                     teamName: team.name,
                     unitPrice: worker.unitPrice || 0,
-                    payType: worker.payType || worker.salaryModel || '일급',
+                    payType: resolveWorkerSalaryType(worker),
                     role: worker.role || '작업자',
                     description: '',
                     workerTeamId: team.id || '',
@@ -561,6 +598,14 @@ const DailyReportGridInput: React.FC = () => {
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+
+        // 실시간 근로자 동기화
+        useEffect(() => {
+            const unsubscribe = manpowerService.subscribeWorkers((newWorkers) => {
+                setWorkers(newWorkers);
+            });
+            return () => unsubscribe();
+        }, []);
     const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
@@ -602,7 +647,7 @@ const DailyReportGridInput: React.FC = () => {
                 const [sitesData, teamsData, workersData] = await Promise.all([
                     siteService.getSites(),
                     teamService.getTeams(),
-                    manpowerService.getWorkers()
+                    manpowerService.getWorkers(true)
                 ]);
                 setSites(sitesData);
                 setTeams(teamsData);
@@ -636,6 +681,7 @@ const DailyReportGridInput: React.FC = () => {
                                     ...row,
                                     workerId: matchedWorker.id ?? '',
                                     unitPrice: matchedWorker.unitPrice ?? 0,
+                                    payType: row.payType || resolveWorkerSalaryType(matchedWorker),
                                     role: matchedWorker.role || '작업자',
                                     teamId: matchedTeam?.id ?? matchedWorker.teamId ?? (matchedWorker as any).workerTeamId ?? '',
                                     teamName: matchedTeam?.name ?? matchedWorker.teamName ?? (matchedWorker as any).workerTeamName ?? '',
@@ -798,7 +844,7 @@ const DailyReportGridInput: React.FC = () => {
                             name: finalWorkerName,
                             manDay: (w as any).gongsu || w.manDay || 0,
                             unitPrice: w.unitPrice ?? 0,
-                            payType: (w as any).payType || (w as any).salaryModel || '일급',
+                            payType: resolveReportWorkerSalaryType(w as any, workerBase),
                             role: w.role || '작업자',
                             description: w.workContent || (w as any).workDescription || '',
                             // Support for both teamName and workerTeamName for robustness
@@ -1057,19 +1103,14 @@ const DailyReportGridInput: React.FC = () => {
                     involvedTeamIds.add(resolvedTeamId);
 
                     const totalManDay = rows.reduce((sum, r) => sum + r.manDay, 0);
-                    const reportWorkers = rows.map(r => ({
+                    const reportWorkers = rows.map(r => {
                         // 사용자가 직접 입력한 payType을 우선적으로 사용
-                        salaryModel: r.payType || (() => {
-                            const matchedWorker = workers.find(w => w.id === r.workerId);
-                            if (matchedWorker?.teamType === '지원팀') return '지원팀';
-                            if (matchedWorker?.teamType === '용역팀') return '용역팀';
-                            return matchedWorker?.salaryModel || '일급제';
-                        })(),
+                        const matchedWorker = workers.find(w => w.id === r.workerId);
+                        const resolvedSalaryType = normalizeSalaryType(r.payType) || resolveWorkerSalaryType(matchedWorker);
                         // payType도 사용자 입력 값을 그대로 사용
-                        payType: r.payType || (() => {
-                            const matchedWorker = workers.find(w => w.id === r.workerId);
-                            return matchedWorker?.payType || matchedWorker?.salaryModel || '일급';
-                        })(),
+                        return {
+                            salaryModel: resolvedSalaryType,
+                            payType: resolvedSalaryType,
                         workerId: r.workerId || 'unknown',
                         name: r.name,
                         role: r.role,
@@ -1085,7 +1126,8 @@ const DailyReportGridInput: React.FC = () => {
                             team?.name ||
                             site?.responsibleTeamName ||
                             ''
-                    }));
+                        };
+                    });
 
                     allReports.push({
                         date,
@@ -1238,7 +1280,7 @@ const DailyReportGridInput: React.FC = () => {
                         teamName: worker?.teamType === '지원팀' ? '지원' : (worker ? (teams.find(t => t.id === worker.teamId)?.name || '') : ''),
                         workerId: worker?.id || '',
                         unitPrice: worker?.unitPrice || 0,
-                        payType: worker?.payType || worker?.salaryModel || '일급',
+                        payType: resolveWorkerSalaryType(worker),
                         role: w.role || worker?.role || '작업자',
                         description: w.workContent || '', // AI content or Empty
                         workerTeamId: worker?.teamId || '',
@@ -1349,69 +1391,72 @@ const DailyReportGridInput: React.FC = () => {
                 </div>
             )}
 
-            {/* Top Toolbar */}
-            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shadow-sm z-10">
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
-                        <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />
-                        <input
-                            type="date"
-                            value={date}
-                            onChange={(e) => setDate(e.target.value)}
-                            className="bg-transparent border-none text-sm font-bold text-slate-700 focus:ring-0 p-0 outline-none"
-                        />
+
+            {/* Sticky Top Toolbar (아래로 고정) */}
+            <div className="sticky-toolbar-wrapper">
+                <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shadow-sm sticky-toolbar z-[20]">
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
+                            <FontAwesomeIcon icon={faCalendarAlt} className="text-slate-500" />
+                            <input
+                                type="date"
+                                value={date}
+                                onChange={(e) => setDate(e.target.value)}
+                                className="bg-transparent border-none text-sm font-bold text-slate-700 focus:ring-0 p-0 outline-none"
+                            />
+                        </div>
+                        {/* Status Badge */}
+                        <div className="flex items-center gap-2">
+                            {!hasWarnings ? (
+                                <span className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200 font-bold flex items-center gap-1">
+                                    <FontAwesomeIcon icon={faCheckCircle} /> AI 분석 준비 완료
+                                </span>
+                            ) : (
+                                <span className="text-sm text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200 font-bold flex items-center gap-1">
+                                    <FontAwesomeIcon icon={faExclamationTriangle} /> 확인 필요
+                                </span>
+                            )}
+                        </div>
                     </div>
-                    {/* Status Badge */}
-                    <div className="flex items-center gap-2">
-                        {!hasWarnings ? (
-                            <span className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200 font-bold flex items-center gap-1">
-                                <FontAwesomeIcon icon={faCheckCircle} /> AI 분석 준비 완료
-                            </span>
-                        ) : (
-                            <span className="text-sm text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200 font-bold flex items-center gap-1">
-                                <FontAwesomeIcon icon={faExclamationTriangle} /> 확인 필요
-                            </span>
-                        )}
+                    <div className="flex gap-2">
+
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="px-4 py-2 bg-yellow-400 text-slate-900 rounded-lg hover:bg-yellow-500 flex items-center gap-2 shadow-sm transition-colors font-bold"
+                        >
+                            <FontAwesomeIcon icon={faComment} /> 카톡 분석
+                        </button>
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleKakaoUpload} />
+
+                        <button
+                            onClick={addLedger}
+                            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                            <FontAwesomeIcon icon={faPlus} /> 장부 추가
+                        </button>
+                        <button
+                            onClick={removeLastLedger}
+                            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                            <FontAwesomeIcon icon={faMinus} /> 장부 삭제
+                        </button>
+                        <button
+                            onClick={handleReset}
+                            className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 shadow-sm transition-colors"
+                            title="모든 장부를 삭제하고 빈 장부 1개로 초기화합니다"
+                        >
+                            <FontAwesomeIcon icon={faEraser} /> 초기화
+                        </button>
+
+                        <button
+                            onClick={handleSaveAll}
+                            disabled={loading}
+                            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-colors"
+                        >
+                            <FontAwesomeIcon icon={faSave} className={loading ? "animate-spin" : ""} />
+                            {loading ? '저장 중...' : '전체 저장'}
+                        </button>
                     </div>
-                </div>
-                <div className="flex gap-2">
-
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        className="px-4 py-2 bg-yellow-400 text-slate-900 rounded-lg hover:bg-yellow-500 flex items-center gap-2 shadow-sm transition-colors font-bold"
-                    >
-                        <FontAwesomeIcon icon={faComment} /> 카톡 분석
-                    </button>
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleKakaoUpload} />
-
-                    <button
-                        onClick={addLedger}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faPlus} /> 장부 추가
-                    </button>
-                    <button
-                        onClick={removeLastLedger}
-                        className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faMinus} /> 장부 삭제
-                    </button>
-                    <button
-                        onClick={handleReset}
-                        className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 shadow-sm transition-colors"
-                        title="모든 장부를 삭제하고 빈 장부 1개로 초기화합니다"
-                    >
-                        <FontAwesomeIcon icon={faEraser} /> 초기화
-                    </button>
-
-                    <button
-                        onClick={handleSaveAll}
-                        disabled={loading}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-colors"
-                    >
-                        <FontAwesomeIcon icon={faSave} className={loading ? "animate-spin" : ""} />
-                        {loading ? '저장 중...' : '전체 저장'}
-                    </button>
                 </div>
             </div>
 
@@ -1468,8 +1513,22 @@ const DailyReportGridInput: React.FC = () => {
                 </div>
             </div>
 
-            {/* Styles for Grid */}
+
+            {/* Styles for Grid & Sticky Toolbar */}
+
             <style>{`
+                /* Sticky Toolbar */
+                .sticky-toolbar-wrapper {
+                    position: sticky;
+                    top: 72px; /* 임시저장 안내 높이 + 마진 (조정 필요시 수정) */
+                    z-index: 20;
+                }
+                .sticky-toolbar {
+                    position: sticky;
+                    top: 72px;
+                    z-index: 20;
+                    background: white;
+                }
                 .handsontable-container .handsontable {
                     font-size: 12px;
                 }
@@ -1478,8 +1537,11 @@ const DailyReportGridInput: React.FC = () => {
                     color: white !important;
                     font-weight: bold !important;
                     font-size: 11px;
+                    position: sticky !important;
+                    top: 0;
+                    z-index: 2;
                 }
-                
+
                 /* Default Styles */
                 .handsontable-container .handsontable td:nth-child(1) { /* Name */
                     background-color: #E0F7FA;

@@ -3,11 +3,58 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBuilding, faUsers, faUser, faHardHat, faCheck,
-    faArrowRight, faSearch, faBriefcase, faIdCard
+    faArrowRight, faSearch, faBriefcase, faIdCard,
+    faUserShield, faCalculator, faBullhorn, faCode, faLaptopCode
 } from '@fortawesome/free-solid-svg-icons';
 import { Company } from '../../services/companyService';
 import { Team } from '../../services/teamService';
 import { Worker } from '../../services/manpowerService';
+
+// 관리 부서별 주요 업무 매핑 (Doing Focus)
+const HQ_TEAM_CONFIG: Record<string, { tasks: string[], icon: any, color: string, bgColor: string, border: string }> = {
+    '인사': {
+        tasks: ['채용/배치', '근태 관리', '급여 정산', '노무 관리', '교육 훈련'],
+        icon: faUserShield,
+        color: 'text-rose-600',
+        bgColor: 'bg-rose-50/50',
+        border: 'border-rose-200'
+    },
+    '회계': {
+        tasks: ['자금 관리', '세무 신고', '회계 감사', '결산 보고', '법카 관리'],
+        icon: faCalculator,
+        color: 'text-amber-600',
+        bgColor: 'bg-amber-50/50',
+        border: 'border-amber-200'
+    },
+    '관리': {
+        tasks: ['자산 관리', '구매 지원', '시설 관리', '문서 수납', '행정 지원'],
+        icon: faBriefcase,
+        color: 'text-slate-600',
+        bgColor: 'bg-slate-50',
+        border: 'border-slate-200'
+    },
+    '영업': {
+        tasks: ['매출 관리', '고객 발굴', '계약 체결', '시장 분석', '수주 대응'],
+        icon: faBullhorn,
+        color: 'text-indigo-600',
+        bgColor: 'bg-indigo-50/50',
+        border: 'border-indigo-200'
+    },
+    '개발': {
+        tasks: ['시스템 개발', '유지 보수', 'DB 설계', '인프라 관리', '기술 지원'],
+        icon: faCode,
+        color: 'text-cyan-600',
+        bgColor: 'bg-cyan-50/50',
+        border: 'border-cyan-200'
+    }
+};
+
+const getHqConfig = (teamName: string) => {
+    for (const key in HQ_TEAM_CONFIG) {
+        if (teamName.includes(key)) return HQ_TEAM_CONFIG[key];
+    }
+    return null;
+};
 
 // ============================================================================
 // STYLES & VARIANTS
@@ -151,11 +198,12 @@ const InteractiveOrgChart: React.FC<InteractiveOrgChartProps> = ({ companies, te
                 <div className="h-px bg-slate-300 dark:bg-slate-700 flex-1" />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4 px-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 px-4">
                 {filteredTeams.map(team => {
                     const isSelected = selectedTeamId === team.id;
                     const isDimmed = selectedTeamId && !isSelected;
                     const teamWorkersCount = workers.filter(w => isWorkerInTeam(w, team)).length;
+                    const hqConfig = getHqConfig(team.name);
 
                     // Find company for badge
                     const teamCompany = companies.find(c => c.id === team.companyId);
@@ -168,16 +216,18 @@ const InteractiveOrgChart: React.FC<InteractiveOrgChartProps> = ({ companies, te
                             onClick={() => team.id && handleTeamSelect(team.id)}
                             whileHover={{ scale: 1.03, y: -4 }}
                             className={`
-                                cursor-pointer rounded-xl p-4 relative transition-all duration-300 flex flex-col h-full
+                                cursor-pointer rounded-2xl p-5 relative transition-all duration-300 flex flex-col h-full border-2
                                 ${isSelected
-                                    ? 'bg-emerald-600 text-white shadow-xl ring-4 ring-emerald-100 scale-[1.02] z-10'
-                                    : 'bg-white text-slate-700 hover:bg-emerald-50 border border-slate-200 shadow-sm dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-emerald-900 dark:border-slate-700'
+                                    ? 'bg-indigo-600 text-white shadow-2xl ring-4 ring-indigo-100 border-indigo-400 scale-[1.02] z-10'
+                                    : hqConfig 
+                                        ? `bg-white ${hqConfig.bgColor} ${hqConfig.border} shadow-lg hover:shadow-xl` 
+                                        : 'bg-white text-slate-700 hover:bg-emerald-50 border-slate-200 shadow-sm dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-emerald-900 dark:border-slate-700'
                                 }
                                 ${isDimmed ? 'opacity-40 scale-95' : 'opacity-100'}
                             `}
                         >
-                            {/* Company Badge */}
-                            <div className="mb-2">
+                            {/* Header Badge */}
+                            <div className="flex justify-between items-start mb-4">
                                 <span className={`
                                     text-[10px] font-bold px-2 py-0.5 rounded-full inline-block
                                     ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}
@@ -185,24 +235,44 @@ const InteractiveOrgChart: React.FC<InteractiveOrgChartProps> = ({ companies, te
                                     <FontAwesomeIcon icon={faBuilding} className="mr-1" />
                                     {teamCompany?.name || '소속 미지정'}
                                 </span>
+                                {hqConfig && !isSelected && (
+                                    <span className={`text-[10px] font-black uppercase tracking-widest ${hqConfig.color}`}>HQ Dept</span>
+                                )}
                             </div>
 
-                            <div className="flex items-center gap-3 mb-2">
+                            <div className="flex items-center gap-4 mb-4">
                                 <div className={`
-                                    w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0
-                                    ${isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300'}
+                                    w-12 h-12 rounded-2xl flex items-center justify-center text-xl shrink-0 shadow-sm
+                                    ${isSelected ? 'bg-white/20 text-white' : hqConfig ? 'bg-white ' + hqConfig.color : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300'}
                                 `}>
-                                    <FontAwesomeIcon icon={faUsers} />
+                                    <FontAwesomeIcon icon={hqConfig?.icon || faUsers} />
                                 </div>
-                                <h4 className="font-bold truncate text-base leading-tight dark:text-slate-100">{team.name}</h4>
+                                <div>
+                                    <h4 className="font-black text-xl leading-tight dark:text-slate-100">{team.name}</h4>
+                                    <p className={`text-xs ${isSelected ? 'text-white/70' : 'text-slate-400'}`}>팀장: {team.leaderName || '-'}</p>
+                                </div>
                             </div>
 
-                            <div className="mt-auto pt-2 flex justify-between items-end border-t border-black/5 dark:border-white/10">
-                                <div className={`text-xs ${isSelected ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`}>
-                                    <span className="opacity-70 mr-1">팀장</span>
-                                    {team.leaderName || '-'}
+                            {/* "하는 일" 영역 (본사 부서 집중 그리드) */}
+                            {hqConfig && (
+                                <div className={`mt-2 mb-4 p-3 rounded-xl ${isSelected ? 'bg-white/10' : 'bg-white/80'} flex-1`}>
+                                    <div className={`text-[10px] font-bold mb-2 uppercase tracking-tighter ${isSelected ? 'text-white/60' : 'text-slate-400'}`}>Major Responsibilities</div>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        {hqConfig.tasks.map((task, i) => (
+                                            <div key={i} className="flex items-center gap-1">
+                                                <div className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-indigo-400'}`} />
+                                                <span className={`text-[11px] font-medium ${isSelected ? 'text-white' : 'text-slate-700'}`}>{task}</span>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isSelected ? 'bg-white/20' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300'}`}>
+                            )}
+
+                            <div className={`mt-auto pt-3 flex justify-between items-center border-t ${isSelected ? 'border-white/10' : 'border-black/5 dark:border-white/10'}`}>
+                                <div className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-500 dark:text-slate-400'}`}>
+                                    Personnel
+                                </div>
+                                <span className={`text-xs font-black px-2 py-0.5 rounded-full ${isSelected ? 'bg-white text-indigo-600' : 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'}`}>
                                     {teamWorkersCount}명
                                 </span>
                             </div>
