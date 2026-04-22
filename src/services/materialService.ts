@@ -20,6 +20,66 @@ const generateId = (prefix: string = 'mat'): string => {
 
 const trimText = (value: unknown): string => String(value ?? '').trim();
 
+const toComparableMillis = (value: unknown): number => {
+    if (!value) return 0;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value !== null) {
+        const maybeTimestamp = value as {
+            toDate?: () => Date;
+            seconds?: number;
+        };
+        if (typeof maybeTimestamp.toDate === 'function') {
+            return maybeTimestamp.toDate().getTime();
+        }
+        if (typeof maybeTimestamp.seconds === 'number') {
+            return maybeTimestamp.seconds * 1000;
+        }
+    }
+    return 0;
+};
+
+const buildMaterialSelectionKey = (material: Pick<Material, 'itemName' | 'spec'>): string => {
+    const itemName = trimText(material.itemName).replace(/\s+/g, ' ').toLowerCase();
+    const spec = trimText(material.spec).replace(/\s+/g, ' ').toLowerCase();
+    return `${itemName}::${spec}`;
+};
+
+const getMaterialQualityScore = (material: Partial<Material>): number => {
+    return [
+        trimText(material.category),
+        trimText(material.itemName),
+        trimText(material.spec),
+        trimText(material.unit),
+        trimText(material.description),
+    ].filter(Boolean).length;
+};
+
+const compareMaterialPreference = (candidate: Material, current: Material): number => {
+    const qualityDiff = getMaterialQualityScore(candidate) - getMaterialQualityScore(current);
+    if (qualityDiff !== 0) return qualityDiff;
+
+    const updatedDiff = toComparableMillis(candidate.updatedAt) - toComparableMillis(current.updatedAt);
+    if (updatedDiff !== 0) return updatedDiff;
+
+    const createdDiff = toComparableMillis(candidate.createdAt) - toComparableMillis(current.createdAt);
+    if (createdDiff !== 0) return createdDiff;
+
+    return String(candidate.id).localeCompare(String(current.id));
+};
+
+const sortMaterialsForSelection = (rows: Material[]): Material[] => {
+    return [...rows].sort((a, b) => {
+        const categoryCompare = trimText(a.category).localeCompare(trimText(b.category), 'ko');
+        if (categoryCompare !== 0) return categoryCompare;
+
+        const itemCompare = trimText(a.itemName).localeCompare(trimText(b.itemName), 'ko');
+        if (itemCompare !== 0) return itemCompare;
+
+        return trimText(a.spec).localeCompare(trimText(b.spec), 'ko');
+    });
+};
+
 const normalizeMaterialSnapshot = async () => {
     const rows = await materialFirestoreService.getAllMaterials();
     return new Map(rows.map((m) => [m.id, m]));
@@ -49,6 +109,21 @@ const normalizeTransactionWithMaster = <T extends { materialId: string; category
 
 export const getAllMaterials = async (): Promise<Material[]> => {
     return await materialFirestoreService.getAllMaterials() as any[];
+};
+
+export const getUniqueMaterialsForSelection = async (): Promise<Material[]> => {
+    const rows = await getAllMaterials();
+    const deduped = new Map<string, Material>();
+
+    rows.forEach((row) => {
+        const key = buildMaterialSelectionKey(row);
+        const existing = deduped.get(key);
+        if (!existing || compareMaterialPreference(row, existing) > 0) {
+            deduped.set(key, row);
+        }
+    });
+
+    return sortMaterialsForSelection(Array.from(deduped.values()));
 };
 
 export const getMaterialById = async (id: string): Promise<Material | null> => {
@@ -402,6 +477,7 @@ export const getMaterialTransactionHistory = async (
 
 const materialService = {
     getAllMaterials,
+    getUniqueMaterialsForSelection,
     getMaterialById,
     addMaterial,
     updateMaterial,

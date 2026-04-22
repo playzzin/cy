@@ -165,10 +165,11 @@ const MaterialOutboundPage: React.FC = () => {
         try {
             const [sitesData, materialsData] = await Promise.all([
                 siteService.getSites(),
-                materialService.getAllMaterials()
+                materialService.getUniqueMaterialsForSelection()
             ]);
             setSites(sitesData.filter((s: any) => s.status === 'active'));
             setMaterials(materialsData);
+
             setQuantities((prev) => {
                 const validIds = new Set(materialsData.map((m) => m.id));
                 const nextEntries = Object.entries(prev).filter(([id]) => validIds.has(id));
