@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFolder,
@@ -9,6 +9,7 @@ import {
     faTrash,
     faSearch,
     faFileLines,
+    faFileInvoiceDollar,
     faArrowUpRightFromSquare,
     faEye,
     faEyeSlash
@@ -82,6 +83,9 @@ const DraggableItem = ({ id, label, icon, color, type = 'new-item', payload = {}
 const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
     const [searchTerm, setSearchTerm] = useState('');
     const [showHidden, setShowHidden] = useState(false);
+    const { setNodeRef: setTrashNodeRef, isOver: isTrashOver } = useDroppable({
+        id: 'trash-zone',
+    });
 
     // Persistent hidden state
     const [hiddenPages, setHiddenPages] = useState<string[]>(() => {
@@ -146,6 +150,14 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                             icon={faFileLines}
                             color="bg-gray-600"
                             payload={{ template: 'divider' }}
+                        />
+                        <DraggableItem
+                            id="new-estimate-pack"
+                            label="견적 관리 세트"
+                            icon={faFileInvoiceDollar}
+                            color="bg-emerald-600"
+                            payload={{ template: 'estimate-pack' }}
+                            path="/estimate/manage"
                         />
                     </div>
 
@@ -222,7 +234,14 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                     {/* Trash Zone */}
                     <div className="mt-auto pt-6 border-t border-gray-700 bg-gray-800">
                         <label className="text-xs font-semibold text-gray-500 uppercase block mb-3 pl-1">휴지통</label>
-                        <div id="trash-zone" className="group border-2 border-dashed border-red-900/30 bg-red-900/5 rounded-xl p-4 flex flex-col items-center justify-center text-red-400/50 hover:bg-red-900/20 hover:border-red-500/50 hover:text-red-400 transition-all duration-300">
+                        <div
+                            ref={setTrashNodeRef}
+                            id="trash-zone"
+                            className={`group border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center transition-all duration-300 ${isTrashOver
+                                ? 'border-red-400 bg-red-500/15 text-red-300 ring-2 ring-red-500/20'
+                                : 'border-red-900/30 bg-red-900/5 text-red-400/50 hover:bg-red-900/20 hover:border-red-500/50 hover:text-red-400'
+                                }`}
+                        >
                             <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
                                 <FontAwesomeIcon icon={faTrash} className="text-lg" />
                             </div>

@@ -1,247 +1,648 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { dailyReportService } from '../../services/dailyReportService';
+import styled from 'styled-components';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService, Company } from '../../services/companyService';
 import { siteService, Site } from '../../services/siteService';
-import { advancePaymentService, AdvancePayment } from '../../services/advancePaymentService';
-import { payrollConfigService, PayrollConfig, PayrollDeductionItem, PayrollInsuranceConfig } from '../../services/payrollConfigService';
+import { AdvancePayment } from '../../services/advancePaymentService';
+import {
+    payrollConfigService,
+    PayrollConfig,
+    PayrollDeductionItem,
+    PayrollInsuranceConfig,
+    DEFAULT_ADVANCE_ITEM_LABELS,
+} from '../../services/payrollConfigService';
 import * as XLSX from 'xlsx-js-style';
 import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faEye, faEyeSlash, faFileExcel, faSearch, faSpinner, faExclamationTriangle, faCalendarDays, faCopy, faChevronUp, faChevronDown, faDownload, faFileZipper, faThumbtack, faTableColumns } from '@fortawesome/free-solid-svg-icons';
+import { faFileExcel, faSpinner, faExclamationTriangle, faCopy, faChevronUp, faChevronDown, faDownload } from '@fortawesome/free-solid-svg-icons';
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
 import { PayslipTemplate } from './components/PayslipTemplate';
-import MonthlyAdvanceLedger, { MonthlyAdvanceLedgerRow } from './components/MonthlyAdvanceLedger';
+import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
+import type { MonthlyAdvanceLedgerHandle } from './components/MonthlyAdvanceLedger';
+import { PayrollToolbar } from './components/PayrollToolbar';
 
-interface WorkerWorkEntry {
-    date: string;
-    siteName: string;
-    siteId?: string;
-    clientCompanyId?: string;
-    isLaborSite?: boolean;
-    manDay: number;
-    unitPrice: number;
-    description?: string;
-    paymentMethod?: string;
-    amount?: number;
-}
+import { usePayrollData } from './hooks/usePayrollData';
+import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
+import { BANK_CODES, STANDARD_DEDUCTION_FIELDS, WITHHOLDING_MAX_MAN_DAY } from './constants/payroll.constants';
 
-interface DeductionLine {
-    label: string;
-    amount: number;
-}
+// --- Premium UI Styled Components ---
+const ToolbarContainer = styled.section`
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 7px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.12), transparent 26%),
+        radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.12), transparent 30%),
+        linear-gradient(135deg, #f8fbff 0%, #f8fafc 52%, #ffffff 100%);
+    box-shadow: 0 18px 32px -24px rgba(15, 23, 42, 0.22);
+    overflow: hidden;
 
-interface DeductionBreakdown {
-    standardLines: DeductionLine[];
-    additionalLines: DeductionLine[];
-    totalStandard: number;
-    totalAdditional: number;
-    total: number;
-    hasData: boolean;
-}
+    &::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(120deg, rgba(255, 255, 255, 0.8), transparent 42%);
+    }
+`;
 
-type InsuranceAppliedReason = 'site' | 'client';
+const ToolbarLead = styled.div`
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+`;
 
-interface InsuranceAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    clientCompanyId: string;
-    manDay: number;
-    amount: number;
-    reason: InsuranceAppliedReason;
-}
+const ToolbarLeadMeta = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+`;
 
-interface InsuranceAppliedSummary {
-    thresholdManDay: number;
-    appliedManDay: number;
-    appliedAmount: number;
-    appliedSites: InsuranceAppliedSiteSummary[];
-}
+const ToolbarBadge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
+    padding: 0 9px;
+    border-radius: 999px;
+    border: 1px solid #dbe4f0;
+    background: rgba(255, 255, 255, 0.96);
+    font-size: 14px;
+    font-weight: 700;
+    color: #334155;
+    backdrop-filter: blur(8px);
+`;
 
-interface BusinessIncomeAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    manDay: number;
-    amount: number;
-    reason: '4대보험_제외';
-}
+const ToolbarGrid = styled.div`
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 5px;
 
-interface BusinessIncomeAppliedSummary {
-    appliedManDay: number;
-    appliedAmount: number;
-    appliedSites: BusinessIncomeAppliedSiteSummary[];
-}
+    @media (max-width: 1280px) {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
 
-interface WithholdingAppliedSiteSummary {
-    siteId: string;
-    siteName: string;
-    manDay: number;
-    amount: number;
-    reason: '노무7이하' | '노무전체';
-}
+    @media (max-width: 768px) {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+`;
 
-interface WithholdingAppliedSummary {
-    thresholdManDay: number;
-    appliedManDay: number;
-    appliedAmount: number;
-    grossAmount?: number;
-    appliedSites: WithholdingAppliedSiteSummary[];
-}
+const ToolbarCard = styled.section<{ $span?: number }>`
+    position: relative;
+    grid-column: span ${props => props.$span ?? 4};
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 100%;
+    padding: 7px;
+    border-radius: 9px;
+    border: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+    box-shadow: 0 14px 30px -24px rgba(15, 23, 42, 0.2);
+    backdrop-filter: blur(14px);
 
-interface TaxRateSnapshot {
-    pensionRate: number;
-    healthRate: number;
-    careRateOfHealth: number;
-    employmentRate: number;
-    incomeTaxRate: number;
-    residentTaxRate: number;
-    withholdingBaseDeduction?: number;
-    withholdingIncomeBaseMultiplier?: number;
-    businessIncomeTaxRate: number;
-    businessResidentTaxRate: number;
-}
+    @media (max-width: 1280px) {
+        grid-column: span 3;
+    }
 
-interface PaymentData {
-    workerId: string;
-    workerName: string;
-    idNumber: string;
-    companyId: string;
-    companyName: string;
-    teamId: string;
-    teamName: string;
-    month: string;
-    totalManDay: number;
-    unitPrice: number;
-    grossAmount: number;
-    totalDeduction: number;
-    totalAmount: number;
-    laborGrossAmount: number;
-    invoiceGrossAmount: number;
-    laborManDay: number;
-    invoiceManDay: number;
-    laborNetAmount: number;
-    invoiceNetAmount: number;
-    bankName: string;
-    bankCode: string;
-    accountNumber: string;
-    accountHolder: string;
-    displayContent: string;
-    workEntries: WorkerWorkEntry[];
-    deductionBreakdown: DeductionBreakdown;
-    taxBreakdown: DeductionBreakdown;
-    taxRateSnapshot?: TaxRateSnapshot;
-    insuranceAppliedSummary?: InsuranceAppliedSummary;
-    withholdingAppliedSummary?: WithholdingAppliedSummary;
-    businessIncomeAppliedSummary?: BusinessIncomeAppliedSummary;
-    isValid: boolean;
-    errors: {
-        bankName?: boolean;
-        bankCode?: boolean;
-        accountNumber?: boolean;
-        accountHolder?: boolean;
-    };
-}
+    @media (max-width: 768px) {
+        grid-column: span 1;
+    }
+`;
 
-const BANK_CODES: { [key: string]: string } = {
-    // 은행
-    '한국은행': '001',
-    '산업은행': '002', '산업': '002', 'KDB': '002',
-    '기업은행': '003', '기업': '003', 'IBK': '003',
-    'KB국민은행': '004', '국민은행': '004', '국민': '004', 'KB': '004',
-    '수협은행': '007', '수협': '007', 'Sh수협': '007',
-    '수출입은행': '008',
-    '농협은행': '011', '농협': '011', 'NH': '011', 'NH농협': '011',
-    '농축협': '012', '지역농협': '012',
-    '우리은행': '020', '우리': '020',
-    'SC제일은행': '023', '제일은행': '023', 'SC': '023',
-    '한국씨티은행': '027', '씨티': '027', '씨티은행': '027',
-    '대구은행': '031', '대구': '031', 'iM뱅크': '031', 'DGB': '031',
-    '부산은행': '032', '부산': '032', 'BNK부산': '032',
-    '광주은행': '034', '광주': '034',
-    '제주은행': '035', '제주': '035',
-    '전북은행': '037', '전북': '037',
-    '경남은행': '039', '경남': '039', 'BNK경남': '039',
-    '새마을금고': '045', '새마을': '045', 'MG새마을': '045', 'MG': '045',
-    '신협': '048', '신협중앙회': '048', '신용협동조합': '048',
-    '상호저축은행': '050', '저축은행': '050',
-    '우체국': '071', '우체국예금': '071',
-    '하나은행': '081', '하나': '081', 'KEB하나': '081',
-    '신한은행': '088', '신한': '088',
-    '케이뱅크': '089', 'K뱅크': '089', '케이': '089',
-    '카카오뱅크': '090', '카카오': '090', '카뱅': '090',
-    '토스뱅크': '092', '토스': '092',
+const ToolbarCardHeader = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6px;
+`;
 
-    // 저축은행 (개별)
-    '대신저축은행': '102',
-    'SBI저축은행': '103', 'SBI': '103',
-    'HK저축은행': '104',
-    '웰컴저축은행': '105', '웰컴': '105',
-    '신한저축은행': '106',
+const ToolbarCardTitle = styled.h3`
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+`;
 
-    // 증권사
-    '유안타증권': '209', '유안타': '209',
-    'KB증권': '218',
-    '상상인증권': '221',
-    '한양증권': '222',
-    '리딩투자증권': '223', '리딩': '223',
-    'BNK투자증권': '224',
-    'IBK투자증권': '225',
-    '다올투자증권': '227', '다올증권': '227',
-    '미래에셋증권': '238', '미래에셋': '238',
-    '삼성증권': '240', '삼성': '240',
-    '한국투자증권': '243', '한투': '243',
-    'NH투자증권': '247', 'NH증권': '247',
-    '교보증권': '261', '교보': '261',
-    '하이투자증권': '262', '아이엠증권': '262', '하이증권': '262',
-    '현대차증권': '263', '현대증권': '263',
-    '키움증권': '264', '키움': '264',
-    '이베스트투자증권': '265', 'LS증권': '265', '이베스트': '265',
-    'SK증권': '266',
-    '대신증권': '267', '대신': '267',
-    '한화투자증권': '269', '한화증권': '269',
-    '하나증권': '270',
-    '토스증권': '271',
-    'NH선물': '272',
-    '코리아에셋투자증권': '273',
-    'DS투자증권': '274',
-    '흥국증권': '275',
-    '유화증권': '276',
-    '에스아이증권': '277',
-    '신한투자증권': '278', '신한증권': '278',
-    'DB금융투자': '279', 'DB증권': '279',
-    '유진투자증권': '280', '유진증권': '280',
-    '메리츠증권': '287', '메리츠': '287',
-    '카카오페이증권': '288',
-    '부국증권': '290',
-    '신영증권': '291',
-};
+const ToolbarCardDescription = styled.p`
+    margin: 2px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #94a3b8;
+    display: none;
+`;
 
-type AdvancePaymentStandardField =
-    | 'prevMonthCarryover'
-    | 'accommodation'
-    | 'privateRoom'
-    | 'gloves'
-    | 'deposit'
-    | 'fines'
-    | 'electricity'
-    | 'gas'
-    | 'internet'
-    | 'water';
+const ToolbarCardBody = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+`;
 
-const STANDARD_DEDUCTION_FIELDS: Array<{ key: AdvancePaymentStandardField; label: string }> = [
-    { key: 'prevMonthCarryover', label: '전월 이월' },
-    { key: 'accommodation', label: '숙소비' },
-    { key: 'privateRoom', label: '개인방' },
-    { key: 'gloves', label: '장갑' },
-    { key: 'deposit', label: '보증금' },
-    { key: 'fines', label: '과태료' },
-    { key: 'electricity', label: '전기료' },
-    { key: 'gas', label: '도시가스' },
-    { key: 'internet', label: '인터넷' },
-    { key: 'water', label: '수도세' },
+const ToolbarInline = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+`;
+
+const ToolbarSectionDivider = styled.div`
+    width: 1px;
+    align-self: stretch;
+    background: linear-gradient(180deg, rgba(148, 163, 184, 0), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0));
+`;
+
+const YearNavigator = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #dbe4f0;
+`;
+
+const YearButton = styled.button`
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: #475569;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        background: #ffffff;
+        color: #0f172a;
+        transform: translateY(-1px);
+    }
+`;
+
+const YearText = styled.span`
+    min-width: 56px;
+    padding: 0 4px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+`;
+
+const MonthGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(12, minmax(36px, 1fr));
+    gap: 3px;
+    width: 100%;
+`;
+
+const MonthButton = styled.button<{ $active: boolean; $inRange: boolean }>`
+    height: 26px;
+    border: 1px solid ${props => (props.$active ? 'transparent' : props.$inRange ? '#bfdbfe' : '#e2e8f0')};
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: ${props => (props.$active ? '#ffffff' : props.$inRange ? '#1e3a8a' : '#64748b')};
+    background: ${props => (props.$active
+        ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+        : props.$inRange
+            ? '#eff6ff'
+            : '#ffffff')};
+    box-shadow: ${props => (props.$active ? '0 12px 24px -16px rgba(37, 99, 235, 0.7)' : 'none')};
+    cursor: pointer;
+    transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+        border-color: #93c5fd;
+    }
+`;
+
+const QuickRangeGroup = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 9px;
+    background: #fff7ed;
+    border: 1px solid rgba(251, 191, 36, 0.36);
+`;
+
+const QuickRangeButton = styled.button`
+    min-height: 28px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    font-size: 13px;
+    font-weight: 800;
+    color: #9a3412;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+
+    &:hover {
+        background: rgba(255, 255, 255, 0.88);
+        color: #7c2d12;
+    }
+`;
+
+const SegmentedGroup = styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    flex-wrap: wrap;
+`;
+
+const SegmentedButton = styled.button<{ $active: boolean }>`
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: ${props => (props.$active ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'transparent')};
+    color: ${props => (props.$active ? '#ffffff' : '#64748b')};
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+        color: ${props => (props.$active ? '#ffffff' : '#0f172a')};
+    }
+`;
+
+const SelectField = styled.select`
+    min-width: 120px;
+    min-height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid #dbe3ee;
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+    cursor: pointer;
+`;
+
+const SearchField = styled.input`
+    min-width: 100px;
+    min-height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+    border: 1px solid #dbe3ee;
+    background: rgba(255, 255, 255, 0.95);
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 600;
+    outline: none;
+
+    &::placeholder {
+        color: #94a3b8;
+    }
+`;
+
+const FieldCard = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 7px;
+    border-radius: 9px;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.94) 100%);
+`;
+
+const FieldLabel = styled.span`
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: #94a3b8;
+`;
+
+const ToggleChipGroup = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+`;
+
+const ToggleChipButton = styled.button<{ $active: boolean }>`
+    min-height: 32px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid ${props => (props.$active ? 'rgba(37, 99, 235, 0.3)' : 'rgba(203, 213, 225, 0.95)')};
+    background: ${props => (props.$active ? 'rgba(59, 130, 246, 0.12)' : 'rgba(255, 255, 255, 0.92)')};
+    color: ${props => (props.$active ? '#1d4ed8' : '#475569')};
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+        transform: translateY(-1px);
+    }
+`;
+void [
+    ToolbarContainer,
+    ToolbarLead,
+    ToolbarLeadMeta,
+    ToolbarBadge,
+    ToolbarGrid,
+    ToolbarCard,
+    ToolbarCardHeader,
+    ToolbarCardTitle,
+    ToolbarCardDescription,
+    ToolbarCardBody,
+    ToolbarInline,
+    ToolbarSectionDivider,
+    YearNavigator,
+    YearButton,
+    YearText,
+    MonthGrid,
+    MonthButton,
+    QuickRangeGroup,
+    QuickRangeButton,
+    SegmentedGroup,
+    SegmentedButton,
+    SelectField,
+    SearchField,
+    FieldCard,
+    FieldLabel,
+    ToggleChipGroup,
+    ToggleChipButton,
 ];
+
+const ActionCluster = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+`;
+
+const ActionButton = styled.button<{ $variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'accent' | 'outline' }>`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 15px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+
+    ${props => props.$variant === 'primary' && `
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(37, 99, 235, 0.6);
+    `}
+    ${props => props.$variant === 'secondary' && `
+        background: linear-gradient(135deg, #334155 0%, #475569 100%);
+        color: white;
+        box-shadow: 0 16px 28px -22px rgba(15, 23, 42, 0.7);
+    `}
+    ${props => props.$variant === 'danger' && `
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+        color: white;
+    `}
+    ${props => props.$variant === 'success' && `
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(5, 150, 105, 0.7);
+    `}
+    ${props => props.$variant === 'warning' && `
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(245, 158, 11, 0.72);
+    `}
+    ${props => props.$variant === 'accent' && `
+        background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+        color: white;
+        box-shadow: 0 16px 30px -22px rgba(249, 115, 22, 0.72);
+    `}
+    ${props => props.$variant === 'outline' && `
+        background: rgba(255, 255, 255, 0.96);
+        border-color: rgba(203, 213, 225, 0.95);
+        color: #334155;
+    `}
+
+    &:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 36px -24px rgba(15, 23, 42, 0.35);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+`;
+
+const KBPreviewOverlay = styled.div`
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(2, 6, 23, 0.68);
+    backdrop-filter: blur(8px);
+`;
+
+const KBPreviewDialog = styled.div`
+    width: 100%;
+    max-width: 1180px;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 28px;
+    border: 1px solid rgba(71, 85, 105, 0.68);
+    background: linear-gradient(180deg, #020617 0%, #111827 100%);
+    box-shadow: 0 36px 80px -34px rgba(2, 6, 23, 0.92);
+`;
+
+const KBPreviewHeader = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 22px;
+    border-bottom: 1px solid rgba(71, 85, 105, 0.42);
+    background:
+        radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 24%),
+        linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(17, 24, 39, 0.94) 100%);
+`;
+
+const KBPreviewTitleRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+`;
+
+const KBPreviewTitleBlock = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+`;
+
+const KBPreviewEyebrow = styled.span`
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #f59e0b;
+`;
+
+const KBPreviewTitle = styled.h3`
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    color: #f8fafc;
+`;
+
+const KBPreviewDescription = styled.p`
+    margin: 0;
+    font-size: 13px;
+    color: #94a3b8;
+`;
+
+const KBPreviewCloseButton = styled.button`
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(71, 85, 105, 0.82);
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #cbd5e1;
+    font-size: 24px;
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+
+    &:hover {
+        background: rgba(30, 41, 59, 0.96);
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+`;
+
+const KBPreviewControlsGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+
+    @media (max-width: 960px) {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    @media (max-width: 640px) {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+`;
+
+const KBPreviewFieldCard = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 20px;
+    border: 1px solid rgba(51, 65, 85, 0.86);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.92) 100%);
+`;
+
+const KBPreviewFieldLabel = styled.label`
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #64748b;
+`;
+
+const KBPreviewFieldHint = styled.span`
+    font-size: 12px;
+    line-height: 1.45;
+    color: #94a3b8;
+`;
+
+const KBPreviewInput = styled.input`
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(71, 85, 105, 0.88);
+    background: rgba(2, 6, 23, 0.72);
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+
+    &::placeholder {
+        color: #64748b;
+    }
+`;
+
+const KBPreviewSelect = styled.select`
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(71, 85, 105, 0.88);
+    background: rgba(2, 6, 23, 0.72);
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 700;
+    outline: none;
+`;
+
+const KBPreviewTableArea = styled.div`
+    flex: 1;
+    overflow: auto;
+    padding: 20px 22px;
+    background: rgba(15, 23, 42, 0.78);
+`;
+
+const KBPreviewTable = styled.table`
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    color: #e2e8f0;
+`;
+
+const KBPreviewFooter = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 18px 22px 22px;
+    border-top: 1px solid rgba(71, 85, 105, 0.42);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.96) 100%);
+`;
+
+const KBPreviewSummary = styled.span`
+    font-size: 14px;
+    color: #cbd5e1;
+`;
 
 const buildStandardDeductionLabelMap = (): Record<string, string> =>
     STANDARD_DEDUCTION_FIELDS.reduce<Record<string, string>>((acc, { key, label }) => {
@@ -258,6 +659,40 @@ const buildDeductionLabelMapFromConfig = (items?: PayrollDeductionItem[]): Recor
         base[safeId] = safeLabel && safeLabel.length > 0 ? safeLabel : safeId;
     });
     return base;
+};
+
+const normalizeLineLabel = (value: string): string => String(value ?? '').replace(/\s+/g, '').trim();
+
+const buildAdvanceLabelSet = (config?: PayrollConfig | null): Set<string> => {
+    const labels = {
+        ...DEFAULT_ADVANCE_ITEM_LABELS,
+        ...(config?.advanceItemLabels ?? {}),
+    };
+
+    const set = new Set<string>([
+        normalizeLineLabel(labels.corporateAdvance1),
+        normalizeLineLabel(labels.corporateAdvance2),
+        normalizeLineLabel(labels.corporateAdvance3),
+        normalizeLineLabel(labels.corporateAdvance4),
+        normalizeLineLabel(labels.laborAdvance1),
+        normalizeLineLabel(labels.laborAdvance2),
+        normalizeLineLabel(labels.laborAdvance3),
+        normalizeLineLabel(labels.laborAdvance4),
+        'corporateAdvance1',
+        'corporateAdvance2',
+        'corporateAdvance3',
+        'corporateAdvance4',
+        'laborAdvance1',
+        'laborAdvance2',
+        'laborAdvance3',
+        'laborAdvance4',
+        'carrySecond',
+        'currentAdvance',
+        'currentAdvanceSecond',
+    ]);
+
+    set.delete('');
+    return set;
 };
 
 const createEmptyDeductionBreakdown = (): DeductionBreakdown => ({
@@ -287,22 +722,32 @@ const TEMP_INSURANCE_PREFIX = '[4대보험]';
 const TEMP_BUSINESS_PREFIX = '[3.3%]';
 const TEMP_TAX_PREFIX = '[원천세]';
 const LEGACY_TAX_PREFIX = '[세금]';
-const WITHHOLDING_MAX_MAN_DAY = 7;
+const TEMP_DAILY_FEE_PREFIX = '[수수료]';
+const DAILY_FEE_LABEL = `${TEMP_DAILY_FEE_PREFIX} 일급제 공수당`;
 
 const stripTemporaryDeductionLines = (breakdown: DeductionBreakdown): DeductionBreakdown => {
     const safe = breakdown ?? createEmptyDeductionBreakdown();
-    const standardLines = safe.standardLines ?? [];
-    const additionalLines = (safe.additionalLines ?? []).filter((line) => {
+    const shouldKeepLine = (line: DeductionLine): boolean => {
         const label = (line?.label ?? '').trim();
         if (!label) return false;
-        return !(label.startsWith(TEMP_INSURANCE_PREFIX) || label.startsWith(TEMP_BUSINESS_PREFIX) || label.startsWith(TEMP_TAX_PREFIX) || label.startsWith(LEGACY_TAX_PREFIX) || label.startsWith('[3.0%]') || label.startsWith('[0.3%]'));
-    });
+        return !(
+            label.startsWith(TEMP_INSURANCE_PREFIX)
+            || label.startsWith(TEMP_BUSINESS_PREFIX)
+            || label.startsWith(TEMP_TAX_PREFIX)
+            || label.startsWith(LEGACY_TAX_PREFIX)
+            || label.startsWith(TEMP_DAILY_FEE_PREFIX)
+            || label.startsWith('[3.0%]')
+            || label.startsWith('[0.3%]')
+        );
+    };
+    const standardLines = (safe.standardLines ?? []).filter(shouldKeepLine);
+    const additionalLines = (safe.additionalLines ?? []).filter(shouldKeepLine);
     return rebuildDeductionBreakdown({ standardLines, additionalLines });
 };
 
 const stripTemporaryTaxLines = (breakdown: DeductionBreakdown | undefined): DeductionBreakdown => {
     const safe = breakdown ?? createEmptyDeductionBreakdown();
-    const additionalLines = (safe.additionalLines ?? []).filter((line) => {
+    const additionalLines = (safe.additionalLines ?? []).filter((line: DeductionLine) => {
         const label = (line?.label ?? '').trim();
         if (!label) return false;
         return !(label.startsWith(TEMP_TAX_PREFIX) || label.startsWith(LEGACY_TAX_PREFIX) || label.startsWith(TEMP_BUSINESS_PREFIX) || label.startsWith(TEMP_INSURANCE_PREFIX) || label.startsWith('[3.0%]') || label.startsWith('[0.3%]'));
@@ -312,7 +757,182 @@ const stripTemporaryTaxLines = (breakdown: DeductionBreakdown | undefined): Dedu
 
 const floorWon = (value: number): number => Math.floor(toNumber(value));
 
-const toNumber = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+const toNumber = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const normalized = value.replace(/,/g, '').trim();
+        if (!normalized) return 0;
+        const parsed = Number(normalized);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+};
+
+const APPLIED_UTILITY_FIELDS: Array<{ key: keyof LedgerUtilityInputLike['invoice']; label: string }> = [
+    { key: 'lodging', label: '숙소비' },
+    { key: 'electricity', label: '전기세' },
+    { key: 'gas', label: '도시가스' },
+    { key: 'water', label: '수도세' },
+    { key: 'internet', label: '인터넷' },
+    { key: 'management', label: '관리비' },
+    { key: 'fine', label: '과태료' },
+    { key: 'other', label: '기타' },
+];
+
+const LEDGER_DEFAULT_ASSIGNMENT: 'corporate' | 'labor' = 'corporate';
+
+const APPLIED_UTILITY_LABEL_SET = new Set(APPLIED_UTILITY_FIELDS.map((field) => field.label));
+
+const isAppliedUtilityOrFeeLabel = (labelRaw: string): boolean => {
+    const label = String(labelRaw ?? '').trim();
+    if (!label) return false;
+    return APPLIED_UTILITY_LABEL_SET.has(label) || label.startsWith(TEMP_DAILY_FEE_PREFIX);
+};
+
+const isDailyWagePaymentItem = (item: Pick<PaymentData, 'id'>): boolean => String(item.id ?? '').endsWith('__일급제');
+
+const buildDailyFeeDeductionLines = (params: {
+    item: Pick<PaymentData, 'id' | 'totalManDay'>;
+    applyDailyFee: boolean;
+    dailyFeePerManDay: number;
+}): DeductionLine[] => {
+    if (!params.applyDailyFee) return [];
+    if (!isDailyWagePaymentItem(params.item)) return [];
+
+    const feePerManDay = Math.max(0, Math.floor(toNumber(params.dailyFeePerManDay)));
+    if (feePerManDay <= 0) return [];
+
+    const totalManDay = Math.max(0, toNumber(params.item.totalManDay));
+    if (totalManDay <= 0) return [];
+
+    return [{
+        label: DAILY_FEE_LABEL,
+        amount: floorWon(totalManDay * feePerManDay),
+    }];
+};
+
+const buildUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
+    if (!manual) return [];
+
+    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
+        const assignmentType = manual.assignmentType || LEDGER_DEFAULT_ASSIGNMENT;
+        const itemAssignments = manual.itemAssignments || {};
+
+        // 개별 항목 분류가 있으면 우선 적용하고, 없으면 행 기본 분류를 따른다.
+        const resolvedAssignment = itemAssignments[field.key] ?? assignmentType;
+        const shouldInclude = resolvedAssignment === 'labor';
+
+        if (!shouldInclude) return acc;
+
+        const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
+        if (amount <= 0) return acc;
+        
+        acc.push({ label: field.label, amount });
+        return acc;
+    }, []);
+};
+
+const buildVisibleUtilityDeductionLines = (manual?: LedgerUtilityInputLike): DeductionLine[] => {
+    if (!manual) return [];
+
+    return APPLIED_UTILITY_FIELDS.reduce<DeductionLine[]>((acc, field) => {
+        const amount = toNumber(manual?.invoice?.[field.key]) + toNumber(manual?.labor?.[field.key]);
+        if (amount <= 0) return acc;
+
+        acc.push({ label: field.label, amount });
+        return acc;
+    }, []);
+};
+
+const mergeDeductionBreakdownWithLines = (
+    breakdown: DeductionBreakdown | undefined,
+    lines: DeductionLine[]
+): DeductionBreakdown => {
+    const safe = breakdown ?? createEmptyDeductionBreakdown();
+    const standardLines = [...(safe.standardLines ?? [])].map((line) => ({
+        label: String(line.label ?? '').trim(),
+        amount: toNumber(line.amount),
+    }));
+    const additionalLines = [...(safe.additionalLines ?? [])].map((line) => ({
+        label: String(line.label ?? '').trim(),
+        amount: toNumber(line.amount),
+    }));
+
+    lines.forEach((line) => {
+        const label = String(line.label ?? '').trim();
+        const amount = toNumber(line.amount);
+        if (!label || amount <= 0) return;
+
+        const standardIndex = standardLines.findIndex((existing) => existing.label === label);
+        if (standardIndex >= 0) {
+            standardLines[standardIndex] = {
+                ...standardLines[standardIndex],
+                amount: standardLines[standardIndex].amount + amount,
+            };
+            return;
+        }
+
+        const additionalIndex = additionalLines.findIndex((existing) => existing.label === label);
+        if (additionalIndex >= 0) {
+            additionalLines[additionalIndex] = {
+                ...additionalLines[additionalIndex],
+                amount: additionalLines[additionalIndex].amount + amount,
+            };
+            return;
+        }
+
+        standardLines.push({ label, amount });
+    });
+
+    return rebuildDeductionBreakdown({ standardLines, additionalLines });
+};
+
+const buildAdvanceDeductionLines = (
+    manual: LedgerUtilityInputLike | undefined,
+    config?: PayrollConfig | null
+): DeductionLine[] => {
+    if (!manual) return [];
+
+    const labels = {
+        ...DEFAULT_ADVANCE_ITEM_LABELS,
+        ...(config?.advanceItemLabels ?? {}),
+    };
+
+    const mapped: Array<{ label: string; amount: number }> = [
+        { label: labels.corporateAdvance1, amount: toNumber(manual.invoice?.carry) },
+        { label: labels.corporateAdvance2, amount: toNumber(manual.invoice?.carrySecond) },
+        { label: labels.corporateAdvance3, amount: toNumber(manual.invoice?.currentAdvance) },
+        { label: labels.corporateAdvance4, amount: toNumber(manual.invoice?.currentAdvanceSecond) },
+        { label: labels.laborAdvance1, amount: toNumber(manual.labor?.carry) },
+        { label: labels.laborAdvance2, amount: toNumber(manual.labor?.carrySecond) },
+        { label: labels.laborAdvance3, amount: toNumber(manual.labor?.currentAdvance) },
+        { label: labels.laborAdvance4, amount: toNumber(manual.labor?.currentAdvanceSecond) },
+    ];
+
+    return mapped
+        .filter((item) => String(item.label ?? '').trim().length > 0 && item.amount > 0)
+        .map((item) => ({ label: String(item.label).trim(), amount: item.amount }));
+};
+
+const ensureAdvanceLinesInBreakdown = (
+    breakdown: DeductionBreakdown,
+    manual: LedgerUtilityInputLike | undefined,
+    config?: PayrollConfig | null
+): DeductionBreakdown => {
+    const source = breakdown ?? createEmptyDeductionBreakdown();
+    const sourceLines = [
+        ...(source.standardLines ?? []),
+        ...(source.additionalLines ?? []),
+    ];
+    const advanceLabelSet = buildAdvanceLabelSet(config);
+    const hasAdvanceLines = sourceLines.some((line) => advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? ''))));
+    if (hasAdvanceLines) return source;
+
+    const manualAdvanceLines = buildAdvanceDeductionLines(manual, config);
+    if (manualAdvanceLines.length === 0) return source;
+
+    return mergeDeductionBreakdownWithLines(source, manualAdvanceLines);
+};
 
 const TAX_LINE_BUSINESS_INCOME_PREFIX = '[3.0%]';
 const TAX_LINE_BUSINESS_RESIDENT_PREFIX = '[0.3%]';
@@ -341,7 +961,7 @@ const resolveTaxLineRateText = (lineLabel: string, snapshot?: TaxRateSnapshot): 
     if (label.startsWith(TEMP_INSURANCE_PREFIX)) {
         if (label.includes('국민연금')) return formatRatePercent(snapshot.pensionRate, 2);
         if (label.includes('건강보험')) return formatRatePercent(snapshot.healthRate, 3);
-        if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth, 2);
+        if (label.includes('장기요양')) return formatRatePercent(snapshot.careRateOfHealth ?? 0, 2);
         if (label.includes('고용보험')) return formatRatePercent(snapshot.employmentRate, 3);
     }
 
@@ -356,8 +976,8 @@ const resolveTaxLineRateText = (lineLabel: string, snapshot?: TaxRateSnapshot): 
         }
     }
 
-    if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate, 1);
-    if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate, 1);
+    if (label.includes('사업소득세')) return formatRatePercent(snapshot.businessIncomeTaxRate ?? BUSINESS_INCOME_TAX_RATE, 1);
+    if (label.includes('소득세')) return formatRatePercent(snapshot.businessResidentTaxRate ?? BUSINESS_RESIDENT_TAX_RATE, 1);
 
     return '-';
 };
@@ -418,6 +1038,10 @@ const extractLedgerTaxAmountsFromItem = (
     item: PaymentData
 ): NonNullable<MonthlyAdvanceLedgerRow['statementTaxAmounts']> => {
     const lines = getTaxLinesForItem(item);
+    const deductionLines: DeductionLine[] = [
+        ...(item.deductionBreakdown?.standardLines ?? []),
+        ...(item.deductionBreakdown?.additionalLines ?? []),
+    ];
 
     let pension = 0;
     let health = 0;
@@ -427,6 +1051,7 @@ const extractLedgerTaxAmountsFromItem = (
     let residentTax = 0;
     let businessIncomeTax = 0;
     let businessResidentTax = 0;
+    let dailyFee = 0;
 
     lines.forEach((line) => {
         const label = String(line.label ?? '').trim();
@@ -453,6 +1078,12 @@ const extractLedgerTaxAmountsFromItem = (
         }
     });
 
+    deductionLines.forEach((line) => {
+        const label = String(line.label ?? '').trim();
+        if (!label.startsWith(TEMP_DAILY_FEE_PREFIX)) return;
+        dailyFee += toNumber(line.amount);
+    });
+
     return {
         pension,
         health,
@@ -462,6 +1093,7 @@ const extractLedgerTaxAmountsFromItem = (
         residentTax,
         businessIncomeTax,
         businessResidentTax,
+        dailyFee,
         isWithholdingTarget:
             (item.withholdingAppliedSummary?.appliedAmount ?? 0) > 0 || incomeTax + residentTax > 0,
     };
@@ -478,7 +1110,7 @@ interface WorkEntryTaxCalculationResult {
 
 const buildWorkEntriesForLedgerRow = (row: MonthlyAdvanceLedgerRow): WorkerWorkEntry[] => {
     const normalizedEntries = (row.workEntries ?? [])
-        .map((entry) => ({
+        .map((entry: MonthlyAdvanceLedgerWorkEntry) => ({
             date: (entry.date ?? row.month).trim() || row.month,
             siteName: (entry.siteName ?? '').trim() || '-',
             siteId: entry.siteId,
@@ -492,7 +1124,7 @@ const buildWorkEntriesForLedgerRow = (row: MonthlyAdvanceLedgerRow): WorkerWorkE
                     ? toNumber(entry.amount)
                     : floorWon(toNumber(entry.manDay) * toNumber(entry.unitPrice)),
         }))
-        .filter((entry) => toNumber(entry.manDay) > 0 || toNumber(entry.amount) > 0);
+        .filter((entry: WorkerWorkEntry) => toNumber(entry.manDay) > 0 || toNumber(entry.amount) > 0);
 
     if (normalizedEntries.length > 0) return normalizedEntries;
 
@@ -534,6 +1166,7 @@ const calculateWorkEntryTaxBreakdown = (params: {
     applyBusinessIncome: boolean;
     normalizeSiteName: (value: string | undefined) => string;
     withholdingThreshold: number;
+    isInsuranceEligibleEntry?: (entry: WorkerWorkEntry) => boolean;
 }): WorkEntryTaxCalculationResult => {
     const insuranceConfig = params.payrollConfig.insuranceConfig;
     const threshold = Math.max(0, Math.floor(toNumber(insuranceConfig?.thresholdDays)));
@@ -572,6 +1205,8 @@ const calculateWorkEntryTaxBreakdown = (params: {
         return (entry.paymentMethod ?? '').trim() === '노무';
     };
 
+    const isInsuranceEligibleEntry = params.isInsuranceEligibleEntry ?? (() => true);
+
     const getLaborGroupKey = (entry: WorkerWorkEntry): string => {
         const siteKey = getSiteKey(entry);
         const clientCompanyId = (entry.clientCompanyId ?? '').trim();
@@ -580,6 +1215,16 @@ const calculateWorkEntryTaxBreakdown = (params: {
     };
 
     const laborGroupAgg = new Map<
+        string,
+        {
+            siteId: string;
+            siteName: string;
+            clientCompanyId: string;
+            manDay: number;
+            amount: number;
+        }
+    >();
+    const insuranceEligibleGroupAgg = new Map<
         string,
         {
             siteId: string;
@@ -621,18 +1266,38 @@ const calculateWorkEntryTaxBreakdown = (params: {
             manDay: prevGroup.manDay + manDay,
             amount: prevGroup.amount + amount,
         });
+
+        if (!isInsuranceEligibleEntry(entry)) return;
+
+        const prevInsuranceGroup =
+            insuranceEligibleGroupAgg.get(groupKey) ??
+            {
+                siteId: siteKey,
+                siteName: siteNameById.get(siteKey) ?? '-',
+                clientCompanyId,
+                manDay: 0,
+                amount: 0,
+            };
+
+        insuranceEligibleGroupAgg.set(groupKey, {
+            siteId: prevInsuranceGroup.siteId || siteKey,
+            siteName: prevInsuranceGroup.siteName || siteNameById.get(siteKey) || '-',
+            clientCompanyId: clientCompanyId || prevInsuranceGroup.clientCompanyId,
+            manDay: prevInsuranceGroup.manDay + manDay,
+            amount: prevInsuranceGroup.amount + amount,
+        });
     });
 
     const insuranceGroupKeys = new Set<string>();
 
     if (params.applyInsurance && threshold > 0) {
-        laborGroupAgg.forEach((agg, groupKey) => {
+        insuranceEligibleGroupAgg.forEach((agg, groupKey) => {
             if (agg.manDay >= threshold) insuranceGroupKeys.add(groupKey);
         });
     }
 
     const insuranceBaseAmount = params.applyInsurance
-        ? Array.from(laborGroupAgg.entries()).reduce((sum, [groupKey, agg]) => sum + (insuranceGroupKeys.has(groupKey) ? agg.amount : 0), 0)
+        ? Array.from(insuranceEligibleGroupAgg.entries()).reduce((sum, [groupKey, agg]) => sum + (insuranceGroupKeys.has(groupKey) ? agg.amount : 0), 0)
         : 0;
 
     const withholdingGroupKeys = new Set<string>();
@@ -730,7 +1395,7 @@ const calculateWorkEntryTaxBreakdown = (params: {
     if (params.applyInsurance && insuranceBaseAmount > 0) {
         const appliedSites: InsuranceAppliedSiteSummary[] = Array.from(insuranceGroupKeys)
             .map((groupKey) => {
-                const agg = laborGroupAgg.get(groupKey);
+                const agg = insuranceEligibleGroupAgg.get(groupKey);
                 const siteId = agg?.siteId ?? groupKey.split('::')[0];
                 const reason: InsuranceAppliedReason = (agg?.clientCompanyId ?? '').trim() ? 'client' : 'site';
                 return {
@@ -774,6 +1439,7 @@ const calculateWorkEntryTaxBreakdown = (params: {
         const grossAmount = appliedSites.reduce((sum, s) => sum + toNumber(s.amount), 0);
 
         withholdingAppliedSummary = {
+            thresholdDays: withholdingApplyAllLabor ? 0 : params.withholdingThreshold,
             thresholdManDay: withholdingApplyAllLabor ? 0 : params.withholdingThreshold,
             appliedManDay,
             appliedAmount: withholdingBaseAmount,
@@ -801,6 +1467,7 @@ const calculateWorkEntryTaxBreakdown = (params: {
         businessIncomeAppliedSummary = {
             appliedManDay,
             appliedAmount: businessBaseAmount,
+            rate: BUSINESS_INCOME_TAX_RATE + BUSINESS_RESIDENT_TAX_RATE,
             appliedSites,
         };
     }
@@ -821,6 +1488,7 @@ const calculateWorkEntryTaxBreakdown = (params: {
         taxRateSnapshot: {
             pensionRate: toNumber(insuranceConfig?.pensionRate),
             healthRate: toNumber(insuranceConfig?.healthRate),
+            longtermRate: toNumber(insuranceConfig?.careRateOfHealth),
             careRateOfHealth: toNumber(insuranceConfig?.careRateOfHealth),
             employmentRate: toNumber(insuranceConfig?.employmentRate),
             incomeTaxRate: withholdingIncomeTaxRate,
@@ -906,12 +1574,27 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [startMonth, setStartMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [endMonth, setEndMonth] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
     const [yearCursor, setYearCursor] = useState<string>(new Date().toISOString().slice(0, 7)); // YYYY-MM
-    const [paymentData, setPaymentData] = useState<PaymentData[]>([]);
-    const [ledgerRowsData, setLedgerRowsData] = useState<MonthlyAdvanceLedgerRow[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
+    const [monthSelectionMode, setMonthSelectionMode] = useState<'single' | 'range'>('single');
+    const [rangeAnchorMonth, setRangeAnchorMonth] = useState<string>('');
+    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+    const [teamDropdownOpen, setTeamDropdownOpen] = useState<boolean>(false);
+    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
+    
+    // usePayrollData 훅 통합
+    const { 
+        loading, 
+        paymentData, 
+        basePaymentData,
+        setPaymentData,
+        ledgerRowsData, 
+        errorCount, 
+        refetch: fetchData 
+    } = usePayrollData(startMonth, endMonth, { 
+        selectedTeamId: selectedTeamId || undefined, 
+        selectedWorkerId: selectedWorkerId || undefined 
+    });
+
     const [bulkDisplayContent, setBulkDisplayContent] = useState<string>('월급');
-    const [bulkSender, setBulkSender] = useState<string>('㈜다원'); // 보내는사람
-    const [errorCount, setErrorCount] = useState<number>(0);
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false); // 국민은행용 미리보기
     const [showPayslipModal, setShowPayslipModal] = useState<boolean>(false);
     const [selectedPayslipRowKey, setSelectedPayslipRowKey] = useState<string>(''); // 
@@ -923,15 +1606,20 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [allSites, setAllSites] = useState<Site[]>([]);
     const [showCalculationLabor, setShowCalculationLabor] = useState<boolean>(false);
     const [companies, setCompanies] = useState<Company[]>([]);
-    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
     const [workerSearchText, setWorkerSearchText] = useState<string>('');
     const [filterMode, setFilterMode] = useState<'team' | 'worker'>('team');
     const [pageViewMode, setPageViewMode] = useState<'standard' | 'ledger'>('ledger');
+    const [toolbarExpanded, setToolbarExpanded] = useState<boolean>(false);
+    const [ledgerVisibleSections, setLedgerVisibleSections] = useState({
+        utilities: true,
+        advances: true,
+        taxes: true,
+    });
 
-    const [filtersReady, setFiltersReady] = useState<boolean>(false);
-    const [deductionLabelMap, setDeductionLabelMap] = useState<Record<string, string>>(buildStandardDeductionLabelMap());
+    const [, setFiltersReady] = useState<boolean>(false);
+    const [, setDeductionLabelMap] = useState<Record<string, string>>(buildStandardDeductionLabelMap());
     const [payrollConfig, setPayrollConfig] = useState<PayrollConfig | null>(null);
+    const advanceLabelSet = useMemo(() => buildAdvanceLabelSet(payrollConfig), [payrollConfig]);
     const [showInsuranceSettings, setShowInsuranceSettings] = useState<boolean>(false);
     const [insuranceConfigSaving, setInsuranceConfigSaving] = useState<boolean>(false);
 
@@ -940,6 +1628,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [healthRatePercentInput, setHealthRatePercentInput] = useState<string>('');
     const [careRateOfHealthPercentInput, setCareRateOfHealthPercentInput] = useState<string>('');
     const [employmentRatePercentInput, setEmploymentRatePercentInput] = useState<string>('');
+    const [dailyWorkerFeePerManDayInput, setDailyWorkerFeePerManDayInput] = useState<string>('');
     const [incomeTaxRatePercentInput, setIncomeTaxRatePercentInput] = useState<string>('');
     const [residentTaxRatePercentInput, setResidentTaxRatePercentInput] = useState<string>('');
     const [withholdingBaseDeductionInput, setWithholdingBaseDeductionInput] = useState<string>('');
@@ -947,11 +1636,22 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const [withholdingApplyAllLaborInput, setWithholdingApplyAllLaborInput] = useState<boolean>(true);
     const [employmentApplyBelowThresholdInput, setEmploymentApplyBelowThresholdInput] = useState<boolean>(true);
 
+    const [deductionApplyInProgress, setDeductionApplyInProgress] = useState(false);
+
     const [insuranceApplied, setInsuranceApplied] = useState<boolean>(false);
+    const [insuranceTeamSiteOnly, setInsuranceTeamSiteOnly] = useState<boolean>(false);
     const [businessIncomeApplied, setBusinessIncomeApplied] = useState<boolean>(false);
+    const [utilitiesApplied, setUtilitiesApplied] = useState<boolean>(true);
+    const [dailyFeeApplied, setDailyFeeApplied] = useState<boolean>(false);
     const [copying, setCopying] = useState(false);
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-    const [isFixed, setIsFixed] = useState<boolean>(true);
+    const [ledgerInputs, setLedgerInputs] = useState<Record<string, LedgerManualInput>>({});
+    const advanceLedgerRef = useRef<MonthlyAdvanceLedgerHandle>(null);
+    const [kbReceiverDisplay, setKbReceiverDisplay] = useState<string>('㈜다원');
+    const [kbMemoSuffix, setKbMemoSuffix] = useState<string>('{이름} 가불');
+    const [kbAmountType, setKbAmountType] = useState<string>('totalAmount');
+    const applyRunSeqRef = React.useRef(0);
+    const applyWatchdogRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const companyNameById = useMemo<Record<string, string>>(() => {
         const map: Record<string, string> = {};
@@ -963,18 +1663,140 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return map;
     }, [companies]);
 
-    // Lock parent scroll for internal scrolling
+    const workerTeamByWorkerId = useMemo(() => {
+        const map = new Map<string, { teamId: string; teamName: string }>();
+        allWorkers.forEach((worker) => {
+            const workerId = String(worker.id ?? '').trim();
+            if (!workerId) return;
+            map.set(workerId, {
+                teamId: String(worker.teamId ?? '').trim(),
+                teamName: String(worker.teamName ?? '').trim(),
+            });
+        });
+        return map;
+    }, [allWorkers]);
+
+    const normalizePersistedTeamId = useCallback((value: string | undefined): string => {
+        const safe = String(value ?? '').trim();
+        if (!safe) return '';
+        if (safe === 'no-team' || safe === '__no_team__' || safe.startsWith('unresolved:')) return '';
+        return safe;
+    }, []);
+
+    const normalizeTeamText = useCallback((value: string | undefined): string => {
+        return (value ?? '')
+            .toLowerCase()
+            .replace(/\(.*?\)/g, '')
+            .replace(/[^0-9a-z\u3131-\u318e\uac00-\ud7a3]/g, '')
+            .trim();
+    }, []);
+
+    const teamIdAliasIndex = useMemo(() => {
+        const aliasToCanonical = new Map<string, string>();
+
+        allTeams.forEach((team) => {
+            const id = normalizePersistedTeamId(String(team.id ?? ''));
+            const legacyId = normalizePersistedTeamId(String(team.legacyId ?? ''));
+            const canonical = id || legacyId;
+            if (!canonical) return;
+
+            aliasToCanonical.set(canonical, canonical);
+            if (id) aliasToCanonical.set(id, canonical);
+            if (legacyId) aliasToCanonical.set(legacyId, canonical);
+        });
+
+        return aliasToCanonical;
+    }, [allTeams, normalizePersistedTeamId]);
+
+    const resolveCanonicalTeamId = useCallback(
+        (value: string | undefined): string => {
+            const normalized = normalizePersistedTeamId(value);
+            if (!normalized) return '';
+            return teamIdAliasIndex.get(normalized) ?? normalized;
+        },
+        [normalizePersistedTeamId, teamIdAliasIndex]
+    );
+
+    const siteTeamOwnershipIndex = useMemo(() => {
+        const bySiteId = new Map<string, { teamId: string; teamNameKey: string }>();
+        const bySiteName = new Map<string, { teamId: string; teamNameKey: string }>();
+
+        allSites.forEach((site) => {
+            const teamId = resolveCanonicalTeamId(String(site.responsibleTeamId ?? ''));
+            const teamNameKey = normalizeTeamText(site.responsibleTeamName ?? '');
+            if (!teamId && !teamNameKey) return;
+
+            const payload = { teamId, teamNameKey };
+
+            const siteId = String(site.id ?? '').trim();
+            if (siteId && !bySiteId.has(siteId)) {
+                bySiteId.set(siteId, payload);
+            }
+
+            const legacyId = String(site.legacyId ?? '').trim();
+            if (legacyId && !bySiteId.has(legacyId)) {
+                bySiteId.set(legacyId, payload);
+            }
+
+            const siteNameKey = normalizeTeamText(site.name);
+            if (siteNameKey && !bySiteName.has(siteNameKey)) {
+                bySiteName.set(siteNameKey, payload);
+            }
+        });
+
+        return { bySiteId, bySiteName };
+    }, [allSites, normalizeTeamText, resolveCanonicalTeamId]);
+
+    const isEntryInWorkerTeamSite = useCallback(
+        (entry: WorkerWorkEntry, workerTeamId: string | undefined, workerTeamName: string | undefined): boolean => {
+            const targetTeamId = resolveCanonicalTeamId(workerTeamId);
+            const targetTeamNameKey = normalizeTeamText(workerTeamName);
+            if (!targetTeamId && !targetTeamNameKey) return false;
+
+            const siteId = String(entry.siteId ?? '').trim();
+            const siteNameKey = normalizeTeamText(entry.siteName);
+            const owner =
+                (siteId ? siteTeamOwnershipIndex.bySiteId.get(siteId) : undefined) ??
+                (siteNameKey ? siteTeamOwnershipIndex.bySiteName.get(siteNameKey) : undefined);
+
+            if (!owner) return false;
+            if (targetTeamId && owner.teamId && owner.teamId === targetTeamId) return true;
+            if (targetTeamNameKey && owner.teamNameKey && owner.teamNameKey === targetTeamNameKey) return true;
+            return false;
+        },
+        [normalizeTeamText, resolveCanonicalTeamId, siteTeamOwnershipIndex]
+    );
+
+    // Full-bleed: remove #main-content padding and lock overflow for internal scrolling
     useEffect(() => {
         const mainContent = document.getElementById('main-content');
         if (mainContent) {
             const originalOverflow = mainContent.style.overflow;
             mainContent.style.overflow = 'hidden';
+            mainContent.classList.add('page-full-bleed');
             return () => {
                 mainContent.style.overflow = originalOverflow;
+                mainContent.classList.remove('page-full-bleed');
             };
         }
     }, []);
     const printRef = useRef<HTMLDivElement>(null);
+    const teamDropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!teamDropdownOpen) return;
+
+        const handleOutsideClick = (event: MouseEvent) => {
+            if (!teamDropdownRef.current) return;
+            const targetNode = event.target as Node;
+            if (!teamDropdownRef.current.contains(targetNode)) {
+                setTeamDropdownOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [teamDropdownOpen]);
 
     // --- Copy Logic ---
     const handleCopyToClipboard = async () => {
@@ -1087,8 +1909,74 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const currentYearMonth = useMemo(() => getYearMonthFromDate(new Date()), [getYearMonthFromDate]);
     const prevYearMonth = useMemo(() => shiftYearMonth(currentYearMonth, -1), [currentYearMonth, shiftYearMonth]);
 
+    const handleSelectSingleMonth = useCallback((yearMonth: string) => {
+        const safe = (yearMonth ?? '').trim();
+        if (!safe) return;
+        setStartMonth(safe);
+        setEndMonth(safe);
+        setYearCursor(safe);
+        setRangeAnchorMonth('');
+    }, []);
+
+    const handleSelectPrevMonth = useCallback(() => {
+        handleSelectSingleMonth(prevYearMonth);
+    }, [handleSelectSingleMonth, prevYearMonth]);
+
+    const handleSelectCurrentMonth = useCallback(() => {
+        handleSelectSingleMonth(currentYearMonth);
+    }, [currentYearMonth, handleSelectSingleMonth]);
+
+    const handleMonthModeChange = useCallback(
+        (nextMode: 'single' | 'range') => {
+            setMonthSelectionMode(nextMode);
+            setRangeAnchorMonth('');
+            if (nextMode === 'single') {
+                const safe = (endMonth || startMonth || currentYearMonth).trim();
+                if (safe) {
+                    setStartMonth(safe);
+                    setEndMonth(safe);
+                    setYearCursor(safe);
+                }
+            }
+        },
+        [currentYearMonth, endMonth, startMonth]
+    );
+
+    const handleMonthButtonSelect = useCallback(
+        (yearMonth: string) => {
+            const safe = (yearMonth ?? '').trim();
+            if (!safe) return;
+            setYearCursor(safe);
+
+            if (monthSelectionMode === 'single') {
+                handleSelectSingleMonth(safe);
+                return;
+            }
+
+            if (!rangeAnchorMonth) {
+                setRangeAnchorMonth('');
+                setStartMonth(safe);
+                setEndMonth(safe);
+                return;
+            }
+
+            const from = compareYearMonth(rangeAnchorMonth, safe) <= 0 ? rangeAnchorMonth : safe;
+            const to = compareYearMonth(rangeAnchorMonth, safe) <= 0 ? safe : rangeAnchorMonth;
+            setStartMonth(from);
+            setEndMonth(to);
+            setRangeAnchorMonth('');
+        },
+        [compareYearMonth, handleSelectSingleMonth, monthSelectionMode, rangeAnchorMonth]
+    );
+
     const monthRange = useMemo(() => buildMonthRange(startMonth, endMonth), [buildMonthRange, endMonth, startMonth]);
     const monthRangeSet = useMemo(() => new Set(monthRange), [monthRange]);
+    const selectedTeamLabel = useMemo(() => {
+        if (!selectedTeamId) return '팀전체';
+        const found = teams.find((team) => String(team.id ?? '').trim() === selectedTeamId);
+        return (found?.name ?? '팀전체').trim() || '팀전체';
+    }, [selectedTeamId, teams]);
+
     const rangeLabel = useMemo(() => {
         if (!startMonth || !endMonth) return '';
         const from = compareYearMonth(startMonth, endMonth) <= 0 ? startMonth : endMonth;
@@ -1096,16 +1984,43 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return from === to ? from : `${from}~${to}`;
     }, [compareYearMonth, endMonth, startMonth]);
 
+        const formatYearMonthParts = useCallback((value: string) => {
+            const [year = '-', month = '-'] = (value ?? '').split('-');
+            return {
+                year,
+                month,
+            };
+        }, []);
+
     const tableColSpan = showAccountColumns ? 15 : 11;
     const filteredPaymentData = useMemo(() => {
         const rows = paymentData;
 
+        const sortRows = (list: PaymentData[]) => {
+            const salaryRank = (item: PaymentData) => (item.id.endsWith('__월급제') ? 0 : 1);
+            return [...list].sort((a, b) => {
+                const monthCmp = String(a.month ?? '').localeCompare(String(b.month ?? ''));
+                if (monthCmp !== 0) return monthCmp;
+
+                const rankCmp = salaryRank(a) - salaryRank(b);
+                if (rankCmp !== 0) return rankCmp;
+
+                const workerCmp = String(a.workerName ?? '').localeCompare(String(b.workerName ?? ''));
+                if (workerCmp !== 0) return workerCmp;
+
+                const teamCmp = String(a.teamName ?? '').localeCompare(String(b.teamName ?? ''));
+                if (teamCmp !== 0) return teamCmp;
+
+                return String(a.id ?? '').localeCompare(String(b.id ?? ''));
+            });
+        };
+
         if (filterMode === 'team') {
-            return rows;
+            return sortRows(rows);
         }
 
-        if (!selectedWorkerId) return rows;
-        return rows.filter((item) => item.workerId === selectedWorkerId);
+        if (!selectedWorkerId) return sortRows(rows);
+        return sortRows(rows.filter((item) => item.workerId === selectedWorkerId));
     }, [filterMode, paymentData, selectedWorkerId]);
 
     const filteredLedgerRows = useMemo<MonthlyAdvanceLedgerRow[]>(() => {
@@ -1118,7 +2033,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const paymentDataByLedgerKey = useMemo(() => {
         const map = new Map<string, PaymentData>();
         paymentData.forEach((item) => {
-            map.set(`${item.month}__${item.workerId}__${item.teamId}`, item);
+            const salaryModel = item.id.endsWith('__일급제') ? '일급제' : item.id.endsWith('__용역팀') ? '용역팀' : '월급제';
+            map.set(`${item.month}__${item.workerId}__${item.teamId}__${salaryModel}`, item);
         });
         return map;
     }, [paymentData]);
@@ -1137,20 +2053,31 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
     const ledgerRows = useMemo<MonthlyAdvanceLedgerRow[]>(
         () =>
             filteredLedgerRows.map((row) => {
-                const key = `${row.month}__${row.workerId}__${row.teamId}`;
-                const isMonthlyRow = (row.salaryModel ?? '').trim() === '월급제';
+                const _rawModel = (row.salaryModel ?? '').trim();
+                const rowSalaryModel = _rawModel === '일급제' ? '일급제' : _rawModel === '용역팀' ? '용역팀' : '월급제';
+                const key = `${row.month}__${row.workerId}__${row.teamId}__${rowSalaryModel}`;
                 let statementItem = paymentDataByLedgerKey.get(key);
 
-                if (!statementItem && isMonthlyRow) {
+                if (!statementItem) {
                     const looseKey = `${row.month}__${row.workerId}`;
-                    const candidates = paymentDataByWorkerMonthKey.get(looseKey) ?? [];
-                    const normalizedRowTeam = normalizeTeamName(row.teamName);
+                    const workerTeam = workerTeamByWorkerId.get(String(row.workerId ?? '').trim());
+                    const normalizedRowTeam = normalizeTeamName(workerTeam?.teamName || row.teamName);
+                    const targetCanonicalTeamId = resolveCanonicalTeamId(workerTeam?.teamId || row.teamId);
+                    const candidates = (paymentDataByWorkerMonthKey.get(looseKey) ?? []).filter((candidate) => {
+                        const candidateSalaryModel = candidate.id.endsWith('__일급제') ? '일급제' : candidate.id.endsWith('__용역팀') ? '용역팀' : '월급제';
+                        return candidateSalaryModel === rowSalaryModel;
+                    });
+
                     statementItem =
+                        candidates.find((candidate) => {
+                            if (!targetCanonicalTeamId) return false;
+                            return resolveCanonicalTeamId(candidate.teamId) === targetCanonicalTeamId;
+                        }) ??
                         candidates.find((candidate) => normalizeTeamName(candidate.teamName) === normalizedRowTeam) ??
                         (candidates.length === 1 ? candidates[0] : undefined);
                 }
 
-                if (isMonthlyRow && statementItem) {
+                if (statementItem) {
                     return {
                         ...row,
                         teamId: statementItem.teamId,
@@ -1167,59 +2094,376 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                 if (!payrollConfig) return row;
 
+                const workerTeam = workerTeamByWorkerId.get(String(row.workerId ?? '').trim());
+                const workerTeamIdForMatch = workerTeam?.teamId || row.teamId;
+                const workerTeamNameForMatch = workerTeam?.teamName || row.teamName;
+
+                const workEntriesForTax = buildWorkEntriesForLedgerRow(row);
                 const calculatedTax = calculateWorkEntryTaxBreakdown({
-                    workEntries: buildWorkEntriesForLedgerRow(row),
+                    workEntries: workEntriesForTax,
                     payrollConfig,
                     applyInsurance: insuranceApplied,
                     applyBusinessIncome: businessIncomeApplied,
                     normalizeSiteName: normalizeTeamName,
                     withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
+                    isInsuranceEligibleEntry: insuranceTeamSiteOnly
+                    ? (entry) => isEntryInWorkerTeamSite(entry, workerTeamIdForMatch, workerTeamNameForMatch)
+                        : undefined,
                 });
+
+                const fallbackDailyFeePerManDay = Math.max(
+                    0,
+                    Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0))
+                );
+                const fallbackDailyFeeManDay = workEntriesForTax.reduce((sum, entry) => sum + toNumber(entry.manDay), 0);
+                const fallbackDailyFee = rowSalaryModel === '일급제' && fallbackDailyFeePerManDay > 0
+                    ? floorWon(fallbackDailyFeeManDay * fallbackDailyFeePerManDay)
+                    : 0;
 
                 return {
                     ...row,
-                    statementTaxAmounts: calculatedTax.statementTaxAmounts,
+                    statementTaxAmounts: {
+                        ...calculatedTax.statementTaxAmounts,
+                        dailyFee: fallbackDailyFee,
+                    },
                 };
             }),
         [
             businessIncomeApplied,
             filteredLedgerRows,
             insuranceApplied,
+            insuranceTeamSiteOnly,
+            isEntryInWorkerTeamSite,
             normalizeTeamName,
             paymentDataByLedgerKey,
             paymentDataByWorkerMonthKey,
             payrollConfig,
+            resolveCanonicalTeamId,
+            workerTeamByWorkerId,
         ]
     );
 
+    const loadedLedgerInputsFromAdvance = useMemo<Record<string, LedgerManualInput>>(() => {
+        const next: Record<string, LedgerManualInput> = {};
+        ledgerRows.forEach((row) => {
+            const key = String(row.rowKey || row.id || '').trim();
+            if (!key || !row.manual) return;
+            next[key] = row.manual;
+        });
+        return next;
+    }, [ledgerRows]);
+
+    const activeLedgerRowKeySet = useMemo<Set<string>>(() => {
+        const set = new Set<string>();
+        ledgerRows.forEach((row) => {
+            const key = String(row.rowKey || row.id || '').trim();
+            if (key) set.add(key);
+        });
+        return set;
+    }, [ledgerRows]);
+
+    const ledgerSideFieldNames: Array<keyof LedgerManualInput['invoice']> = useMemo(
+        () => [
+            'carry',
+            'carrySecond',
+            'currentAdvance',
+            'currentAdvanceSecond',
+            'lodging',
+            'electricity',
+            'gas',
+            'water',
+            'internet',
+            'management',
+            'fine',
+            'other',
+        ],
+        []
+    );
+
+    const isLedgerManualInputEffectivelyEmpty = useCallback(
+        (input: LedgerManualInput | undefined, baselineInput?: LedgerManualInput): boolean => {
+            if (!input) return true;
+
+            const resolveAssignmentType = (
+                assignmentType: LedgerManualInput['assignmentType'] | undefined,
+                fallback: 'corporate' | 'labor' = 'corporate'
+            ): 'corporate' | 'labor' => {
+                if (assignmentType === 'labor') return 'labor';
+                if (assignmentType === 'corporate') return 'corporate';
+                return fallback;
+            };
+
+            const isSideEmpty = (side: LedgerManualInput['invoice'] | undefined): boolean => {
+                const safeSide = side ?? ({} as LedgerManualInput['invoice']);
+                return ledgerSideFieldNames.every((field) => toNumber(safeSide[field]) === 0);
+            };
+
+            const memo = String(input.personalMemo ?? '').trim();
+            const assignments = input.itemAssignments ?? {};
+            const hasAssignment = Object.keys(assignments).some((key) => {
+                const value = assignments[key];
+                return (value === 'corporate' || value === 'labor') && String(key).trim().length > 0;
+            });
+
+            const hasAnyValue = !isSideEmpty(input.invoice) || !isSideEmpty(input.labor) || memo.length > 0 || hasAssignment;
+            if (!hasAnyValue) return true;
+
+            const baselineAssignment = resolveAssignmentType(baselineInput?.assignmentType, 'corporate');
+            const currentAssignment = resolveAssignmentType(input.assignmentType, baselineAssignment);
+            const hasCustomAssignment = currentAssignment !== baselineAssignment;
+
+            return isSideEmpty(input.invoice) && isSideEmpty(input.labor) && memo.length === 0 && !hasAssignment && !hasCustomAssignment;
+        },
+        [ledgerSideFieldNames]
+    );
+
+    useEffect(() => {
+        setLedgerInputs((prev) => {
+            const next: Record<string, LedgerManualInput> = {};
+
+            activeLedgerRowKeySet.forEach((key) => {
+                const prevInput = prev[key];
+                const loadedInput = loadedLedgerInputsFromAdvance[key];
+
+                if (loadedInput && (!prevInput || isLedgerManualInputEffectivelyEmpty(prevInput, loadedInput))) {
+                    next[key] = loadedInput;
+                    return;
+                }
+
+                if (prevInput) {
+                    next[key] = prevInput;
+                    return;
+                }
+
+                if (loadedInput) {
+                    next[key] = loadedInput;
+                }
+            });
+
+            const prevKeys = Object.keys(prev);
+            const nextKeys = Object.keys(next);
+            if (prevKeys.length !== nextKeys.length) return next;
+
+            const hasChanged = nextKeys.some((key) => prev[key] !== next[key]);
+            return hasChanged ? next : prev;
+        });
+    }, [activeLedgerRowKeySet, isLedgerManualInputEffectivelyEmpty, loadedLedgerInputsFromAdvance]);
+
+    const utilityInputByPaymentRowKey = useMemo(() => {
+        const map = new Map<string, LedgerUtilityInputLike>();
+        const paymentRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+
+        const upsertUtilityInput = (paymentRowKey: string, input: LedgerUtilityInputLike) => {
+            const existing = map.get(paymentRowKey);
+            if (!existing) {
+                map.set(paymentRowKey, input);
+                return;
+            }
+
+            const mergeSide = (side: 'invoice' | 'labor') => {
+                const prevSide = existing[side];
+                const nextSide = input[side];
+                return {
+                    ...prevSide,
+                    ...nextSide,
+                    lodging: toNumber(prevSide?.lodging) + toNumber(nextSide?.lodging),
+                    electricity: toNumber(prevSide?.electricity) + toNumber(nextSide?.electricity),
+                    gas: toNumber(prevSide?.gas) + toNumber(nextSide?.gas),
+                    water: toNumber(prevSide?.water) + toNumber(nextSide?.water),
+                    internet: toNumber(prevSide?.internet) + toNumber(nextSide?.internet),
+                    management: toNumber(prevSide?.management) + toNumber(nextSide?.management),
+                    fine: toNumber(prevSide?.fine) + toNumber(nextSide?.fine),
+                    other: toNumber(prevSide?.other) + toNumber(nextSide?.other),
+                };
+            };
+
+            map.set(paymentRowKey, {
+                ...existing,
+                ...input,
+                invoice: mergeSide('invoice'),
+                labor: mergeSide('labor'),
+            });
+        };
+
+        Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
+            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : ledgerRowKey.endsWith('__용역팀') ? '용역팀' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
+            if (!salaryModel) return;
+
+            const input = manual as LedgerUtilityInputLike;
+            const parts = ledgerRowKey.split('__');
+            if (parts.length < 4) return;
+            const [month, workerId, teamId] = parts;
+
+            const directPaymentKey = `${month}__${workerId}__${teamId}__${salaryModel}`;
+            if (paymentRows.some((item) => item.id === directPaymentKey)) {
+                upsertUtilityInput(directPaymentKey, input);
+                return;
+            }
+
+            const candidates = paymentRows.filter((item) => item.month === month && item.workerId === workerId && item.id.endsWith(`__${salaryModel}`));
+            if (candidates.length === 0) return;
+
+            const ledgerRow = ledgerRowsData.find((row) => row.rowKey === ledgerRowKey);
+            if (ledgerRow) {
+                const normalizedLedgerTeam = normalizeTeamName(ledgerRow.teamName);
+                const matched = candidates.find((candidate) => normalizeTeamName(candidate.teamName) === normalizedLedgerTeam);
+                if (matched) {
+                    upsertUtilityInput(matched.id, input);
+                    return;
+                }
+            }
+
+            if (candidates.length === 1) {
+                upsertUtilityInput(candidates[0].id, input);
+            }
+        });
+
+        return map;
+    }, [basePaymentData, ledgerInputs, ledgerRowsData, normalizeTeamName, paymentData]);
+
+    const utilityInputByWorkerMonthSingle = useMemo(() => {
+        const grouped = new Map<string, LedgerUtilityInputLike[]>();
+
+        Object.entries(ledgerInputs).forEach(([ledgerRowKey, manual]) => {
+            const salaryModel = ledgerRowKey.endsWith('__일급제') ? '일급제' : ledgerRowKey.endsWith('__용역팀') ? '용역팀' : (ledgerRowKey.endsWith('__월급제') ? '월급제' : '');
+            if (!salaryModel) return;
+            const parts = ledgerRowKey.split('__');
+            if (parts.length < 4) return;
+            const [month, workerId] = parts;
+            const key = `${month}__${workerId}__${salaryModel}`;
+            const list = grouped.get(key) ?? [];
+            list.push(manual as LedgerUtilityInputLike);
+            grouped.set(key, list);
+        });
+
+        const singleMap = new Map<string, LedgerUtilityInputLike>();
+        grouped.forEach((list, key) => {
+            if (list.length === 1) {
+                singleMap.set(key, list[0]);
+            }
+        });
+
+        return singleMap;
+    }, [ledgerInputs]);
+
+    const mergeUtilityInput = useCallback((left: LedgerUtilityInputLike, right: LedgerUtilityInputLike): LedgerUtilityInputLike => {
+        const mergeSide = (side: 'invoice' | 'labor') => ({
+            ...left[side],
+            ...right[side],
+            lodging: toNumber(left[side]?.lodging) + toNumber(right[side]?.lodging),
+            electricity: toNumber(left[side]?.electricity) + toNumber(right[side]?.electricity),
+            gas: toNumber(left[side]?.gas) + toNumber(right[side]?.gas),
+            water: toNumber(left[side]?.water) + toNumber(right[side]?.water),
+            internet: toNumber(left[side]?.internet) + toNumber(right[side]?.internet),
+            management: toNumber(left[side]?.management) + toNumber(right[side]?.management),
+            fine: toNumber(left[side]?.fine) + toNumber(right[side]?.fine),
+            other: toNumber(left[side]?.other) + toNumber(right[side]?.other),
+        });
+
+        return {
+            ...left,
+            ...right,
+            invoice: mergeSide('invoice'),
+            labor: mergeSide('labor'),
+        };
+    }, []);
+
+    const resolveUtilityInputForPaymentItem = useCallback((item: PaymentData): LedgerUtilityInputLike | undefined => {
+        const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : item.id.endsWith('__용역팀') ? '용역팀' : '월급제';
+        const itemRowKey = item.id;
+        const direct = itemRowKey ? (ledgerInputsRef.current[itemRowKey] as LedgerUtilityInputLike | undefined) : undefined;
+        const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
+
+        // 동일 행의 direct 입력이 있으면 우선 사용 (mapped와 합치면 2배 합산이 발생할 수 있음)
+        if (direct) return direct;
+        if (mapped) return mapped;
+
+        const itemTeamNormalized = normalizeTeamNameRef.current(item.teamName);
+        const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
+        const singleFallback = utilityInputByWorkerMonthSingleRef.current.get(monthWorkerKey);
+
+        const monthWorkerEntries = Object.entries(ledgerInputsRef.current)
+            .filter(([ledgerRowKey]) => ledgerRowKey.endsWith(`__${itemSalaryModel}`))
+            .filter(([ledgerRowKey]) => {
+                const parts = ledgerRowKey.split('__');
+                if (parts.length < 4) return false;
+                const [month, workerId] = parts;
+                return month === item.month && workerId === item.workerId;
+            })
+            .map(([ledgerRowKey, manual]) => {
+                const ledgerRow = ledgerRowsDataRef.current.find((row) => row.rowKey === ledgerRowKey);
+                return {
+                    team: normalizeTeamNameRef.current(ledgerRow?.teamName),
+                    input: manual as LedgerUtilityInputLike,
+                };
+            });
+
+        const teamMatchedInputs = monthWorkerEntries
+            .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
+            .map((entry) => entry.input);
+
+        if (teamMatchedInputs.length > 1) {
+            return teamMatchedInputs.reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+        }
+
+        if (teamMatchedInputs.length === 1) {
+            return teamMatchedInputs[0];
+        }
+
+        if (singleFallback) {
+            return singleFallback;
+        }
+
+        const paymentRows = (basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : paymentDataRef.current)
+            .filter((row) => row.month === item.month && row.workerId === item.workerId);
+
+        if (paymentRows.length === 1 && monthWorkerEntries.length > 0) {
+            return monthWorkerEntries
+                .map((entry) => entry.input)
+                .reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+        }
+
+        return undefined;
+    }, []);
+
     const payslipTarget = useMemo(() => {
         if (filteredPaymentData.length === 0) return null;
-        const targetKey = selectedPayslipRowKey || `${filteredPaymentData[0].month}__${filteredPaymentData[0].workerId}__${filteredPaymentData[0].teamId}`;
-        const target = filteredPaymentData.find((item) => `${item.month}__${item.workerId}__${item.teamId}` === targetKey) ?? filteredPaymentData[0];
+        const defaultTarget = filteredPaymentData.find((item) => item.id.endsWith('__월급제')) ?? filteredPaymentData[0];
+        const targetKey = selectedPayslipRowKey || defaultTarget.id;
+        const target = filteredPaymentData.find((item) => item.id === targetKey) ?? defaultTarget;
         return target;
     }, [filteredPaymentData, selectedPayslipRowKey]);
 
     useEffect(() => {
+        let mounted = true;
         const fetchInitialData = async () => {
             try {
-                const [fetchedTeams, fetchedWorkers, fetchedCompanies] = await Promise.all([
+                const [fetchedTeams, fetchedWorkers, fetchedCompanies, fetchedSites] = await Promise.all([
                     teamService.getTeams(),
                     manpowerService.getWorkers(),
                     companyService.getCompanies(),
+                    siteService.getSites(),
                 ]);
-
+                if (!mounted) return;
                 setAllTeams(fetchedTeams);
                 setAllWorkers(fetchedWorkers);
                 setCompanies(fetchedCompanies);
+                setAllSites(fetchedSites);
             } catch (error) {
+                if (!mounted) return;
                 console.error('Failed to load initial data:', error);
                 alert('초기 데이터를 불러오는 중 오류가 발생했습니다.');
             } finally {
-                setFiltersReady(true);
+                if (mounted) {
+                    setFiltersReady(true);
+                }
             }
         };
 
         void fetchInitialData();
+        return () => {
+            mounted = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -1250,6 +2494,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setHealthRatePercentInput(String(Math.round(((insurance?.healthRate ?? 0.03545) * 100000)) / 1000));
         setCareRateOfHealthPercentInput(String(Math.round(((insurance?.careRateOfHealth ?? 0.1295) * 100000)) / 1000));
         setEmploymentRatePercentInput(String(Math.round(((insurance?.employmentRate ?? 0.009) * 100000)) / 1000));
+        setDailyWorkerFeePerManDayInput(String(Math.floor(toNumber(insurance?.dailyWorkerFeePerManDay ?? 0))));
         setWithholdingBaseDeductionInput(String(Math.floor(toNumber(insurance?.withholdingBaseDeduction ?? 150000))));
         setWithholdingIncomeBaseMultiplierPercentInput(
             String(Math.round((toNumber(insurance?.withholdingIncomeBaseMultiplier ?? 0.55) * 10000)) / 100)
@@ -1270,57 +2515,396 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         setShowInsuranceSettings(true);
     }, [payrollConfig]);
 
-    const applyCalculatedDeductions = useCallback((params: { applyInsurance: boolean; applyBusinessIncome: boolean }) => {
-        const config = payrollConfig;
-        if (!config) {
+    // useRef로 최신 상태 액세스 - 의존성 없이 항상 최신값 사용
+    const basePaymentDataRef = React.useRef(basePaymentData);
+    const paymentDataRef = React.useRef(paymentData);
+    // 세금 계산 결과 영속 캐시 - basePaymentData 교체 시 초기화
+    const persistentTaxCacheRef = React.useRef<Map<string, any>>(new Map());
+    // 연속 토글 디바운스 타이머
+    const applyDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const payrollConfigRef = React.useRef(payrollConfig);
+    const normalizeTeamNameRef = React.useRef(normalizeTeamName);
+    const buildUtilityDeductionLinesRef = React.useRef(buildVisibleUtilityDeductionLines);
+    const mergeDeductionBreakdownWithLinesRef = React.useRef(mergeDeductionBreakdownWithLines);
+    const calculateWorkEntryTaxBreakdownRef = React.useRef(calculateWorkEntryTaxBreakdown);
+    const rebuildDeductionBreakdownRef = React.useRef(rebuildDeductionBreakdown);
+    const stripTemporaryDeductionLinesRef = React.useRef(stripTemporaryDeductionLines);
+    const stripTemporaryTaxLinesRef = React.useRef(stripTemporaryTaxLines);
+    const ledgerInputsRef = React.useRef(ledgerInputs);
+    const ledgerRowsDataRef = React.useRef(ledgerRowsData);
+    const utilityInputByPaymentRowKeyRef = React.useRef(utilityInputByPaymentRowKey);
+    const utilityInputByWorkerMonthSingleRef = React.useRef(utilityInputByWorkerMonthSingle);
+    const mergeUtilityInputRef = React.useRef(mergeUtilityInput);
+
+    const clearApplyWatchdog = useCallback(() => {
+        if (applyWatchdogRef.current !== null) {
+            clearTimeout(applyWatchdogRef.current);
+            applyWatchdogRef.current = null;
+        }
+    }, []);
+
+    const markApplyStarted = useCallback((seq: number) => {
+        setDeductionApplyInProgress(true);
+        clearApplyWatchdog();
+        // 비정상 루프가 생겨도 오버레이가 영구 고정되지 않도록 최대 표시시간을 둔다.
+        applyWatchdogRef.current = setTimeout(() => {
+            if (applyRunSeqRef.current === seq) {
+                setDeductionApplyInProgress(false);
+            }
+            applyWatchdogRef.current = null;
+        }, 15000);
+    }, [clearApplyWatchdog]);
+
+    const markApplyFinished = useCallback((seq: number) => {
+        if (applyRunSeqRef.current !== seq) return;
+        clearApplyWatchdog();
+        setDeductionApplyInProgress(false);
+    }, [clearApplyWatchdog]);
+
+    React.useEffect(() => {
+        // basePaymentData 참조가 달라지면(새 조회) 세금 캐시를 초기화한다
+        if (basePaymentDataRef.current !== basePaymentData) {
+            persistentTaxCacheRef.current.clear();
+        }
+        basePaymentDataRef.current = basePaymentData;
+        paymentDataRef.current = paymentData;
+        payrollConfigRef.current = payrollConfig;
+        normalizeTeamNameRef.current = normalizeTeamName;
+        buildUtilityDeductionLinesRef.current = buildVisibleUtilityDeductionLines;
+        mergeDeductionBreakdownWithLinesRef.current = mergeDeductionBreakdownWithLines;
+        calculateWorkEntryTaxBreakdownRef.current = calculateWorkEntryTaxBreakdown;
+        rebuildDeductionBreakdownRef.current = rebuildDeductionBreakdown;
+        stripTemporaryDeductionLinesRef.current = stripTemporaryDeductionLines;
+        stripTemporaryTaxLinesRef.current = stripTemporaryTaxLines;
+        ledgerInputsRef.current = ledgerInputs;
+        ledgerRowsDataRef.current = ledgerRowsData;
+        utilityInputByPaymentRowKeyRef.current = utilityInputByPaymentRowKey;
+        utilityInputByWorkerMonthSingleRef.current = utilityInputByWorkerMonthSingle;
+        mergeUtilityInputRef.current = mergeUtilityInput;
+    }, [basePaymentData, paymentData, payrollConfig, normalizeTeamName, ledgerInputs, ledgerRowsData, utilityInputByPaymentRowKey, utilityInputByWorkerMonthSingle, mergeUtilityInput]);
+
+    React.useEffect(() => {
+        return () => {
+            if (applyDebounceRef.current !== null) {
+                clearTimeout(applyDebounceRef.current);
+                applyDebounceRef.current = null;
+            }
+            clearApplyWatchdog();
+        };
+    }, [clearApplyWatchdog]);
+
+    const applyCalculatedDeductions = useCallback((params: {
+        applyInsurance: boolean;
+        applyBusinessIncome: boolean;
+        applyUtilities: boolean;
+        applyDailyFee: boolean;
+        applyInsuranceTeamSiteOnly: boolean;
+        immediate?: boolean;
+    }) => {
+        const effectiveApplyUtilities = true;
+        const config = payrollConfigRef.current;
+        if ((params.applyInsurance || params.applyBusinessIncome || params.applyDailyFee) && !config) {
             alert('설정(4대보험/세율)을 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
             return;
         }
 
-        setPaymentData((prev) =>
-            prev.map((item) => {
-                const baseDeductionBreakdown = stripTemporaryDeductionLines(item.deductionBreakdown);
-                const baseTaxBreakdown = stripTemporaryTaxLines(item.taxBreakdown);
+        const runSeq = applyRunSeqRef.current + 1;
+        applyRunSeqRef.current = runSeq;
+        markApplyStarted(runSeq);
 
-                const calculatedTax = calculateWorkEntryTaxBreakdown({
-                    workEntries: item.workEntries ?? [],
-                    payrollConfig: config,
-                    applyInsurance: params.applyInsurance,
-                    applyBusinessIncome: params.applyBusinessIncome,
-                    normalizeSiteName: normalizeTeamName,
-                    withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
+        if (applyDebounceRef.current !== null) {
+            clearTimeout(applyDebounceRef.current);
+            applyDebounceRef.current = null;
+        }
+
+        const delay = params.immediate ? 0 : 150;
+        applyDebounceRef.current = setTimeout(() => {
+            if (runSeq !== applyRunSeqRef.current) return;
+            applyDebounceRef.current = null;
+
+            try {
+                const basePD = basePaymentDataRef.current.length > 0 ? basePaymentDataRef.current : paymentDataRef.current;
+                const ledgerInputsMap = ledgerInputsRef.current;
+                const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(config?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
+
+                const ledgerEntriesMergedByMonthWorker = new Map<string, { team: string | undefined, input: any }[]>();
+                Object.entries(ledgerInputsMap).forEach(([ledgerRowKey, manual]) => {
+                    const parts = ledgerRowKey.split('__');
+                    if (parts.length < 4) return;
+                    const [month, workerId, , salaryModelStr] = parts;
+                    const ledgerRow = ledgerRowsDataRef.current.find((row) => row.rowKey === ledgerRowKey);
+                    const team = normalizeTeamNameRef.current(ledgerRow?.teamName);
+
+                    const groupKey = `${month}__${workerId}__${salaryModelStr}`;
+                    let group = ledgerEntriesMergedByMonthWorker.get(groupKey);
+                    if (!group) {
+                        group = [];
+                        ledgerEntriesMergedByMonthWorker.set(groupKey, group);
+                    }
+                    group.push({ team, input: manual });
                 });
 
-                const nextDeductionBreakdown = rebuildDeductionBreakdown({
-                    standardLines: baseDeductionBreakdown.standardLines,
-                    additionalLines: [...(baseDeductionBreakdown.additionalLines ?? [])],
+                const paymentRowsCountByMonthWorker = new Map<string, number>();
+                basePD.forEach((row) => {
+                    const key = `${row.month}__${row.workerId}`;
+                    paymentRowsCountByMonthWorker.set(key, (paymentRowsCountByMonthWorker.get(key) || 0) + 1);
                 });
 
-                const nextTaxBreakdown = rebuildDeductionBreakdown({
-                    standardLines: [],
-                    additionalLines: [...(baseTaxBreakdown.additionalLines ?? []), ...calculatedTax.taxAdditionalLines],
+                const taxCache = persistentTaxCacheRef.current;
+
+                const newPaymentData = basePD.map((item) => {
+                    const sourceDeductionBreakdownRaw = stripTemporaryDeductionLinesRef.current(item.deductionBreakdown);
+                    const baseTaxBreakdown = stripTemporaryTaxLinesRef.current(item.taxBreakdown);
+
+                    const itemRowKey = item.id;
+                    const direct = itemRowKey ? (ledgerInputsMap[itemRowKey] as any) : undefined;
+                    const mapped = itemRowKey ? utilityInputByPaymentRowKeyRef.current.get(itemRowKey) : undefined;
+
+                    let utilityInput: any = undefined;
+                    if (direct) {
+                        utilityInput = direct;
+                    } else if (mapped) {
+                        utilityInput = mapped;
+                    } else {
+                        const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+                        const itemTeamNormalized = normalizeTeamNameRef.current(item.teamName);
+                        const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
+                        const singleFallback = utilityInputByWorkerMonthSingleRef.current.get(monthWorkerKey);
+
+                        const monthWorkerEntries = ledgerEntriesMergedByMonthWorker.get(monthWorkerKey) || [];
+
+                        const teamMatchedInputs = monthWorkerEntries
+                            .filter((entry) => !itemTeamNormalized || !entry.team || entry.team === itemTeamNormalized)
+                            .map((entry) => entry.input);
+
+                        if (teamMatchedInputs.length > 1) {
+                            utilityInput = teamMatchedInputs.reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+                        } else if (teamMatchedInputs.length === 1) {
+                            utilityInput = teamMatchedInputs[0];
+                        } else if (singleFallback) {
+                            utilityInput = singleFallback;
+                        } else {
+                            const pRowsCount = paymentRowsCountByMonthWorker.get(`${item.month}__${item.workerId}`) || 0;
+                            if (pRowsCount === 1 && monthWorkerEntries.length > 0) {
+                                utilityInput = monthWorkerEntries
+                                    .map((entry) => entry.input)
+                                    .reduce((acc, cur) => mergeUtilityInputRef.current(acc, cur));
+                            }
+                        }
+                    }
+
+                    const utilityLines = effectiveApplyUtilities && utilityInput
+                        ? buildUtilityDeductionLinesRef.current(utilityInput)
+                        : [];
+                    const dailyFeeLines = buildDailyFeeDeductionLines({
+                        item,
+                        applyDailyFee: params.applyDailyFee,
+                        dailyFeePerManDay,
+                    });
+                    const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
+                    const sourceDeductionBreakdown = ensureAdvanceLinesInBreakdown(
+                        sourceDeductionBreakdownRaw,
+                        utilityInput,
+                        config
+                    );
+                    const rebasedDeductionBreakdown = rebuildDeductionBreakdownRef.current({
+                        standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                        additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                    });
+
+                    const nextDeductionBreakdown = (effectiveApplyUtilities || params.applyDailyFee)
+                        ? mergeDeductionBreakdownWithLinesRef.current(rebasedDeductionBreakdown, deductionAppliedLines)
+                        : sourceDeductionBreakdown;
+
+                    let nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
+                        standardLines: [],
+                        additionalLines: [...(baseTaxBreakdown.additionalLines ?? [])],
+                    });
+                    let taxRateSnapshot: any = undefined;
+                    let insuranceAppliedSummary: any = undefined;
+                    let withholdingAppliedSummary: any = undefined;
+                    let businessIncomeAppliedSummary: any = undefined;
+
+                    if (config && (params.applyInsurance || params.applyBusinessIncome)) {
+                        const entriesLen = item.workEntries?.length ?? 0;
+                        const cacheKey = `${item.workerId}__${item.month}__${entriesLen}__${params.applyInsurance}__${params.applyBusinessIncome}__${params.applyInsuranceTeamSiteOnly}__${params.applyInsuranceTeamSiteOnly ? (item.teamId ?? '') : ''}`;
+
+                        let calculatedTax = taxCache.get(cacheKey);
+                        if (!calculatedTax) {
+                            calculatedTax = calculateWorkEntryTaxBreakdownRef.current({
+                                workEntries: item.workEntries ?? [],
+                                payrollConfig: config,
+                                applyInsurance: params.applyInsurance,
+                                applyBusinessIncome: params.applyBusinessIncome,
+                                normalizeSiteName: normalizeTeamNameRef.current,
+                                withholdingThreshold: WITHHOLDING_MAX_MAN_DAY,
+                                isInsuranceEligibleEntry: params.applyInsuranceTeamSiteOnly
+                                    ? (entry) => isEntryInWorkerTeamSite(entry, item.teamId, item.teamName)
+                                    : undefined,
+                            });
+                            taxCache.set(cacheKey, calculatedTax);
+                        }
+
+                        nextTaxBreakdown = rebuildDeductionBreakdownRef.current({
+                            standardLines: [],
+                            additionalLines: [...(baseTaxBreakdown.additionalLines ?? []), ...calculatedTax.taxAdditionalLines],
+                        });
+                        taxRateSnapshot = calculatedTax.taxRateSnapshot;
+                        insuranceAppliedSummary = calculatedTax.insuranceAppliedSummary;
+                        withholdingAppliedSummary = calculatedTax.withholdingAppliedSummary;
+                        businessIncomeAppliedSummary = calculatedTax.businessIncomeAppliedSummary;
+                    }
+
+                    const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
+                    const nextTotalAmount = item.grossAmount - nextTotalDeduction;
+
+                    if (
+                        item.totalDeduction === nextTotalDeduction &&
+                        item.totalAmount === nextTotalAmount &&
+                        item.deductionBreakdown === nextDeductionBreakdown &&
+                        item.taxBreakdown === nextTaxBreakdown &&
+                        item.taxRateSnapshot === taxRateSnapshot &&
+                        item.insuranceAppliedSummary === insuranceAppliedSummary &&
+                        item.withholdingAppliedSummary === withholdingAppliedSummary &&
+                        item.businessIncomeAppliedSummary === businessIncomeAppliedSummary
+                    ) {
+                        return item;
+                    }
+
+                    return {
+                        ...item,
+                        deductionBreakdown: nextDeductionBreakdown,
+                        taxBreakdown: nextTaxBreakdown,
+                        taxRateSnapshot,
+                        insuranceAppliedSummary,
+                        withholdingAppliedSummary,
+                        businessIncomeAppliedSummary,
+                        totalDeduction: nextTotalDeduction,
+                        totalAmount: nextTotalAmount,
+                    };
                 });
 
-                const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
-                const nextTotalAmount = item.grossAmount - nextTotalDeduction;
+                if (runSeq !== applyRunSeqRef.current) return;
 
-                return {
-                    ...item,
-                    deductionBreakdown: nextDeductionBreakdown,
-                    taxBreakdown: nextTaxBreakdown,
-                    taxRateSnapshot: calculatedTax.taxRateSnapshot,
-                    insuranceAppliedSummary: calculatedTax.insuranceAppliedSummary,
-                    withholdingAppliedSummary: calculatedTax.withholdingAppliedSummary,
-                    businessIncomeAppliedSummary: calculatedTax.businessIncomeAppliedSummary,
-                    totalDeduction: nextTotalDeduction,
-                    totalAmount: nextTotalAmount,
-                };
-            })
-        );
+                setPaymentData(newPaymentData);
+                setInsuranceApplied(params.applyInsurance);
+                setInsuranceTeamSiteOnly(params.applyInsuranceTeamSiteOnly);
+                setBusinessIncomeApplied(params.applyBusinessIncome);
+                setUtilitiesApplied(effectiveApplyUtilities);
+                setDailyFeeApplied(params.applyDailyFee);
 
-        setInsuranceApplied(params.applyInsurance);
-        setBusinessIncomeApplied(params.applyBusinessIncome);
-    }, [normalizeTeamName, payrollConfig]);
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        markApplyFinished(runSeq);
+                    }, 0);
+                });
+            } catch (error) {
+                console.error('Failed to apply calculated deductions:', error);
+                markApplyFinished(runSeq);
+            }
+        }, delay);
+    }, [
+        isEntryInWorkerTeamSite,
+        markApplyFinished,
+        markApplyStarted,
+        setPaymentData,
+    ]);
+
+    const openPayslipPreview = useCallback(() => {
+        if (filteredPaymentData.length === 0) return;
+
+        // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
+        if (filteredPaymentData.length === 0) return;
+
+        // 명세서 모달 오픈 직전 최신 공제/세금 상태를 강제로 반영해 미리보기 표시와 계산값을 동기화한다.
+        if (insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) {
+            applyCalculatedDeductions({
+                applyInsurance: insuranceApplied,
+                applyBusinessIncome: businessIncomeApplied,
+                applyUtilities: utilitiesApplied,
+                applyDailyFee: dailyFeeApplied,
+                applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
+                immediate: true, // 모달 오픈 전 즉시 반영
+            });
+        }
+
+        const defaultTarget = filteredPaymentData.find((item) => item.id.endsWith('__월급제')) ?? filteredPaymentData[0];
+        setSelectedPayslipRowKey(defaultTarget.id);
+        setShowPayslipModal(true);
+    }, [
+        applyCalculatedDeductions,
+        businessIncomeApplied,
+        dailyFeeApplied,
+        filteredPaymentData,
+        insuranceApplied,
+        insuranceTeamSiteOnly,
+        utilitiesApplied,
+    ]);
+
+    const resolvedPayslipTarget = useMemo(() => {
+        if (!payslipTarget) return null;
+        if (!utilitiesApplied && !dailyFeeApplied) return payslipTarget;
+
+        const baseRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+        const payslipRowKey = payslipTarget.id;
+        const baseItem = payslipRowKey
+            ? baseRows.find((item) => item.id === payslipRowKey)
+            : baseRows.find((item) => (
+                item.month === payslipTarget.month
+                && item.workerId === payslipTarget.workerId
+                && normalizeTeamName(item.teamName) === normalizeTeamName(payslipTarget.teamName)
+            ));
+
+        // 기준 원본 행을 찾지 못하면 현재 계산값을 그대로 사용해 중복 병합을 방지한다.
+        if (!baseItem) {
+            return payslipTarget;
+        }
+
+        const utilityInput = resolveUtilityInputForPaymentItem(payslipTarget);
+
+        const utilityLines = utilitiesApplied ? buildVisibleUtilityDeductionLines(utilityInput) : [];
+        const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
+        const dailyFeeLines = buildDailyFeeDeductionLines({
+            item: payslipTarget,
+            applyDailyFee: dailyFeeApplied,
+            dailyFeePerManDay,
+        });
+        const deductionAppliedLines = [...utilityLines, ...dailyFeeLines];
+            const sourceDeductionBreakdownRaw = stripTemporaryDeductionLines(baseItem.deductionBreakdown);
+            const sourceDeductionBreakdown = ensureAdvanceLinesInBreakdown(
+                sourceDeductionBreakdownRaw,
+                utilityInput,
+                payrollConfig
+            );
+            const baseDeductionBreakdown = rebuildDeductionBreakdown({
+                standardLines: (sourceDeductionBreakdown.standardLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                additionalLines: (sourceDeductionBreakdown.additionalLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+        });
+        const nextDeductionBreakdown = mergeDeductionBreakdownWithLines(baseDeductionBreakdown, deductionAppliedLines);
+        const nextTaxBreakdown = rebuildDeductionBreakdown({
+            standardLines: [...(payslipTarget.taxBreakdown?.standardLines ?? [])],
+            additionalLines: [...(payslipTarget.taxBreakdown?.additionalLines ?? [])],
+        });
+        const nextTotalDeduction = nextDeductionBreakdown.total + nextTaxBreakdown.total;
+        const nextTotalAmount = payslipTarget.grossAmount - nextTotalDeduction;
+
+        return {
+            ...payslipTarget,
+            deductionBreakdown: nextDeductionBreakdown,
+            taxBreakdown: nextTaxBreakdown,
+            totalDeduction: nextTotalDeduction,
+            totalAmount: nextTotalAmount,
+        };
+    }, [
+        basePaymentData,
+        dailyFeeApplied,
+        normalizeTeamName,
+        paymentData,
+        payrollConfig,
+        payslipTarget,
+        resolveUtilityInputForPaymentItem,
+        utilitiesApplied,
+    ]);
 
     const handleSaveInsuranceSettings = useCallback(async () => {
         const config = payrollConfig;
@@ -1336,6 +2920,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const healthPercent = Number(healthRatePercentInput);
         const carePercent = Number(careRateOfHealthPercentInput);
         const employmentPercent = Number(employmentRatePercentInput);
+        const dailyWorkerFeePerManDay = Math.floor(Number(dailyWorkerFeePerManDayInput));
         const incomeTaxPercent = Number(incomeTaxRatePercentInput);
         const residentTaxPercent = Number(residentTaxRatePercentInput);
         const withholdingBaseDeductionWon = Math.floor(Number(withholdingBaseDeductionInput));
@@ -1358,6 +2943,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             alert('갑근세 단가 공제기준은 0 이상의 숫자여야 합니다.');
             return;
         }
+        if (!Number.isFinite(dailyWorkerFeePerManDay) || dailyWorkerFeePerManDay < 0) {
+            alert('일급제 수수료 공수당 금액은 0 이상의 숫자여야 합니다.');
+            return;
+        }
 
         const nextInsurance: PayrollInsuranceConfig = {
             thresholdDays,
@@ -1365,6 +2954,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             healthRate: healthPercent / 100,
             careRateOfHealth: carePercent / 100,
             employmentRate: employmentPercent / 100,
+            dailyWorkerFeePerManDay,
             withholdingBaseDeduction: withholdingBaseDeductionWon,
             withholdingIncomeBaseMultiplier: withholdingIncomeBaseMultiplierPercent / 100,
             withholdingIncomeTaxRate: incomeTaxPercent / 100,
@@ -1384,8 +2974,15 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             setDeductionLabelMap(buildDeductionLabelMapFromConfig(latest?.deductionItems));
             setShowInsuranceSettings(false);
 
-            if (insuranceApplied || businessIncomeApplied) {
-                applyCalculatedDeductions({ applyInsurance: insuranceApplied, applyBusinessIncome: businessIncomeApplied });
+            if (insuranceApplied || businessIncomeApplied || utilitiesApplied || dailyFeeApplied) {
+                applyCalculatedDeductions({
+                    applyInsurance: insuranceApplied,
+                    applyBusinessIncome: businessIncomeApplied,
+                    applyUtilities: utilitiesApplied,
+                    applyDailyFee: dailyFeeApplied,
+                    applyInsuranceTeamSiteOnly: insuranceTeamSiteOnly,
+                    immediate: true, // 설정 저장 후 즉시 반영
+                });
             }
         } catch (error) {
             console.error('Failed to save insurance settings:', error);
@@ -1397,15 +2994,19 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         applyCalculatedDeductions,
         businessIncomeApplied,
         careRateOfHealthPercentInput,
+        dailyFeeApplied,
+        dailyWorkerFeePerManDayInput,
         employmentApplyBelowThresholdInput,
         employmentRatePercentInput,
         healthRatePercentInput,
         incomeTaxRatePercentInput,
         insuranceApplied,
+        insuranceTeamSiteOnly,
         insuranceThresholdManDayInput,
         payrollConfig,
         pensionRatePercentInput,
         residentTaxRatePercentInput,
+        utilitiesApplied,
         withholdingApplyAllLaborInput,
         withholdingBaseDeductionInput,
         withholdingIncomeBaseMultiplierPercentInput,
@@ -1482,8 +3083,37 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             setSelectedWorkerId('');
             setWorkerSearchText('');
         }
+        setTeamDropdownOpen(false);
         setExpandedRows(new Set());
     }, [filterMode]);
+
+    const isLedgerInsuranceEligibleEntry = useCallback(
+        (
+            entry: MonthlyAdvanceLedgerWorkEntry,
+            ledgerRow: Pick<MonthlyAdvanceLedgerRow, 'workerId' | 'teamId' | 'teamName' | 'month'>
+        ): boolean => {
+            const workerTeam = workerTeamByWorkerId.get(String(ledgerRow.workerId ?? '').trim());
+            const workerTeamIdForMatch = workerTeam?.teamId || ledgerRow.teamId;
+            const workerTeamNameForMatch = workerTeam?.teamName || ledgerRow.teamName;
+            const normalizedEntry: WorkerWorkEntry = {
+                date: String(entry.date ?? ledgerRow.month ?? '').trim() || ledgerRow.month,
+                siteId: entry.siteId,
+                siteName: String(entry.siteName ?? '').trim(),
+                clientCompanyId: entry.clientCompanyId,
+                isLaborSite: Boolean(entry.isLaborSite),
+                paymentMethod: entry.paymentMethod,
+                manDay: toNumber(entry.manDay),
+                unitPrice: toNumber(entry.unitPrice),
+                amount:
+                    toNumber(entry.amount) > 0
+                        ? toNumber(entry.amount)
+                        : floorWon(toNumber(entry.manDay) * toNumber(entry.unitPrice)),
+            };
+
+            return isEntryInWorkerTeamSite(normalizedEntry, workerTeamIdForMatch, workerTeamNameForMatch);
+        },
+        [isEntryInWorkerTeamSite, workerTeamByWorkerId]
+    );
 
     const allowedTeamIdsForWorkerFilter = useMemo(() => {
         if (!selectedTeamId) return null;
@@ -1517,8 +3147,9 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const rows = allWorkers
             .filter((w): w is Worker & { id: string } => typeof w.id === 'string' && w.id.trim().length > 0)
             .filter((w) => {
-                const model = (w.salaryModel ?? w.payType ?? '').trim();
+                const model = (w.payType ?? '').trim(); // salaryModel 완전 제거
                 if (model === '월급제') return true;
+                if (model === '용역팀') return true;
                 if (shouldIncludeDailyWage && model === '일급제') return true;
                 return false;
             })
@@ -1538,6 +3169,372 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         return rows;
     }, [allWorkers, allowedTeamIdsForWorkerFilter, pageViewMode, workerSearchText]);
 
+    // ★ 행별 표시 데이터 캐시 - 렌더 루프 안에서 매번 재계산하던 수십 개의 계산값을
+    //    여기서 한 번만 처리한다. expandedRows 토글 같은 무관한 상태 변경 시 완전히 건너뜀.
+    const rowDisplayCache = useMemo(() => {
+        const cache = new Map<string, {
+            deductionBreakdownForDisplay: DeductionBreakdown;
+            advanceLinesForDisplay: DeductionLine[];
+            nonAdvanceDeductionLinesForDisplay: DeductionLine[];
+            advanceTotalForDisplay: number;
+            nonAdvanceDeductionTotalForDisplay: number;
+            hasNonAdvanceDeductionLines: boolean;
+            hasAdvanceLines: boolean;
+            taxLinesForItem: DeductionLine[];
+            taxTotalForDisplay: number;
+            totalDeductionForDisplay: number;
+            totalAmountForDisplay: number;
+            insuranceTaxLines: DeductionLine[];
+            withholdingTaxLines: DeductionLine[];
+            businessTaxLines: DeductionLine[];
+            otherTaxLines: DeductionLine[];
+            insuranceSectionTaxTotal: number;
+            withholdingSectionTaxTotal: number;
+            businessSectionTaxTotal: number;
+            otherTaxTotal: number;
+            insuranceAfterTaxAmount: number;
+            withholdingGrossAmount: number;
+            withholdingAfterTaxAmount: number;
+            businessAfterTaxAmount: number;
+            showInsuranceSection: boolean;
+            hasInsuranceTargetSummary: boolean;
+            withholdingDetailText: string;
+        }>();
+
+        const baseRows = basePaymentData.length > 0 ? basePaymentData : paymentData;
+        const baseRowsById = new Map<string, PaymentData>();
+        baseRows.forEach((row) => {
+            baseRowsById.set(row.id, row);
+        });
+
+        const dailyFeePerManDay = Math.max(0, Math.floor(toNumber(payrollConfig?.insuranceConfig?.dailyWorkerFeePerManDay ?? 0)));
+
+        filteredPaymentData.forEach((item) => {
+            const baseItemForDisplay = baseRowsById.get(item.id) ?? item;
+
+            // utility input 해결 (state 값 직접 사용)
+            const directUtility = ledgerInputs[item.id] as LedgerUtilityInputLike | undefined;
+            const mappedUtility = utilityInputByPaymentRowKey.get(item.id);
+            let utilityInputForDisplay: LedgerUtilityInputLike | undefined = directUtility ?? mappedUtility;
+            if (!utilityInputForDisplay) {
+                const itemSalaryModel = item.id.endsWith('__일급제') ? '일급제' : '월급제';
+                const monthWorkerKey = `${item.month}__${item.workerId}__${itemSalaryModel}`;
+                utilityInputForDisplay = utilityInputByWorkerMonthSingle.get(monthWorkerKey);
+            }
+
+            const utilityLinesForDisplay = utilitiesApplied ? buildVisibleUtilityDeductionLines(utilityInputForDisplay) : [];
+            const dailyFeeLinesForDisplay = buildDailyFeeDeductionLines({
+                item,
+                applyDailyFee: dailyFeeApplied,
+                dailyFeePerManDay,
+            });
+            const deductionAppliedLines = [...utilityLinesForDisplay, ...dailyFeeLinesForDisplay];
+
+            const sourceDeduction = ensureAdvanceLinesInBreakdown(
+                stripTemporaryDeductionLines(baseItemForDisplay.deductionBreakdown),
+                utilityInputForDisplay,
+                payrollConfig
+            );
+            const baseDeduction = rebuildDeductionBreakdown({
+                standardLines: (sourceDeduction.standardLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+                additionalLines: (sourceDeduction.additionalLines ?? []).filter((line: DeductionLine) => !isAppliedUtilityOrFeeLabel(String(line.label ?? '').trim())),
+            });
+            const deductionBreakdownForDisplay = (utilitiesApplied || dailyFeeApplied)
+                ? mergeDeductionBreakdownWithLines(baseDeduction, deductionAppliedLines)
+                : sourceDeduction;
+
+            const deductionLines = [
+                ...(deductionBreakdownForDisplay.standardLines ?? []),
+                ...(deductionBreakdownForDisplay.additionalLines ?? []),
+            ];
+            const advanceLinesForDisplay = deductionLines.filter((line) =>
+                advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+            );
+            const nonAdvanceDeductionLinesForDisplay = deductionLines.filter((line) =>
+                !advanceLabelSet.has(normalizeLineLabel(String(line?.label ?? '')))
+            );
+            const advanceTotalForDisplay = advanceLinesForDisplay.reduce((sum, l) => sum + toNumber(l.amount), 0);
+            const nonAdvanceDeductionTotalForDisplay = nonAdvanceDeductionLinesForDisplay.reduce((sum, l) => sum + toNumber(l.amount), 0);
+
+            const taxLinesForItem = getTaxLinesForItem(item);
+            const taxTotalForDisplay = taxLinesForItem.reduce((sum, l) => sum + toNumber(l.amount), 0);
+            const totalDeductionForDisplay = deductionBreakdownForDisplay.total + taxTotalForDisplay;
+            const totalAmountForDisplay = item.grossAmount - totalDeductionForDisplay;
+
+            const insuranceTaxLines: DeductionLine[] = [];
+            const withholdingTaxLines: DeductionLine[] = [];
+            const businessTaxLines: DeductionLine[] = [];
+            const otherTaxLines: DeductionLine[] = [];
+
+            let insuranceSectionTaxTotal = 0;
+            let withholdingSectionTaxTotal = 0;
+            let businessSectionTaxTotal = 0;
+            let otherTaxTotal = 0;
+
+            taxLinesForItem.forEach((line) => {
+                const amount = toNumber(line.amount);
+                if (isInsuranceSectionTaxLabel(line.label)) {
+                    insuranceTaxLines.push(line);
+                    insuranceSectionTaxTotal += amount;
+                    return;
+                }
+                if (isWithholdingSectionTaxLabel(line.label)) {
+                    withholdingTaxLines.push(line);
+                    withholdingSectionTaxTotal += amount;
+                    return;
+                }
+                if (isBusinessSectionTaxLabel(line.label)) {
+                    businessTaxLines.push(line);
+                    businessSectionTaxTotal += amount;
+                    return;
+                }
+                otherTaxLines.push(line);
+                otherTaxTotal += amount;
+            });
+
+            const insuranceAfterTaxAmount = Math.max(0, Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal));
+            const withholdingGrossAmount = item.withholdingAppliedSummary
+                ? toNumber(item.withholdingAppliedSummary.grossAmount ?? item.withholdingAppliedSummary.appliedAmount)
+                : 0;
+            const withholdingAfterTaxAmount = Math.max(0, Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal));
+            const businessAfterTaxAmount = Math.max(0, Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
+
+            cache.set(item.id, {
+                deductionBreakdownForDisplay,
+                advanceLinesForDisplay,
+                nonAdvanceDeductionLinesForDisplay,
+                advanceTotalForDisplay,
+                nonAdvanceDeductionTotalForDisplay,
+                hasNonAdvanceDeductionLines: nonAdvanceDeductionLinesForDisplay.length > 0,
+                hasAdvanceLines: advanceLinesForDisplay.length > 0,
+                taxLinesForItem,
+                taxTotalForDisplay,
+                totalDeductionForDisplay,
+                totalAmountForDisplay,
+                insuranceTaxLines,
+                withholdingTaxLines,
+                businessTaxLines,
+                otherTaxLines,
+                insuranceSectionTaxTotal,
+                withholdingSectionTaxTotal,
+                businessSectionTaxTotal,
+                otherTaxTotal,
+                insuranceAfterTaxAmount,
+                withholdingGrossAmount,
+                withholdingAfterTaxAmount,
+                businessAfterTaxAmount,
+                showInsuranceSection: insuranceTaxLines.length > 0,
+                hasInsuranceTargetSummary: Boolean(item.insuranceAppliedSummary && item.insuranceAppliedSummary.appliedManDay > 0),
+                withholdingDetailText: resolveWithholdingDetailText(item.taxRateSnapshot),
+            });
+        });
+
+        return cache;
+    }, [
+        advanceLabelSet,
+        basePaymentData,
+        dailyFeeApplied,
+        filteredPaymentData,
+        ledgerInputs,
+        paymentData,
+        payrollConfig,
+        utilityInputByPaymentRowKey,
+        utilityInputByWorkerMonthSingle,
+        utilitiesApplied,
+    ]);
+
+    const normalizeBankKey = useCallback((value: unknown): string => {
+        const collapsed = String(value ?? '')
+            .trim()
+            .replace(/\s+/g, '')
+            .replace(/[[\](){}]/g, '')
+            .toUpperCase();
+
+        return collapsed
+            .replace(/^\d{3}[-_]?/, '')
+            .replace(/[-_]?\d{3}$/, '');
+    }, []);
+
+    const bankCodeByName = useMemo(() => {
+        const map = new Map<string, string>();
+
+        Object.entries(BANK_CODES).forEach(([k, v]) => {
+            const key = String(k ?? '').trim();
+            const value = String(v ?? '').trim();
+
+            if (/^\d{3}$/.test(key)) {
+                // code -> name 형태
+                const normalizedName = normalizeBankKey(value);
+                if (normalizedName) map.set(normalizedName, key);
+                return;
+            }
+
+            if (/^\d{3}$/.test(value)) {
+                // name -> code 형태
+                const normalizedName = normalizeBankKey(key);
+                if (normalizedName) map.set(normalizedName, value);
+            }
+        });
+
+        // 자주 입력되는 별칭 보정
+        map.set('국민', '004');
+        map.set('국민은행', '004');
+        map.set('KB국민', '004');
+        map.set('KB국민은행', '004');
+
+        return map;
+    }, [normalizeBankKey]);
+
+    const bankNameKeyEntries = useMemo(() => {
+        const entries: Array<{ nameKey: string; code: string }> = [];
+        Object.entries(BANK_CODES).forEach(([k, v]) => {
+            const code = String(k ?? '').trim();
+            const name = String(v ?? '').trim();
+            if (!/^\d{3}$/.test(code)) return;
+            const normalizedName = normalizeBankKey(name);
+            if (!normalizedName) return;
+            entries.push({ nameKey: normalizedName, code });
+
+            const withoutBank = normalizeBankKey(name.replace(/은행|증권|중앙회|저축은행/g, ''));
+            if (withoutBank && withoutBank !== normalizedName) {
+                entries.push({ nameKey: withoutBank, code });
+            }
+        });
+
+        entries.sort((a, b) => b.nameKey.length - a.nameKey.length);
+        return entries;
+    }, [normalizeBankKey]);
+
+    const resolveBankCode = useCallback((bankName?: string, bankCode?: string): string => {
+        const explicitCode = String(bankCode ?? '').trim();
+        if (/^\d{3}$/.test(explicitCode)) return explicitCode;
+
+        const rawBankName = String(bankName ?? '').trim();
+        if (/^\d{3}$/.test(rawBankName)) return rawBankName;
+
+        const normalizedName = normalizeBankKey(bankName);
+        if (!normalizedName) return '';
+
+        const exact = bankCodeByName.get(normalizedName);
+        if (exact) return exact;
+
+        const candidateCodes = new Set<string>();
+        bankNameKeyEntries.forEach(({ nameKey, code }) => {
+            if (!nameKey) return;
+            if (normalizedName.includes(nameKey) || nameKey.includes(normalizedName)) {
+                candidateCodes.add(code);
+            }
+        });
+
+        if (candidateCodes.size === 1) {
+            return Array.from(candidateCodes)[0];
+        }
+
+        if (candidateCodes.size > 1) {
+            const ranked = Array.from(candidateCodes)
+                .map((code) => {
+                    const officialName = String(BANK_CODES[code] ?? '');
+                    const officialKey = normalizeBankKey(officialName);
+
+                    let score = 0;
+                    if (/은행|뱅크/.test(officialName)) score += 40;
+                    if (/저축은행/.test(officialName)) score -= 15;
+                    if (/증권|선물/.test(officialName)) score -= 20;
+
+                    if (officialKey === normalizedName) score += 50;
+                    else if (officialKey.startsWith(normalizedName)) score += 20;
+                    else if (officialKey.includes(normalizedName)) score += 10;
+
+                    return { code, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+                return ranked[0].code;
+            }
+        }
+
+        return '';
+    }, [bankCodeByName, bankNameKeyEntries, normalizeBankKey]);
+
+    const analyzeBankMapping = useCallback((bankName?: string, bankCode?: string): {
+        code: string;
+        reason: string;
+        candidates: string[];
+    } => {
+        const explicitCode = String(bankCode ?? '').trim();
+        if (/^\d{3}$/.test(explicitCode)) {
+            return { code: explicitCode, reason: '', candidates: [] };
+        }
+
+        const rawBankName = String(bankName ?? '').trim();
+        if (/^\d{3}$/.test(rawBankName)) {
+            return { code: rawBankName, reason: '', candidates: [] };
+        }
+
+        const normalizedName = normalizeBankKey(bankName);
+        if (!normalizedName) {
+            return {
+                code: '',
+                reason: '은행명이 비어있거나 형식이 올바르지 않습니다.',
+                candidates: []
+            };
+        }
+
+        const exact = bankCodeByName.get(normalizedName);
+        if (exact) {
+            return { code: exact, reason: '', candidates: [] };
+        }
+
+        const candidateCodes = new Set<string>();
+        bankNameKeyEntries.forEach(({ nameKey, code }) => {
+            if (!nameKey) return;
+            if (normalizedName.includes(nameKey) || nameKey.includes(normalizedName)) {
+                candidateCodes.add(code);
+            }
+        });
+
+        if (candidateCodes.size === 1) {
+            return { code: Array.from(candidateCodes)[0], reason: '', candidates: [] };
+        }
+
+        if (candidateCodes.size > 1) {
+            const ranked = Array.from(candidateCodes)
+                .map((code) => {
+                    const officialName = String(BANK_CODES[code] ?? '');
+                    const officialKey = normalizeBankKey(officialName);
+
+                    let score = 0;
+                    if (/은행|뱅크/.test(officialName)) score += 40;
+                    if (/저축은행/.test(officialName)) score -= 15;
+                    if (/증권|선물/.test(officialName)) score -= 20;
+
+                    if (officialKey === normalizedName) score += 50;
+                    else if (officialKey.startsWith(normalizedName)) score += 20;
+                    else if (officialKey.includes(normalizedName)) score += 10;
+
+                    return { code, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (ranked[0] && (ranked.length === 1 || ranked[0].score > ranked[1].score)) {
+                return { code: ranked[0].code, reason: '', candidates: [] };
+            }
+
+            return {
+                code: '',
+                reason: '유사 은행 후보가 여러 개여서 자동 매핑을 보류했습니다.',
+                candidates: ranked.slice(0, 4).map((r) => `${r.code}:${BANK_CODES[r.code]}`),
+            };
+        }
+
+        return {
+            code: '',
+            reason: '등록된 은행명/별칭과 일치하는 코드가 없습니다.',
+            candidates: []
+        };
+    }, [bankCodeByName, bankNameKeyEntries, normalizeBankKey]);
+
 
 
 
@@ -1550,8 +3547,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             errors.bankName = true;
             isValid = false;
         }
-        if (!item.bankCode && item.bankName) {
-            if (!BANK_CODES[item.bankName]) {
+        if (!resolveBankCode(item.bankName, item.bankCode)) {
+            if (item.bankName) {
                 errors.bankCode = true;
                 isValid = false;
             }
@@ -1566,433 +3563,19 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         return { isValid, errors };
-    }, []);
+    }, [resolveBankCode]);
+    void [
+        buildUtilityDeductionLines,
+        sumInsuranceSectionTax,
+        sumWithholdingSectionTax,
+        sumBusinessSectionTax,
+        buildDeductionBreakdownFromRecords,
+        handleResetFilters,
+        validateItem,
+    ];
 
-    const fetchData = useCallback(async () => {
-        if (!startMonth || !endMonth) return;
-        const months = buildMonthRange(startMonth, endMonth);
-        if (months.length === 0) return;
-
-        setLoading(true);
-        try {
-            const safeStart = compareYearMonth(startMonth, endMonth) <= 0 ? startMonth : endMonth;
-            const safeEnd = compareYearMonth(startMonth, endMonth) <= 0 ? endMonth : startMonth;
-
-            const [endYearStr, endMonthStr] = safeEnd.split('-');
-            const endYear = Number(endYearStr);
-            const endMonthNum = Number(endMonthStr);
-
-            const startDate = `${safeStart}-01`;
-            const lastDay = new Date(endYear, endMonthNum, 0).getDate();
-            const endDate = `${safeEnd}-${String(lastDay).padStart(2, '0')}`;
-
-            const monthlyReports = await dailyReportService.getReportsByRange(startDate, endDate);
-
-            const advancesByMonth = new Map<string, AdvancePayment[]>();
-            await Promise.all(
-                months.map(async (monthKey) => {
-                    const [yStr, mStr] = monthKey.split('-');
-                    const y = Number(yStr);
-                    const m = Number(mStr);
-                    if (!Number.isFinite(y) || !Number.isFinite(m)) {
-                        advancesByMonth.set(monthKey, []);
-                        return;
-                    }
-                    const rows = await advancePaymentService.getAdvancePaymentsByYearMonth(y, m);
-                    advancesByMonth.set(monthKey, rows);
-                })
-            );
-
-            const advances = Array.from(advancesByMonth.values()).flat();
-            const advanceByWorkerTeamKey = new Map<string, AdvancePayment[]>();
-            const advanceListByWorkerId = new Map<string, AdvancePayment[]>();
-            advances.forEach((item) => {
-                const workerId = (item.workerId ?? '').trim();
-                const teamId = (item.teamId ?? '').trim();
-                if (!workerId) return;
-                if (teamId) {
-                    const listByTeam = advanceByWorkerTeamKey.get(`${workerId}__${teamId}`) ?? [];
-                    listByTeam.push(item);
-                    advanceByWorkerTeamKey.set(`${workerId}__${teamId}`, listByTeam);
-                }
-                const list = advanceListByWorkerId.get(workerId) ?? [];
-                list.push(item);
-                advanceListByWorkerId.set(workerId, list);
-            });
-
-            const workers = allWorkers.length > 0 ? allWorkers : await manpowerService.getWorkers();
-            if (allWorkers.length === 0) {
-                setAllWorkers(workers);
-            }
-            const workerMap = new Map<string, Worker>();
-            workers.forEach(w => {
-                if (w.id) workerMap.set(w.id, w);
-            });
-
-            const sites = allSites.length > 0 ? allSites : await siteService.getSites();
-            if (allSites.length === 0) {
-                setAllSites(sites);
-            }
-            const siteMap = new Map<string, Site>();
-            sites.forEach(s => {
-                const id = (s.id ?? '').trim();
-                if (id) siteMap.set(id, s);
-                const legacyId = (s.legacyId ?? '').trim();
-                if (legacyId && !siteMap.has(legacyId)) siteMap.set(legacyId, s);
-            });
-
-            const teamMap = new Map<string, Team>();
-            allTeams.forEach(t => {
-                if (t.id) teamMap.set(t.id, t);
-            });
-
-            const allowedTeamIds = (() => {
-                if (!selectedTeamId) return null;
-
-                const selectedTeamName = allTeams.find(t => t.id === selectedTeamId)?.name ?? '';
-                const selectedTeamNameNormalized = normalizeTeamName(selectedTeamName);
-
-                const ids = new Set<string>();
-                ids.add(selectedTeamId);
-
-                allTeams.forEach(team => {
-                    if (!team.id) return;
-                    if (team.parentTeamId === selectedTeamId) {
-                        ids.add(team.id);
-                        return;
-                    }
-                    if (selectedTeamNameNormalized) {
-                        const parentNameNormalized = normalizeTeamName(team.parentTeamName ?? '');
-                        if (parentNameNormalized && parentNameNormalized === selectedTeamNameNormalized) {
-                            ids.add(team.id);
-                        }
-                    }
-                });
-
-                return ids;
-            })();
-
-            type WorkerAggregate = {
-                workerId: string;
-                companyId: string;
-                companyName: string;
-                salaryModel: '월급제' | '일급제';
-                manDay: number;
-                teamId: string;
-                teamName: string;
-                totalAmount: number;
-                laborGrossAmount: number;
-                invoiceGrossAmount: number;
-                laborManDay: number;
-                invoiceManDay: number;
-                unitPrices: number[];
-                workEntries: WorkerWorkEntry[];
-                month: string;
-            };
-            const workerAggregates: Record<string, WorkerAggregate> = {};
-            const ledgerWorkerAggregates: Record<string, WorkerAggregate> = {};
-
-            const mergeWorkerAggregate = (
-                bucket: Record<string, WorkerAggregate>,
-                aggregateKey: string,
-                params: {
-                    salaryModel: '월급제' | '일급제';
-                    workerId: string;
-                    companyId: string;
-                    companyName: string;
-                    teamId: string;
-                    teamName: string;
-                    month: string;
-                    manDay: number;
-                    unitPrice: number;
-                    isLabor: boolean;
-                    reportDate: string;
-                    siteName: string;
-                    siteId?: string;
-                    clientCompanyId?: string;
-                    description?: string;
-                    paymentMethod?: string;
-                }
-            ) => {
-                if (!bucket[aggregateKey]) {
-                    bucket[aggregateKey] = {
-                        workerId: params.workerId,
-                        companyId: params.companyId,
-                        companyName: params.companyName,
-                        salaryModel: params.salaryModel,
-                        manDay: 0,
-                        teamId: params.teamId,
-                        teamName: params.teamName,
-                        totalAmount: 0,
-                        laborGrossAmount: 0,
-                        invoiceGrossAmount: 0,
-                        laborManDay: 0,
-                        invoiceManDay: 0,
-                        unitPrices: [],
-                        workEntries: [],
-                        month: params.month,
-                    };
-                }
-
-                const target = bucket[aggregateKey];
-                const entryAmount = params.manDay * params.unitPrice;
-                target.manDay += params.manDay;
-                target.totalAmount += entryAmount;
-                if (params.isLabor) {
-                    target.laborGrossAmount += entryAmount;
-                    target.laborManDay += params.manDay;
-                } else {
-                    target.invoiceGrossAmount += entryAmount;
-                    target.invoiceManDay += params.manDay;
-                }
-
-                if (!target.unitPrices.includes(params.unitPrice)) {
-                    target.unitPrices.push(params.unitPrice);
-                }
-
-                target.workEntries.push({
-                    date: params.reportDate,
-                    siteName: params.siteName,
-                    siteId: params.siteId,
-                    clientCompanyId: params.clientCompanyId,
-                    isLaborSite: params.isLabor,
-                    manDay: params.manDay,
-                    unitPrice: params.unitPrice,
-                    description: params.description,
-                    paymentMethod: params.paymentMethod || '-',
-                    amount: entryAmount
-                });
-            };
-
-            monthlyReports.forEach(report => {
-                const reportYearMonth = (report.date ?? '').slice(0, 7);
-                if (!reportYearMonth) return;
-                if (!months.includes(reportYearMonth)) return;
-
-                const reportSite = siteMap.get(report.siteId);
-
-                const resolvedReportTeamIdFromName = (() => {
-                    const normalized = normalizeTeamName(report.teamName ?? '');
-                    if (!normalized) return '';
-                    const matched = allTeams.find(t => normalizeTeamName(t.name ?? '') === normalized);
-                    return matched?.id ?? '';
-                })();
-
-                const reportTeamId = report.teamId || resolvedReportTeamIdFromName;
-                const reportTeamName = report.teamName || teamMap.get(reportTeamId)?.name || '';
-
-                report.workers.forEach(reportWorker => {
-                    const workerDetails = workerMap.get(reportWorker.workerId);
-                    if (!workerDetails) return;
-
-                    if (selectedWorkerId && reportWorker.workerId !== selectedWorkerId) return;
-
-                    const snapshotSalaryModel =
-                        typeof reportWorker.salaryModel === 'string' && reportWorker.salaryModel.trim().length > 0
-                            ? reportWorker.salaryModel
-                            : typeof reportWorker.payType === 'string' && reportWorker.payType.trim().length > 0
-                                ? reportWorker.payType
-                                : workerDetails.salaryModel;
-
-                    const normalizedSalaryModel = (snapshotSalaryModel ?? '').trim();
-                    const isMonthlyWage = normalizedSalaryModel === '월급제';
-                    const isDailyWage = normalizedSalaryModel === '일급제';
-                    if (!isMonthlyWage && !isDailyWage) return;
-
-                    if (selectedTeamId && allowedTeamIds) {
-                        const workerTeamId = (workerDetails.teamId ?? '').trim();
-                        if (!workerTeamId || !allowedTeamIds.has(workerTeamId)) {
-                            return;
-                        }
-                    }
-
-                    const resolvedTeamIdFromName = (() => {
-                        const normalized = normalizeTeamName(reportTeamName);
-                        if (!normalized) return '';
-                        const matched = allTeams.find(t => normalizeTeamName(t.name ?? '') === normalized);
-                        return matched?.id ?? '';
-                    })();
-
-                    const resolvedTeamId = (workerDetails.teamId ?? '').trim() || reportTeamId || resolvedTeamIdFromName || reportWorker.teamId || '';
-                    const resolvedTeamName = (workerDetails.teamName ?? '').trim() || reportTeamName || teamMap.get(resolvedTeamId)?.name || '';
-
-                    const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
-                    const snapshotUnitPrice = reportWorker.unitPrice ?? workerDetails.unitPrice ?? 0;
-                    const isLabor = reportSite?.paymentMethod === '노무';
-
-                    const aggregateParams = {
-                        workerId: reportWorker.workerId,
-                        companyId: workerDetails.companyId || teamMap.get(resolvedTeamId)?.companyId || report.companyId || reportSite?.constructorCompanyId || '',
-                        companyName: workerDetails.companyName || teamMap.get(resolvedTeamId)?.companyName || report.companyName || '',
-                        teamId: safeTeamKey,
-                        teamName: resolvedTeamName,
-                        month: reportYearMonth,
-                        manDay: reportWorker.manDay,
-                        unitPrice: snapshotUnitPrice,
-                        isLabor,
-                        reportDate: report.date,
-                        siteName: report.siteName || reportSite?.name || '-',
-                        siteId: report.siteId,
-                        clientCompanyId: reportSite?.clientCompanyId || '',
-                        description: reportWorker.workContent || report.workContent || '',
-                        paymentMethod: reportSite?.paymentMethod || '-'
-                    };
-
-                    if (isMonthlyWage) {
-                        const monthlyAggregateKey = `${reportYearMonth}__${reportWorker.workerId}__${safeTeamKey}__월급제`;
-                        mergeWorkerAggregate(workerAggregates, monthlyAggregateKey, {
-                            ...aggregateParams,
-                            salaryModel: '월급제'
-                        });
-                    }
-
-                    const ledgerSalaryModel: '월급제' | '일급제' = isDailyWage ? '일급제' : '월급제';
-                    const ledgerAggregateKey = `${reportYearMonth}__${reportWorker.workerId}__${safeTeamKey}__${ledgerSalaryModel}`;
-                    mergeWorkerAggregate(ledgerWorkerAggregates, ledgerAggregateKey, {
-                        ...aggregateParams,
-                        salaryModel: ledgerSalaryModel
-                    });
-                });
-            });
-
-            const processedData: PaymentData[] = [];
-            let errCount = 0;
-
-            Object.keys(workerAggregates).forEach(key => {
-                const agg = workerAggregates[key];
-                const workerDetails = workerMap.get(agg.workerId);
-
-                if (workerDetails) {
-                    const grossAmount = agg.totalAmount;
-                    const unitPrice = agg.unitPrices.length === 1
-                        ? agg.unitPrices[0]
-                        : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (workerDetails.unitPrice || 0));
-                    const bankName = workerDetails.bankName || '';
-                    const bankCode = BANK_CODES[bankName] || '';
-                    const accountNumber = workerDetails.accountNumber || '';
-                    const accountHolder = workerDetails.accountHolder || '';
-
-                    const canonicalTeamId = (() => {
-                        const raw = (agg.teamId ?? '').trim();
-                        if (!raw) return (workerDetails.teamId ?? '').trim();
-                        if (raw.startsWith('unresolved:') || raw === 'no-team') {
-                            return (workerDetails.teamId ?? '').trim();
-                        }
-                        return raw;
-                    })();
-
-                    const advanceRecords = (() => {
-                        if (canonicalTeamId) {
-                            const primaryList = advanceByWorkerTeamKey.get(`${agg.workerId}__${canonicalTeamId}`) ?? [];
-                            if (primaryList.length > 0) return primaryList;
-                        }
-                        return advanceListByWorkerId.get(agg.workerId) ?? [];
-                    })();
-
-                    const deductionBreakdown = buildDeductionBreakdownFromRecords(advanceRecords, deductionLabelMap);
-                    const totalDeduction = deductionBreakdown.total;
-                    const netAmount = grossAmount - totalDeduction;
-
-                    // 계산서/노무용 실지급액 비례 배분
-                    const laborProp = grossAmount > 0 ? agg.laborGrossAmount / grossAmount : 0;
-                    const laborNetAmount = Math.round(netAmount * laborProp);
-                    const invoiceNetAmount = netAmount - laborNetAmount; // 끝전 처리 방지 위해 차감 방식으로 계산
-
-                    const validation = validateItem({ bankName, bankCode, accountNumber, accountHolder });
-                    if (!validation.isValid) errCount++;
-
-                    processedData.push({
-                        workerId: agg.workerId,
-                        workerName: workerDetails.name,
-                        idNumber: workerDetails.idNumber || '',
-                        companyId: agg.companyId,
-                        companyName: agg.companyName,
-                        teamId: agg.teamId,
-                        teamName: agg.teamName,
-                        month: agg.month,
-                        totalManDay: agg.manDay,
-                        unitPrice: unitPrice,
-                        grossAmount,
-                        laborGrossAmount: agg.laborGrossAmount,
-                        invoiceGrossAmount: agg.invoiceGrossAmount,
-                        laborManDay: agg.laborManDay,
-                        invoiceManDay: agg.invoiceManDay,
-                        totalDeduction,
-                        totalAmount: netAmount,
-                        laborNetAmount,
-                        invoiceNetAmount,
-                        bankName: bankName,
-                        bankCode: bankCode,
-                        accountNumber: accountNumber,
-                        accountHolder: accountHolder,
-                        displayContent: '월급',
-                        workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
-                        deductionBreakdown,
-                        taxBreakdown: createEmptyDeductionBreakdown(),
-                        taxRateSnapshot: undefined,
-                        insuranceAppliedSummary: undefined,
-                        withholdingAppliedSummary: undefined,
-                        businessIncomeAppliedSummary: undefined,
-                        isValid: validation.isValid,
-                        errors: validation.errors
-                    });
-                }
-            });
-
-            const processedLedgerRows: MonthlyAdvanceLedgerRow[] = Object.keys(ledgerWorkerAggregates).reduce<MonthlyAdvanceLedgerRow[]>(
-                (acc, key) => {
-                    const agg = ledgerWorkerAggregates[key];
-                    const workerDetails = workerMap.get(agg.workerId);
-                    if (!workerDetails) return acc;
-
-                    const grossAmount = agg.totalAmount;
-                    const unitPrice = agg.unitPrices.length === 1
-                        ? agg.unitPrices[0]
-                        : (agg.manDay > 0 ? Math.round(grossAmount / agg.manDay) : (workerDetails.unitPrice || 0));
-
-                    acc.push({
-                        rowKey: `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`,
-                        month: agg.month,
-                        teamId: agg.teamId,
-                        teamName: agg.teamName,
-                        workerId: agg.workerId,
-                        workerName: workerDetails.name,
-                        salaryModel: agg.salaryModel,
-                        invoiceManDay: agg.invoiceManDay,
-                        laborManDay: agg.laborManDay,
-                        unitPrice,
-                        invoiceGrossAmount: agg.invoiceGrossAmount,
-                        laborGrossAmount: agg.laborGrossAmount,
-                        workEntries: agg.workEntries.sort((a, b) => a.date.localeCompare(b.date)),
-                    });
-
-                    return acc;
-                },
-                []
-            );
-
-            setPaymentData(processedData);
-            setLedgerRowsData(processedLedgerRows);
-            setErrorCount(errCount);
-            setInsuranceApplied(false);
-            setBusinessIncomeApplied(false);
-
-        } catch (error) {
-            console.error("Error fetching payment data:", error);
-            setLedgerRowsData([]);
-            alert("데이터를 불러오는 중 오류가 발생했습니다.");
-        } finally {
-            setLoading(false);
-        }
-    }, [allSites, allTeams, allWorkers, buildMonthRange, compareYearMonth, deductionLabelMap, endMonth, normalizeTeamName, selectedTeamId, selectedWorkerId, startMonth, validateItem]);
-
-    useEffect(() => {
-        if (!filtersReady) return;
-        void fetchData();
-    }, [fetchData, filtersReady]);
-
-    const toggleRow = (month: string, workerId: string, teamId: string) => {
-        const key = `${month}__${workerId}__${teamId}`;
+    const toggleRow = (itemId: string) => {
+        const key = itemId;
         setExpandedRows(prev => {
             const next = new Set(prev);
             if (next.has(key)) {
@@ -2004,20 +3587,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         });
     };
 
-    const handleDisplayContentChange = (month: string, workerId: string, teamId: string, value: string) => {
+    const handleDisplayContentChange = (itemId: string, value: string) => {
         setPaymentData(prev => prev.map(item => {
-            if (item.month !== month) return item;
-            if (item.workerId !== workerId) return item;
-            if (item.teamId !== teamId) return item;
+            if (item.id !== itemId) return item;
             return { ...item, displayContent: value };
         }));
     };
 
     const handleBulkDisplayContentApply = () => {
-        const visibleKeys = new Set(filteredPaymentData.map(item => `${item.month}__${item.workerId}__${item.teamId}`));
+        const visibleKeys = new Set(filteredPaymentData.map(item => item.id));
         setPaymentData(prev => prev.map(item => {
-            const key = `${item.month}__${item.workerId}__${item.teamId}`;
-            if (!visibleKeys.has(key)) return item;
+            if (!visibleKeys.has(item.id)) return item;
             return { ...item, displayContent: bulkDisplayContent };
         }));
     };
@@ -2064,11 +3644,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         ];
 
         const rowData: (string | number)[][] = filteredPaymentData.map(item => [
-            item.bankCode,
+            resolveBankCode(item.bankName, item.bankCode),
             item.accountNumber,
             item.totalAmount,
-            '㈜다원',
-            `${item.workerName} 가불`
+            kbReceiverDisplay,
+            `${item.workerName}${kbMemoSuffix}`
         ]);
 
         const ws = XLSX.utils.aoa_to_sheet([headerRow, ...rowData]);
@@ -2104,31 +3684,174 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             }
         }
 
-        // 열 너비 설정
         ws['!cols'] = [
-            { wch: 8 },  // A: 은행코드
-            { wch: 20 }, // B: 계좌번호
-            { wch: 15 }, // C: 이체금액
-            { wch: 12 }, // D: 받는분 통장 표시
-            { wch: 18 }, // E: 내 통장 메모
+            { wch: 8 },
+            { wch: 20 },
+            { wch: 15 },
+            { wch: 12 },
+            { wch: 18 },
         ];
 
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "국민은행용");
+        XLSX.utils.book_append_sheet(wb, ws, '국민은행용');
 
         const fileName = `월급제_국민은행용_${rangeLabel || currentYearMonth}.xlsx`;
         XLSX.writeFile(wb, fileName);
     };
 
     const getKBPreviewData = () => {
-        return filteredPaymentData.map(item => ({
-            은행코드: item.bankCode,
-            계좌번호: item.accountNumber,
-            이체금액: item.totalAmount,
-            받는분통장표시: '㈜다원',
-            내통장메모: `${item.workerName} 가불`
-        }));
+        const sumSideAdvances = (side: any) => {
+            if (!side) return 0;
+            const toNum = (v: any) => typeof v === 'number' && !isNaN(v) ? v : 0;
+            return toNum(side.carry) + toNum(side.carrySecond) + toNum(side.currentAdvance) + toNum(side.currentAdvanceSecond);
+        };
+        const getAdvanceItem = (side: any, field: 'carry' | 'carrySecond' | 'currentAdvance' | 'currentAdvanceSecond'): number => {
+            if (!side) return 0;
+            const v = side[field];
+            return typeof v === 'number' && !isNaN(v) ? v : 0;
+        };
+
+        return filteredPaymentData.map((item) => {
+            let amount = item.totalAmount;
+            if (kbAmountType === 'invoiceNet') {
+                amount = item.invoiceNetAmount || 0;
+            } else if (kbAmountType === 'laborNet') {
+                amount = item.laborNetAmount || 0;
+            } else if (kbAmountType === 'invoiceAdvance') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? sumSideAdvances(manual.invoice) : 0;
+            } else if (kbAmountType === 'laborAdvance') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? sumSideAdvances(manual.labor) : 0;
+            } else if (kbAmountType === 'corporateAdvance1') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'carry') : 0;
+            } else if (kbAmountType === 'corporateAdvance2') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'carrySecond') : 0;
+            } else if (kbAmountType === 'corporateAdvance3') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'currentAdvance') : 0;
+            } else if (kbAmountType === 'corporateAdvance4') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.invoice, 'currentAdvanceSecond') : 0;
+            } else if (kbAmountType === 'laborAdvance1') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'carry') : 0;
+            } else if (kbAmountType === 'laborAdvance2') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'carrySecond') : 0;
+            } else if (kbAmountType === 'laborAdvance3') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'currentAdvance') : 0;
+            } else if (kbAmountType === 'laborAdvance4') {
+                const manual = ledgerInputs[item.id];
+                amount = manual ? getAdvanceItem(manual.labor, 'currentAdvanceSecond') : 0;
+            }
+
+            let memo = kbMemoSuffix;
+            if (memo.includes('{이름}')) {
+                memo = memo.replace('{이름}', item.workerName);
+            } else if (memo.startsWith(' ')) {
+                memo = item.workerName + memo;
+            } else if (!memo) {
+                memo = item.workerName;
+            }
+
+            const analysis = analyzeBankMapping(item.bankName, item.bankCode);
+            const rawBankName = String(item.bankName ?? '').trim();
+            const bankCodeDisplay = analysis.code || rawBankName || '(은행명없음)';
+
+            return {
+                은행코드: analysis.code,
+                은행코드표시: bankCodeDisplay,
+                은행코드미매핑: !analysis.code,
+                은행코드수정요망: !analysis.code,
+                은행코드사유: analysis.reason,
+                은행코드후보: analysis.candidates.join(', '),
+                계좌번호: item.accountNumber,
+                이체금액: amount,
+                받는분통장표시: kbReceiverDisplay,
+                내통장메모: memo
+            };
+        }).filter((row) => Number.isFinite(row.이체금액) && row.이체금액 > 0);
     };
+
+    const bankMappingDiagnostics = useMemo(() => {
+        const grouped = new Map<string, {
+            inputNames: Set<string>;
+            count: number;
+            mappedCount: number;
+            codes: Set<string>;
+            reasons: Map<string, number>;
+            candidates: Set<string>;
+        }>();
+
+        filteredPaymentData.forEach((item) => {
+            const rawName = String(item.bankName ?? '').trim();
+            const normalizedName = normalizeBankKey(rawName) || '(빈값)';
+            const analysis = analyzeBankMapping(item.bankName, item.bankCode);
+
+            if (!grouped.has(normalizedName)) {
+                grouped.set(normalizedName, {
+                    inputNames: new Set<string>(),
+                    count: 0,
+                    mappedCount: 0,
+                    codes: new Set<string>(),
+                    reasons: new Map<string, number>(),
+                    candidates: new Set<string>(),
+                });
+            }
+
+            const bucket = grouped.get(normalizedName)!;
+            bucket.count += 1;
+            bucket.inputNames.add(rawName || '(미입력)');
+
+            if (analysis.code) {
+                bucket.mappedCount += 1;
+                bucket.codes.add(analysis.code);
+            } else {
+                const reason = analysis.reason || '미매핑 사유 없음';
+                bucket.reasons.set(reason, (bucket.reasons.get(reason) || 0) + 1);
+                analysis.candidates.forEach((c) => bucket.candidates.add(c));
+            }
+        });
+
+        return Array.from(grouped.entries())
+            .map(([normalized, bucket]) => {
+                const unmappedCount = bucket.count - bucket.mappedCount;
+                const topReason = Array.from(bucket.reasons.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+                const suggestedAction = !unmappedCount
+                    ? '정상'
+                    : topReason.includes('여러 개')
+                        ? '은행명을 더 구체적으로 입력하세요. (예: 신한은행, 카카오뱅크)'
+                        : topReason.includes('비어')
+                            ? '은행명을 입력하세요.'
+                            : '공식 은행명으로 수정하거나 3자리 은행코드를 직접 입력하세요.';
+
+                return {
+                    normalized,
+                    inputNames: Array.from(bucket.inputNames).slice(0, 4).join(', '),
+                    count: bucket.count,
+                    mappedCount: bucket.mappedCount,
+                    unmappedCount,
+                    codes: Array.from(bucket.codes).join(', '),
+                    reason: topReason,
+                    candidates: Array.from(bucket.candidates).join(', '),
+                    suggestedAction,
+                };
+            })
+            .sort((a, b) => {
+                if (a.unmappedCount !== b.unmappedCount) return b.unmappedCount - a.unmappedCount;
+                return a.normalized.localeCompare(b.normalized, 'ko');
+            });
+    }, [analyzeBankMapping, filteredPaymentData, normalizeBankKey]);
+
+    const bankDiagnosticSummary = useMemo(() => {
+        const total = bankMappingDiagnostics.reduce((sum, row) => sum + row.count, 0);
+        const unmapped = bankMappingDiagnostics.reduce((sum, row) => sum + row.unmappedCount, 0);
+        return { total, unmapped };
+    }, [bankMappingDiagnostics]);
 
 
     const handleDownloadIndividualPayslip = useCallback(() => {
@@ -2199,7 +3922,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             '',
             '',
             '',
-            Number(workEntries.reduce((sum, entry) => sum + entry.manDay, 0).toFixed(1)),
+            Number(workEntries.reduce((sum: number, entry: WorkerWorkEntry) => sum + entry.manDay, 0).toFixed(1)),
             '',
             payslipTarget.grossAmount,
             '총 차감액',
@@ -2342,15 +4065,18 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
 
         setBatchDownloading(true);
+
+        // batchDownloading=true 설정 후 React가 PayslipTemplate들을 마운트할 때까지 대기
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
         const zip = new JSZip();
-        const folder = zip.folder(`노임명세서_${rangeLabel || currentYearMonth}_${selectedTeamId ? teams.find(t => t.id === selectedTeamId)?.name : '전체'}`);
 
         try {
             let processedCount = 0;
 
             // Process sequentially to avoid browser freeze
             for (const item of filteredPaymentData) {
-                const elementKey = `${item.month}__${item.workerId}__${item.teamId}`;
+                const elementKey = item.id;
                 const element = batchRefs.current[elementKey];
                 if (!element) continue;
 
@@ -2363,7 +4089,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                 const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
                 if (blob) {
-                    folder?.file(`${item.workerName}_${item.month}.png`, blob);
+                    const cleanWorkerName = (item.workerName || '').replace(/[0-9]/g, '');
+                    zip.file(`${cleanWorkerName}_${item.month}.png`, blob);
                     processedCount++;
                 }
             }
@@ -2385,365 +4112,166 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         }
     };
 
+    const insuranceConfigView = payrollConfig?.insuranceConfig;
+    const insuranceThresholdDays = Math.max(0, Math.floor(toNumber(insuranceConfigView?.thresholdDays ?? 8)));
+    const withholdingApplyAllLaborView =
+        typeof insuranceConfigView?.withholdingApplyAllLabor === 'boolean' ? insuranceConfigView.withholdingApplyAllLabor : true;
+    const employmentApplyBelowThresholdView =
+        typeof insuranceConfigView?.employmentApplyBelowThreshold === 'boolean' ? insuranceConfigView.employmentApplyBelowThreshold : true;
+    const withholdingBaseDeductionWonView = Math.max(0, Math.floor(toNumber(insuranceConfigView?.withholdingBaseDeduction ?? 150000)));
+    const withholdingIncomeRatePercentView = Math.round(
+        toNumber(insuranceConfigView?.withholdingIncomeTaxRate ?? payrollConfig?.incomeTaxRate ?? 0.06) * 10000
+    ) / 100;
+    const withholdingResidentRatePercentView = Math.round(
+        toNumber(insuranceConfigView?.withholdingResidentTaxRate ?? payrollConfig?.residentTaxRate ?? 0.1) * 10000
+    ) / 100;
+    const withholdingTaxCreditPercentView = Math.round(
+        toNumber(insuranceConfigView?.withholdingIncomeBaseMultiplier ?? 0.55) * 10000
+    ) / 100;
+    const dailyWorkerFeePerManDayView = Math.max(0, Math.floor(toNumber(insuranceConfigView?.dailyWorkerFeePerManDay ?? 0)));
+
+
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-4 md:p-6 max-w-[1700px] w-full mx-auto overflow-hidden">
-            {!hideHeader && (
-                <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm px-6 py-4 mb-4">
-                    <div className="flex items-center gap-3">
-                        <div className="bg-rose-100 text-rose-600 p-2 rounded-xl">
-                            <FontAwesomeIcon icon={faCalendarDays} className="text-xl" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800">월급제</h1>
-                            <p className="text-sm text-slate-500 mt-1">월별 공수·단가·공제를 한 화면에서 검토하고 엑셀 출력까지 진행합니다.</p>
-                        </div>
+        <div className="relative h-full flex flex-col p-2 w-full overflow-hidden">
+            {deductionApplyInProgress && (
+                <div className="absolute inset-0 z-[100] pointer-events-none bg-white/50 backdrop-blur-sm flex items-center justify-center">
+                    <div className="flex flex-col items-center gap-3 bg-white p-6 rounded-2xl shadow-xl border border-slate-100">
+                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-4xl text-blue-600" />
+                        <span className="text-slate-600 font-semibold text-lg">급여 계산을 적용하고 있습니다...</span>
                     </div>
                 </div>
             )}
 
-            <div className="flex-shrink-0 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 mb-6">
-                <div className="flex flex-wrap gap-3 items-center justify-between">
-                    <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 w-full xl:w-auto">
-                        <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 border border-slate-200">
-                            <button
-                                type="button"
-                                onClick={() => setYearCursor(shiftYearMonth(yearCursor, -12))}
-                                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded-md transition shadow-sm"
-                                title="이전 연도"
-                            >
-                                <FontAwesomeIcon icon={faChevronLeft} />
-                            </button>
-                            <span className="font-bold text-slate-700 px-2 min-w-[80px] text-center">
-                                {parseInt(yearCursor.split('-')[0])}년
-                            </span>
-                            <button
-                                type="button"
-                                onClick={() => setYearCursor(shiftYearMonth(yearCursor, 12))}
-                                className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-white rounded-md transition shadow-sm"
-                                title="다음 연도"
-                            >
-                                <FontAwesomeIcon icon={faChevronRight} />
-                            </button>
-                        </div>
 
-                        <div className="flex flex-wrap items-center gap-1">
-                            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
-                                const year = yearCursor.split('-')[0];
-                                const ym = `${year}-${String(m).padStart(2, '0')}`;
-                                const isInRange = monthRangeSet.has(ym);
-                                const isStart = startMonth === ym;
-                                const isEnd = endMonth === ym;
-                                return (
-                                    <button
-                                        key={m}
-                                        type="button"
-                                        onClick={() => {
-                                            if (!startMonth || (startMonth && endMonth && compareYearMonth(startMonth, endMonth) !== 0 && monthRange.length > 1 && (ym === startMonth || ym === endMonth))) {
-                                                setStartMonth(ym);
-                                                setEndMonth(ym);
-                                                return;
-                                            }
-                                            if (!startMonth) {
-                                                setStartMonth(ym);
-                                                setEndMonth(ym);
-                                                return;
-                                            }
-                                            if (compareYearMonth(ym, startMonth) < 0) {
-                                                setStartMonth(ym);
-                                                return;
-                                            }
-                                            setEndMonth(ym);
-                                        }}
-                                        className={`w-9 h-8 text-sm font-medium rounded-md transition ${isStart || isEnd
-                                            ? 'bg-slate-800 text-white shadow-md transform scale-105'
-                                            : isInRange
-                                                ? 'bg-slate-200 text-slate-800'
-                                                : 'text-slate-600 hover:bg-slate-100'
-                                            }`}
-                                    >
-                                        {m}월
-                                    </button>
-                                );
-                            })}
-                        </div>
+            {!hideHeader && (
+                <PayrollToolbar
+                    hideHeader={!!hideHeader}
+                    rangeLabel={rangeLabel}
+                    targetCount={paymentData.length + ledgerRowsData.filter(r => r.salaryModel === '일급제').length}
+                    monthRangeLength={monthRange.length}
+                    totalLoadCount={paymentData.length}
+                    monthSelectionMode={monthSelectionMode}
+                    handleMonthModeChange={handleMonthModeChange}
+                    yearCursor={yearCursor}
+                    setYearCursor={setYearCursor}
+                    shiftYearMonth={shiftYearMonth}
+                    formatYearMonthParts={formatYearMonthParts}
+                    handleSelectPrevMonth={handleSelectPrevMonth}
+                    handleSelectCurrentMonth={handleSelectCurrentMonth}
+                    monthRangeSet={monthRangeSet}
+                    startMonth={startMonth}
+                    endMonth={endMonth}
+                    rangeAnchorMonth={rangeAnchorMonth}
+                    handleMonthButtonSelect={handleMonthButtonSelect}
+                    teamDropdownRef={teamDropdownRef}
+                    teamDropdownOpen={teamDropdownOpen}
+                    setTeamDropdownOpen={setTeamDropdownOpen}
+                    selectedTeamLabel={selectedTeamLabel}
+                    selectedTeamId={selectedTeamId}
+                    setSelectedTeamId={setSelectedTeamId}
+                    teams={teams}
+                    filterMode={filterMode}
+                    setFilterMode={setFilterMode}
+                    selectedWorkerId={selectedWorkerId}
+                    setSelectedWorkerId={setSelectedWorkerId}
+                    workerOptions={workerOptions}
+                    workerSearchText={workerSearchText}
+                    setWorkerSearchText={setWorkerSearchText}
+                    pageViewMode={pageViewMode}
+                    setPageViewMode={setPageViewMode}
+                    ledgerVisibleSections={ledgerVisibleSections}
+                    setLedgerVisibleSections={setLedgerVisibleSections}
+                    showAccountColumns={showAccountColumns}
+                    setShowAccountColumns={setShowAccountColumns}
+                    showCalculationLabor={showCalculationLabor}
+                    setShowCalculationLabor={setShowCalculationLabor}
+                    insuranceApplied={insuranceApplied}
+                    insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                    businessIncomeApplied={businessIncomeApplied}
+                    utilitiesApplied={utilitiesApplied}
+                    dailyFeeApplied={dailyFeeApplied}
+                    applyCalculatedDeductions={applyCalculatedDeductions}
+                    insuranceThresholdDays={insuranceThresholdDays}
+                    withholdingApplyAllLaborView={withholdingApplyAllLaborView}
+                    WITHHOLDING_MAX_MAN_DAY={WITHHOLDING_MAX_MAN_DAY}
+                    withholdingBaseDeductionWonView={withholdingBaseDeductionWonView}
+                    withholdingIncomeRatePercentView={withholdingIncomeRatePercentView}
+                    withholdingTaxCreditPercentView={withholdingTaxCreditPercentView}
+                    withholdingResidentRatePercentView={withholdingResidentRatePercentView}
+                    employmentApplyBelowThresholdView={employmentApplyBelowThresholdView}
+                    dailyWorkerFeePerManDayView={dailyWorkerFeePerManDayView}
+                    fetchData={fetchData}
+                    toolbarExpanded={toolbarExpanded}
+                    setToolbarExpanded={setToolbarExpanded}
+                    openInsuranceSettings={openInsuranceSettings}
+                    setShowKBPreview={setShowKBPreview}
+                    isPaymentDataEmpty={paymentData.length === 0}
+                    openPayslipPreview={openPayslipPreview}
+                    handleBatchDownload={handleBatchDownload}
+                    batchDownloading={batchDownloading}
+                    advanceLedgerRef={advanceLedgerRef}
+                    isLedgerRowsDataEmpty={ledgerRowsData.length === 0}
+                    currentYearMonth={currentYearMonth}
+                />
+            )}
 
-                        <div className="h-6 w-px bg-slate-300 mx-1 hidden lg:block"></div>
-
-                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setStartMonth(prevYearMonth);
-                                    setEndMonth(prevYearMonth);
-                                    setYearCursor(prevYearMonth);
-                                }}
-                                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white hover:text-slate-900 rounded-md transition hover:shadow-sm"
-                            >
-                                전달
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setStartMonth(currentYearMonth);
-                                    setEndMonth(currentYearMonth);
-                                    setYearCursor(currentYearMonth);
-                                }}
-                                className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-white hover:text-slate-900 rounded-md transition hover:shadow-sm"
-                            >
-                                이달
-                            </button>
-                        </div>
-
-                        <div className="text-xs text-slate-500">
-                            선택기간: <span className="font-semibold text-slate-700">{rangeLabel || '-'}</span>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-2 py-1.5 shadow-sm">
-                        <span className="text-xs text-slate-500 px-1">검색</span>
-                        <div className="flex bg-slate-100 rounded-md p-1">
-                            <button
-                                type="button"
-                                onClick={() => setFilterMode('team')}
-                                className={`px-3 py-1 text-sm font-semibold rounded-md transition ${filterMode === 'team'
-                                    ? 'bg-white shadow text-slate-900'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                            >
-                                팀
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setFilterMode('worker')}
-                                className={`px-3 py-1 text-sm font-semibold rounded-md transition ${filterMode === 'worker'
-                                    ? 'bg-white shadow text-slate-900'
-                                    : 'text-slate-600 hover:text-slate-900'
-                                    }`}
-                            >
-                                개인
-                            </button>
-                        </div>
-                    </div>
-
-                    {filterMode === 'team' ? (
-                        <select
-                            value={selectedTeamId}
-                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                            className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-                        >
-                            <option value="">팀전체</option>
-                            {teams
-                                .filter((team): team is Team & { id: string } => typeof team.id === 'string' && team.id.trim().length > 0)
-                                .map(team => (
-                                    <option key={team.id} value={team.id}>{team.name}</option>
-                                ))}
-                        </select>
-                    ) : (
-                        <>
-                            <select
-                                value={selectedWorkerId}
-                                onChange={(e) => setSelectedWorkerId(e.target.value)}
-                                className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none"
-                            >
-                                <option value="">개인전체</option>
-                                {workerOptions.map((w) => (
-                                    <option key={w.id} value={w.id}>{w.name}</option>
-                                ))}
-                            </select>
-
-                            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-2 shadow-sm">
-                                <span className="text-xs text-slate-500">작업자</span>
-                                <input
-                                    type="text"
-                                    value={workerSearchText}
-                                    onChange={(e) => setWorkerSearchText(e.target.value)}
-                                    className="text-sm outline-none w-28"
-                                    placeholder="작업자검색"
-                                />
-                            </div>
-                        </>
-                    )}
-
-                    <button
-                        type="button"
-                        onClick={handleResetFilters}
-                        className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-semibold transition"
-                    >
-                        필터 초기화
-                    </button>
-
-
-
-                    <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-2 shadow-sm">
-                        <span className="text-xs text-slate-500">보내는사람</span>
-                        <input
-                            type="text"
-                            value={bulkSender}
-                            onChange={(e) => setBulkSender(e.target.value)}
-                            className="text-sm outline-none w-24"
-                            placeholder="㈜다원"
-                        />
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={() => setShowAccountColumns(prev => !prev)}
-                        className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-lg text-sm font-semibold transition flex items-center gap-2"
-                    >
-                        <FontAwesomeIcon icon={showAccountColumns ? faEyeSlash : faEye} />
-                        {showAccountColumns ? '계좌 숨기기' : '계좌 보기'}
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={() => setShowCalculationLabor((prev) => !prev)}
-                        className={`px-3 py-2 border rounded-lg text-sm font-semibold transition flex items-center gap-2 ${showCalculationLabor
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={faTableColumns} />
-                        {showCalculationLabor ? '계산노무 숨기기' : '계산노무 보기'}
-                    </button>
-
-                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-                        <button
-                            type="button"
-                            onClick={() => setPageViewMode('standard')}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pageViewMode === 'standard'
-                                ? 'bg-white text-slate-900 shadow-sm'
-                                : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                        >
-                            기본목록
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setPageViewMode('ledger')}
-                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${pageViewMode === 'ledger'
-                                ? 'bg-white text-slate-900 shadow-sm'
-                                : 'text-slate-600 hover:text-slate-900'
-                                }`}
-                        >
-                            가불대장
-                        </button>
-                    </div>
-
-                    <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={openInsuranceSettings}
-                            className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-bold transition"
-                        >
-                            4대보험 설정
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyCalculatedDeductions({ applyInsurance: !insuranceApplied, applyBusinessIncome: businessIncomeApplied })}
-                            disabled={paymentData.length === 0}
-                            className={`${insuranceApplied ? 'bg-indigo-200 text-indigo-900 hover:bg-indigo-300' : 'bg-indigo-600 text-white hover:bg-indigo-700'} px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50`}
-                        >
-                            {insuranceApplied ? '4대보험 해제' : '4대보험 적용'}
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyCalculatedDeductions({ applyInsurance: insuranceApplied, applyBusinessIncome: !businessIncomeApplied })}
-                            disabled={paymentData.length === 0}
-                            className={`${businessIncomeApplied ? 'bg-emerald-200 text-emerald-900 hover:bg-emerald-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'} px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50`}
-                        >
-                            {businessIncomeApplied ? '사업소득 해제' : '사업소득 적용'}
-                        </button>
-                        <button
-                            onClick={fetchData}
-                            className="bg-slate-100 text-slate-600 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2"
-                        >
-                            <FontAwesomeIcon icon={faSearch} />
-                            <span>조회</span>
-                        </button>
-                        <button
-                            onClick={() => setShowKBPreview(true)}
-                            disabled={paymentData.length === 0}
-                            className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            🏦 국민은행용
-                        </button>
-                        <button
-                            onClick={() => {
-                                if (filteredPaymentData.length === 0) return;
-                                setSelectedPayslipRowKey(`${filteredPaymentData[0].month}__${filteredPaymentData[0].workerId}__${filteredPaymentData[0].teamId}`);
-                                setShowPayslipModal(true);
+            {/* Hidden Batch Rendering Container - 다운로드 시에만 렌더링 (평소 불필요한 재렌더링 방지) */}
+            {batchDownloading && (
+                <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
+                    {filteredPaymentData.map(item => (
+                        <PayslipTemplate
+                            key={`batch-${item.id}`}
+                            ref={el => {
+                                const elementKey = item.id;
+                                batchRefs.current[elementKey] = el;
                             }}
-                            disabled={paymentData.length === 0}
-                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            📄 명세서
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setIsFixed((prev) => !prev)}
-                            className={`px-4 py-2 border rounded-lg text-sm font-bold transition flex items-center gap-2 ${isFixed
-                                ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={faThumbtack} className={isFixed ? 'rotate-45' : ''} />
-                            {isFixed ? '틀고정 해제' : '틀고정'}
-                        </button>
-                        <button
-                            onClick={handleBatchDownload}
-                            disabled={paymentData.length === 0 || batchDownloading}
-                            className="bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 disabled:opacity-50"
-                        >
-                            {batchDownloading ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faFileZipper} />}
-                            전체 다운로드
-                        </button>
-                    </div>
+                            data={item}
+                            month={item.month}
+                            applyUtilities={utilitiesApplied}
+                            insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                            isTeamResponsibleSiteEntry={isEntryInWorkerTeamSite}
+                        />
+                    ))}
                 </div>
-            </div>
-
-            {/* Hidden Batch Rendering Container */}
-            <div className="absolute left-[-9999px] top-0 pointer-events-none opacity-0 w-[1120px]">
-                {filteredPaymentData.map(item => (
-                    <PayslipTemplate
-                        key={`batch-${item.month}__${item.workerId}__${item.teamId}`}
-                        ref={el => {
-                            const elementKey = `${item.month}__${item.workerId}__${item.teamId}`;
-                            batchRefs.current[elementKey] = el;
-                        }}
-                        data={item}
-                        month={item.month}
-                    />
-                ))}
-            </div>
+            )}
 
             {errorCount > 0 && (
-                <div className="flex-shrink-0 mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2 text-sm">
+                <div className="flex-shrink-0 mb-2 bg-red-50 border border-red-200 text-red-700 px-2.5 py-2 rounded-lg flex items-center gap-1.5 text-base">
                     <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-500" />
                     <span><strong>{errorCount}건</strong>의 계좌 정보가 누락되었습니다. 작업자 DB를 점검해주세요.</span>
                 </div>
             )}
 
-            <div className={`${pageViewMode === 'ledger' ? 'hidden ' : ''}flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col`}>
-                <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                        <h2 className="font-semibold text-slate-700">지급 대상자 목록 (월급제)</h2>
+            {pageViewMode === 'standard' && (
+                <div className="flex-1 min-h-0 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                <div className="p-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                    <div className="flex items-center gap-2.5">
+                        <h2 className="font-semibold text-lg text-slate-700">지급 대상자 목록</h2>
                         <div className="flex items-center gap-2">
                             <input
                                 type="text"
                                 value={bulkDisplayContent}
                                 onChange={(e) => setBulkDisplayContent(e.target.value)}
                                 placeholder="표시내용 일괄입력"
-                                className="border border-slate-300 rounded px-2 py-1 text-xs w-32"
+                                className="border border-slate-300 rounded px-3 py-2 text-base w-40"
                             />
                             <button
                                 onClick={handleBulkDisplayContentApply}
-                                className="bg-slate-600 text-white px-3 py-1 rounded text-xs hover:bg-slate-700"
+                                className="bg-slate-600 text-white px-3.5 py-2 rounded text-base hover:bg-slate-700"
                             >
                                 일괄적용
                             </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowBankCodes(true)}
+                                className="bg-blue-600 text-white px-3.5 py-2 rounded text-base hover:bg-blue-700"
+                                title="은행 코드 매핑표/미매핑 사유 확인"
+                            >
+                                은행 매핑 진단
+                            </button>
                         </div>
                     </div>
-                    <div className="text-sm flex items-center gap-4">
+                    <div className="text-base flex items-center gap-2.5">
                         <div>
                             <span className="text-slate-500 mr-2">총공수</span>
                             <span className="font-bold text-slate-800">{filteredPaymentData.reduce((sum, item) => sum + item.totalManDay, 0).toFixed(1)}</span>
@@ -2761,43 +4289,45 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             <span className="font-bold text-brand-600 text-lg">{filteredPaymentData.reduce((sum, item) => sum + item.totalAmount, 0).toLocaleString()}원</span>
                         </div>
                         <div className="mx-2 w-px h-8 bg-slate-200 hidden xl:block" />
-                        <div className="bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100">
-                            <span className="text-blue-600 text-xs font-semibold mr-2">계산서용 입금</span>
+                        <div className="bg-blue-50 px-2 py-1 rounded-lg border border-blue-100">
+                            <span className="text-blue-600 text-base font-semibold mr-2">계산서용 입금</span>
                             <span className="font-bold text-blue-800">{filteredPaymentData.reduce((sum, item) => sum + item.invoiceNetAmount, 0).toLocaleString()}원</span>
                         </div>
-                        <div className="bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100">
-                            <span className="text-indigo-600 text-xs font-semibold mr-2">노무용 금액</span>
+                        <div className="bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100">
+                            <span className="text-indigo-600 text-base font-semibold mr-2">노무용 금액</span>
                             <span className="font-bold text-indigo-800">{filteredPaymentData.reduce((sum, item) => sum + item.laborNetAmount, 0).toLocaleString()}원</span>
                         </div>
                     </div>
                 </div>
 
                 <div className="flex-1 min-h-0 overflow-auto">
-                    <table className="w-full text-sm text-left border-separate border-spacing-0">
-                        <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-40">
+                    <table
+                        className="w-full table-fixed text-[13px] text-left border-separate border-spacing-0"
+                    >
+                        <thead className="text-slate-500 font-medium sticky top-0 z-40">
                             <tr className="border-b border-slate-200">
-                                <th className={`px-4 py-3 text-center w-12 border-b border-slate-200 ${isFixed ? 'sticky left-0 z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`}></th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[48px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '70px' : 'auto', minWidth: isFixed ? '70px' : 'auto' }}>월</th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[118px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '100px' : 'auto', minWidth: isFixed ? '100px' : 'auto' }}>이름</th>
-                                <th className={`px-4 py-3 border-b border-slate-200 ${isFixed ? 'sticky left-[218px] z-50 bg-slate-50 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''}`} style={{ width: isFixed ? '140px' : 'auto', minWidth: isFixed ? '140px' : 'auto' }}>팀명</th>
-                                <th className="px-4 py-3 border-b border-slate-200">주민번호</th>
-                                <th className="px-4 py-3 border-b border-slate-200">시공사</th>
-                                <th className="px-4 py-3">총 공수</th>
-                                <th className="px-4 py-3 text-right">단가</th>
-                                <th className="px-4 py-3 text-right">지급전</th>
+                                <th className="sticky top-0 left-0 z-50 bg-slate-50 px-2 py-1.5 text-center w-10 border-b border-slate-200 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]"></th>
+                                <th className="sticky top-0 left-[40px] z-50 bg-slate-50 px-2 py-1.5 border-b border-slate-200 w-16 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">월</th>
+                                <th className="sticky top-0 left-[104px] z-50 bg-slate-50 px-2 py-1.5 border-b border-slate-200 w-32 shadow-[inset_-1px_-1px_0_rgba(0,0,0,0.1)]">이름</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">팀명</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">주민번호</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">시공사</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">총 공수</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">단가</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">지급전</th>
                                 {showCalculationLabor && (
                                     <>
-                                        <th className="px-4 py-3 text-center bg-blue-50/50 text-blue-700">계산서 공수</th>
-                                        <th className="px-4 py-3 text-right bg-blue-50/50 text-blue-700">계산서 금액</th>
-                                        <th className="px-4 py-3 text-center bg-indigo-50/50 text-indigo-700">노무 공수</th>
-                                        <th className="px-4 py-3 text-right bg-indigo-50/50 text-indigo-700">노무 금액</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-center bg-blue-50 text-blue-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계산서 공수</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-right bg-blue-50 text-blue-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계산서 금액</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-center bg-indigo-50 text-indigo-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">노무 공수</th>
+                                        <th className="sticky top-0 z-40 px-2 py-1.5 text-right bg-indigo-50 text-indigo-700 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">노무 금액</th>
                                     </>
                                 )}
-                                <th className="px-4 py-3 text-right">공제</th>
-                                <th className="px-4 py-3 text-right">실지급</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">공제</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 text-right border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">실지급</th>
                                 {showAccountColumns && (
                                     <>
-                                        <th className="px-4 py-3">
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">
                                             코드
                                             <button
                                                 type="button"
@@ -2807,97 +4337,127 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                 📋
                                             </button>
                                         </th>
-                                        <th className="px-4 py-3">은행명</th>
-                                        <th className="px-4 py-3">계좌번호</th>
-                                        <th className="px-4 py-3">예금주</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">은행명</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">계좌번호</th>
+                                        <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">예금주</th>
                                     </>
                                 )}
-                                <th className="px-4 py-3 border-b border-slate-200">표시내용</th>
+                                <th className="sticky top-0 z-40 bg-slate-50 px-2 py-1.5 border-b border-slate-200 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)]">표시내용</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={tableColSpan} className="px-4 py-12 text-center text-slate-500">
+                                    <td colSpan={tableColSpan} className="px-2 py-8 text-center text-slate-500">
                                         <FontAwesomeIcon icon={faSpinner} spin className="mr-2" />
                                         데이터를 불러오는 중입니다...
                                     </td>
                                 </tr>
                             ) : filteredPaymentData.length === 0 ? (
                                 <tr>
-                                    <td colSpan={tableColSpan} className="px-4 py-12 text-center text-slate-500">
+                                    <td colSpan={tableColSpan} className="px-2 py-8 text-center text-slate-500">
                                         해당 기간에 지급 대상자가 없습니다.
                                     </td>
                                 </tr>
                             ) : (
                                 filteredPaymentData.map(item => {
-                                    const rowKey = `${item.month}__${item.workerId}__${item.teamId}`;
+                                    const rowKey = item.id;
                                     const isExpanded = expandedRows.has(rowKey);
-                                    const taxLinesForItem = getTaxLinesForItem(item);
-                                    const insuranceTaxLines = taxLinesForItem.filter((line) => isInsuranceSectionTaxLabel(line.label));
-                                    const withholdingTaxLines = taxLinesForItem.filter((line) => isWithholdingSectionTaxLabel(line.label));
-                                    const businessTaxLines = taxLinesForItem.filter((line) => isBusinessSectionTaxLabel(line.label));
-                                    const otherTaxLines = taxLinesForItem.filter((line) => (
-                                        !isInsuranceSectionTaxLabel(line.label)
-                                        && !isWithholdingSectionTaxLabel(line.label)
-                                        && !isBusinessSectionTaxLabel(line.label)
-                                    ));
-                                    const insuranceSectionTaxTotal = sumInsuranceSectionTax(item);
-                                    const withholdingSectionTaxTotal = sumWithholdingSectionTax(item);
-                                    const businessSectionTaxTotal = sumBusinessSectionTax(item);
-                                    const otherTaxTotal = otherTaxLines.reduce((sum, line) => sum + toNumber(line.amount), 0);
-                                    const insuranceAfterTaxAmount = Math.max(0, Math.floor((item.insuranceAppliedSummary?.appliedAmount ?? 0) - insuranceSectionTaxTotal));
-                                    const withholdingGrossAmount = item.withholdingAppliedSummary
-                                        ? toNumber(item.withholdingAppliedSummary.grossAmount ?? item.withholdingAppliedSummary.appliedAmount)
-                                        : 0;
-                                    const withholdingAfterTaxAmount = Math.max(0, Math.floor(withholdingGrossAmount - withholdingSectionTaxTotal));
-                                    const businessAfterTaxAmount = Math.max(0, Math.floor((item.businessIncomeAppliedSummary?.appliedAmount ?? 0) - businessSectionTaxTotal));
-                                    const showInsuranceSection = insuranceTaxLines.length > 0;
-                                    const hasInsuranceTargetSummary = Boolean(item.insuranceAppliedSummary && item.insuranceAppliedSummary.appliedManDay > 0);
-                                    const withholdingDetailText = resolveWithholdingDetailText(item.taxRateSnapshot);
+                                    // ★ 캐시에서 표시 데이터 조회 - O(1), 재계산 없음
+                                    const rowDisplay = rowDisplayCache.get(item.id);
+                                    if (!rowDisplay) return null;
+                                    const {
+                                        advanceLinesForDisplay,
+                                        nonAdvanceDeductionLinesForDisplay,
+                                        advanceTotalForDisplay,
+                                        nonAdvanceDeductionTotalForDisplay,
+                                        hasNonAdvanceDeductionLines,
+                                        hasAdvanceLines,
+                                        totalDeductionForDisplay,
+                                        totalAmountForDisplay,
+                                        insuranceTaxLines,
+                                        withholdingTaxLines,
+                                        businessTaxLines,
+                                        otherTaxLines,
+                                        insuranceSectionTaxTotal,
+                                        withholdingSectionTaxTotal,
+                                        businessSectionTaxTotal,
+                                        otherTaxTotal,
+                                        insuranceAfterTaxAmount,
+                                        withholdingAfterTaxAmount,
+                                        businessAfterTaxAmount,
+                                        showInsuranceSection,
+                                        hasInsuranceTargetSummary,
+                                        withholdingDetailText,
+                                    } = rowDisplay;
+
+                                    const isMonthly = item.id.endsWith('__월급제');
+                                    const isService = item.id.endsWith('__용역팀');
+                                    const salaryLabel = isMonthly ? '월급제' : isService ? '용역팀' : '일급제';
+                                    
+                                    const rowBgClass = isMonthly 
+                                        ? 'bg-blue-50/25 hover:bg-blue-50/40' 
+                                        : isService 
+                                            ? 'bg-orange-50/25 hover:bg-orange-50/40' 
+                                            : 'bg-emerald-50/25 hover:bg-emerald-50/40';
+
+                                    const badgeClass = isMonthly 
+                                        ? 'bg-blue-100 text-blue-700' 
+                                        : isService 
+                                            ? 'bg-orange-100 text-orange-700' 
+                                            : 'bg-emerald-100 text-emerald-700';
 
                                     return (
                                         <React.Fragment key={rowKey}>
-                                            <tr className={`hover:bg-slate-50 transition ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'bg-indigo-50/30' : ''}`}>
-                                                <td className={`px-4 py-3 text-center border-b border-slate-100 ${isFixed ? 'sticky left-0 z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>
+                                            <tr className={`transition ${rowBgClass} ${!item.isValid ? 'bg-red-50' : ''} ${isExpanded ? 'ring-1 ring-indigo-200' : ''}`}>
+                                                <td className="sticky left-0 z-20 bg-inherit px-2 py-1.5 text-center border-b border-slate-100 shadow-[inset_-1px_0_0_rgba(0,0,0,0.1)]">
                                                     <button
-                                                        onClick={() => toggleRow(item.month, item.workerId, item.teamId ?? '')}
-                                                        className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${isExpanded ? 'bg-brand-100 text-brand-600' : 'text-slate-400 hover:bg-slate-100'}`}
+                                                        onClick={() => toggleRow(item.id)}
+                                                        className={`w-5 h-5 rounded-full flex items-center justify-center transition-colors ${isExpanded ? 'bg-brand-100 text-brand-600' : 'text-slate-400 hover:bg-slate-100'}`}
                                                     >
                                                         <FontAwesomeIcon icon={isExpanded ? faChevronUp : faChevronDown} className="text-xs" />
                                                     </button>
                                                 </td>
-                                                <td className={`px-4 py-3 font-mono text-slate-600 text-xs border-b border-slate-100 ${isFixed ? 'sticky left-[48px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.month}</td>
-                                                <td className={`px-4 py-3 font-medium text-slate-800 border-b border-slate-100 ${isFixed ? 'sticky left-[118px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.workerName}</td>
-                                                <td className={`px-4 py-3 text-slate-600 border-b border-slate-100 ${isFixed ? 'sticky left-[218px] z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]' : ''} ${isFixed ? (!item.isValid ? 'bg-red-50' : isExpanded ? 'bg-indigo-50' : 'bg-white') : ''}`}>{item.teamName}</td>
-                                                <td className="px-4 py-3 text-slate-600 font-mono text-xs border-b border-slate-100">{item.idNumber || '-'}</td>
-                                                <td className="px-4 py-3 text-slate-600 border-b border-slate-100">{item.companyName || '-'}</td>
-                                                <td className="px-4 py-3 text-slate-600 border-b border-slate-100">{Number(item.totalManDay).toFixed(1)}</td>
-                                                <td className="px-4 py-3 text-right text-slate-600 border-b border-slate-100">{item.unitPrice.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-right text-slate-600 border-b border-slate-100">{item.grossAmount.toLocaleString()}</td>
+                                                <td className="sticky left-[40px] z-20 bg-inherit px-2 py-1.5 font-mono text-slate-600 text-[11px] border-b border-slate-100">{item.month}</td>
+                                                <td className="sticky left-[104px] z-20 bg-inherit px-2 py-1.5 font-medium text-slate-800 border-b border-slate-100 shadow-[inset_-1px_0_0_rgba(0,0,0,0.1)]">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span>{item.workerName}</span>
+                                                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${badgeClass}`}>
+                                                            {salaryLabel}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-2 py-1.5 text-slate-600 border-b border-slate-100">{item.teamName}</td>
+                                                <td className="px-2 py-1.5 text-slate-600 font-mono text-[11px] border-b border-slate-100">{item.idNumber || '-'}</td>
+                                                <td className="px-2 py-1.5 text-slate-600 border-b border-slate-100">{item.companyName || '-'}</td>
+                                                <td className="px-2 py-1.5 text-slate-600 border-b border-slate-100">{Number(item.totalManDay).toFixed(1)}</td>
+                                                <td className="px-2 py-1.5 text-right text-slate-600 border-b border-slate-100">{item.unitPrice.toLocaleString()}</td>
+                                                <td className="px-2 py-1.5 text-right text-slate-600 border-b border-slate-100">{item.grossAmount.toLocaleString()}</td>
                                                 {showCalculationLabor && (
                                                     <>
-                                                        <td className="px-4 py-3 text-center text-blue-600 border-b border-slate-100 bg-blue-50/20">{item.invoiceManDay.toFixed(1)}</td>
-                                                        <td className="px-4 py-3 text-right text-blue-600 border-b border-slate-100 bg-blue-50/20">{item.invoiceNetAmount.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center text-indigo-600 border-b border-slate-100 bg-indigo-50/20">{item.laborManDay.toFixed(1)}</td>
-                                                        <td className="px-4 py-3 text-right text-indigo-600 border-b border-slate-100 bg-indigo-50/20">{item.laborNetAmount.toLocaleString()}</td>
+                                                        <td className="px-2 py-1.5 text-center text-blue-600 border-b border-slate-100 bg-blue-50/20">{item.invoiceManDay.toFixed(1)}</td>
+                                                        <td className="px-2 py-1.5 text-right text-blue-600 border-b border-slate-100 bg-blue-50/20">{item.invoiceNetAmount.toLocaleString()}</td>
+                                                        <td className="px-2 py-1.5 text-center text-indigo-600 border-b border-slate-100 bg-indigo-50/20">{item.laborManDay.toFixed(1)}</td>
+                                                        <td className="px-2 py-1.5 text-right text-indigo-600 border-b border-slate-100 bg-indigo-50/20">{item.laborNetAmount.toLocaleString()}</td>
                                                     </>
                                                 )}
-                                                <td className="px-4 py-3 text-right text-amber-700 font-semibold border-b border-slate-100">{item.totalDeduction.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-right font-bold text-brand-600 border-b border-slate-100">{item.totalAmount.toLocaleString()}</td>
+                                                <td className="px-2 py-1.5 text-right text-amber-700 font-semibold border-b border-slate-100">{totalDeductionForDisplay.toLocaleString()}</td>
+                                                <td className="px-2 py-1.5 text-right font-bold text-brand-600 border-b border-slate-100">{totalAmountForDisplay.toLocaleString()}</td>
                                                 {showAccountColumns && (
                                                     <>
-                                                        <td className={`px-4 py-3 border-b border-slate-100 ${item.errors.bankCode ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.bankCode || '-'}</td>
-                                                        <td className={`px-4 py-3 border-b border-slate-100 ${item.errors.bankName ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.bankName || '(미입력)'}</td>
-                                                        <td className={`px-4 py-3 border-b border-slate-100 ${item.errors.accountNumber ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountNumber || '(미입력)'}</td>
-                                                        <td className={`px-4 py-3 border-b border-slate-100 ${item.errors.accountHolder ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountHolder || '(미입력)'}</td>
+                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.bankCode ? 'text-red-600 font-bold' : 'text-slate-600'}`}>
+                                                            {resolveBankCode(item.bankName, item.bankCode) || `미매핑(${item.bankName || '은행명없음'})`}
+                                                        </td>
+                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.bankName ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.bankName || '(미입력)'}</td>
+                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.accountNumber ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountNumber || '(미입력)'}</td>
+                                                        <td className={`px-2 py-1.5 border-b border-slate-100 ${item.errors.accountHolder ? 'text-red-600 font-bold' : 'text-slate-600'}`}>{item.accountHolder || '(미입력)'}</td>
                                                     </>
                                                 )}
-                                                <td className="px-4 py-3 border-b border-slate-100">
+                                                <td className="px-2 py-1.5 border-b border-slate-100">
                                                     <input
                                                         type="text"
                                                         value={item.displayContent}
-                                                        onChange={(e) => handleDisplayContentChange(item.month, item.workerId, item.teamId, e.target.value)}
+                                                        onChange={(e) => handleDisplayContentChange(item.id, e.target.value)}
                                                         className="border border-slate-300 rounded px-2 py-1 text-xs w-full focus:border-brand-500 outline-none"
                                                     />
                                                 </td>
@@ -2924,7 +4484,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                 <thead className="bg-slate-50 text-slate-500">
                                                                                     <tr>
                                                                                         <th className="px-3 py-2 text-left font-medium border-b border-slate-100 w-24">일자</th>
-                                                                                        <th className="px-3 py-2 text-left font-medium border-b border-slate-100">현장</th>
+                                                                                        <th className="px-3 py-2 text-left font-medium border-b border-slate-100 w-16">분류</th>
+                                                                            <th className="px-3 py-2 text-left font-medium border-b border-slate-100">현장</th>
                                                                                         <th className="px-3 py-2 text-center font-medium border-b border-slate-100 w-16">구분</th>
                                                                                         <th className="px-3 py-2 text-right font-medium border-b border-slate-100 w-16">공수</th>
                                                                                         <th className="px-3 py-2 text-right font-medium border-b border-slate-100 w-24">단가</th>
@@ -2932,10 +4493,23 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                     </tr>
                                                                                 </thead>
                                                                                 <tbody className="divide-y divide-slate-100">
-                                                                                    {item.workEntries.map((entry, idx) => (
+                                                                                    {item.workEntries.map((entry: WorkerWorkEntry, idx: number) => (
                                                                                         <tr key={`${entry.date}-${idx}`} className="hover:bg-indigo-50/30">
                                                                                             <td className="px-3 py-2 font-mono text-slate-600">{entry.date}</td>
-                                                                                            <td className="px-3 py-2 text-slate-700">{entry.siteName}</td>
+                                                                                            <td className="px-3 py-2">
+                                                                                    {entry.assignmentType === 'corporate' ? (
+                                                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-800">
+                                                                                            법인
+                                                                                        </span>
+                                                                                    ) : entry.assignmentType === 'labor' ? (
+                                                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-800">
+                                                                                            노무
+                                                                                        </span>
+                                                                                    ) : (
+                                                                                        <span className="text-slate-400 text-center block">-</span>
+                                                                                    )}
+                                                                                </td>
+                                                                                <td className="px-3 py-2 text-slate-700">{entry.siteName}</td>
                                                                                             <td className="px-3 py-2 text-center text-slate-500">{entry.paymentMethod || '-'}</td>
                                                                                             <td className="px-3 py-2 text-right font-medium text-slate-700">{entry.manDay.toFixed(1)}</td>
                                                                                             <td className="px-3 py-2 text-right text-slate-600">{entry.unitPrice.toLocaleString()}</td>
@@ -2945,14 +4519,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                 </tbody>
                                                                                 <tfoot className="bg-slate-50 font-semibold text-slate-700">
                                                                                     <tr>
-                                                                                        <td colSpan={3} className="px-3 py-2 text-right">합계</td>
+                                                                                        <td colSpan={4} className="px-3 py-2 text-right">합계</td>
                                                                                         <td className="px-3 py-2 text-right text-indigo-600">{item.totalManDay.toFixed(1)}</td>
                                                                                         <td className="px-3 py-2"></td>
                                                                                         <td className="px-3 py-2 text-right text-indigo-600">{item.grossAmount.toLocaleString()}</td>
                                                                                     </tr>
                                                                                     {(item.laborGrossAmount > 0 && item.invoiceGrossAmount > 0) && (
                                                                                         <tr className="text-[10px] font-normal text-slate-500 bg-white border-t border-slate-100">
-                                                                                            <td colSpan={5} className="px-3 py-1 text-right">
+                                                                                            <td colSpan={6} className="px-3 py-1 text-right">
                                                                                                 (노무용: {item.laborGrossAmount.toLocaleString()} / 계산서용: {item.invoiceGrossAmount.toLocaleString()})
                                                                                             </td>
                                                                                             <td></td>
@@ -2976,10 +4550,10 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                             공제내역
                                                                         </h4>
                                                                         <span className="text-xs text-slate-500 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
-                                                                            총 {(item.deductionBreakdown.standardLines.length + item.deductionBreakdown.additionalLines.length)}건
+                                                                            총 {nonAdvanceDeductionLinesForDisplay.length}건
                                                                         </span>
                                                                     </div>
-                                                                    {item.deductionBreakdown.hasData ? (
+                                                                    {hasNonAdvanceDeductionLines ? (
                                                                         <div className="border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
                                                                             <table className="w-full text-xs">
                                                                                 <thead className="bg-slate-50 text-slate-500">
@@ -2989,7 +4563,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                     </tr>
                                                                                 </thead>
                                                                                 <tbody className="divide-y divide-slate-100">
-                                                                                    {[...item.deductionBreakdown.standardLines, ...item.deductionBreakdown.additionalLines].map((line, idx) => (
+                                                                                    {nonAdvanceDeductionLinesForDisplay.map((line, idx) => (
                                                                                         <tr key={`deduction-${line.label}-${idx}`} className="hover:bg-amber-50/30">
                                                                                             <td className="px-3 py-2 text-slate-700">{line.label}</td>
                                                                                             <td className="px-3 py-2 text-right text-red-600 font-medium">-{line.amount.toLocaleString()}</td>
@@ -2999,7 +4573,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                 <tfoot className="bg-amber-50 font-bold text-amber-800">
                                                                                     <tr>
                                                                                         <td className="px-3 py-2 text-right">공제 합계</td>
-                                                                                        <td className="px-3 py-2 text-right">-{item.deductionBreakdown.total.toLocaleString()}</td>
+                                                                                        <td className="px-3 py-2 text-right">-{nonAdvanceDeductionTotalForDisplay.toLocaleString()}</td>
                                                                                     </tr>
                                                                                 </tfoot>
                                                                             </table>
@@ -3007,6 +4581,46 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                     ) : (
                                                                         <div className="p-4 border border-dashed border-slate-300 rounded-lg text-center text-xs text-slate-500 bg-white">
                                                                             공제 내역이 없습니다.
+                                                                        </div>
+                                                                    )}
+
+                                                                    <div className="flex items-center justify-between">
+                                                                        <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                                                                            <span className="w-1 h-4 bg-yellow-500 rounded-full"></span>
+                                                                            가불내역
+                                                                        </h4>
+                                                                        <span className="text-xs text-slate-500 font-mono bg-white px-2 py-0.5 rounded border border-slate-200">
+                                                                            총 {advanceLinesForDisplay.length}건
+                                                                        </span>
+                                                                    </div>
+                                                                    {hasAdvanceLines ? (
+                                                                        <div className="border border-yellow-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                                                                            <table className="w-full text-xs">
+                                                                                <thead className="bg-yellow-50 text-yellow-800">
+                                                                                    <tr>
+                                                                                        <th className="px-3 py-2 text-left font-medium border-b border-yellow-100">항목</th>
+                                                                                        <th className="px-3 py-2 text-right font-medium border-b border-yellow-100 w-32">금액</th>
+                                                                                    </tr>
+                                                                                </thead>
+                                                                                <tbody className="divide-y divide-yellow-100">
+                                                                                    {advanceLinesForDisplay.map((line, idx) => (
+                                                                                        <tr key={`advance-${line.label}-${idx}`} className="hover:bg-yellow-50/40">
+                                                                                            <td className="px-3 py-2 text-slate-700">{line.label}</td>
+                                                                                            <td className="px-3 py-2 text-right text-red-600 font-medium">-{line.amount.toLocaleString()}</td>
+                                                                                        </tr>
+                                                                                    ))}
+                                                                                </tbody>
+                                                                                <tfoot className="bg-yellow-50 font-bold text-yellow-900">
+                                                                                    <tr>
+                                                                                        <td className="px-3 py-2 text-right">가불 합계</td>
+                                                                                        <td className="px-3 py-2 text-right">-{advanceTotalForDisplay.toLocaleString()}</td>
+                                                                                    </tr>
+                                                                                </tfoot>
+                                                                            </table>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="p-4 border border-dashed border-yellow-300 rounded-lg text-center text-xs text-slate-500 bg-white">
+                                                                            가불 내역이 없습니다.
                                                                         </div>
                                                                     )}
 
@@ -3047,7 +4661,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                             </tr>
                                                                                         </thead>
                                                                                         <tbody className="divide-y divide-emerald-100">
-                                                                                            {item.insuranceAppliedSummary!.appliedSites.map((s) => (
+                                                                                            {(item.insuranceAppliedSummary?.appliedSites ?? []).map((s: InsuranceAppliedSiteSummary) => (
                                                                                                 <tr key={`ins-site-${s.siteId}`}>
                                                                                                     <td className="px-2 py-1 text-slate-700">{s.siteName}</td>
                                                                                                     <td className="px-2 py-1 text-center text-emerald-700 font-semibold">
@@ -3103,13 +4717,13 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                             )}
                                                                         </div>
                                                                     )}
-                                                                    {item.withholdingAppliedSummary && item.withholdingAppliedSummary.appliedManDay > 0 && (
+                                                                    {item.withholdingAppliedSummary && (item.withholdingAppliedSummary.appliedManDay ?? 0) > 0 && (
                                                                         <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-xs mt-2">
                                                                             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                                                                 <div className="text-amber-900 font-bold">
-                                                                                    갑근세·지방세 적용공수 {item.withholdingAppliedSummary.appliedManDay.toFixed(1)}공수
-                                                                                    {item.withholdingAppliedSummary.thresholdManDay > 0
-                                                                                        ? ` (기준 ${item.withholdingAppliedSummary.thresholdManDay}공수 이하)`
+                                                                                    갑근세·지방세 적용공수 {(item.withholdingAppliedSummary.appliedManDay ?? 0).toFixed(1)}공수
+                                                                                    {(item.withholdingAppliedSummary.thresholdManDay ?? item.withholdingAppliedSummary.thresholdDays ?? 0) > 0
+                                                                                        ? ` (기준 ${item.withholdingAppliedSummary.thresholdManDay ?? item.withholdingAppliedSummary.thresholdDays ?? 0}공수 이하)`
                                                                                         : ' (노무 전체 공수 적용)'}
                                                                                 </div>
                                                                                 <div className="text-amber-800 font-mono">
@@ -3127,7 +4741,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                         </tr>
                                                                                     </thead>
                                                                                     <tbody className="divide-y divide-amber-100">
-                                                                                        {item.withholdingAppliedSummary.appliedSites.map((s) => (
+                                                                                        {(item.withholdingAppliedSummary.appliedSites ?? []).map((s: WithholdingAppliedSiteSummary) => (
                                                                                             <tr key={`withholding-site-${s.siteId}`}>
                                                                                                 <td className="px-2 py-1 text-slate-700">{s.siteName}</td>
                                                                                                 <td className="px-2 py-1 text-center text-amber-700 font-semibold">
@@ -3183,11 +4797,11 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                             </div>
                                                                         </div>
                                                                     )}
-                                                                    {item.businessIncomeAppliedSummary && item.businessIncomeAppliedSummary.appliedManDay > 0 && (
+                                                                    {item.businessIncomeAppliedSummary && (item.businessIncomeAppliedSummary.appliedManDay ?? 0) > 0 && (
                                                                         <div className="border border-sky-200 bg-sky-50 rounded-lg p-3 text-xs mt-2">
                                                                             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                                                                 <div className="text-sky-900 font-bold">
-                                                                                    사업소득 3.3% 적용 공수 {item.businessIncomeAppliedSummary.appliedManDay.toFixed(1)}
+                                                                                    사업소득 3.3% 적용 공수 {(item.businessIncomeAppliedSummary.appliedManDay ?? 0).toFixed(1)}
                                                                                 </div>
                                                                                 <div className="text-sky-800 font-mono">
                                                                                     대상금액 {item.businessIncomeAppliedSummary.appliedAmount.toLocaleString()}원
@@ -3204,7 +4818,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                                                                         </tr>
                                                                                     </thead>
                                                                                     <tbody className="divide-y divide-sky-100">
-                                                                                        {item.businessIncomeAppliedSummary.appliedSites.map((s) => (
+                                                                                        {(item.businessIncomeAppliedSummary.appliedSites ?? []).map((s: BusinessIncomeAppliedSiteSummary) => (
                                                                                             <tr key={`biz-site-${s.siteId}`}>
                                                                                                 <td className="px-2 py-1 text-slate-700">{s.siteName}</td>
                                                                                                 <td className="px-2 py-1 text-center text-sky-700 font-semibold">4대보험·갑근세 제외</td>
@@ -3312,83 +4926,173 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                     </table>
                 </div>
             </div>
+            )}
 
             {pageViewMode === 'ledger' && (
-                <MonthlyAdvanceLedger
-                    rows={ledgerRows}
-                    payrollConfig={payrollConfig}
-                    withholdingThreshold={WITHHOLDING_MAX_MAN_DAY}
-                    applyInsurance={insuranceApplied}
-                    applyBusinessIncome={businessIncomeApplied}
-                    clientCompanyNameById={companyNameById}
-                />
+                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    <MonthlyAdvanceLedger
+                        ref={advanceLedgerRef}
+                        rows={ledgerRows}
+                        payrollConfig={payrollConfig}
+                        advanceItemLabels={payrollConfig?.advanceItemLabels}
+                        withholdingThreshold={WITHHOLDING_MAX_MAN_DAY}
+                        applyUtilities={utilitiesApplied}
+                        applyInsurance={insuranceApplied}
+                        applyBusinessIncome={businessIncomeApplied}
+                        applyDailyFee={dailyFeeApplied}
+                        insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                        isInsuranceEligibleEntry={isLedgerInsuranceEligibleEntry}
+                        clientCompanyNameById={companyNameById}
+                        onInputsChange={setLedgerInputs}
+                        initialInputs={loadedLedgerInputsFromAdvance}
+                        visibleSections={ledgerVisibleSections}
+                    />
+                </div>
             )}
 
             {showKBPreview && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
-                        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-amber-50">
-                            <h3 className="text-lg font-bold text-slate-800">🏦 국민은행용 엑셀 미리보기</h3>
-                            <button
-                                onClick={() => setShowKBPreview(false)}
-                                className="text-slate-400 hover:text-slate-600 text-2xl"
-                            >
-                                ×
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-auto p-4">
-                            <table className="w-full text-sm border-collapse">
-                                <thead className="bg-amber-100 sticky top-0">
+                <KBPreviewOverlay>
+                    <KBPreviewDialog>
+                        <KBPreviewHeader>
+                            <KBPreviewTitleRow>
+                                <KBPreviewTitleBlock>
+                                    <KBPreviewEyebrow>KB Transfer Preview</KBPreviewEyebrow>
+                                    <KBPreviewTitle>국민은행용 엑셀 미리보기</KBPreviewTitle>
+                                    <KBPreviewDescription>송금표시, 메모 규칙, 이체금액 기준을 같은 팔레트의 카드형 입력으로 정리했습니다.</KBPreviewDescription>
+                                </KBPreviewTitleBlock>
+                                <KBPreviewCloseButton onClick={() => setShowKBPreview(false)}>
+                                    ×
+                                </KBPreviewCloseButton>
+                            </KBPreviewTitleRow>
+
+                            <KBPreviewControlsGrid>
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-receiver-display">받는분통장표시</KBPreviewFieldLabel>
+                                    <KBPreviewInput
+                                        id="kb-receiver-display"
+                                        type="text"
+                                        value={kbReceiverDisplay}
+                                        onChange={(e) => setKbReceiverDisplay(e.target.value)}
+                                        placeholder="㈜다원"
+                                    />
+                                    <KBPreviewFieldHint>은행 업로드 파일의 D열에 동일하게 들어갑니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-memo-suffix">내통장메모 규칙</KBPreviewFieldLabel>
+                                    <KBPreviewInput
+                                        id="kb-memo-suffix"
+                                        type="text"
+                                        value={kbMemoSuffix}
+                                        onChange={(e) => setKbMemoSuffix(e.target.value)}
+                                        placeholder="{이름} 가불"
+                                    />
+                                    <KBPreviewFieldHint>{'{이름}'} 치환자를 쓰면 작업자 이름 뒤에 자동으로 붙습니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+
+                                <KBPreviewFieldCard>
+                                    <KBPreviewFieldLabel htmlFor="kb-amount-type">이체금액 적용 기준</KBPreviewFieldLabel>
+                                    <KBPreviewSelect
+                                        id="kb-amount-type"
+                                        value={kbAmountType}
+                                        onChange={(e) => setKbAmountType(e.target.value)}
+                                    >
+                                        <option value="totalAmount">실지급액 (전체)</option>
+                                        <option value="invoiceNet">공제후 법인총액</option>
+                                        <option value="laborNet">공제후 노무총액</option>
+                                        <option value="invoiceAdvance">법인가불 총액</option>
+                                        <option value="laborAdvance">노무가불 총액</option>
+                                        {(() => {
+                                            const al = { ...DEFAULT_ADVANCE_ITEM_LABELS, ...(payrollConfig?.advanceItemLabels ?? {}) };
+                                            return (
+                                                <>
+                                                    <option disabled>── 법인가불 개별 ──</option>
+                                                    <option value="corporateAdvance1">{al.corporateAdvance1}</option>
+                                                    <option value="corporateAdvance2">{al.corporateAdvance2}</option>
+                                                    <option value="corporateAdvance3">{al.corporateAdvance3}</option>
+                                                    <option value="corporateAdvance4">{al.corporateAdvance4}</option>
+                                                    <option disabled>── 노무가불 개별 ──</option>
+                                                    <option value="laborAdvance1">{al.laborAdvance1}</option>
+                                                    <option value="laborAdvance2">{al.laborAdvance2}</option>
+                                                    <option value="laborAdvance3">{al.laborAdvance3}</option>
+                                                    <option value="laborAdvance4">{al.laborAdvance4}</option>
+                                                </>
+                                            );
+                                        })()}
+                                    </KBPreviewSelect>
+                                    <KBPreviewFieldHint>선택한 기준으로 C열 이체금액이 계산됩니다.</KBPreviewFieldHint>
+                                </KBPreviewFieldCard>
+                            </KBPreviewControlsGrid>
+                        </KBPreviewHeader>
+                        <KBPreviewTableArea>
+                            <KBPreviewTable>
+                                <thead className="bg-slate-800/95 sticky top-0">
                                     <tr>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">A. 은행코드</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">B. 계좌번호</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-right font-bold">C. 이체금액</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">D. 받는분통장표시</th>
-                                        <th className="border border-slate-300 px-3 py-2 text-left font-bold">E. 내통장메모</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">A. 은행코드</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">B. 계좌번호</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-right font-bold text-slate-100">C. 이체금액</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">D. 받는분통장표시</th>
+                                        <th className="border border-slate-700 px-3 py-2 text-left font-bold text-slate-100">E. 내통장메모</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {getKBPreviewData().map((row, idx) => (
-                                        <tr key={idx} className="hover:bg-amber-50">
-                                            <td className="border border-slate-300 px-3 py-2">{row.은행코드}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.계좌번호}</td>
-                                            <td className="border border-slate-300 px-3 py-2 text-right font-medium">{row.이체금액.toLocaleString()}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.받는분통장표시}</td>
-                                            <td className="border border-slate-300 px-3 py-2">{row.내통장메모}</td>
+                                        <tr key={idx} className="hover:bg-slate-800/60">
+                                            <td className={`border border-slate-700 px-3 py-2 ${row.은행코드미매핑 ? 'text-rose-300 font-semibold' : ''}`}>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span>{row.은행코드표시}</span>
+                                                    {row.은행코드수정요망 && (
+                                                        <span className="inline-flex items-center rounded bg-rose-500/30 px-1.5 py-0.5 text-[10px] font-bold text-rose-100">
+                                                            수정요망
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.계좌번호}</td>
+                                            <td className="border border-slate-700 px-3 py-2 text-right font-medium text-amber-300">{row.이체금액.toLocaleString()}</td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.받는분통장표시}</td>
+                                            <td className="border border-slate-700 px-3 py-2">{row.내통장메모}</td>
                                         </tr>
                                     ))}
                                 </tbody>
-                            </table>
-                        </div>
-                        <div className="p-4 border-t border-slate-200 flex justify-between items-center bg-amber-50">
-                            <span className="text-sm text-slate-600">
+                            </KBPreviewTable>
+                        </KBPreviewTableArea>
+                        <KBPreviewFooter>
+                            <KBPreviewSummary>
                                 총 {getKBPreviewData().length}명 · 총 이체금액 {getKBPreviewData().reduce((sum, row) => sum + row.이체금액, 0).toLocaleString()}원
-                            </span>
-                            <div className="flex gap-2">
-                                <button
+                            </KBPreviewSummary>
+                            <ActionCluster>
+                                <ActionButton
+                                    type="button"
+                                    $variant="outline"
                                     onClick={() => setShowKBPreview(false)}
-                                    className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
                                 >
                                     닫기
-                                </button>
-                                <button
+                                </ActionButton>
+                                <ActionButton
+                                    type="button"
+                                    $variant="warning"
                                     onClick={() => { handleDownloadKBExcel(); setShowKBPreview(false); }}
-                                    className="px-4 py-2 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-bold flex items-center gap-2"
                                 >
                                     <FontAwesomeIcon icon={faFileExcel} />
                                     국민은행용 다운로드
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                                </ActionButton>
+                            </ActionCluster>
+                        </KBPreviewFooter>
+                    </KBPreviewDialog>
+                </KBPreviewOverlay>
             )}
 
             {showBankCodes && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[85vh] flex flex-col">
+                    <div className="bg-white rounded-xl shadow-2xl max-w-6xl w-full mx-4 max-h-[85vh] flex flex-col">
                         <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-blue-50">
-                            <h3 className="text-lg font-bold text-slate-800">📊 은행코드표</h3>
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800">📊 은행 매핑 진단표</h3>
+                                <p className="text-xs text-slate-600 mt-0.5">
+                                    전체 입력 {bankDiagnosticSummary.total}건 · 미매핑 {bankDiagnosticSummary.unmapped}건
+                                </p>
+                            </div>
                             <button
                                 onClick={() => setShowBankCodes(false)}
                                 className="text-slate-400 hover:text-slate-600 text-2xl"
@@ -3396,33 +5100,72 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 ×
                             </button>
                         </div>
-                        <div className="flex-1 overflow-auto p-4 space-y-4 text-xs">
+
+                        <div className="flex-1 overflow-auto p-4 space-y-5 text-xs">
                             <div>
-                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-blue-100 px-2 py-1 rounded">🏦 은행</h4>
-                                <p className="text-slate-500 text-xs mb-2">대표 은행명 또는 별칭을 입력하면 코드가 자동 매핑됩니다.</p>
+                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-blue-100 px-2 py-1 rounded">🏦 공식 은행코드 매핑표</h4>
+                                <p className="text-slate-500 text-xs mb-2">기준 데이터: BANK_CODES 상수</p>
+                                <table className="w-full text-xs border-collapse">
+                                    <thead className="bg-slate-100 sticky top-0">
+                                        <tr>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">코드</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">은행명</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {Object.entries(BANK_CODES)
+                                            .sort(([a], [b]) => Number(a) - Number(b))
+                                            .map(([code, name]) => (
+                                                <tr key={`${code}-${name}`}>
+                                                    <td className="border px-2 py-1 font-mono">{code}</td>
+                                                    <td className="border px-2 py-1">{name}</td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
                             </div>
-                            <table className="w-full text-xs border-collapse">
-                                <thead className="bg-slate-100 sticky top-0">
-                                    <tr>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">코드</th>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">은행명</th>
-                                        <th className="border border-slate-300 px-2 py-1 text-left font-bold">별칭</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {Object.entries(BANK_CODES)
-                                        .filter(([name]) => name.length <= 6) // 대표명만 대략 노출
-                                        .slice(0, 30)
-                                        .map(([name, code]) => (
-                                            <tr key={`${code}-${name}`}>
-                                                <td className="border px-2 py-1 font-mono">{code}</td>
-                                                <td className="border px-2 py-1">{name}</td>
-                                                <td className="border px-2 py-1 text-slate-500">자동인식</td>
+
+                            <div>
+                                <h4 className="text-sm font-bold text-slate-700 mb-2 bg-amber-100 px-2 py-1 rounded">🛠 입력 은행명 진단 (미매핑 사유)</h4>
+                                <table className="w-full text-xs border-collapse">
+                                    <thead className="bg-slate-100 sticky top-0">
+                                        <tr>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">입력 은행명</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-right font-bold">건수</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">매핑 코드</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">미매핑 사유</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">후보</th>
+                                            <th className="border border-slate-300 px-2 py-1 text-left font-bold">권장 조치</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bankMappingDiagnostics.length === 0 && (
+                                            <tr>
+                                                <td colSpan={6} className="border px-2 py-4 text-center text-slate-500">진단할 데이터가 없습니다.</td>
+                                            </tr>
+                                        )}
+                                        {bankMappingDiagnostics.map((row) => (
+                                            <tr key={row.normalized} className={row.unmappedCount > 0 ? 'bg-rose-50/50' : ''}>
+                                                <td className="border px-2 py-1">
+                                                    <div className="font-medium">{row.inputNames}</div>
+                                                    <div className="text-slate-400">정규화키: {row.normalized}</div>
+                                                </td>
+                                                <td className="border px-2 py-1 text-right tabular-nums">{row.count}</td>
+                                                <td className="border px-2 py-1 font-mono">
+                                                    {row.codes || '-'}
+                                                </td>
+                                                <td className={`border px-2 py-1 ${row.unmappedCount > 0 ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+                                                    {row.reason || '-'}
+                                                </td>
+                                                <td className="border px-2 py-1 text-slate-600">{row.candidates || '-'}</td>
+                                                <td className="border px-2 py-1 text-slate-700">{row.suggestedAction}</td>
                                             </tr>
                                         ))}
-                                </tbody>
-                            </table>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
+
                         <div className="p-4 border-t border-slate-200 bg-blue-50">
                             <button
                                 onClick={() => setShowBankCodes(false)}
@@ -3442,7 +5185,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                             <div className="flex items-center gap-2">
                                 <span className="text-2xl">📄</span>
                                 <div>
-                                    <h3 className="text-lg font-bold text-slate-800">월급제 노임명세서 미리보기</h3>
+                                    <h3 className="text-lg font-bold text-slate-800">노임명세서 미리보기</h3>
                                     <p className="text-xs text-slate-500">{rangeLabel || '-'} · 총 {filteredPaymentData.length}명</p>
                                 </div>
                             </div>
@@ -3459,12 +5202,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 <div className="flex-1 overflow-y-auto">
                                     {filteredPaymentData.map(worker => (
                                         <button
-                                            key={`${worker.month}__${worker.workerId}__${worker.teamId}`}
-                                            onClick={() => setSelectedPayslipRowKey(`${worker.month}__${worker.workerId}__${worker.teamId}`)}
-                                            className={`w-full text-left px-4 py-3 border-b border-slate-100 text-sm transition flex flex-col ${payslipTarget?.workerId === worker.workerId ? 'bg-purple-50 text-purple-700 font-semibold' : 'hover:bg-slate-50'}`}
+                                            key={worker.id}
+                                            onClick={() => setSelectedPayslipRowKey(worker.id)}
+                                            className={`w-full text-left px-4 py-3 border-b border-slate-100 text-sm transition flex flex-col ${payslipTarget?.id === worker.id
+                                                ? (worker.id.endsWith('__월급제') ? 'bg-blue-50 text-blue-700 font-semibold' : 'bg-emerald-50 text-emerald-700 font-semibold')
+                                                : (worker.id.endsWith('__월급제') ? 'hover:bg-blue-50/40' : 'hover:bg-emerald-50/40')}`}
                                         >
                                             <span>{worker.workerName}</span>
-                                            <span className="text-xs text-slate-500">{worker.month} · {worker.teamName}</span>
+                                            <span className="text-xs text-slate-500">{worker.month} · {worker.teamName} · {worker.id.endsWith('__일급제') ? '일급제' : '월급제'}</span>
                                         </button>
                                     ))}
                                     {filteredPaymentData.length === 0 && (
@@ -3473,11 +5218,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                 </div>
                             </aside>
                             <div className="flex-1 overflow-auto p-6 bg-slate-50">
-                                {payslipTarget ? (
+                                {resolvedPayslipTarget ? (
                                     <PayslipTemplate
                                         ref={printRef}
-                                        data={payslipTarget}
-                                        month={payslipTarget.month}
+                                        data={resolvedPayslipTarget}
+                                        month={resolvedPayslipTarget.month}
+                                        applyUtilities={utilitiesApplied}
+                                        insuranceTeamSiteOnly={insuranceTeamSiteOnly}
+                                        isTeamResponsibleSiteEntry={isEntryInWorkerTeamSite}
                                     />
                                 ) : (
                                     <div className="text-center py-12 text-slate-500">
@@ -3487,14 +5235,14 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
 
                                 <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                                     <p className="text-sm text-slate-600">
-                                        <span className="font-semibold text-slate-800">{payslipTarget?.workerName ?? '-'}</span>
+                                        <span className="font-semibold text-slate-800">{resolvedPayslipTarget?.workerName ?? '-'}</span>
                                         {' · 실지급 '}
-                                        <span className="text-brand-600 font-bold">{payslipTarget ? payslipTarget.totalAmount.toLocaleString() : 0}원</span>
+                                        <span className="text-brand-600 font-bold">{resolvedPayslipTarget ? resolvedPayslipTarget.totalAmount.toLocaleString() : 0}원</span>
                                     </p>
                                     <div className="flex gap-2">
                                         <button
                                             onClick={handleCopyToClipboard}
-                                            disabled={!payslipTarget || copying}
+                                            disabled={!resolvedPayslipTarget || copying}
                                             className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             {copying ? <FontAwesomeIcon icon={faSpinner} spin /> : <FontAwesomeIcon icon={faCopy} />}
@@ -3502,7 +5250,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         </button>
                                         <button
                                             onClick={handleDownloadIndividualPayslip}
-                                            disabled={!payslipTarget}
+                                            disabled={!resolvedPayslipTarget}
                                             className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold flex items-center gap-2 disabled:opacity-50"
                                         >
                                             <FontAwesomeIcon icon={faFileExcel} />
@@ -3530,7 +5278,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                         <div className="p-4 border-b border-slate-200 flex items-center justify-between">
                             <div>
                                 <h3 className="text-lg font-bold text-slate-800">4대보험/세율 설정</h3>
-                                <p className="text-xs text-slate-500 mt-1">적용 기준(공수) 및 요율(%)을 저장합니다.</p>
+                                <p className="text-xs text-slate-500 mt-1">적용 기준(공수), 요율(%), 일급제 수수료 공수당(원)을 저장합니다.</p>
                             </div>
                             <button
                                 type="button"
@@ -3602,6 +5350,17 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
                                         className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
                                         min={0}
                                         step={0.001}
+                                    />
+                                </label>
+                                <label className="text-sm">
+                                    <div className="text-xs font-bold text-slate-600 mb-1">일급제 수수료 공수당 금액 (원)</div>
+                                    <input
+                                        type="number"
+                                        value={dailyWorkerFeePerManDayInput}
+                                        onChange={(e) => setDailyWorkerFeePerManDayInput(e.target.value)}
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                        min={0}
+                                        step={1000}
                                     />
                                 </label>
                                 <label className="text-sm">

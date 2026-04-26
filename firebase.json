@@ -1,6 +1,7 @@
 {
-  "storage": {
-    "rules": "storage.rules"
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "hosting": {
     "public": "build",
@@ -16,31 +17,7 @@
       }
     ]
   },
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs20",
-    "ignore": [
-      "node_modules",
-      ".git",
-      "firebase-debug.log",
-      "firebase-debug.*.log"
-    ]
-  },
-  "emulators": {
-    "auth": {
-      "port": 9099
-    },
-    "firestore": {
-      "port": 8080
-    },
-    "storage": {
-      "port": 9199
-    },
-    "functions": {
-      "port": 5001
-    },
-    "ui": {
-      "enabled": true
-    }
+  "storage": {
+    "rules": "storage.rules"
   }
 }

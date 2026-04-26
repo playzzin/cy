@@ -347,7 +347,7 @@ export class AnalyticsAgent {
         let markdown = `## 📈 전체 공수 통계\n\n**${periodText}**\n\n`;
 
         markdown += '| 항목 | 값 |\n';
-        markdown += '|------|----|\ n';
+        markdown += '|------|----|\n';
         markdown += `| 총 공수 | ${data.totalManDay.toFixed(1)} |\n`;
         markdown += `| 투입 인원 | ${data.totalWorkers}명 |\n`;
         markdown += `| 평균 일일 공수 | ${data.avgManDay.toFixed(1)} |\n`;

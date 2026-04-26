@@ -1,0 +1,49 @@
+.org-chart-page.is-light {
+    background: #f8fafc;
+}
+
+.org-chart-page.is-light [class*="bg-gradient"],
+.org-chart-page.is-light [class*="radial-gradient"],
+.org-chart-page.is-light [class*="linear-gradient"] {
+    background-image: none !important;
+}
+
+.org-chart-page.is-light [class*="bg-cyan-"],
+.org-chart-page.is-light [class*="bg-emerald-"],
+.org-chart-page.is-light [class*="bg-amber-"],
+.org-chart-page.is-light [class*="bg-fuchsia-"],
+.org-chart-page.is-light [class*="bg-violet-"],
+.org-chart-page.is-light [class*="bg-blue-"],
+.org-chart-page.is-light [class*="bg-slate-950"],
+.org-chart-page.is-light [class*="bg-slate-900"],
+.org-chart-page.is-light [class*="bg-black/"],
+.org-chart-page.is-light [class*="bg-white/[0."] {
+    background-color: #ffffff !important;
+}
+
+.org-chart-page.is-light [class*="border-cyan-"],
+.org-chart-page.is-light [class*="border-emerald-"],
+.org-chart-page.is-light [class*="border-amber-"],
+.org-chart-page.is-light [class*="border-fuchsia-"],
+.org-chart-page.is-light [class*="border-violet-"],
+.org-chart-page.is-light [class*="border-white/"],
+.org-chart-page.is-light [class*="border-slate-"] {
+    border-color: #e2e8f0 !important;
+}
+
+.org-chart-page.is-light [class*="text-cyan-"],
+.org-chart-page.is-light [class*="text-emerald-"],
+.org-chart-page.is-light [class*="text-amber-"],
+.org-chart-page.is-light [class*="text-fuchsia-"],
+.org-chart-page.is-light [class*="text-violet-"],
+.org-chart-page.is-light [class*="text-white"] {
+    color: #1f2937 !important;
+}
+
+.org-chart-page.is-light [class*="shadow-"] {
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08) !important;
+}
+
+.org-chart-page.is-light [class*="backdrop-blur"] {
+    backdrop-filter: none !important;
+}

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartSimple, faList, faSpinner, faBuilding, faArrowRight, faCalendar } from '@fortawesome/free-solid-svg-icons';
+import { faChartSimple, faList, faSpinner, faArrowRight, faCalendar } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
@@ -31,6 +31,9 @@ interface MatrixCell {
     records: SupportRecord[];
 }
 
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const toYmd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+
 const SupportStatusPage: React.FC = () => {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [viewMode, setViewMode] = useState<'matrix' | 'list'>('matrix');
@@ -41,19 +44,13 @@ const SupportStatusPage: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [records, setRecords] = useState<SupportRecord[]>([]);
 
-    useEffect(() => {
-        fetchData();
-    }, [selectedDate]);
-
-    const pad2 = (n: number) => String(n).padStart(2, '0');
-    const toYmd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     const parseYmdLocal = (ymd: string): Date => {
         const [y, m, day] = String(ymd).split('-').map((v) => Number(v));
         if (!y || !m || !day) return new Date(ymd);
         return new Date(y, m - 1, day);
     };
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             // 1. Load Master Data
@@ -130,7 +127,11 @@ const SupportStatusPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [selectedDate]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
     // --- Helpers ---
     const getCompany = (id: string) => companies.find(c => c.id === id);

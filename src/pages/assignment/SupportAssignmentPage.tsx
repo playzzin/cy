@@ -74,7 +74,7 @@ const WorkerCard: React.FC<{ worker: SupportWorker; isOverlay?: boolean }> = ({ 
 };
 
 // --- Droppable Column ---
-const TeamColumn: React.FC<{ column: TeamColumn; isSource?: boolean }> = ({ column, isSource }) => {
+const TeamColumnPanel: React.FC<{ column: TeamColumn; isSource?: boolean }> = ({ column, isSource }) => {
     const { setNodeRef, isOver } = useDroppable({
         id: column.teamId,
         data: { teamId: column.teamId, isSource }
@@ -344,7 +344,7 @@ const SupportAssignmentPage: React.FC = () => {
                     {/* Source Column (My Team) */}
                     {sourceColumn && (
                         <div className="flex-shrink-0 w-80">
-                            <TeamColumn column={sourceColumn} isSource />
+                            <TeamColumnPanel column={sourceColumn} isSource />
                         </div>
                     )}
 
@@ -358,7 +358,7 @@ const SupportAssignmentPage: React.FC = () => {
                     <div className="flex gap-4 flex-1 overflow-x-auto">
                         {targetColumns.map(col => (
                             <div key={col.teamId} className="flex-shrink-0 w-80">
-                                <TeamColumn column={col} />
+                                <TeamColumnPanel column={col} />
                             </div>
                         ))}
                     </div>

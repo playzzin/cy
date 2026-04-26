@@ -1,574 +1,1104 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Timestamp } from 'firebase/firestore';
-import { Estimate, EstimateItem, estimateService, EstimateRequestType, EstimateStatus } from '../../services/estimateService';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faFileInvoiceDollar, faPlus, faTrash, faSave, faEdit } from '@fortawesome/free-solid-svg-icons';
+import {
+    faPlus, faSave, faSpinner, faTrash, faPrint, faEye,
+    faFileAlt, faEdit, faMagnifyingGlass, faFileInvoiceDollar,
+    faClipboardList, faRotateRight
+} from '@fortawesome/free-solid-svg-icons';
+import { estimateService, Estimate, EstimateItem } from '../../services/estimateService';
+import { companyFirestoreService } from '../../services/companyFirestoreService';
+import { CompanyZod } from '../../types/zod/companySchema';
+import { db } from '../../config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 
-const generateItemId = (): string => {
-    return `item-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+// --- Constants ---
+const EXCEL_FONT = "'Inter', 'Pretendard', '맑은 고딕', 'Malgun Gothic', dotum, sans-serif";
+const BORDER_COLOR = '#e2e8f0'; // slate-200
+const BORDER_THICK = `1.5px solid ${BORDER_COLOR}`;
+const BORDER_THIN = `1px solid ${BORDER_COLOR}`;
+const BG_LABEL = '#f8fafc'; // slate-50
+const PRIMARY_COLOR = '#0f172a'; // slate-900 (Header)
+
+// --- Preset Data for Autocomplete ---
+const COMMON_CATEGORIES = ['시스템 동바리', '시스템 비계', '시스템 비계 (발판포함)', '선택 항목', '기타'];
+const COMMON_SECTIONS = ['설치/해체 (m3)', '설치/해체 (m2)', '추가 설치 (m3)', '추가 설치 (m2)', '망 설치 (m2)', '운반비'];
+const COMMON_UNITS = ['m3', 'm2', '인', '식', 'kg'];
+
+// --- Types ---
+type DocumentType = 'estimate' | 'transaction';
+type EstimateStatus = 'draft' | 'sent' | 'approved' | 'rejected';
+type Pane = 'edit' | 'preview' | 'transaction-edit' | 'transaction-preview';
+
+type EstimateDraft = {
+    id?: string;
+    documentType: DocumentType;
+    estimateNo: string;
+    title: string;
+    projectName: string;
+    clientName: string;
+    clientCompany: string;
+    clientContact: string;
+    status: EstimateStatus;
+    issueDate: string;
+    validUntilDate: string;
+    items: EstimateItem[];
+    discount: number;
+    vatRate: number;
+    includeVat: boolean;
+    paymentTerms: string;
+    scopeNotes: string;
+    notes: string;
+    installRatio: number;
+    supplierName: string;
+    supplierCompany: string;
+    supplierContact: string;
+    supplierAddress: string;
+    supplierBizNo: string;
+    supplierAccount: string;
+    supplierFax: string;
+    supplierManager: string;
+    supplierManagerContact: string;
 };
 
-const defaultItems: EstimateItem[] = [
-    {
-        id: generateItemId(),
-        label: '디자인',
-        description: '메인/서브 페이지 UI 디자인',
-        category: 'design',
-        unitPrice: 0,
-        quantity: 1,
-        amount: 0,
-        isOptional: false
-    },
-    {
-        id: generateItemId(),
-        label: '퍼블리싱',
-        description: '반응형 HTML/CSS/JS 구현',
-        category: 'frontend',
-        unitPrice: 0,
-        quantity: 1,
-        amount: 0,
-        isOptional: false
-    },
-    {
-        id: generateItemId(),
-        label: '유지보수 (3개월)',
-        description: '경미한 수정 및 장애 대응',
-        category: 'maintenance',
-        unitPrice: 0,
-        quantity: 1,
-        amount: 0,
-        isOptional: true
-    }
-];
+const DEFAULT_SCOPE_NOTES = `- V.A.T 별도 (세금 계산서 처리시)
+- 결제 조건 : 정기 결제
+- 별도 협의 없으면 설치(50%), 해체(50%) 분할청구
+- 도면변경이나 설치방법 변경에 따라 체적, 견적 금액은 변동될 수 있음. 실물량 정산.
+- 직영품은 1인당 27만원 (식대, 경비 포함)
+- 설치, 해체시 상하차 및 인양 장비 현장 지원 (지게차, 크레인, 사다리차)
+- 정리 반출시, 반생, 랩 등 포함 견적
+- 외부비계는 발판 W=500 1열 조건
+- 하부 성토구간 보강은 합판 현장지원. (300 * 300 재단 후 지급조건)
+- 후리도매 자재, 파이프 및 클램프 현장지원.
+- 물량 산출방식 : 길이(벽체에서 900mm 이격) * 높이(기초+난간 1200mm 포함) = m2 기준견적.
+- 시스템 동바리 해체시 바닥 정리 및 정리공간 확보 후 해체
+- 거푸집 선 해체 후 시스템 동바리 해체 조건
+- 설치불가 구간 현장조치 (파이프비계 설치) : 물량 제외, 추후 정산.
+- 건설산업기본법 제29조 4항 관련 시행규칙 제26조의 6에 의거하여 전문시공팀 현장소개하여 별도계약조건`;
 
-const EstimatePage: React.FC = () => {
-    const [estimates, setEstimates] = useState<Estimate[]>([]);
-    const [loading, setLoading] = useState<boolean>(false);
-    const [error, setError] = useState<string | null>(null);
+const createItem = (input: Partial<EstimateItem> = {}): EstimateItem => ({
+    id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    category: input.category || '',
+    section: input.section || '',
+    label: input.label || input.section || '',
+    unit: input.unit || '',
+    quantity: input.quantity || 0,
+    finalUnitPrice: input.finalUnitPrice || 0,
+    unitPrice: input.finalUnitPrice || 0,
+    amount: (input.quantity || 0) * (input.finalUnitPrice || 0),
+    install50: 0,
+    remove50: 0,
+    note: '',
+    pointBase: 4000,
+    pointMultiplier: 1500,
+    date: (input as any).date || '',
+});
 
-    const [editingId, setEditingId] = useState<string | null>(null);
+const getEmptyDraft = (type: DocumentType = 'estimate'): EstimateDraft => ({
+    documentType: type,
+    estimateNo: `EST-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${String(Date.now()).slice(-4)}`,
+    title: type === 'estimate' ? '견 적 서' : '거 래 명 세 표',
+    projectName: '', clientName: '', clientCompany: '', clientContact: '',
+    status: 'draft', issueDate: new Date().toISOString().split('T')[0], validUntilDate: new Date().toISOString().split('T')[0],
+    items: type === 'estimate' ? [
+        createItem({ category: '시스템 동바리', section: '' }),
+        createItem({ category: '시스템 동바리', section: '' }),
+        createItem({ category: '시스템 동바리', section: '' }),
+        createItem({ category: '시스템 동바리', section: '' }),
+        createItem({ category: '시스템 비계', section: '' }),
+        createItem({ category: '시스템 비계', section: '' }),
+        createItem({ category: '시스템 비계', section: '' }),
+        createItem({ category: '시스템 비계', section: '' })
+    ] : [],
+    discount: 0, vatRate: 10, includeVat: true,
+    paymentTerms: '정기 결제',
+    scopeNotes: DEFAULT_SCOPE_NOTES,
+    notes: '설치/해체 시공',
+    installRatio: 50,
+    supplierName: '', supplierCompany: '', supplierContact: '', supplierAddress: '', supplierBizNo: '', supplierAccount: '', supplierFax: '', supplierManager: '이재욱', supplierManagerContact: '010-2365-7692'
+});
 
-    const [title, setTitle] = useState<string>('');
-    const [clientName, setClientName] = useState<string>('');
-    const [clientCompany, setClientCompany] = useState<string>('');
-    const [requestType, setRequestType] = useState<EstimateRequestType>('build');
-    const [status, setStatus] = useState<EstimateStatus>('draft');
-    const [validUntilDate, setValidUntilDate] = useState<string>('');
-    const [notes, setNotes] = useState<string>('');
-    const [items, setItems] = useState<EstimateItem[]>(defaultItems);
-    const [discount, setDiscount] = useState<number>(0);
-    const [tax, setTax] = useState<number>(0);
+const LOGO_FALLBACK = "https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EA%B8%B4%EB%A1%9C%EA%B3%A0.png?alt=media&token=fca01385-1946-4b6c-8d98-776945928bc5";
 
-    const subtotal = useMemo(
-        () => items.reduce((sum, item) => sum + item.amount, 0),
-        [items]
-    );
-
-    const total = useMemo(
-        () => subtotal - discount + tax,
-        [subtotal, discount, tax]
-    );
-
-    const resetForm = (): void => {
-        setEditingId(null);
-        setTitle('');
-        setClientName('');
-        setClientCompany('');
-        setRequestType('build');
-        setStatus('draft');
-        setValidUntilDate('');
-        setNotes('');
-        setItems(defaultItems.map((item) => ({ ...item, id: generateItemId(), unitPrice: 0, quantity: 1, amount: 0 })));
-        setDiscount(0);
-        setTax(0);
-    };
-
-    const loadEstimates = async (): Promise<void> => {
-        try {
-            setLoading(true);
-            setError(null);
-            const data = await estimateService.getEstimates();
-            setEstimates(data);
-        } catch (e) {
-            setError('견적 데이터를 불러오는 중 오류가 발생했습니다.');
-        } finally {
-            setLoading(false);
+const formatCurrency = (v: number | null | undefined): string => new Intl.NumberFormat('ko-KR').format(Math.round(v || 0));
+const formatDecimal = (v: number | null | undefined): string => (v || 0).toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const numberToKorean = (num: number): string => {
+    const unit = ['', '십', '백', '천'];
+    const gUnit = ['', '만', '억', '조'];
+    const numChar = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+    let res = '';
+    const sNum = String(Math.floor(num));
+    for (let i = 0; i < sNum.length; i++) {
+        const n = Number(sNum[sNum.length - 1 - i]);
+        if (n > 0) res = numChar[n] + unit[i % 4] + res;
+        if (i % 4 === 3) {
+            const group = Math.floor(i / 4);
+            if (Number(sNum.slice(Math.max(0, sNum.length - 4 - i), sNum.length - i)) > 0) res = gUnit[group] + res;
         }
-    };
+    }
+    return res || '영';
+};
 
-    useEffect(() => {
-        void loadEstimates();
-    }, []);
+// ─── 공통 스타일 및 유틸리티 ──────────────────────────────────────────────────
+const cellStyle = (overrides: React.CSSProperties = {}): React.CSSProperties => ({
+    border: BORDER_THIN,
+    padding: '8px 10px',
+    fontFamily: EXCEL_FONT,
+    fontSize: '9.5pt',
+    verticalAlign: 'middle',
+    textAlign: 'center',
+    backgroundColor: '#fff',
+    color: '#334155', // slate-700
+    ...overrides
+});
 
-    const handleItemChange = (index: number, field: keyof Omit<EstimateItem, 'id' | 'amount'>, value: string | number | boolean): void => {
-        setItems((prev) => {
-            const updated = [...prev];
-            const target = { ...updated[index] };
+const labelCellStyle = (overrides: React.CSSProperties = {}): React.CSSProperties => ({
+    ...cellStyle({
+        backgroundColor: BG_LABEL,
+        fontWeight: 600,
+        color: '#475569', // slate-600
+        textAlign: 'center'
+    }),
+    ...overrides
+});
 
-            if (field === 'unitPrice' || field === 'quantity') {
-                const numValue = typeof value === 'number' ? value : Number(value) || 0;
-                (target as any)[field] = numValue;
-            } else if (field === 'isOptional') {
-                target.isOptional = Boolean(value);
-            } else if (field === 'label' || field === 'description' || field === 'category') {
-                (target as any)[field] = String(value);
-            }
+const tableWrapperStyle: React.CSSProperties = {
+    borderRadius: '10px',
+    border: BORDER_THIN,
+    overflow: 'hidden',
+    marginBottom: '12px',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+};
 
-            target.amount = (target.unitPrice || 0) * (target.quantity || 0);
-            updated[index] = target;
-            return updated;
+// 인쇄 전용 전역 스타일
+const PRINT_STYLES = `
+    @media print {
+        header, nav, #sidebar, .print\\:hidden, button, .sidebar-pc-toggle-btn { 
+            display: none !important; 
+        }
+        body, html { 
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        main { 
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+        }
+        .flex-1 { overflow: visible !important; }
+        .no-print { display: none !important; }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    }
+`;
+
+const verticalHeaderStyle: React.CSSProperties = {
+    ...cellStyle({ backgroundColor: BG_LABEL, fontWeight: 700 }),
+    lineHeight: '1.2'
+};
+
+// ─── 하위 컴포넌트 외부 분리 (포커스 유지 및 성능 최적화) ───────────────────────────
+
+const TitleComponent = React.memo(({ text, logoUrl }: { text: string; logoUrl?: string }) => (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', marginTop: '10px', paddingBottom: '12px', borderBottom: '2.5px solid #000', width: '100%' }}>
+        <div style={{ flex: '0 0 200px', display: 'flex', alignItems: 'center' }}>
+            {logoUrl && (
+                <img
+                    src={logoUrl}
+                    alt="Logo"
+                    style={{ height: '75px', width: 'auto', objectFit: 'contain' }}
+                />
+            )}
+        </div>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <span style={{ fontSize: '28pt', fontWeight: 900, fontFamily: EXCEL_FONT, letterSpacing: '0.5em', color: '#000', textAlign: 'center' }}>
+                {text}
+            </span>
+        </div>
+        <div style={{ flex: '0 0 200px' }}></div> {/* 우측 밸런스용 빈 공간 */}
+    </div>
+));
+
+const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft, setShowCompanyPicker }: any) => {
+    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '10pt', padding: '0 2px' };
+    const wrapInput = (field: keyof EstimateDraft, placeholder = '') =>
+        isEdit ? <input value={(draft[field] as string) || ''} onChange={e => updateDraft(field, e.target.value)} style={inputStyle} placeholder={placeholder} />
+            : <span>{(draft[field] as string) || placeholder || ''}</span>;
+
+    const isTransaction = draft.documentType === 'transaction';
+    const accParts = (draft.supplierAccount || '').split(' ');
+    const bank = accParts[0] || '';
+    const accNo = accParts.slice(1).join(' ') || '';
+    const rowHeight = '16.6%';
+
+    return (
+        <div style={{ display: 'flex', gap: '20px', marginBottom: '12px', alignItems: 'stretch' }}>
+            {/* 공급받는자 박스 */}
+            <div style={{ ...tableWrapperStyle, flex: 1, marginBottom: 0 }}>
+                <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                    <colgroup><col style={{ width: '80px' }} /><col style={{ width: 'auto' }} /></colgroup>
+                    <tbody>
+                        <tr>
+                            <td colSpan={2} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: '28px', fontSize: '10pt', fontWeight: 900 }}>공 급 받 는 자</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>업 체 명</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, fontWeight: 700 }}>
+                                {isEdit ? (
+                                    <input value={draft.clientCompany} onChange={e => updateDraft('clientCompany', e.target.value)} style={{ ...inputStyle, fontWeight: 700 }} />
+                                ) : (draft.clientCompany || '')}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>현 장 명</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('projectName')}</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>결제조건</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('paymentTerms')}</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>비&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;고</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('notes')}</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: isTransaction ? BORDER_THIN : 'none', borderRight: BORDER_THIN, height: rowHeight }}>{isTransaction ? '작성일자' : '견적일자'}</td>
+                            <td style={{ ...cellStyle(), borderBottom: isTransaction ? BORDER_THIN : 'none' }}>{wrapInput('issueDate')}</td>
+                        </tr>
+                        {isTransaction && (
+                            <tr>
+                                <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN, height: rowHeight }}>담 당 자</td>
+                                <td style={{ ...cellStyle() }}>{wrapInput('clientName')}</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            {/* 공급자 박스 */}
+            <div style={{ ...tableWrapperStyle, flex: 1.3, marginBottom: 0 }}>
+                <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                    <colgroup><col style={{ width: '85px' }} /><col style={{ width: 'auto' }} /><col style={{ width: '75px' }} /><col style={{ width: 'auto' }} /></colgroup>
+                    <tbody>
+                        <tr>
+                            <td colSpan={4} style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, height: '28px', fontSize: '10pt', fontWeight: 900 }}>공 급 자</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>상&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;호</td>
+                            <td colSpan={3} style={{ ...cellStyle(), borderBottom: BORDER_THIN, fontWeight: 700, position: 'relative' }}>
+                                {wrapInput('supplierCompany')}
+                                <img src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EB%8F%84%EC%9E%A5.jpg?alt=media&token=04a70f81-44dc-406d-ab92-b438d264e537" alt="도장" style={{ position: 'absolute', top: '-10px', right: '10px', width: '48px', height: '48px', mixBlendMode: 'multiply', opacity: 0.9, pointerEvents: 'none', zIndex: 10 }} />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>등록번호</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, fontWeight: 700 }}>{wrapInput('supplierBizNo')}</td>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>대 표</td>
+                            <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('supplierName')}</td>
+                        </tr>
+                        <tr>
+                            <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>주&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;소</td>
+                            <td colSpan={3} style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('supplierAddress')}</td>
+                        </tr>
+                        {isTransaction ? (
+                            <>
+                                <tr>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>전&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;화</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>{wrapInput('supplierContact')}</td>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>팩 스</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('supplierFax')}</td>
+                                </tr>
+                                <tr>
+                                    <td style={{ ...labelCellStyle(), borderRight: rowHeight, height: rowHeight }}>계&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;좌</td>
+                                    <td colSpan={3} style={{ ...cellStyle() }}>{wrapInput('supplierAccount')}</td>
+                                </tr>
+                            </>
+                        ) : (
+                            <>
+                                <tr>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>은&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;행</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>{bank}</td>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, fontSize: '9pt', padding: '0 2px' }}>계좌번호</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{accNo}</td>
+                                </tr>
+                                <tr>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>전&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;화</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>{wrapInput('supplierContact')}</td>
+                                    <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN }}>팩 스</td>
+                                    <td style={{ ...cellStyle(), borderBottom: BORDER_THIN }}>{wrapInput('supplierFax')}</td>
+                                </tr>
+                                <tr>
+                                    <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN, height: rowHeight }}>담 당 자</td>
+                                    <td style={{ ...cellStyle(), borderRight: BORDER_THIN }}>{wrapInput('supplierManager')}</td>
+                                    <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>연 락 처</td>
+                                    <td style={{ ...cellStyle() }}>{wrapInput('supplierManagerContact')}</td>
+                                </tr>
+                            </>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+});
+
+const AmountBarComponent = React.memo(({ subtotal, totalAmt, taxAmt, label, isTransaction, draft }: any) => {
+    const vatRate = draft.vatRate || 10;
+    const currentTaxAmt = taxAmt || (subtotal ? Math.round(subtotal * (vatRate / 100)) : 0);
+
+    return (
+        <div style={{ ...tableWrapperStyle, marginBottom: '20px' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <colgroup>
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: 'auto' }} />
+                    <col style={{ width: '135px' }} />
+                    <col style={{ width: '125px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '140px' }} />
+                </colgroup>
+                <tbody>
+                    <tr style={{ height: '36px' }}>
+                        <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>{label || (isTransaction ? '합계금액' : '금      액')}</td>
+                        <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>일 금</td>
+                        <td style={{ ...cellStyle(), fontWeight: 700, fontSize: '11pt', textAlign: 'center', borderRight: BORDER_THIN }}>{numberToKorean(totalAmt)} 원정</td>
+                        <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>공급가액: {formatCurrency(subtotal)}</td>
+                        <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>부가세: {formatCurrency(currentTaxAmt)}</td>
+                        <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>총액</td>
+                        <td style={{ ...cellStyle(), fontWeight: 900, fontSize: '11pt', textAlign: 'right', paddingRight: '12px', color: '#0056b3' }}>{formatCurrency(totalAmt)} 원</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+});
+
+const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, updateItem, addEmptyItem, setDraft }: any) => {
+    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
+    const installRatio = draft.installRatio || 50;
+    const removeRatio = 100 - installRatio;
+
+    const moveItem = (id: string, direction: 'up' | 'down') => {
+        setDraft((prev: any) => {
+            const items = [...prev.items];
+            const idx = items.findIndex(i => i.id === id);
+            if (idx === -1) return prev;
+            const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+            if (newIdx < 0 || newIdx >= items.length) return prev;
+            [items[idx], items[newIdx]] = [items[newIdx], items[idx]];
+            return { ...prev, items };
         });
     };
 
-    const handleAddItem = (): void => {
-        setItems((prev) => [
-            ...prev,
-            {
-                id: generateItemId(),
-                label: '새 항목',
-                description: '',
-                category: '',
-                unitPrice: 0,
-                quantity: 1,
-                amount: 0,
-                isOptional: false
+    const groups: { name: string; items: any[] }[] = [];
+    itemsWithCalc.forEach((item: any) => {
+        const cat = item.category || '기타';
+        const g = groups.find(x => x.name === cat);
+        if (g) g.items.push(item);
+        else groups.push({ name: cat, items: [item] });
+    });
+    const displayGroups = groups.length > 0 ? groups : [{ name: '', items: [] }];
+
+    return (
+        <div style={tableWrapperStyle}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <colgroup>
+                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '50px' }} />
+                    <col style={{ width: '70px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '100px' }} />
+                    {isEdit && <col style={{ width: '30px' }} />}
+                </colgroup>
+                <thead>
+                    <tr style={{ height: '32px' }}>
+                        <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>품 명</th>
+                        <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>설치 구간</th>
+                        <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단위</th>
+                        <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>물 량</th>
+                        <th colSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>인 건 비</th>
+                        <th colSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>청 구</th>
+                        <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>비 고</th>
+                        {isEdit && <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>삭제</th>}
+                    </tr>
+                    <tr style={{ height: '28px' }}>
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단 가</th>
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>금 액</th>
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>설치 {installRatio}%</th>
+                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>해체 {removeRatio}%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {(() => {
+                        const mandatoryCategories = ['시스템 동바리', '시스템 비계'];
+                        const allExistingCategories = Array.from(new Set(itemsWithCalc.map((i: any) => i.category || '')));
+
+                        // 필수 카테고리 유지
+                        mandatoryCategories.forEach(mc => {
+                            if (!allExistingCategories.includes(mc)) {
+                                allExistingCategories.push(mc);
+                            }
+                        });
+
+                        // "기타" 또는 빈 이름 제거 (필수 카테고리는 위에서 이미 추가됨)
+                        const finalCategories = allExistingCategories.filter(cat => cat && cat !== '기타');
+
+                        const totalQty = itemsWithCalc.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
+                        const totalInstall = itemsWithCalc.reduce((s: number, i: any) => s + (i.install50 || 0), 0);
+                        const totalRemove = itemsWithCalc.reduce((s: number, i: any) => s + (i.remove50 || 0), 0);
+
+                        return (
+                            <>
+                                {finalCategories.map((cat: any, cIdx: number) => {
+                                    const realItems = itemsWithCalc.filter((i: any) => (i.category || '') === cat);
+                                    const MIN_ROWS = 4; // 6줄에서 4줄로 더 축소
+                                    const displayItems = [...realItems];
+                                    while (displayItems.length < MIN_ROWS) {
+                                        displayItems.push({ id: `empty-${cat}-${displayItems.length}`, category: cat, isFiller: true });
+                                    }
+
+                                    const gQty = realItems.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
+                                    const gAmount = realItems.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+                                    const gInstall = realItems.reduce((s: number, i: any) => s + (i.install50 || 0), 0);
+                                    const gRemove = realItems.reduce((s: number, i: any) => s + (i.remove50 || 0), 0);
+
+                                    return (
+                                        <React.Fragment key={`group-${cat}-${cIdx}`}>
+                                            {displayItems.map((item: any, rIdx: number) => (
+                                                <tr key={item.id} style={{ height: '28px' }} className="group/row hover:bg-slate-50">
+                                                    {rIdx === 0 && (
+                                                        <td rowSpan={displayItems.length + 1} style={{ ...cellStyle(), border: BORDER_THIN, fontWeight: 900, backgroundColor: '#fcfcfc', color: '#64748b', fontSize: '11pt', verticalAlign: 'middle' }}>
+                                                            {isEdit && !item.isFiller ? (
+                                                                <>
+                                                                    <input
+                                                                        value={cat}
+                                                                        list="categories-list"
+                                                                        onChange={e => {
+                                                                            if (realItems[0]) updateItem(realItems[0].id, 'category', e.target.value);
+                                                                        }}
+                                                                        style={{ ...inputStyle, fontWeight: 900, fontSize: '11pt', color: '#64748b' }}
+                                                                    />
+                                                                    <datalist id="categories-list">
+                                                                        {COMMON_CATEGORIES.map(c => <option key={c} value={c} />)}
+                                                                    </datalist>
+                                                                </>
+                                                            ) : cat}
+                                                        </td>
+                                                    )}
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '6px' }}>
+                                                        {item.isFiller ? '' : (isEdit ? (
+                                                            <>
+                                                                <input value={item.section} list="sections-list" onChange={e => updateItem(item.id, 'section', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} />
+                                                                <datalist id="sections-list">{COMMON_SECTIONS.map(s => <option key={s} value={s} />)}</datalist>
+                                                            </>
+                                                        ) : item.section)}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                                        {item.isFiller ? '' : (isEdit ? (
+                                                            <>
+                                                                <input value={item.unit} list="units-list" onChange={e => updateItem(item.id, 'unit', e.target.value)} style={inputStyle} />
+                                                                <datalist id="units-list">{COMMON_UNITS.map(u => <option key={u} value={u} />)}</datalist>
+                                                            </>
+                                                        ) : item.unit)}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                        {item.isFiller ? '' : (isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '-'))}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                        {item.isFiller ? '' : (isEdit ? <input type="number" value={item.finalUnitPrice || ''} onChange={e => updateItem(item.id, 'finalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '-'))}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>
+                                                        {item.isFiller ? '' : (item.amount ? formatCurrency(item.amount) : '-')}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                        {item.isFiller ? '' : (item.install50 ? formatCurrency(item.install50) : '-')}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                        {item.isFiller ? '' : (item.remove50 ? formatCurrency(item.remove50) : '-')}
+                                                    </td>
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                                        {item.isFiller ? '' : (isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={inputStyle} /> : (item.note || ''))}
+                                                    </td>
+                                                    {isEdit && (
+                                                        <td style={{ ...cellStyle(), padding: '0', backgroundColor: '#fff' }}>
+                                                            {!item.isFiller && (
+                                                                <button onClick={() => setDraft((d: any) => ({ ...d, items: d.items.filter((it: any) => it.id !== item.id) }))} style={{ width: '100%', height: '100%', background: 'transparent', color: '#ef4444', border: 'none', cursor: 'pointer' }}>×</button>
+                                                            )}
+                                                        </td>
+                                                    )}
+                                                </tr>
+                                            ))}
+                                            <tr style={{ height: '30px', backgroundColor: '#eef2ff' }}>
+                                                <td style={{ ...labelCellStyle(), border: BORDER_THIN, textAlign: 'center', color: '#4338ca', letterSpacing: '1em', backgroundColor: '#eef2ff' }}>합 계</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gQty ? formatDecimal(gQty) : '0'}</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gAmount ? formatCurrency(gAmount) : '0'}</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gInstall ? formatCurrency(gInstall) : '0'}</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gRemove ? formatCurrency(gRemove) : '0'}</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                                                {isEdit && (
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0', backgroundColor: '#f5f3ff' }}>
+                                                        <button
+                                                            onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem({ category: cat })] }))}
+                                                            style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: '14pt' }}
+                                                            title="항목 추가"
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </td>
+                                                )}
+                                            </tr>
+                                        </React.Fragment>
+                                    );
+                                })}
+                                <tr style={{ height: '40px', backgroundColor: '#f8fafc' }}>
+                                    <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: '12pt', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '13pt', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalInstall ? formatCurrency(totalInstall) : '0'}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalRemove ? formatCurrency(totalRemove) : '0'}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
+                                    {isEdit && <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>}
+                                </tr>
+                            </>
+                        );
+                    })()}
+                </tbody>
+            </table>
+        </div>
+    );
+});
+
+const TransactionTable = React.memo(({ draft, itemsWithCalc, isEdit, updateItem, addEmptyItem, setDraft }: any) => {
+    const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
+    const vatRate = draft.vatRate || 10;
+    return (
+        <div style={tableWrapperStyle}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <colgroup><col style={{ width: '36px' }} /><col style={{ width: '160px' }} /><col style={{ width: '60px' }} /><col style={{ width: '65px' }} /><col style={{ width: '90px' }} /><col style={{ width: '100px' }} /><col style={{ width: '100px' }} /><col style={{ width: 'auto' }} />{isEdit && <col style={{ width: '45px' }} />}</colgroup>
+                <thead>
+                    <tr style={{ height: '32px' }}>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>No</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>품목</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>단위</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>수량</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>단가</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>공급가액</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>세액</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>비고</th>
+                        {isEdit && <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>삭제</th>}
+                    </tr>
+                </thead>
+                <tbody style={{ borderBottom: BORDER_THICK }}>
+                    {itemsWithCalc.filter((item: any) => {
+                        const isDefault = item.category === '시스템 동바리' || item.category === '시스템 비계';
+                        const hasValue = item.quantity > 0 || item.amount > 0 || (item.note && item.note.trim() !== '');
+                        return !isDefault || hasValue;
+                    }).map((item: any, idx: number) => {
+                        const supplyAmt = item.amount || 0;
+                        const vatAmt = supplyAmt ? Math.round(supplyAmt * vatRate / 100) : 0;
+                        return (
+                            <tr key={item.id} style={{ height: '24px' }}>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'center' }}>{idx + 1}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>{isEdit ? <input value={item.category} onChange={e => updateItem(item.id, 'category', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.category}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>{isEdit ? <input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} style={inputStyle} /> : item.unit}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '')}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{isEdit ? <input type="number" value={item.finalUnitPrice || ''} onChange={e => updateItem(item.id, 'finalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '')}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>{supplyAmt ? formatCurrency(supplyAmt) : ''}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{vatAmt ? formatCurrency(vatAmt) : ''}</td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>{isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.note}</td>
+                                {isEdit && <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}><button onClick={() => setDraft((d: any) => ({ ...d, items: d.items.filter((it: any) => it.id !== item.id) }))} style={{ width: '100%', height: '100%', background: '#ef5350', color: '#fff', border: 'none', cursor: 'pointer' }}>×</button></td>}
+                            </tr>
+                        );
+                    })}
+                    {!isEdit && Array.from({ length: Math.max(0, 15 - itemsWithCalc.length) }).map((_, i) => (
+                        <tr key={`empty-${i}`} style={{ height: '24px' }}>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                        </tr>
+                    ))}
+                    {isEdit && (
+                        <tr style={{ height: '32px', backgroundColor: '#f8fafc' }}>
+                            <td colSpan={8} style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}>
+                                <button 
+                                    onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem()] }))}
+                                    style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: '11pt' }}
+                                >
+                                    + 항목 추가
+                                </button>
+                            </td>
+                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        </div>
+    );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+const EstimatePage: React.FC = () => {
+    return (
+        <>
+            <style>{PRINT_STYLES}</style>
+            <EstimatePageContent />
+        </>
+    );
+};
+
+const EstimatePageContent: React.FC = () => {
+    const [draft, setDraft] = useState<EstimateDraft>(() => getEmptyDraft());
+    const [estimates, setEstimates] = useState<Estimate[]>([]);
+    const [allCompanies, setAllCompanies] = useState<CompanyZod[]>([]);
+    const [myCompany, setMyCompany] = useState<CompanyZod | null>(null);
+    const scopeNotesRef = useRef<HTMLTextAreaElement>(null);
+
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [pane, setPane] = useState<Pane>('edit');
+    const [searchText, setSearchText] = useState('');
+    const [logoUrl, setLogoUrl] = useState<string>('');
+    const printRef = useRef<HTMLDivElement>(null);
+
+    // 특이사항 높이 자동 조절
+    useEffect(() => {
+        const resize = () => {
+            if (scopeNotesRef.current) {
+                scopeNotesRef.current.style.height = 'auto';
+                scopeNotesRef.current.style.height = scopeNotesRef.current.scrollHeight + 'px';
             }
-        ]);
-    };
+        };
+        resize();
+        // 렌더링 시점 이슈 대비
+        const timer = setTimeout(resize, 100);
+        return () => clearTimeout(timer);
+    }, [draft.scopeNotes, draft.id, pane]);
 
-    const handleRemoveItem = (id: string): void => {
-        setItems((prev) => prev.filter((item) => item.id !== id));
-    };
+    useEffect(() => {
+        const loadConfig = async () => {
+            try {
+                const snap = await getDoc(doc(db, 'settings', 'system_config'));
+                if (snap.exists() && snap.data().erpLogoUrl) {
+                    setLogoUrl(snap.data().erpLogoUrl);
+                } else {
+                    setLogoUrl(LOGO_FALLBACK);
+                }
+            } catch (e) {
+                console.error(e);
+                setLogoUrl(LOGO_FALLBACK);
+            }
+        };
+        loadConfig();
+    }, []);
 
-    const parseNumber = (value: string): number => {
-        const num = Number(value.replace(/,/g, ''));
-        return Number.isNaN(num) ? 0 : num;
-    };
-
-    const setEditingEstimate = (estimate: Estimate): void => {
-        setEditingId(estimate.id ?? null);
-        setTitle(estimate.title);
-        setClientName(estimate.clientName);
-        setClientCompany(estimate.clientCompany ?? '');
-        setRequestType(estimate.requestType);
-        setStatus(estimate.status);
-        setValidUntilDate(
-            estimate.validUntil ? new Date(estimate.validUntil.toDate()).toISOString().split('T')[0] : ''
-        );
-        setNotes(estimate.notes ?? '');
-        setItems(
-            (estimate.items ?? []).map((item) => ({
-                ...item,
-                amount: (item.unitPrice || 0) * (item.quantity || 0)
-            }))
-        );
-        setDiscount(estimate.discount ?? 0);
-        setTax(estimate.tax ?? 0);
-    };
-
-    const handleSave = async (): Promise<void> => {
+    const loadData = async () => {
+        setLoading(true);
         try {
-            setLoading(true);
-            setError(null);
+            const [fetchedEstimates, fetchedCompanies] = await Promise.all([
+                estimateService.getEstimates(),
+                companyFirestoreService.getCompanies()
+            ]);
+            setEstimates(fetchedEstimates);
+            setAllCompanies(fetchedCompanies);
 
-            const validUntilTimestamp = validUntilDate
-                ? Timestamp.fromDate(new Date(validUntilDate))
-                : undefined;
-
-            const payload: Omit<Estimate, 'id' | 'createdAt' | 'updatedAt'> = {
-                title,
-                clientName,
-                clientCompany: clientCompany || undefined,
-                requestType,
-                status,
-                items,
-                subtotal,
-                discount,
-                tax,
-                total,
-                validUntil: validUntilTimestamp,
-                notes: notes || undefined
-            };
-
-            if (editingId) {
-                await estimateService.updateEstimate(editingId, payload);
-            } else {
-                await estimateService.addEstimate(payload);
+            const main = fetchedCompanies.find(c => c.name.includes('청연')) || fetchedCompanies.find(c => c.isMyCompany) || fetchedCompanies[0];
+            if (main && !draft.id) {
+                setMyCompany(main);
+                setDraft(prev => ({
+                    ...prev,
+                    supplierCompany: main.name,
+                    supplierBizNo: main.businessNumber || '',
+                    supplierName: main.ceoName || '',
+                    supplierAddress: main.address || '',
+                    supplierContact: main.phone || '',
+                    supplierFax: main.fax || '',
+                    supplierAccount: main.bankName && main.accountNumber ? `${main.bankName} ${main.accountNumber}` : '',
+                    supplierManager: '이재욱',
+                    supplierManagerContact: '010-2365-7692'
+                }));
             }
-
-            await loadEstimates();
-            resetForm();
-        } catch (e) {
-            setError('견적 저장 중 오류가 발생했습니다.');
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); }
+        finally { setLoading(false); }
     };
 
-    const handleDelete = async (id: string): Promise<void> => {
-        if (!window.confirm('이 견적을 삭제하시겠습니까?')) return;
-        try {
-            setLoading(true);
-            setError(null);
-            await estimateService.deleteEstimate(id);
-            await loadEstimates();
-            if (editingId === id) {
-                resetForm();
-            }
-        } catch (e) {
-            setError('견적 삭제 중 오류가 발생했습니다.');
-        } finally {
-            setLoading(false);
+    useEffect(() => { loadData(); }, []);
+
+    const itemsWithCalc = useMemo(() => draft.items.map(item => {
+        const amount = (item.finalUnitPrice || 0) * (item.quantity || 0);
+        const ratio = (draft.installRatio || 50) / 100;
+        return { ...item, amount, install50: Math.round(amount * ratio), remove50: amount - Math.round(amount * ratio) };
+    }), [draft.items, draft.installRatio]);
+
+    // --- [심층 개선] 모든 합계 계산을 하나의 useMemo로 통합 (정합성 100% 보장) ---
+    const { subtotal, requiredSubtotal, optionalSubtotal, tax, total } = useMemo(() => {
+        const required = itemsWithCalc
+            .filter(item => item.category !== '선택 항목')
+            .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+        const optional = itemsWithCalc
+            .filter(item => item.category === '선택 항목')
+            .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+        const sub = required + optional;
+        const taxAmt = draft.includeVat ? Math.round(sub * (draft.vatRate / 100)) : 0;
+        const totalAmt = sub + taxAmt - (draft.discount || 0);
+
+        return {
+            subtotal: sub,
+            requiredSubtotal: required,
+            optionalSubtotal: optional,
+            tax: taxAmt,
+            total: totalAmt
+        };
+    }, [itemsWithCalc, draft.includeVat, draft.vatRate, draft.discount]);
+
+    const updateDraft = React.useCallback((field: keyof EstimateDraft, value: any) =>
+        setDraft(prev => ({ ...prev, [field]: value })), []);
+
+    const addEmptyItem = React.useCallback(() =>
+        setDraft(prev => ({ ...prev, items: [...prev.items, createItem({})] })), []);
+
+    const updateItem = React.useCallback((itemId: string, field: string, val: any) => {
+        setDraft(d => {
+            const n = [...d.items];
+            const idx = n.findIndex(i => i.id === itemId);
+            if (idx === -1) return d;
+            const updated = { ...n[idx], [field]: val };
+            if (field === 'finalUnitPrice') updated.unitPrice = val;
+            n[idx] = updated;
+            return { ...d, items: n };
+        });
+    }, []);
+
+
+    const resetDraft = (type: DocumentType = 'estimate') => {
+        const empty = getEmptyDraft(type);
+        if (myCompany) {
+            Object.assign(empty, {
+                supplierCompany: myCompany.name, supplierBizNo: myCompany.businessNumber || '',
+                supplierName: myCompany.ceoName || '', supplierAddress: myCompany.address || '',
+                supplierContact: myCompany.phone || '',
+                supplierAccount: myCompany.bankName && myCompany.accountNumber ? `${myCompany.bankName} ${myCompany.accountNumber}` : ''
+            });
         }
+        setDraft(empty);
+        setPane(type === 'estimate' ? 'edit' : 'transaction-edit');
+    };
+
+    const selectEstimate = (est: Estimate) => {
+        const cleanDraft: EstimateDraft = {
+            ...getEmptyDraft(est.documentType as any || 'estimate'),
+            ...est, id: est.id, items: est.items || []
+        };
+        setDraft(cleanDraft);
+        setPane(est.documentType === 'transaction' ? 'transaction-edit' : 'edit');
+    };
+
+    const deleteEstimate = async (e: React.MouseEvent, est: Estimate) => {
+        e.stopPropagation();
+        if (!window.confirm('정말 삭제하시겠습니까?')) return;
+        try {
+            await estimateService.deleteEstimate(est.id!);
+            if (draft.id === est.id) resetDraft('estimate');
+            loadData();
+        } catch (err) { console.error(err); alert('삭제 실패'); }
+    };
+
+    const saveEstimate = async () => {
+        if (!draft.title || !draft.clientCompany) {
+            setSaveError("필수 항목(제목, 업체명)을 입력해주세요.");
+            return;
+        }
+        try {
+            setSaving(true);
+            setSaveError(null);
+            const payload = { ...draft, items: itemsWithCalc, subtotal, total };
+            if (draft.id) await estimateService.updateEstimate(draft.id, payload);
+            else {
+                const newId = await estimateService.addEstimate(payload);
+                setDraft(prev => ({ ...prev, id: newId }));
+            }
+            alert('저장되었습니다.');
+            loadData();
+        } catch (e) {
+            console.error(e);
+            setSaveError("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
+        }
+        finally { setSaving(false); }
+    };
+
+    const filteredEstimates = useMemo(() => {
+        if (!searchText) return estimates;
+        const low = searchText.toLowerCase();
+        return estimates.filter(e =>
+            (e.title || '').toLowerCase().includes(low) ||
+            (e.projectName || '').toLowerCase().includes(low)
+        );
+    }, [estimates, searchText]);
+
+    const renderContent = () => {
+        if (pane === 'transaction-edit') {
+            return (
+                <div className="flex-1 overflow-auto p-8 print:p-0 print:overflow-visible">
+                    <div className="mx-auto max-w-5xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
+                        <TitleComponent text="거 래 명 세 표" logoUrl={LOGO_FALLBACK} />
+                        <InfoTableComponent draft={draft} isEdit={true} updateDraft={updateDraft} />
+                        <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} isTransaction={true} draft={draft} />
+                        <TransactionTable draft={draft} itemsWithCalc={itemsWithCalc} isEdit={true} updateItem={updateItem} addEmptyItem={addEmptyItem} setDraft={setDraft} />
+                    </div>
+                </div>
+            );
+        }
+        // default: edit (estimate edit)
+        return (
+            <div className="flex-1 overflow-auto p-8 print:p-0 print:overflow-visible">
+                <div className="mx-auto max-w-5xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
+                    <TitleComponent text={draft.title || '견 적 서'} logoUrl={LOGO_FALLBACK} />
+                    <InfoTableComponent draft={draft} isEdit={true} updateDraft={updateDraft} />
+                    <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} label="" isTransaction={false} draft={draft} />
+                    <EstimateTable draft={draft} itemsWithCalc={itemsWithCalc} subtotal={subtotal} isEdit={true} updateItem={updateItem} addEmptyItem={addEmptyItem} setDraft={setDraft} />
+
+                    <div className="mt-8">
+                        <div className="space-y-3">
+                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">특약사항 (Special Terms)</label>
+                            <textarea
+                                ref={scopeNotesRef}
+                                value={draft.scopeNotes}
+                                onChange={e => updateDraft('scopeNotes', e.target.value)}
+                                className="w-full p-4 text-[12px] leading-relaxed border-2 border-slate-100 rounded-xl focus:border-indigo-500 focus:ring-0 transition-all resize-none bg-slate-50/50 overflow-hidden"
+                                style={{ minHeight: '400px' }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
     };
 
     return (
-        <div className="flex flex-col h-full bg-slate-50">
-            {/* Header */}
-            <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+        <div className="flex flex-col h-screen overflow-hidden bg-slate-50 font-sans text-slate-900">
+            <header className="flex flex-none items-center justify-between border-b bg-white px-6 py-3 shadow-sm z-30 print:hidden">
                 <div className="flex items-center gap-3">
-                    <div className="bg-emerald-100 p-2 rounded-lg">
-                        <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-emerald-600 text-xl" />
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg shadow-lg bg-indigo-600">
+                        <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-lg text-white" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-800">홈페이지 견적 프로그램</h1>
-                        <p className="text-sm text-slate-500">
-                            홈페이지 제작/수정 요청을 기반으로 항목별 단가와 수량을 입력해 상용 수준의 견적서를 관리합니다.
-                        </p>
+                        <h1 className="text-[16px] font-black tracking-tight text-slate-900">청연ENG 견적/명세 통합관리</h1>
                     </div>
                 </div>
-                <button
-                    type="button"
-                    onClick={resetForm}
-                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-200"
-                >
-                    <FontAwesomeIcon icon={faPlus} />
-                    새 견적
-                </button>
-            </div>
 
-            {/* Content */}
-            <div className="flex-1 flex overflow-hidden">
-                {/* Left: Estimate List */}
-                <div className="w-[40%] border-r border-slate-200 bg-white overflow-y-auto">
-                    <div className="p-4 flex items-center justify-between">
-                        <h2 className="text-sm font-bold text-slate-700">견적 목록</h2>
+                <div className="flex items-center gap-4 print:hidden">
+                    <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200">
+                        <button
+                            onClick={() => setPane('edit')}
+                            className={`px-5 py-1.5 text-[11px] font-black rounded-lg transition-all ${pane === 'edit' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            ESTIMATE
+                        </button>
+                        <button
+                            onClick={() => setPane('transaction-edit')}
+                            className={`px-5 py-1.5 text-[11px] font-black rounded-lg transition-all ${pane === 'transaction-edit' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                        >
+                            TRANSACTION
+                        </button>
                     </div>
-                    {loading && estimates.length === 0 ? (
-                        <div className="p-4 text-sm text-slate-500">로딩 중...</div>
-                    ) : estimates.length === 0 ? (
-                        <div className="p-4 text-sm text-slate-500">등록된 견적이 없습니다. 상단의 "새 견적"을 눌러 생성하세요.</div>
-                    ) : (
-                        <ul className="divide-y divide-slate-100">
-                            {estimates.map((estimate) => (
-                                <li
-                                    key={estimate.id}
-                                    className="px-4 py-3 cursor-pointer hover:bg-slate-50 flex items-start justify-between gap-2"
-                                    onClick={() => setEditingEstimate(estimate)}
-                                >
-                                    <div>
-                                        <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                                            {estimate.title}
-                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                                                {estimate.requestType === 'build' ? '제작' : '수정'}
-                                            </span>
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-0.5">
-                                            {estimate.clientCompany && <span className="mr-2">{estimate.clientCompany}</span>}
-                                            <span>{estimate.clientName}</span>
-                                        </div>
-                                        <div className="text-xs text-emerald-600 mt-1 font-semibold">
-                                            총액: {estimate.total.toLocaleString()} 원
-                                        </div>
-                                    </div>
-                                    <div className="flex flex-col items-end gap-2">
-                                        <span
-                                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                                                estimate.status === 'approved'
-                                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                                    : estimate.status === 'sent'
-                                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                                    : estimate.status === 'rejected'
-                                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                                    : 'bg-slate-50 text-slate-600 border-slate-200'
-                                            }`}
-                                        >
-                                            {estimate.status === 'draft'
-                                                ? '임시저장'
-                                                : estimate.status === 'sent'
-                                                ? '발송'
-                                                : estimate.status === 'approved'
-                                                ? '승인'
-                                                : '반려'}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (estimate.id) {
-                                                    void handleDelete(estimate.id);
-                                                }
-                                            }}
-                                            className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-600"
-                                        >
-                                            <FontAwesomeIcon icon={faTrash} /> 삭제
-                                        </button>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
+
+                    <div className="h-6 w-px bg-slate-200" />
+
+                    <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                        <span className="text-[11px] font-bold text-slate-500">설치 비율</span>
+                        <input
+                            type="number"
+                            value={draft.installRatio}
+                            onChange={e => updateDraft('installRatio', Number(e.target.value))}
+                            className="w-12 bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[12px] font-bold text-center focus:ring-1 focus:ring-indigo-500 outline-none"
+                        />
+                        <span className="text-[11px] font-bold text-slate-500">% / 해체 {100 - (draft.installRatio || 0)}%</span>
+                    </div>
+
+                    <div className="h-6 w-px bg-slate-200" />
+
+                    <div className="flex items-center gap-2">
+                        {saveError && <span className="text-[11px] font-bold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">{saveError}</span>}
+                        <button onClick={() => resetDraft('estimate')} className="inline-flex items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-2 text-[12px] font-bold text-slate-600 hover:border-indigo-500 hover:text-indigo-600 transition-all">
+                            <FontAwesomeIcon icon={faPlus} /> 새 문서
+                        </button>
+                        <button onClick={saveEstimate} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white px-5 py-2 text-[12px] font-black hover:bg-indigo-600 disabled:opacity-50 shadow-xl transition-all">
+                            <FontAwesomeIcon icon={saving ? faSpinner : faSave} spin={saving} /> {saving ? '저장 중...' : '문서 저장'}
+                        </button>
+                        <button onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 text-white px-5 py-2 text-[12px] font-black hover:bg-indigo-700 shadow-xl transition-all">
+                            <FontAwesomeIcon icon={faPrint} /> 인쇄/PDF
+                        </button>
+                    </div>
                 </div>
+            </header>
 
-                {/* Right: Editor */}
-                <div className="flex-1 overflow-y-auto p-6">
-                    {error && (
-                        <div className="mb-4 text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
-                            {error}
-                        </div>
-                    )}
-
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                                    <FontAwesomeIcon icon={faEdit} className="text-indigo-500" /> 견적 입력
-                                </h2>
-                                {editingId && (
-                                    <p className="text-xs text-slate-500 mt-1">선택한 견적을 수정 중입니다.</p>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Basic Info */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">견적 제목</label>
-                                <input
-                                    type="text"
-                                    value={title}
-                                    onChange={(e) => setTitle(e.target.value)}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="예: 회사 홈페이지 제작 견적"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">고객명</label>
-                                <input
-                                    type="text"
-                                    value={clientName}
-                                    onChange={(e) => setClientName(e.target.value)}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="담당자 이름"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">고객 회사명</label>
-                                <input
-                                    type="text"
-                                    value={clientCompany}
-                                    onChange={(e) => setClientCompany(e.target.value)}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="회사 이름 (선택)"
-                                />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-600 mb-1">요청 유형</label>
-                                    <select
-                                        value={requestType}
-                                        onChange={(e) => setRequestType(e.target.value as EstimateRequestType)}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    >
-                                        <option value="build">제작 요청</option>
-                                        <option value="modify">수정 요청</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-600 mb-1">견적 상태</label>
-                                    <select
-                                        value={status}
-                                        onChange={(e) => setStatus(e.target.value as EstimateStatus)}
-                                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    >
-                                        <option value="draft">임시저장</option>
-                                        <option value="sent">발송됨</option>
-                                        <option value="approved">승인됨</option>
-                                        <option value="rejected">반려됨</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">유효기간</label>
-                                <input
-                                    type="date"
-                                    value={validUntilDate}
-                                    onChange={(e) => setValidUntilDate(e.target.value)}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                />
-                            </div>
-                        </div>
-
-                        {/* Items */}
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-sm font-bold text-slate-700">항목별 내역</h3>
-                                <button
-                                    type="button"
-                                    onClick={handleAddItem}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-md border border-emerald-200"
-                                >
-                                    <FontAwesomeIcon icon={faPlus} /> 항목 추가
-                                </button>
-                            </div>
-                            <div className="overflow-x-auto border border-slate-200 rounded-xl">
-                                <table className="min-w-full text-xs">
-                                    <thead className="bg-slate-50">
-                                        <tr>
-                                            <th className="px-3 py-2 text-left font-semibold text-slate-600">항목명</th>
-                                            <th className="px-3 py-2 text-left font-semibold text-slate-600">설명</th>
-                                            <th className="px-3 py-2 text-left font-semibold text-slate-600">카테고리</th>
-                                            <th className="px-3 py-2 text-right font-semibold text-slate-600">단가</th>
-                                            <th className="px-3 py-2 text-right font-semibold text-slate-600">수량</th>
-                                            <th className="px-3 py-2 text-right font-semibold text-slate-600">금액</th>
-                                            <th className="px-3 py-2 text-center font-semibold text-slate-600">옵션</th>
-                                            <th className="px-3 py-2 text-center font-semibold text-slate-600">삭제</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {items.map((item, index) => (
-                                            <tr key={item.id} className="border-t border-slate-100">
-                                                <td className="px-3 py-2 align-top">
-                                                    <input
-                                                        type="text"
-                                                        value={item.label}
-                                                        onChange={(e) => handleItemChange(index, 'label', e.target.value)}
-                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top">
-                                                    <textarea
-                                                        value={item.description ?? ''}
-                                                        onChange={(e) => handleItemChange(index, 'description', e.target.value)}
-                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs min-h-[32px]"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top">
-                                                    <input
-                                                        type="text"
-                                                        value={item.category ?? ''}
-                                                        onChange={(e) => handleItemChange(index, 'category', e.target.value)}
-                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs"
-                                                        placeholder="design / frontend 등"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top text-right">
-                                                    <input
-                                                        type="text"
-                                                        value={item.unitPrice.toLocaleString()}
-                                                        onChange={(e) => handleItemChange(index, 'unitPrice', parseNumber(e.target.value))}
-                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs text-right"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top text-right">
-                                                    <input
-                                                        type="text"
-                                                        value={item.quantity.toString()}
-                                                        onChange={(e) => handleItemChange(index, 'quantity', parseNumber(e.target.value))}
-                                                        className="w-full border border-slate-300 rounded px-2 py-1 text-xs text-right"
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top text-right text-slate-800 font-semibold">
-                                                    {item.amount.toLocaleString()} 원
-                                                </td>
-                                                <td className="px-3 py-2 align-top text-center">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={item.isOptional ?? false}
-                                                        onChange={(e) => handleItemChange(index, 'isOptional', e.target.checked)}
-                                                    />
-                                                </td>
-                                                <td className="px-3 py-2 align-top text-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemoveItem(item.id)}
-                                                        className="text-rose-500 hover:text-rose-600"
-                                                    >
-                                                        <FontAwesomeIcon icon={faTrash} />
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-
-                        {/* Summary */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">비고 / 메모</label>
-                                <textarea
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                                    placeholder="고객과 합의한 특이사항, 제외 항목, 결제 조건 등을 기록하세요."
-                                />
-                            </div>
-                            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                    <span className="text-slate-600">소계(Subtotal)</span>
-                                    <span className="font-semibold text-slate-800">{subtotal.toLocaleString()} 원</span>
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-slate-600">할인(Discount)</span>
-                                    <input
-                                        type="text"
-                                        value={discount.toLocaleString()}
-                                        onChange={(e) => setDiscount(parseNumber(e.target.value))}
-                                        className="w-32 border border-slate-300 rounded px-2 py-1 text-xs text-right"
-                                    />
-                                </div>
-                                <div className="flex justify-between items-center">
-                                    <span className="text-slate-600">세금(Tax)</span>
-                                    <input
-                                        type="text"
-                                        value={tax.toLocaleString()}
-                                        onChange={(e) => setTax(parseNumber(e.target.value))}
-                                        className="w-32 border border-slate-300 rounded px-2 py-1 text-xs text-right"
-                                    />
-                                </div>
-                                <div className="border-t border-slate-200 my-2" />
-                                <div className="flex justify-between items-center">
-                                    <span className="text-slate-700 font-bold">총액(Total)</span>
-                                    <span className="text-lg font-extrabold text-emerald-600">{total.toLocaleString()} 원</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex justify-end gap-2 pt-2">
-                            <button
-                                type="button"
-                                onClick={resetForm}
-                                className="px-4 py-2 text-sm rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50"
-                            >
-                                초기화
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { void handleSave(); }}
-                                disabled={loading}
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                                <FontAwesomeIcon icon={faSave} />
-                                {editingId ? '견적 수정 저장' : '견적 저장'}
-                            </button>
-                        </div>
+            {/* 2단: 상단 문서 리스트 레이어 */}
+            <section className="flex-none bg-white border-b shadow-sm z-20 print:hidden overflow-hidden">
+                <div className="flex items-center px-6 py-3 gap-6">
+                    {/* 검색창 컴팩트화 */}
+                    <div className="w-[280px] relative">
+                        <FontAwesomeIcon icon={faMagnifyingGlass} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[12px]" />
+                        <input
+                            value={searchText}
+                            onChange={e => setSearchText(e.target.value)}
+                            placeholder="문서 제목 검색..."
+                            className="w-full pl-9 pr-4 py-2 text-[12px] bg-slate-50 border border-slate-200 rounded-xl focus:border-indigo-500 focus:bg-white transition-all font-bold"
+                        />
                     </div>
+
+                    <div className="h-8 w-px bg-slate-100" />
+
+                    {/* 문서 가로 스크롤 리스트 */}
+                    <div className="flex-1 overflow-x-auto no-scrollbar flex items-center gap-3 py-1">
+                        {loading ? (
+                            <div className="flex items-center gap-2 text-slate-400 px-4">
+                                <FontAwesomeIcon icon={faSpinner} spin className="text-xs" />
+                                <span className="text-[11px] font-bold uppercase tracking-widest">Loading...</span>
+                            </div>
+                        ) : filteredEstimates.length === 0 ? (
+                            <span className="text-[12px] text-slate-400 font-bold px-4 italic">검색 결과가 없습니다.</span>
+                        ) : (
+                            filteredEstimates.map(e => (
+                                <div
+                                    key={e.id}
+                                    onClick={() => selectEstimate(e)}
+                                    className={`group flex items-center gap-3 px-4 py-2 rounded-xl border-2 transition-all cursor-pointer whitespace-nowrap min-w-[200px] max-w-[280px] ${draft.id === e.id ? 'bg-indigo-50 border-indigo-500 shadow-sm' : 'bg-white border-slate-100 hover:border-slate-300'}`}
+                                >
+                                    <div className={`w-2 h-2 rounded-full ${e.documentType === 'transaction' ? 'bg-teal-400' : 'bg-indigo-400'}`} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className={`text-[12px] font-black truncate ${draft.id === e.id ? 'text-indigo-900' : 'text-slate-800'}`}>{e.title || '제목 없음'}</div>
+                                        <div className="text-[10px] font-bold text-slate-400 truncate">{e.clientCompany || '업체 미지정'}</div>
+                                    </div>
+                                    <button
+                                        onClick={ev => deleteEstimate(ev, e)}
+                                        className="opacity-0 group-hover:opacity-100 w-6 h-6 flex items-center justify-center rounded-lg hover:bg-rose-100 hover:text-rose-600 text-slate-300 transition-all"
+                                    >
+                                        <FontAwesomeIcon icon={faTrash} className="text-[10px]" />
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    {/* 탭 전환 필터 */}
+                    <div className="flex p-0.5 bg-slate-100 rounded-lg border border-slate-200 ml-auto shrink-0">
+                        <button onClick={() => setPane('edit')} className={`px-4 py-1.5 text-[10px] font-black rounded-md transition-all ${!pane.includes('transaction') ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>견적서 리스트</button>
+                        <button onClick={() => setPane('transaction-edit')} className={`px-4 py-1.5 text-[10px] font-black rounded-md transition-all ${pane.includes('transaction') ? 'bg-white text-teal-600 shadow-sm' : 'text-slate-500'}`}>명세표 리스트</button>
+                    </div>
+                </div>
+            </section>
+
+            {/* 3단: 메인 작업 영역 (전체 너비 활용) */}
+            <main className="flex-1 overflow-auto bg-slate-50/50 flex flex-col min-w-0 print:block print:overflow-visible print:bg-white print:p-0 print:m-0">
+                <div className="flex-1 flex flex-col items-center">
+                    {renderContent()}
+                </div>
+            </main>
+        </div>
+    );
+};
+
+
+// ─── 미리보기 문서 컴포넌트 (인쇄용) ──────────────────────────────────────────────────
+
+const EstimateDocument = React.memo(({ draft, itemsWithCalc, subtotal, total, tax }: any) => {
+    const [logoUrl, setLogoUrl] = useState<string>('');
+    useEffect(() => {
+        const fetchLogo = async () => {
+            try {
+                const snap = await getDoc(doc(db, 'settings', 'system_config'));
+                setLogoUrl(snap.exists() && snap.data().erpLogoUrl ? snap.data().erpLogoUrl : LOGO_FALLBACK);
+            } catch (e) { setLogoUrl(LOGO_FALLBACK); }
+        };
+        fetchLogo();
+    }, []);
+    return (
+        <div className="flex flex-col gap-6">
+            <TitleComponent text={draft.title || '견 적 서'} logoUrl={logoUrl} />
+            <InfoTableComponent draft={draft} isEdit={false} />
+            <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} label="" isTransaction={false} draft={draft} />
+            <EstimateTable draft={draft} itemsWithCalc={itemsWithCalc} subtotal={subtotal} isEdit={false} />
+
+            <div className="mt-8 grid grid-cols-1 gap-6">
+                <div className="p-6 border-2 border-slate-100 rounded-2xl bg-slate-50/30">
+                    <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-3">특이사항 (Notes)</h4>
+                    <div className="text-[12px] leading-relaxed text-slate-700 whitespace-pre-wrap font-medium">
+                        {draft.scopeNotes || '별도 특이사항 없음'}
+                    </div>
+                </div>
+                <div className="text-center mt-12 flex flex-col items-center gap-4">
+                    <img
+                        src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EA%B8%B4%EB%A1%9C%EA%B3%A0.png?alt=media&token=637b3817-170b-470d-9a58-ddd0e8797588"
+                        alt="Company Logo"
+                        style={{ height: '32px', width: 'auto', objectFit: 'contain', opacity: 0.8 }}
+                    />
+                    <div className="h-0.5 w-24 bg-slate-200" />
+                    <p className="text-[12px] font-bold text-slate-400 tracking-[0.3em] uppercase">Professional Engineering Service</p>
                 </div>
             </div>
         </div>
     );
-};
+});
+
+const TransactionDocument = React.memo(({ draft, itemsWithCalc, subtotal, total, tax }: any) => {
+    const [logoUrl, setLogoUrl] = useState<string>('');
+    useEffect(() => {
+        const fetchLogo = async () => {
+            try {
+                const snap = await getDoc(doc(db, 'settings', 'system_config'));
+                setLogoUrl(snap.exists() && snap.data().erpLogoUrl ? snap.data().erpLogoUrl : LOGO_FALLBACK);
+            } catch (e) { setLogoUrl(LOGO_FALLBACK); }
+        };
+        fetchLogo();
+    }, []);
+    return (
+        <div className="flex flex-col gap-6">
+            <TitleComponent text="거 래 명 세 표" logoUrl={logoUrl} />
+            <div style={{ textAlign: 'right', marginBottom: '-10px', fontSize: '9pt', color: '#64748b' }}>
+                작성일자: {draft.issueDate}
+            </div>
+            <InfoTableComponent draft={draft} isEdit={false} />
+            <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} isTransaction={true} draft={draft} />
+            <TransactionTable 
+                draft={draft} 
+                itemsWithCalc={itemsWithCalc.filter((item: any) => {
+                    const isDefault = item.category === '시스템 동바리' || item.category === '시스템 비계';
+                    const hasValue = item.quantity > 0 || item.amount > 0 || (item.note && item.note.trim() !== '');
+                    return !isDefault || hasValue;
+                })} 
+                isEdit={false} 
+            />
+            <div className="mt-4 p-4 border border-slate-200 text-center font-bold text-slate-600">
+                위 금액을 정히 영수(청구)함
+            </div>
+            <div className="mt-10 flex justify-center">
+                <img
+                    src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EA%B8%B4%EB%A1%9C%EA%B3%A0.png?alt=media&token=637b3817-170b-470d-9a58-ddd0e8797588"
+                    alt="Company Logo"
+                    style={{ height: '36px', width: 'auto', objectFit: 'contain' }}
+                />
+            </div>
+        </div>
+    );
+});
 
 export default EstimatePage;

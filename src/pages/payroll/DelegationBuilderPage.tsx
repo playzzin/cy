@@ -2,11 +2,10 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faPlus, faFont, faTable, faMinus, faSearch, faTrash, faUndo, faRedo, faSave, faFolderOpen, faFileAlt, faLayerGroup,
-    faHeading, faAlignLeft, faCalendarAlt, faSignature, faRulerCombined, faSearchMinus, faSearchPlus, faMousePointer, faGripLines, faMagnet,
+    faFont, faTable, faSearch, faUndo, faRedo, faSave, faFileAlt, faLayerGroup,
+    faHeading, faAlignLeft, faCalendarAlt, faSignature, faRulerCombined, faSearchMinus, faSearchPlus, faMousePointer, faMagnet,
     faPrint, faFileExport, faFileImport
 } from '@fortawesome/free-solid-svg-icons';
-import { produce } from 'immer';
 import {
     DndContext, DragOverlay, useDraggable, useDroppable, DragStartEvent, DragEndEvent,
     MouseSensor, TouchSensor, useSensor, useSensors, DragCancelEvent
@@ -20,7 +19,7 @@ import { WidgetRenderer } from '../../components/delegation-v3/builder/WidgetRen
 import { PropertiesPanel } from '../../components/delegation-v3/builder/PropertiesPanel';
 import { PRESETS } from '../../components/delegation-v3/builder/presets';
 import { Ruler } from '../../components/delegation-v3/builder/Ruler';
-import { mmToPx, MM_TO_PX } from '../../utils/units';
+import { MM_TO_PX } from '../../utils/units';
 import { PrintPreview } from './components/PrintPreview';
 
 // Types
@@ -158,9 +157,9 @@ const DelegationBuilderPage: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handlePrint = useReactToPrint({
-        content: () => printComponentRef.current,
+        contentRef: printComponentRef,
         documentTitle: '위임장_출력',
-        onBeforeGetContent: () => {
+        onBeforePrint: async () => {
             // Optional: Loading state or preparation
         },
         onAfterPrint: () => {
@@ -340,7 +339,7 @@ const DelegationBuilderPage: React.FC = () => {
                 builder.updateElement(table.id, { height: newHeight });
             }
         });
-    }, [delegators.length, builder.elements.length]); // Check when count changes or elements added/removed
+    }, [builder, delegators.length, builder.elements.length]); // Check when count changes or elements added/removed
     // Note: We don't depend on builder.elements deeply to avoid resize loops if we were updating height inside.
     // However, here we only update if height is different. 
     // Ideally we should depend on `delegators.length` and presence of tables.
@@ -403,6 +402,7 @@ const DelegationBuilderPage: React.FC = () => {
             }
         }
     };
+    void loadTemplate;
 
     const exportToJson = () => {
         const templateData = {
@@ -671,7 +671,7 @@ const DelegationBuilderPage: React.FC = () => {
                             임시저장
                         </ActionButton>
 
-                        <ActionButton onClick={handlePrint} $primary>
+                        <ActionButton onClick={() => handlePrint()} $primary>
                             <FontAwesomeIcon icon={faPrint} className="mr-2" />
                             출력 / PDF
                         </ActionButton>
@@ -961,6 +961,7 @@ const handleDeleteTemplate = () => {
         window.location.reload();
     }
 };
+void handleDeleteTemplate;
 
 export default DelegationBuilderPage;
 
@@ -1173,6 +1174,7 @@ const Input = styled.input`
         border-color: #cbd5e1;
     }
 `;
+void [InputGroup, Label, Input];
 
 const Divider = styled.div`
     height: 1px;

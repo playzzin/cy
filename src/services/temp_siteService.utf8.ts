@@ -1,6 +1,21 @@
-﻿import { db } from '../config/firebase';
+import { db } from '../config/firebase';
 import { toast } from '../utils/swal';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, Timestamp, query, orderBy, increment, limit, startAfter, where, getDoc } from 'firebase/firestore';
+import {
+    collection,
+    addDoc,
+    updateDoc,
+    deleteDoc,
+    doc,
+    getDocs,
+    Timestamp,
+    query,
+    orderBy,
+    increment,
+    limit,
+    startAfter,
+    where,
+    getDoc,
+} from 'firebase/firestore';
 
 export interface Site {
     id?: string;

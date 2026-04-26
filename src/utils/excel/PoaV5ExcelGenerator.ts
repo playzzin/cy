@@ -81,7 +81,7 @@ const colToLetters = (col: number): string => {
 const normalizeHeader = (v: unknown): string => {
     return String(v ?? '')
         .replace(/\s+/g, '')
-        .replace(/[()\[\]{}:;,.\-_/\\|]/g, '')
+        .replace(/[[\](){}:;,.\-_/\\|]/g, '')
         .trim();
 };
 

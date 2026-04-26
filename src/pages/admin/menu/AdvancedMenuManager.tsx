@@ -185,6 +185,27 @@ const AdvancedMenuManager: React.FC = () => {
         persistMenuData(newData);
     }, [menuData, selectedSite, persistMenuData]);
 
+    const handleDeleteItem = useCallback((id: string) => {
+        if (!window.confirm('정말 삭제하시겠습니까? 휴지통으로 이동하지 않고 즉시 삭제됩니다.')) return;
+        if (!menuData) return;
+        
+        // Deep clone to ensure immutable update and prevent side effects in nested structures
+        const newData = JSON.parse(JSON.stringify(menuData));
+        const result = findRef(newData[selectedSite]?.menu || [], id);
+        
+        if (result) {
+            result.list.splice(result.index, 1);
+            
+            // Clear from selectedIds if it was deleted
+            setSelectedIds(prev => prev.filter(sid => sid !== id));
+            
+            setMenuData(newData);
+            persistMenuData(newData);
+        } else {
+            console.warn(`[MenuManager] Failed to find item with ID: ${id} for deletion`);
+        }
+    }, [menuData, selectedSite, persistMenuData]);
+
     const handleOutdent = useCallback((id: string) => {
         if (!menuData) return;
         const currentMenu = [...(menuData[selectedSite]?.menu || [])];
@@ -371,25 +392,25 @@ const AdvancedMenuManager: React.FC = () => {
         }
     };
 
-    const handleDeleteItem = (itemId: string) => {
-        if (!window.confirm('정말 삭제하시겠습니까? 휴지통으로 이동하지 않고 즉시 삭제됩니다.')) return;
-        if (!menuData) return;
 
-        const newMenu = JSON.parse(JSON.stringify(menuData[selectedSite]?.menu || []));
-        const target = findRef(newMenu, itemId);
 
-        if (target) {
-            target.list.splice(target.index, 1);
 
-            const newData = { ...menuData };
-            newData[selectedSite].menu = newMenu;
-            updateMenuData(newData);
 
-            if (selectedIds.includes(itemId)) {
-                setSelectedIds(prev => prev.filter(id => id !== itemId));
-            }
-        }
-    };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     // --- DnD Sensors ---
     const sensors = useSensors(
@@ -446,7 +467,20 @@ const AdvancedMenuManager: React.FC = () => {
                     ? { id: newId, text: '새 그룹', sub: [], icon: 'faFolder' }
                     : template === 'divider'
                         ? { id: newId, text: '-' }
-                        : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
+                        : template === 'estimate-pack'
+                            ? {
+                                id: newId,
+                                text: '견적 관리',
+                                icon: 'fa-file-invoice-dollar',
+                                sub: [
+                                    { id: `${newId}-manage`, text: '견적서 관리', path: '/estimate/manage', icon: 'fa-file-invoice-dollar' },
+                                    { id: `${newId}-new`, text: '견적 등록', path: '/estimate/new', icon: 'fa-file-invoice-dollar' },
+                                    { id: `${newId}-list`, text: '견적 목록', path: '/estimate/list', icon: 'fa-file-invoice-dollar' },
+                                    { id: `${newId}-uxui`, text: 'UX/UI 견적서', path: '/estimate/manage', icon: 'fa-file-invoice-dollar' },
+                                    { id: `${newId}-request`, text: '견적 문의', path: '/estimate/request', icon: 'fa-file-invoice-dollar' }
+                                ]
+                            }
+                            : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
             }
 
             const dst = findRef(newMenu, overId);

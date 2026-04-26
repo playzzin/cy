@@ -19,15 +19,13 @@ import SupportSettingsPage from './pages/support/SupportSettingsPage';
 import SupportStatusPage from './pages/support/SupportStatusPage';
 import AccommodationManager from './pages/support/AccommodationManager';
 import WorkerSummaryPage from './pages/manpower/WorkerSummaryPage';
-import { VehicleManagerPage } from './pages/support/VehicleManagerPage';
-
-import { CardManagerPage } from './pages/support/CardManagerPage';
+import VehicleCardIntegratedPage from './pages/support/VehicleCardIntegratedPage';
 import MaterialMasterPage from './pages/materials/MaterialMasterPage';
 import MaterialInboundPage from './pages/materials/MaterialInboundPage';
 import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
 import MaterialTransactionsPage from './pages/materials/MaterialTransactionsPage';
 import MaterialInventoryPage from './pages/materials/MaterialInventoryPage';
-// import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage'; // Fixed import
+import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage';
 import CompanyDatabase from './pages/database/CompanyDatabase';
 import ManpowerInputPage from './pages/manpower/ManpowerInputPage';
 import WorkerDatabase from './pages/database/WorkerDatabase';
@@ -45,6 +43,7 @@ import TaxAdvanceTeamPayslipPage from './pages/payroll/TaxAdvanceTeamPayslipPage
 import WagePaymentPage from './pages/payroll/WagePaymentPage';
 import DailyWageDraftPage from './pages/payroll/DailyWageDraftPage';
 import DailyWageStatementPage from './pages/payroll/DailyWageStatementPage';
+import DailyAdvanceWorkbookPage from './pages/payroll/DailyAdvanceWorkbookPage';
 import MonthlyWageDraftPage from './pages/payroll/MonthlyWageDraftPage';
 import SupportTeamPaymentPage from './pages/payroll/SupportTeamPaymentPage';
 import SupportClaimPage from './pages/payroll/SupportClaimPage';
@@ -63,13 +62,15 @@ import LaborCostStatementGeneratorPage from './pages/payroll/LaborCostStatementG
 import LaborExchangePage from './pages/payroll/LaborExchangePage';
 import TeamSettlementPage from './pages/payroll/TeamSettlementPage';
 import SupportRateManagementPage from './pages/support/SupportRateManagementPage';
+import SupportManagerPage from './pages/support/SupportManagerPage';
 import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
 import TeamBasedPaymentDraftPageV2 from './pages/payroll/TeamBasedPaymentDraftPageV2';
 import EmploymentCertificatePage from './pages/hr/EmploymentCertificatePage';
+import TerminationCertificatePage from './pages/hr/TerminationCertificatePage';
 import DailyReportStatisticsPage from './pages/report/DailyReportStatisticsPage';
 import OfficeManagementPage from './pages/office/OfficeManagementPage';
 
-import Login from './components/auth/Login';
+import { Login } from './components/auth/index';
 import IntegratedDatabase from './pages/database/ManpowerDatabase';
 import ManualPage from './pages/manual';
 import ProfilePage from './pages/profile/ProfilePage';
@@ -109,6 +110,7 @@ import { MenuManagementPage } from './pages/admin/MenuManagementPage';
 import DataConsolePage from './pages/admin/DataConsolePage';
 import DataBackupPage from './pages/admin/DataBackupPage';
 import StatusGraphPage from './pages/jeonkuk/StatusGraphPage';
+import NationwidePartnersPage from './pages/jeonkuk/NationwidePartnersPage';
 import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
 import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
 import UserManagementPage from './pages/admin/UserManagementPage';
@@ -138,7 +140,15 @@ import CheongyeonGreetingPage from './pages/cheongyeon/CheongyeonGreetingPage';
 import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPage';
 import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
 import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
+import CheongyeonHistoryPage from './pages/cheongyeon/history';
+import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
+import NationwideDashboardHome from './pages/jeonkuk/NationwideDashboardHome';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
+import EstimatePage from './pages/estimate/EstimatePage';
+import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
+import AccountManagementPage from './pages/database/AccountManagementPage';
+import ConstructionCompanyDatabase from './pages/database/ConstructionCompanyDatabase';
+import WorkerDatabaseInput from './pages/database/WorkerDatabaseInput';
 
 import HomepageClientProgressPage from './pages/homepage/HomepageClientProgressPage';
 import HomepageRequestListPage from './pages/homepage/HomepageRequestListPage';
@@ -147,9 +157,11 @@ import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPag
 import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
 import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
 import TaxInvoiceLedgerPage from './pages/taxinvoice/TaxInvoiceLedgerPage';
+import TaxInvoiceIssueListPage from './pages/taxinvoice/TaxInvoiceIssueListPage';
 import ReceivablesManagerPage from './pages/taxinvoice/ReceivablesManagerPage';
 
 import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
+import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
 import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
 import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
 import AccountInquiryPage from './pages/taxinvoice/AccountInquiryPage';
@@ -160,7 +172,7 @@ import RefineSiteList from './pages/refine/RefineSiteList';
 import { RefineSmartSelectDemo } from './pages/refine/RefineSmartSelectDemo';
 import { ProjectGalleryPage } from './pages/gallery/ProjectGalleryPage';
 import { AiImageGalleryPage } from './pages/gallery/AiImageGalleryPage';
-import SiteManagementPage from './pages/site/SiteManagementPage';
+import SiteManagementPage, { ClosedSiteManagementPage } from './pages/site/SiteManagementPage';
 import RefineWorkerList from './pages/refine/RefineWorkerList';
 import RefineTeamList from './pages/refine/RefineTeamList';
 import RefineCompanyList from './pages/refine/RefineCompanyList';
@@ -201,13 +213,10 @@ const DashboardLayoutWrapper = () => (
   </DashboardLayout>
 );
 
-
-
-
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <Router future={{ v7_relativeSplatPath: true }}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
@@ -230,6 +239,8 @@ const App: React.FC = () => {
             <Route path="/dashboard-v2" element={<DashboardExecutiveView />} />
             {/* 청연사이트 전용 대시보드 */}
             <Route path="/dashboard2" element={<CheongyeonHome />} />
+            <Route path="/dashboard3" element={<NationwideDashboardHome />} />
+            <Route path="/cheongyeon/home" element={<Navigate to="/dashboard2" replace />} />
 
             {/* Reports */}
             {/* Daily Reports */}
@@ -276,7 +287,10 @@ const App: React.FC = () => {
             {/* Database Management */}
             <Route path="/database">
               <Route path="company-db" element={<CompanyDatabase />} />
+              <Route path="company-db-construction" element={<ConstructionCompanyDatabase />} />
               <Route path="manpower-db" element={<IntegratedDatabase />} />
+              <Route path="account-management" element={<AccountManagementPage />} />
+              <Route path="worker-input" element={<WorkerDatabaseInput />} />
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
             </Route>
 
@@ -299,6 +313,7 @@ const App: React.FC = () => {
               <Route path="wage-payment" element={<WagePaymentPage />} />
               <Route path="daily-wage" element={<DailyWageDraftPage />} />
               <Route path="daily-wage-statement" element={<DailyWageStatementPage />} />
+              <Route path="daily-advance-workbook" element={<DailyAdvanceWorkbookPage />} />
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
               <Route path="support-team" element={<SupportTeamPaymentPage />} />
@@ -317,11 +332,15 @@ const App: React.FC = () => {
               <Route path="taxinvoice/issue" element={<TaxInvoicePage />} />
               <Route path="taxinvoice/ledger" element={<TaxInvoiceLedgerPage />} />
               <Route path="taxinvoice/receivables" element={<ReceivablesManagerPage />} />
+              <Route path="taxinvoice/issue-list" element={<TaxInvoiceIssueListPage />} />
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
+              <Route path="workbook-ledger" element={<WorkbookLedgerPage key="cheongyeon" tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage key="dawon" tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
-              <Route path="taxinvoice/account-inquiry" element={<AccountInquiryPage />} />
+              <Route path="taxinvoice/account-inquiry" element={<AccountManagementPage />} />
+              <Route path="taxinvoice/bank-inquiry" element={<AccountInquiryPage />} />
               <Route path="kakao-test" element={<KakaoTestPage />} />
               <Route path="kakao-sender" element={<KakaoSenderPage />} />
               <Route path="kakao-message-center" element={<KakaoMessageCenterPage />} />
@@ -390,10 +409,11 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<AccommodationManager />} />
-            <Route path="/support/vehicles" element={<VehicleManagerPage />} />
-            <Route path="/support/cards" element={<CardManagerPage />} />
+            <Route path="/support/vehicles" element={<SupportManagerPage />} />
+            <Route path="/support/cards" element={<SupportManagerPage />} />
 
             <Route path="/hr/certificate" element={<EmploymentCertificatePage />} />
+            <Route path="/hr/termination-certificate" element={<TerminationCertificatePage />} />
             {/* Payroll Management */}
             <Route path="/payroll/payslip" element={<PayslipPage />} />
 
@@ -403,7 +423,7 @@ const App: React.FC = () => {
             <Route path="/materials/outbound" element={<MaterialOutboundPage />} />
             <Route path="/materials/transactions" element={<MaterialTransactionsPage />} />
             <Route path="/materials/inventory" element={<MaterialInventoryPage />} />
-            {/* <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} /> */}
+            <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} />
 
             {/* Company DB */}
             <Route path="/database/company-db" element={<CompanyDatabase />} />
@@ -418,6 +438,7 @@ const App: React.FC = () => {
               <Route path="db-structure" element={<FirestoreStructureViewer />} />
               <Route path="db-design" element={<SchemaDesignViewer />} />
               <Route path="integrated-status" element={<WhiteboardStatusBoard />} />
+              <Route path="nationwide-partners" element={<NationwidePartnersPage />} />
               <Route path="status-graph" element={<StatusGraphPage />} />
               <Route path="integrated-support-status" element={<IntegratedSupportStatusBoard />} />
               <Route path="total-history" element={<TotalPersonnelHistoryPage />} />
@@ -467,10 +488,17 @@ const App: React.FC = () => {
             <Route path="/cheongyeon/greeting" element={<CheongyeonGreetingPage />} />
             <Route path="/cheongyeon/directions" element={<CheongyeonDirectionsPage />} />
             <Route path="/cheongyeon/tech-vision" element={<CheongyeonTechVisionPage />} />
+            <Route path="/cheongyeon/philosophy" element={<CheongyeonPhilosophyPage />} />
+            <Route path="/cheongyeon/history" element={<CheongyeonHistoryPage />} />
 
             {/* Company */}
             <Route path="/company/management" element={<CompanyManagementPage />} />
             <Route path="/company/registration" element={<CompanyRegistrationPage />} />
+            <Route path="/estimate" element={<Navigate to="/estimate/manage" replace />} />
+            <Route path="/estimate/manage" element={<EstimatePage />} />
+            <Route path="/estimate/list" element={<EstimatePage />} />
+            <Route path="/estimate/new" element={<EstimatePage />} />
+            <Route path="/estimate/request" element={<EstimateRequestPage />} />
 
             {/* Gallery */}
             <Route path="/gallery/projects" element={<ProjectGalleryPage />} />
@@ -478,6 +506,8 @@ const App: React.FC = () => {
 
             {/* Site Management */}
             <Route path="/site/management" element={<SiteManagementPage />} />
+            <Route path="/site/management/closed" element={<ClosedSiteManagementPage />} />
+            <Route path="/site/management-closed" element={<ClosedSiteManagementPage />} />
 
           </Route>
 

@@ -6,7 +6,7 @@ import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { EmploymentCertificateTemplate } from '../../components/hr/EmploymentCertificateTemplate';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPrint, faSearch } from '@fortawesome/free-solid-svg-icons';
+import { faPrint } from '@fortawesome/free-solid-svg-icons';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from 'date-fns';
@@ -53,6 +53,9 @@ const Label = styled.label`
 `;
 
 const Input = styled.input`
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -65,6 +68,9 @@ const Input = styled.input`
 `;
 
 const Select = styled.select`
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -110,6 +116,31 @@ const SectionHeader = styled.h2`
   border-bottom: 2px solid #e2e8f0;
 `;
 
+const DateRangeRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+`;
+
+const DateField = styled.div`
+  min-width: 0;
+
+  .react-datepicker-wrapper,
+  .react-datepicker__input-container {
+    display: block;
+    width: 100%;
+  }
+`;
+
+const RangeDivider = styled.span`
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+`;
+
 // Simple Workers Search List
 const WorkerList = styled.div`
   border: 1px solid #e2e8f0;
@@ -132,6 +163,44 @@ const WorkerItem = styled.div<{ $isActive: boolean }>`
   }
 `;
 
+const fallbackPrintFromElement = (element: HTMLElement, title: string) => {
+        const popup = window.open('', '_blank', 'noopener,noreferrer,width=1200,height=900');
+        if (!popup) {
+                window.alert('팝업이 차단되어 PDF 저장 창을 열 수 없습니다. 브라우저 팝업 차단을 해제해 주세요.');
+                return;
+        }
+
+        const styleNodes = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+                .map((node) => node.outerHTML)
+                .join('\n');
+
+        popup.document.open();
+        popup.document.write(`
+            <!doctype html>
+            <html lang="ko">
+                <head>
+                    <meta charset="utf-8" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1" />
+                    <title>${title}</title>
+                    ${styleNodes}
+                    <style>
+                        @page { size: A4 portrait; margin: 10mm; }
+                        html, body { margin: 0 !important; padding: 0 !important; background: #ffffff !important; }
+                    </style>
+                </head>
+                <body>
+                    ${element.outerHTML}
+                </body>
+            </html>
+        `);
+        popup.document.close();
+        popup.focus();
+
+        window.setTimeout(() => {
+                popup.print();
+        }, 250);
+};
+
 const EmploymentCertificatePage: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
@@ -152,6 +221,8 @@ const EmploymentCertificatePage: React.FC = () => {
     const [isServing, setIsServing] = useState(true);
 
     const componentRef = useRef<HTMLDivElement>(null);
+
+    const sanitizeCertificateName = (name?: string | null) => String(name || '').replace(/\d+/g, '').trim();
 
     const isTargetIssuerCompany = (company: Company): boolean => {
         const name = String(company.name || '');
@@ -191,21 +262,57 @@ const EmploymentCertificatePage: React.FC = () => {
         fetchData();
     }, []);
 
-    const handlePrint = useReactToPrint({
-        content: () => componentRef.current,
-        documentTitle: `재직증명서_${selectedWorker?.name || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
+        const handlePrint = useReactToPrint({
+        contentRef: componentRef,
+        documentTitle: `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`,
+                pageStyle: `
+                    @page {
+                        size: A4 portrait;
+                        margin: 10mm;
+                    }
+                    @media print {
+                        html, body {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            background: #ffffff !important;
+                            -webkit-print-color-adjust: exact;
+                            print-color-adjust: exact;
+                        }
+                    }
+                `,
+                onPrintError: () => {
+                        if (componentRef.current) {
+                                const title = `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`;
+                                fallbackPrintFromElement(componentRef.current, title);
+                        }
+                }
     });
 
-    // 대상 근로자는 회사 선택과 무관하게 청연 소속만 노출
-    const cheongyeonCompany = companies.find(c => c.name.includes('청연'));
+        const handlePrintClick = async () => {
+                if (!componentRef.current) return;
+
+                try {
+                        await handlePrint();
+                } catch {
+                        const title = `재직증명서_${sanitizeCertificateName(selectedWorker?.name) || '미지정'}_${format(issueDate, 'yyyyMMdd')}`;
+                        fallbackPrintFromElement(componentRef.current, title);
+                }
+        };
+
+    // 대상 근로자는 시공사(다원, 청연 등) 소속인 경우 모두 노출
     const filteredWorkers = workers.filter(w => {
         const companyName = String(w.companyName || '');
         const teamName = String(w.teamName || '');
-        const isCheongyeonWorker =
-            (cheongyeonCompany?.id && w.companyId === cheongyeonCompany.id)
-            || companyName.includes('청연')
-            || teamName.includes('청연');
-        if (!isCheongyeonWorker) return false;
+        
+        // 발급 대상 회사(companies 리스트) 중 하나에 속하는지 확인
+        const isTargetWorker = companies.some(c => {
+            const cleanName = c.name.replace('(주)', '').trim();
+            return (c.id && w.companyId === c.id) || 
+                   (c.name && companyName.includes(cleanName)) ||
+                   (c.name && teamName.includes(cleanName));
+        });
+
+        if (!isTargetWorker) return false;
         if (searchWorkerName.trim() && !w.name.includes(searchWorkerName)) return false;
         return true;
     });
@@ -224,6 +331,7 @@ const EmploymentCertificatePage: React.FC = () => {
                     <Label>발급 회사 (시공사)</Label>
                     <Select
                         value={selectedCompanyId}
+                        disabled={loading}
                         onChange={(e) => {
                             setSelectedCompanyId(e.target.value);
                             setSelectedWorker(null);
@@ -250,7 +358,7 @@ const EmploymentCertificatePage: React.FC = () => {
                         <div style={{ display: 'flex', gap: '8px' }}>
                             <Input
                                 type="text"
-                                placeholder="청연 소속 근로자 이름 검색 (선택사항)"
+                                placeholder="대상 근로자 이름 검색 (선택사항)"
                                 value={searchWorkerName}
                                 onChange={(e) => setSearchWorkerName(e.target.value)}
                                 style={{ flex: 1 }}
@@ -265,9 +373,9 @@ const EmploymentCertificatePage: React.FC = () => {
                                         onClick={() => {
                                             setSelectedWorker(worker);
                                             setSearchWorkerName(worker.name);
-                                            // Auto-fill position and duties
-                                            setPosition(worker.role || worker.rank || '일용근로자');
-                                            setDuties(worker.role || '건설 관련 업무');
+                                            // Auto-fill position and duties (Requested: Position empty, Duties: '현장직')
+                                            setPosition('');
+                                            setDuties('현장직');
 
                                             // Auto-fill dates
                                             const createdAt = worker.createdAt?.toDate ? worker.createdAt.toDate() : (worker.createdAt as any);
@@ -287,7 +395,7 @@ const EmploymentCertificatePage: React.FC = () => {
                         {/* ... (Empty state) */}
                         {filteredWorkers.length === 0 && (
                             <div style={{ padding: '12px', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>
-                                청연 소속 근로자가 없습니다.
+                                대상 근로자가 없습니다.
                             </div>
                         )}
                         {selectedWorker && (
@@ -334,8 +442,8 @@ const EmploymentCertificatePage: React.FC = () => {
 
                 <FormGroup>
                     <Label>재직 기간 (입사일 ~ 종료일)</Label>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <div style={{ flex: 1 }}>
+                    <DateRangeRow>
+                        <DateField>
                             <DatePicker
                                 selected={joinDate}
                                 onChange={(date: Date | null) => setJoinDate(date)}
@@ -343,9 +451,9 @@ const EmploymentCertificatePage: React.FC = () => {
                                 locale={ko}
                                 customInput={<Input placeholder="입사일 선택" />}
                             />
-                        </div>
-                        <span>~</span>
-                        <div style={{ flex: 1 }}>
+                        </DateField>
+                        <RangeDivider>~</RangeDivider>
+                        <DateField>
                             <DatePicker
                                 selected={isServing ? null : endDate}
                                 onChange={(date: Date | null) => {
@@ -357,8 +465,8 @@ const EmploymentCertificatePage: React.FC = () => {
                                 customInput={<Input placeholder={isServing ? "현재 재직중" : "퇴사일 선택"} disabled={isServing} />}
                                 disabled={isServing}
                             />
-                        </div>
-                    </div>
+                        </DateField>
+                    </DateRangeRow>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
                         <input
                             type="checkbox"
@@ -397,7 +505,7 @@ const EmploymentCertificatePage: React.FC = () => {
 
                 <div style={{ flex: 1 }}></div>
 
-                <Button onClick={handlePrint} disabled={!selectedWorker}>
+                <Button onClick={handlePrintClick} disabled={!selectedWorker || loading}>
                     <FontAwesomeIcon icon={faPrint} />
                     재직증명서 인쇄 / PDF 저장
                 </Button>

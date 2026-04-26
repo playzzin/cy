@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUserCheck, faSearch, faUserPlus, faExclamationTriangle, faCheckCircle } from '@fortawesome/free-solid-svg-icons';
+import { faUserCheck, faSearch, faUserPlus, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 
 interface ProfileSetupProps {
     onComplete: () => void;
@@ -27,11 +27,7 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete }) => {
         address: ''
     });
 
-    useEffect(() => {
-        checkAutoMatch();
-    }, [currentUser]);
-
-    const checkAutoMatch = async () => {
+    const checkAutoMatch = useCallback(async () => {
         if (!currentUser?.email) {
             setStep('manual-search');
             return;
@@ -52,7 +48,11 @@ const ProfileSetup: React.FC<ProfileSetupProps> = ({ onComplete }) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [currentUser]);
+
+    useEffect(() => {
+        checkAutoMatch();
+    }, [checkAutoMatch]);
 
     const handleAutoLink = async () => {
         if (!foundWorker?.id || !currentUser?.uid) return;

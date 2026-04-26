@@ -15,6 +15,8 @@ import {
     doc,
     getDoc,
 } from 'firebase/firestore';
+import { normalizeLooseDateString, normalizeLooseDateText } from '../utils/dateNormalization';
+import { resolveReportPayType, resolveWorkerPayType, syncPayTypeFields } from '../utils/payType';
 
 export type { DailyReport, DailyReportWorker };
 
@@ -47,10 +49,46 @@ export interface DailyReportWorkerRow {
 
 const normalizeReport = (report: Partial<DailyReport> & { date: string; teamId: string; siteId: string }): DailyReport => ({
     ...report,
-    workers: report.workers ?? [],
+    date: normalizeLooseDateText(report.date),
+    workers: Array.isArray(report.workers)
+        ? report.workers.map((worker) => syncPayTypeFields(worker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' }))
+        : [],
     totalManDay: report.totalManDay ?? 0,
     totalAmount: report.totalAmount ?? 0,
 }) as DailyReport;
+
+const filterReportsByParams = (reports: DailyReport[], params: {
+    startDate?: string;
+    endDate?: string;
+    teamId?: string;
+    siteId?: string;
+}): DailyReport[] => {
+    const normalizedStartDate = normalizeLooseDateString(params.startDate);
+    const normalizedEndDate = normalizeLooseDateString(params.endDate);
+
+    return reports.filter((report) => {
+        const normalizedReportDate = normalizeLooseDateString(report.date);
+        if (!normalizedReportDate) return false;
+        if (normalizedStartDate && normalizedReportDate < normalizedStartDate) return false;
+        if (normalizedEndDate && normalizedReportDate > normalizedEndDate) return false;
+        if (params.teamId && report.teamId !== params.teamId) return false;
+        if (params.siteId && report.siteId !== params.siteId) return false;
+        return true;
+    }).sort((a, b) => {
+        const dateCompare = String(b.date ?? '').localeCompare(String(a.date ?? ''));
+        if (dateCompare !== 0) return dateCompare;
+        return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+    });
+};
+
+// undefined를 null로 치환 (타입 보존)
+const cleanWorker = (worker: any): DailyReportWorker => {
+    const cleaned: any = { ...worker };
+    Object.keys(cleaned).forEach((k) => {
+        if (cleaned[k] === undefined) cleaned[k] = null;
+    });
+    return cleaned as DailyReportWorker;
+};
 
 export const dailyReportService = {
     addReport: async (report: DailyReportInput): Promise<string> => {
@@ -64,11 +102,22 @@ export const dailyReportService = {
         const oldSnap = await getDoc(doc(db, 'daily_reports', id));
         if (!oldSnap.exists()) throw new Error('Report not found');
         const oldData = normalizeReport(oldSnap.data() as any);
+        let normalizedUpdates = {
+            ...updates,
+            ...(updates.date !== undefined ? { date: normalizeLooseDateText(updates.date) } : {})
+        };
+        // workers 필드가 있으면 undefined -> null 치환
+        if (Array.isArray(normalizedUpdates.workers)) {
+          normalizedUpdates = {
+            ...normalizedUpdates,
+            workers: normalizedUpdates.workers.map(cleanWorker)
+          };
+        }
 
         await dailyReportService._updateStats(oldData, -1);
-        await dailyReportFirestoreService.updateReport(id, updates);
+        await dailyReportFirestoreService.updateReport(id, normalizedUpdates);
 
-        const newData = normalizeReport({ ...oldData, ...updates } as any);
+        const newData = normalizeReport({ ...oldData, ...normalizedUpdates } as any);
         await dailyReportService._updateStats(newData, 1);
     },
 
@@ -136,28 +185,14 @@ export const dailyReportService = {
             : paramsOrDate;
 
         const normalized = {
-            startDate: params.startDate ?? params.endDate,
-            endDate: params.endDate ?? params.startDate,
+            startDate: normalizeLooseDateText(params.startDate ?? params.endDate ?? ''),
+            endDate: normalizeLooseDateText(params.endDate ?? params.startDate ?? ''),
             teamId: params.teamId,
             siteId: params.siteId,
         };
 
-        if (!normalized.startDate && !normalized.endDate) {
-            const all = await dailyReportService.getAllReports();
-            return all.filter(report => {
-                if (normalized.teamId && report.teamId !== normalized.teamId) return false;
-                if (normalized.siteId && report.siteId !== normalized.siteId) return false;
-                return true;
-            });
-        }
-
-        const reports = await dailyReportFirestoreService.getReportsByRange({
-            startDate: normalized.startDate || '',
-            endDate: normalized.endDate || '',
-            teamId: normalized.teamId,
-            siteId: normalized.siteId,
-        });
-        return reports.map(report => normalizeReport(report as any));
+        const all = await dailyReportService.getAllReports();
+        return filterReportsByParams(all, normalized);
     },
 
     getReportsList: async (): Promise<DailyReport[]> => {
@@ -212,16 +247,31 @@ export const dailyReportService = {
         const reports = await dailyReportService.getReports(params);
         const { siteService } = await import('./siteService');
         const sites = await siteService.getSites();
-        const siteMap = new Map(sites.map(site => [site.id, site]));
+        const siteMap = new Map<string, (typeof sites)[number]>();
+        const siteNameMap = new Map<string, (typeof sites)[number]>();
+
+        sites.forEach((site) => {
+            const id = String(site.id ?? '').trim();
+            const legacyId = String(site.legacyId ?? '').trim();
+            const name = String(site.name ?? '').trim();
+
+            if (id) siteMap.set(id, site);
+            if (legacyId) siteMap.set(legacyId, site);
+            if (name && !siteNameMap.has(name)) siteNameMap.set(name, site);
+        });
 
         const rows: DailyReportWorkerRow[] = [];
         reports.forEach(report => {
-            const site = report.siteId ? siteMap.get(report.siteId) : undefined;
-            const fallbackSiteType = site?.siteType || '';
-            const fallbackPaymentType = site?.paymentMethod || '';
+            const site = report.siteId
+                ? siteMap.get(String(report.siteId).trim())
+                : undefined;
+            const resolvedSite = site ?? siteNameMap.get(String(report.siteName ?? '').trim());
+            const fallbackSiteType = resolvedSite?.siteType || '';
+            const fallbackPaymentType = resolvedSite?.paymentMethod || '';
 
             report.workers.forEach(worker => {
                 const unitPrice = worker.unitPrice || 0;
+                const resolvedPayType = resolveReportPayType(worker) || undefined;
                 rows.push({
                     reportId: report.id || '',
                     date: report.date,
@@ -229,8 +279,8 @@ export const dailyReportService = {
                     teamName: report.teamName,
                     siteId: report.siteId,
                     siteName: report.siteName,
-                    responsibleTeamId: report.responsibleTeamId ?? site?.responsibleTeamId,
-                    responsibleTeamName: report.responsibleTeamName ?? site?.responsibleTeamName,
+                    responsibleTeamId: report.responsibleTeamId ?? resolvedSite?.responsibleTeamId,
+                    responsibleTeamName: report.responsibleTeamName ?? resolvedSite?.responsibleTeamName,
                     workerId: worker.workerId,
                     workerName: worker.name,
                     role: worker.role,
@@ -238,8 +288,8 @@ export const dailyReportService = {
                     manDay: worker.manDay,
                     unitPrice,
                     amount: worker.manDay * unitPrice,
-                    payType: worker.payType,
-                    salaryModel: worker.salaryModel,
+                    payType: resolvedPayType,
+                    salaryModel: resolvedPayType,
                     workContent: worker.workContent,
                     siteType: worker.siteType || report.siteType || fallbackSiteType || '',
                     paymentType: worker.paymentType || report.paymentType || fallbackPaymentType || '',
@@ -267,8 +317,52 @@ export const dailyReportService = {
     },
 
     getReportsBySite: async (siteId: string): Promise<DailyReport[]> => {
+        const normalizedTargetSiteId = String(siteId ?? '').trim();
+        if (!normalizedTargetSiteId) return [];
+
         const reports = await dailyReportService.getAllReports();
-        return reports.filter(report => report.siteId === siteId);
+
+        // 현장 ID 체계가 바뀐 경우(legacyId <-> id)에도 과거 일보를 함께 조회한다.
+        const { siteService } = await import('./siteService');
+        const allSites = await siteService.getSites();
+
+        const candidateSiteIds = new Set<string>();
+        const candidateSiteNames = new Set<string>();
+        candidateSiteIds.add(normalizedTargetSiteId);
+
+        let expanded = true;
+        while (expanded) {
+            expanded = false;
+            for (const site of allSites) {
+                const id = String(site.id ?? '').trim();
+                const legacyId = String(site.legacyId ?? '').trim();
+                if (!id && !legacyId) continue;
+
+                const isLinked = (id && candidateSiteIds.has(id)) || (legacyId && candidateSiteIds.has(legacyId));
+                if (!isLinked) continue;
+
+                if (id && !candidateSiteIds.has(id)) {
+                    candidateSiteIds.add(id);
+                    expanded = true;
+                }
+                if (legacyId && !candidateSiteIds.has(legacyId)) {
+                    candidateSiteIds.add(legacyId);
+                    expanded = true;
+                }
+
+                const name = String(site.name ?? '').trim();
+                if (name) candidateSiteNames.add(name);
+            }
+        }
+
+        return reports.filter((report) => {
+            const reportSiteId = String(report.siteId ?? '').trim();
+            if (reportSiteId && candidateSiteIds.has(reportSiteId)) return true;
+
+            // 일부 구 데이터가 siteId가 비정상인 경우를 대비해 siteName도 보조 매칭한다.
+            const reportSiteName = String(report.siteName ?? '').trim();
+            return !!reportSiteName && candidateSiteNames.has(reportSiteName);
+        });
     },
 
     syncReportsSalaryModel: async (): Promise<{ updated: number; errors: string[] }> => {
@@ -284,8 +378,8 @@ export const dailyReportService = {
                     .map(worker => [
                         String(worker.id),
                         {
-                            salaryModel: worker.salaryModel ?? worker.payType,
-                            payType: worker.payType ?? worker.salaryModel,
+                            payType: resolveWorkerPayType(worker) || undefined,
+                            salaryModel: resolveWorkerPayType(worker) || undefined,
                         },
                     ])
             );
@@ -299,16 +393,16 @@ export const dailyReportService = {
                     const current = workerMap.get(String(worker.workerId));
                     if (!current) return worker;
 
-                    const nextSalaryModel = current.salaryModel ?? worker.salaryModel;
-                    const nextPayType = current.payType ?? worker.payType;
-                    if (nextSalaryModel !== worker.salaryModel || nextPayType !== worker.payType) {
+                    const nextPayType = resolveReportPayType(worker, current) || undefined;
+                    const nextSalaryModel = nextPayType;
+                    if (nextPayType !== worker.payType || nextSalaryModel !== worker.salaryModel) {
                         changed = true;
                     }
 
                     return {
                         ...worker,
-                        salaryModel: nextSalaryModel,
                         payType: nextPayType,
+                        salaryModel: nextSalaryModel,
                     };
                 });
 
@@ -366,9 +460,9 @@ export const dailyReportService = {
         const updatedWorkers = [...report.workers];
         const existingIndex = updatedWorkers.findIndex(existingWorker => existingWorker.workerId === worker.workerId);
         if (existingIndex >= 0) {
-            updatedWorkers[existingIndex] = { ...updatedWorkers[existingIndex], ...worker };
+            updatedWorkers[existingIndex] = syncPayTypeFields({ ...updatedWorkers[existingIndex], ...worker } as DailyReportWorker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' });
         } else {
-            updatedWorkers.push(worker as DailyReportWorker);
+            updatedWorkers.push(syncPayTypeFields(worker as DailyReportWorker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' }));
         }
 
         const totalManDay = updatedWorkers.reduce((sum, currentWorker) => sum + (currentWorker.manDay || 0), 0);
@@ -389,7 +483,7 @@ export const dailyReportService = {
         const index = updatedWorkers.findIndex(worker => worker.workerId === workerId);
         if (index === -1) throw new Error('Worker not found in report');
 
-        updatedWorkers[index] = { ...updatedWorkers[index], ...updates };
+        updatedWorkers[index] = syncPayTypeFields({ ...updatedWorkers[index], ...updates } as DailyReportWorker, { returnUndefinedOnEmpty: true, priority: 'salaryModel' });
         const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
         const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
@@ -404,15 +498,26 @@ export const dailyReportService = {
         const report = await dailyReportService.getReport(reportId);
         if (!report) throw new Error('Report not found');
 
-        const updatedWorkers = report.workers.filter(worker => worker.workerId !== workerId);
-        const totalManDay = updatedWorkers.reduce((sum, worker) => sum + (worker.manDay || 0), 0);
-        const totalAmount = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
+                // undefined 필드를 null로 치환하되 타입 보존
+                const cleanWorker = (worker: any): DailyReportWorker => {
+                    const cleaned: any = { ...worker };
+                    Object.keys(cleaned).forEach((k) => {
+                        if (cleaned[k] === undefined) cleaned[k] = null;
+                    });
+                    return cleaned as DailyReportWorker;
+                };
 
-        await dailyReportService.updateReport(reportId, {
-            workers: updatedWorkers,
-            totalManDay,
-            totalAmount,
-        });
+                const updatedWorkers = report.workers
+                    .filter(worker => worker.workerId !== workerId)
+                    .map(cleanWorker);
+                const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
+                const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
+
+                await dailyReportService.updateReport(reportId, {
+                        workers: updatedWorkers,
+                        totalManDay,
+                        totalAmount,
+                });
     },
 
     getDBStats: async () => {

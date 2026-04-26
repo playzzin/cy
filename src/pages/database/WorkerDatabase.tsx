@@ -27,8 +27,7 @@ import IdCardAnalysisModal from '../../components/manpower/IdCardAnalysisModal';
 import WorkerModal from '../manpower/WorkerModal';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
-import SingleSelectPopover from '../../components/common/SingleSelectPopover';
-import InputPopover from '../../components/common/InputPopover';
+import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
 
 const WORKER_COLUMNS = [
     { key: 'name', label: '이름' },
@@ -50,6 +49,7 @@ const WORKER_COLUMNS = [
 
 const QUICK_VIEW_PERSONAL_COLUMNS = ['name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
 const QUICK_VIEW_WORK_COLUMNS = ['name', 'role', 'salaryModel', 'teamName', 'companyName', 'status'];
+const UNASSIGNED_TEAM_FILTER_ID = '__unassigned_team__';
 
 interface WorkerDatabaseProps {
     hideHeader?: boolean;
@@ -122,6 +122,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [isEditMode, setIsEditMode] = useState(false);
     const [showInactive, setShowInactive] = useState(false); // Default: Hide inactive workers
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
+    const [selectedTeamId, setSelectedTeamId] = useState('');
 
     // Highlight scroll control (for Data Integrity "관리" navigation)
     const highlightScrolledRef = useRef(false);
@@ -215,7 +216,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 teamType: team.type,
                 companyId: team.companyId || '',
                 companyName: team.companyName || '',
-                salaryModel: newSalaryModel
+                salaryModel: newSalaryModel,
+                payType: newSalaryModel
             };
 
             setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...updates } : w));
@@ -307,20 +309,84 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
     // 필터링된 작업자 목록
     const filteredWorkers = workers.filter(worker => {
-        const lowerSearch = searchTerm.toLowerCase();
+        const lowerSearch = searchTerm.trim().toLowerCase();
+        const selectedTeamNameForFilter = teams.find((team) => team.id === selectedTeamId)?.name?.trim() ?? '';
+        const workerTeamId = String(worker.teamId ?? '').trim();
+        const workerTeamName = String(worker.teamName ?? '').trim();
+        const matchesTeam = !selectedTeamId
+            ? true
+            : selectedTeamId === UNASSIGNED_TEAM_FILTER_ID
+                ? !workerTeamId && !workerTeamName
+                : workerTeamId === selectedTeamId || (!workerTeamId && selectedTeamNameForFilter.length > 0 && workerTeamName === selectedTeamNameForFilter);
 
         // Status filter: If showInactive is false, only show 'active'/'재직' or 'unassigned'/'미배정'.
         const isActive = worker.status === '재직' || worker.status === 'active' || worker.status === '미배정' || !worker.status;
         if (!showInactive && !isActive) return false;
+        if (!matchesTeam) return false;
+
+        if (!lowerSearch) return true;
 
         return (
             worker.name.toLowerCase().includes(lowerSearch) ||
-            (worker.idNumber ?? '').includes(lowerSearch) ||
-            (worker.contact && worker.contact.includes(lowerSearch))
+            String(worker.idNumber ?? '').toLowerCase().includes(lowerSearch) ||
+            String(worker.contact ?? '').toLowerCase().includes(lowerSearch) ||
+            String(worker.teamName ?? '').toLowerCase().includes(lowerSearch)
         );
     });
 
     // 선택 기능
+    const selectedTeamName = React.useMemo(
+        () => teams.find((team) => team.id === selectedTeamId)?.name?.trim() ?? '',
+        [teams, selectedTeamId]
+    );
+
+    const teamFilterOptions = React.useMemo(() => {
+        const teamNameToId = new Map<string, string>();
+        const teamCounts = new Map<string, number>();
+        let unassignedCount = 0;
+
+        teams.forEach((team) => {
+            const normalizedName = String(team.name ?? '').trim().toLowerCase();
+            if (team.id && normalizedName) {
+                teamNameToId.set(normalizedName, team.id);
+            }
+        });
+
+        workers.forEach((worker) => {
+            const rawTeamId = String(worker.teamId ?? '').trim();
+            if (rawTeamId) {
+                teamCounts.set(rawTeamId, (teamCounts.get(rawTeamId) ?? 0) + 1);
+                return;
+            }
+
+            const normalizedTeamName = String(worker.teamName ?? '').trim().toLowerCase();
+            const mappedTeamId = normalizedTeamName ? teamNameToId.get(normalizedTeamName) : undefined;
+            if (mappedTeamId) {
+                teamCounts.set(mappedTeamId, (teamCounts.get(mappedTeamId) ?? 0) + 1);
+                return;
+            }
+
+            unassignedCount += 1;
+        });
+
+        const options = [...teams]
+            .filter((team) => Boolean(team.id))
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+            .map((team) => ({
+                id: team.id!,
+                name: `${team.name} (${teamCounts.get(team.id!) ?? 0}명)`
+            }));
+
+        if (unassignedCount > 0) {
+            options.unshift({
+                id: UNASSIGNED_TEAM_FILTER_ID,
+                name: `미배정 (${unassignedCount}명)`
+            });
+        }
+
+        return options;
+    }, [teams, workers]);
+
     const toggleSelectAll = () => {
         if (selectedWorkerIds.length === filteredWorkers.length && filteredWorkers.length > 0) {
             setSelectedWorkerIds([]);
@@ -383,7 +449,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 const blob = await getBlob(ref(storage, worker.fileNameSaved!));
 
                 const ext = worker.fileNameSaved!.split('.').pop() || 'jpg';
-                const filename = `${worker.name}_${worker.idNumber}.${ext}`;
+                const cleanName = (worker.name || '').replace(/[0-9]/g, '');
+                const filename = `${cleanName}_${worker.idNumber}.${ext}`;
 
                 zip.file(filename, blob);
 
@@ -398,7 +465,9 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                         error.message;
                 setBulkLogs(prev => [`[실패] ${worker.name}: ${msg}`, ...prev]);
             }
-            setBulkProgress(prev => ({ ...prev, success: successCount, fail: failCount }));
+            const nextSuccessCount = successCount;
+            const nextFailCount = failCount;
+            setBulkProgress(prev => ({ ...prev, success: nextSuccessCount, fail: nextFailCount }));
         }
 
         if (successCount > 0) {
@@ -430,7 +499,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
             const ext = worker.fileNameSaved.split('.').pop() || 'jpg';
             const safeIdNumber = worker.idNumber || '미등록';
-            const filename = `${worker.name}_${safeIdNumber}.${ext}`;
+            const cleanName = (worker.name || '').replace(/[0-9]/g, '');
+            const filename = `${cleanName}_${safeIdNumber}.${ext}`;
 
             const downloadUrl = new URL(url);
             downloadUrl.searchParams.set(
@@ -577,7 +647,9 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                         error.message;
                 setBulkLogs(prev => [`[실패] ${worker.name}: ${msg}`, ...prev]);
             }
-            setBulkProgress(prev => ({ ...prev, success: successCount, fail: failCount }));
+            const nextSuccessCount = successCount;
+            const nextFailCount = failCount;
+            setBulkProgress(prev => ({ ...prev, success: nextSuccessCount, fail: nextFailCount }));
         }
 
         setLoading(false);
@@ -830,6 +902,22 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                     className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-64"
                                 />
                             </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-600 whitespace-nowrap">팀</span>
+                                <div className="w-56 min-w-[14rem]">
+                                    <SingleSelectPopover
+                                        options={teamFilterOptions}
+                                        selectedId={selectedTeamId}
+                                        onSelect={(id) => setSelectedTeamId(id)}
+                                        placeholder="전체 팀"
+                                    />
+                                </div>
+                            </div>
+                            {selectedTeamId && (
+                                <div className="text-xs text-slate-500 whitespace-nowrap">
+                                    조회 팀: {teamFilterOptions.find((option) => option.id === selectedTeamId)?.name ?? selectedTeamName}
+                                </div>
+                            )}
                         </div>
                     </div>
 

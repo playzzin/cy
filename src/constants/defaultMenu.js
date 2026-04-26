@@ -1,4 +1,3 @@
-"use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_MENU_CONFIG = void 0;
 exports.DEFAULT_MENU_CONFIG = {
@@ -22,7 +21,7 @@ exports.DEFAULT_MENU_CONFIG = {
             {
                 text: "출력 관리",
                 icon: "fa-clipboard-list",
-                sub: ["일보작성", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
+                sub: ["일보작성", "일보목록v2", "통합 일괄 등록", "일보 통계"]
             },
             {
                 text: "지원 관리",
@@ -65,7 +64,13 @@ exports.DEFAULT_MENU_CONFIG = {
             {
                 text: "시스템 관리",
                 icon: "fa-gears",
-                sub: ["메뉴관리", "시스템 메시지 설정", "데이터 연결 점검", { text: "현장 관리", path: "/site/management" }]
+                sub: [
+                    "메뉴관리",
+                    "시스템 메시지 설정",
+                    "데이터 연결 점검",
+                    { text: "현장 관리", path: "/site/management" },
+                    { text: "마감 현장 관리", path: "/site/management/closed" }
+                ]
             },
             {
                 text: "클라우드 저장소",
@@ -159,7 +164,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -193,7 +198,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -207,7 +212,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -221,7 +226,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -235,7 +240,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -249,7 +254,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -263,7 +268,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -277,7 +282,7 @@ exports.DEFAULT_MENU_CONFIG = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",

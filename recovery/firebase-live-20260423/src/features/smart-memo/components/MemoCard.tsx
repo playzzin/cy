@@ -1,0 +1,630 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Memo, MemoColor } from '../types/memo';
+import { Trash2, GripHorizontal, ChevronUp, ChevronDown, Globe, MessageCircle } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import debounce from 'lodash.debounce';
+import { cn } from '../lib/utils';
+import { useMemoStore } from '../store/useMemoStore';
+import Swal from 'sweetalert2';
+
+// Custom Simple Renderer to avoid heavy dependencies
+const SimpleRenderer = ({ content }: { content: string }) => {
+    // Regex to capture URLs only
+    const parts = content.split(/(https?:\/\/[^\s]+|\n)/g);
+
+    return (
+        <>
+            {parts.map((part, index) => {
+                if (part === '\n') return <br key={index} />;
+                if (part.startsWith('http')) {
+                    return (
+                        <a
+                            key={index}
+                            href={part}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-500 hover:underline cursor-pointer relative z-50"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {part}
+                        </a>
+                    );
+                }
+                return <span key={index}>{part}</span>;
+            })}
+        </>
+    );
+};
+
+interface MemoCardProps {
+    memo: Memo;
+    onDelete: () => void;
+    className?: string;
+    showDragHandle?: boolean;
+    // RGL Props
+    style?: React.CSSProperties;
+    onMouseDown?: React.MouseEventHandler;
+    onMouseUp?: React.MouseEventHandler;
+    onTouchEnd?: React.TouchEventHandler;
+    onContentSizeChange?: (size: { height: number }) => void;
+}
+
+const COLOR_MAP: Record<MemoColor, string> = {
+    white: 'bg-white border-slate-200',
+    red: 'bg-rose-100 border-rose-200',
+    orange: 'bg-orange-100 border-orange-200',
+    yellow: 'bg-amber-100 border-amber-200',
+    green: 'bg-emerald-100 border-emerald-200',
+    blue: 'bg-sky-100 border-sky-200',
+    purple: 'bg-violet-100 border-violet-200',
+    gray: 'bg-slate-100 border-slate-200',
+};
+
+// --- Sub-Component: Auto-Resizing Textarea for Checklist ---
+const ChecklistTextarea = ({
+    value,
+    onChange,
+    onKeyDown,
+    isChecked
+}: {
+    value: string;
+    onChange: (val: string) => void;
+    onKeyDown: (e: React.KeyboardEvent) => void;
+    isChecked: boolean;
+}) => {
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [localValue, setLocalValue] = useState(value);
+    const [isFocused, setIsFocused] = useState(false);
+
+    // Sync from props if not focused to avoid race conditions
+    useEffect(() => {
+        if (!isFocused && value !== localValue) {
+            setLocalValue(value);
+        }
+    }, [value, isFocused, localValue]);
+
+    // Debounced update to parent (Store)
+    const debouncedOnChange = useRef(
+        debounce((newValue: string) => {
+            onChange(newValue);
+        }, 500)
+    ).current;
+
+    useEffect(() => {
+        return () => {
+            debouncedOnChange.flush();
+            debouncedOnChange.cancel();
+        };
+    }, [debouncedOnChange]);
+
+    // Auto-resize logic
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+        }
+    }, [localValue]);
+
+    return (
+        <textarea
+            ref={textareaRef}
+            rows={1}
+            value={localValue}
+            onChange={(e) => {
+                const val = e.target.value;
+                setLocalValue(val);
+                debouncedOnChange(val);
+            }}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => {
+                setIsFocused(false);
+                // Force sync on blur to ensure consistency
+                if (localValue !== value) {
+                    onChange(localValue);
+                }
+            }}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                }
+                onKeyDown(e);
+            }}
+            placeholder="List item..."
+            className={cn(
+                "flex-1 bg-transparent border-none outline-none text-sm text-slate-700 placeholder:text-slate-300 resize-none overflow-hidden min-h-[24px]",
+                isChecked ? "line-through text-slate-400" : ""
+            )}
+            style={{
+                lineHeight: '1.5',
+                paddingTop: '2px',
+                paddingBottom: '2px'
+            }}
+            spellCheck={false}
+        />
+    );
+};
+// -----------------------------------------------------------
+
+// Use forwardRef for RGL compatibility
+export const MemoCard = React.forwardRef<HTMLDivElement, MemoCardProps>(({
+    memo,
+    onDelete,
+    className,
+    showDragHandle = true,
+    style,
+    onMouseDown,
+    onMouseUp,
+    onTouchEnd,
+    onContentSizeChange,
+    ...props
+}, ref) => {
+    const updateMemo = useMemoStore(state => state.updateMemo);
+    const toggleMemoCollapse = useMemoStore(state => state.toggleMemoCollapse);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const checklistRef = useRef<HTMLDivElement>(null);
+
+    // Local State for smooth typing
+    const [title, setTitle] = useState(memo.title || '');
+    const [content, setContent] = useState(memo.content || '');
+    const [isFocused, setIsFocused] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+    const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
+
+    const toggleComments = (itemId: string) => {
+        setExpandedComments(prev => ({ ...prev, [itemId]: !prev[itemId] }));
+        // Recalculate height after animation (approx delay)
+        setTimeout(() => onContentSizeChange?.({ height: checklistRef.current?.scrollHeight || 0 }), 300);
+    };
+
+    // Height Measurement Logic
+    useEffect(() => {
+        const target = memo.type === 'checklist' ? checklistRef.current : contentRef.current;
+        if (!target || !onContentSizeChange) return;
+
+        const measure = debounce(() => {
+            if (!target) return;
+            // Add some padding for header (approx 40px) + borders
+            const totalHeight = target.scrollHeight + 50;
+            onContentSizeChange?.({ height: totalHeight });
+        }, 200);
+
+        measure();
+
+        const resizeObserver = new ResizeObserver(measure);
+        resizeObserver.observe(target);
+
+        // Also observe textarea if editing text
+        if (textareaRef.current && memo.type === 'text' && (isEditing || !content)) {
+            resizeObserver.observe(textareaRef.current);
+        }
+
+        return () => {
+            resizeObserver.disconnect();
+            measure.cancel();
+        };
+    }, [memo.type, memo.content, memo.checklistItems, isEditing, onContentSizeChange]);
+
+    // Sync from props (Firestore) -> Local State
+    // Only if user is NOT typing (not focused)
+    useEffect(() => {
+        if (!isFocused && !isEditing) {
+            if (memo.title !== title) setTitle(memo.title || '');
+            if (memo.content !== content) setContent(memo.content || '');
+        }
+    }, [memo.title, memo.content, isFocused, isEditing]);
+
+    // Debounced Updaters
+    const debouncedUpdateContent = useRef(
+        debounce((id: string, newContent: string) => {
+            void updateMemo(id, { content: newContent }).catch(() => { });
+        }, 800)
+    ).current;
+
+    const debouncedUpdateTitle = useRef(
+        debounce((id: string, newTitle: string) => {
+            void updateMemo(id, { title: newTitle }).catch(() => { });
+        }, 800)
+    ).current;
+
+    useEffect(() => {
+        return () => {
+            debouncedUpdateContent.flush();
+            debouncedUpdateContent.cancel();
+            debouncedUpdateTitle.flush();
+            debouncedUpdateTitle.cancel();
+        };
+    }, [debouncedUpdateContent, debouncedUpdateTitle]);
+
+    // Handlers
+    const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const val = e.target.value;
+        setContent(val);
+        debouncedUpdateContent(memo.id, val);
+    };
+
+    const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setTitle(val);
+        debouncedUpdateTitle(memo.id, val);
+    };
+
+    // Formatting Logic
+    const handleFormat = (tag: 'b' | 'u', e: React.MouseEvent) => {
+        e.stopPropagation();
+
+        if (!isEditing) {
+            setIsEditing(true);
+            // Use setTimeout to allow render
+            setTimeout(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.focus();
+                    // Append at end if no selection
+                    const len = textareaRef.current.value.length;
+                    textareaRef.current.setSelectionRange(len, len);
+                }
+            }, 0);
+            return;
+        }
+
+        if (!textareaRef.current) return;
+
+        const start = textareaRef.current.selectionStart;
+        const end = textareaRef.current.selectionEnd;
+        if (start === end) return; // No selection
+
+        const wrapper = tag === 'b' ? '**' : '<u>';
+        const wrapperEnd = tag === 'b' ? '**' : '</u>';
+
+        const selectedText = content.substring(start, end);
+        const newContent = content.substring(0, start) + wrapper + selectedText + wrapperEnd + content.substring(end);
+
+        setContent(newContent);
+        debouncedUpdateContent(memo.id, newContent);
+
+        // Restore focus? Might not be needed for simple button click
+    };
+
+    const handleCollapseToggle = async (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent drag start
+        await toggleMemoCollapse(memo.id, {
+            isCollapsed: !memo.isCollapsed
+        });
+    };
+
+
+
+    const handleDelete = async (e: React.MouseEvent) => {
+        e.stopPropagation(); // Prevent drag start
+
+        const result = await Swal.fire({
+            title: '메모 삭제',
+            text: "정말로 이 메모를 삭제하시겠습니까?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            cancelButtonColor: '#94a3b8',
+            confirmButtonText: '삭제',
+            cancelButtonText: '취소',
+            focusCancel: true
+        });
+
+        if (result.isConfirmed) {
+            onDelete();
+        }
+    };
+
+    return (
+        <div
+            ref={ref}
+            className={cn(
+                "flex flex-col w-full h-full rounded-2xl transition-all duration-200",
+                "shadow-sm hover:shadow-lg border",
+                COLOR_MAP[memo.color] || COLOR_MAP.white,
+                memo.isCollapsed ? "shadow-md" : "",
+                className
+            )}
+            style={style}
+            onMouseDown={onMouseDown}
+            onMouseUp={onMouseUp}
+            onTouchEnd={onTouchEnd}
+            {...props}
+        >
+            {/* Header: Glass-like feeling */}
+            <div className={cn(
+                "flex items-center justify-between px-3 py-2 z-10 shrink-0",
+                "rounded-t-2xl border-b border-black/5",
+                "bg-white/30 backdrop-blur-sm transition-colors",
+                (!memo.isCollapsed && showDragHandle) ? "grid-drag-handle cursor-grab active:cursor-grabbing" : ""
+            )}>
+                {/* 1. Drag Handle + Type Icon */}
+                <div className={cn(
+                    "mr-2 text-black/20 flex items-center gap-1",
+                    (!memo.isCollapsed && showDragHandle) ? "opacity-100" : "opacity-0"
+                )}>
+                    <GripHorizontal className="w-4 h-4" />
+                </div>
+
+                {/* 2. Title Input */}
+                <input
+                    type="text"
+                    value={title}
+                    onChange={handleTitleChange}
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => setIsFocused(false)}
+                    onMouseDown={(e) => e.stopPropagation()} // Allow text selection
+                    placeholder="Title"
+                    className="flex-1 bg-transparent border-none outline-none text-sm font-bold text-slate-700 placeholder:text-slate-400 min-w-0"
+                />
+
+                {/* 3. Controls */}
+                <div className="flex items-center gap-1 ml-2 relative">
+                    {/* Public Badge */}
+                    {memo.scope === 'public' && (
+                        <div className="p-1 px-2 rounded-full bg-blue-50 border border-blue-100 text-blue-500 mr-1 flex items-center gap-1" title="Public Memo">
+                            <Globe className="w-3 h-3" />
+                            <span className="text-[10px] font-bold">Public</span>
+                        </div>
+                    )}
+
+                    {/* Color Picker Pattern */}
+                    {!memo.isCollapsed && (
+                        <div className="relative">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsColorPickerOpen(!isColorPickerOpen);
+                                }}
+                                className={cn(
+                                    "p-1.5 rounded-full hover:bg-black/5 transition-colors",
+                                    "text-slate-400 hover:text-slate-600"
+                                )}
+                                title="Change Color"
+                            >
+                                <div className={cn(
+                                    "w-3.5 h-3.5 rounded-full border border-slate-300",
+                                    {
+                                        'bg-white': memo.color === 'white',
+                                        'bg-rose-400': memo.color === 'red',
+                                        'bg-orange-400': memo.color === 'orange',
+                                        'bg-amber-400': memo.color === 'yellow',
+                                        'bg-emerald-400': memo.color === 'green',
+                                        'bg-sky-400': memo.color === 'blue',
+                                        'bg-violet-400': memo.color === 'purple',
+                                        'bg-slate-400': memo.color === 'gray',
+                                    }
+                                )} />
+                            </button>
+
+                            {/* Color Picker Popover (Click Trigger) */}
+                            {isColorPickerOpen && (
+                                <div
+                                    className="absolute top-full right-0 mt-1 p-2 bg-white rounded-xl shadow-xl border border-slate-100 z-50 grid grid-cols-4 gap-2 w-[110px]"
+                                    onMouseDown={(e) => e.stopPropagation()} // Prevent card drag/click
+                                >
+                                    {(['white', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray'] as const).map((c) => (
+                                        <button
+                                            key={c}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void updateMemo(memo.id, { color: c }).catch(() => { });
+                                                setIsColorPickerOpen(false);
+                                            }}
+                                            className={cn(
+                                                "w-5 h-5 rounded-full border border-slate-200 hover:scale-110 transition-transform",
+                                                {
+                                                    'bg-white': c === 'white',
+                                                    'bg-rose-400': c === 'red',
+                                                    'bg-orange-400': c === 'orange',
+                                                    'bg-amber-400': c === 'yellow',
+                                                    'bg-emerald-400': c === 'green',
+                                                    'bg-sky-400': c === 'blue',
+                                                    'bg-violet-400': c === 'purple',
+                                                    'bg-slate-400': c === 'gray',
+                                                    'ring-2 ring-slate-400 ring-offset-1': memo.color === c
+                                                }
+                                            )}
+                                            title={c.charAt(0).toUpperCase() + c.slice(1)}
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Formatting Buttons Removed */}
+
+                    {/* Convert Type Button (Text <-> Checklist) */}
+                    {!memo.isCollapsed && (
+                        <button
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                const store = useMemoStore.getState();
+                                if (memo.type === 'checklist') {
+                                    await store.convertToText(memo.id);
+                                } else {
+                                    await store.convertToChecklist(memo.id);
+                                }
+                            }}
+                            className="p-1.5 rounded-full hover:bg-black/5 text-slate-400 hover:text-slate-600 transition-colors"
+                            title={memo.type === 'checklist' ? "Convert to Text" : "Convert to Checklist"}
+                        >
+                            {memo.type === 'checklist' ? (
+                                <span className="text-[10px] font-bold">TXT</span>
+                            ) : (
+                                <span className="text-[10px] font-bold">CHK</span>
+                            )}
+                        </button>
+                    )}
+
+                    <button
+                        onClick={handleCollapseToggle}
+                        className="p-1.5 rounded-full hover:bg-black/5 text-slate-500 hover:text-slate-700 transition-colors"
+                        title={memo.isCollapsed ? "Expand" : "Collapse"}
+                    >
+                        {memo.isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                    </button>
+
+                    {!memo.isCollapsed && (
+                        <button
+                            onClick={handleDelete}
+                            className="p-1.5 rounded-full hover:bg-red-100 hover:text-red-500 text-slate-400 transition-colors"
+                            title="Delete"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            {/* Body: Content (Text or Checklist) */}
+            <div className={cn(
+                "flex-1 w-full min-h-0 relative transition-opacity duration-200 overflow-hidden",
+                memo.isCollapsed ? "opacity-0 pointer-events-none hidden" : "opacity-100"
+            )}>
+                {memo.type === 'checklist' ? (
+                    <div ref={checklistRef} className="w-full h-full p-2 overflow-y-auto no-scrollbar" onMouseDown={e => e.stopPropagation()}>
+                        {/* Checklist Render */}
+                        {(memo.checklistItems || []).map((item, index) => (
+                            <React.Fragment key={item.id}>
+                                <div className="flex items-start gap-2 mb-1 group px-1">
+                                    <input
+                                        type="checkbox"
+                                        checked={item.isChecked}
+                                        onChange={() => useMemoStore.getState().toggleChecklistItem(memo.id, item.id)}
+                                        className="mt-1.5 accent-slate-500 cursor-pointer w-3.5 h-3.5 shrink-0"
+                                    />
+                                    <ChecklistTextarea
+                                        value={item.text}
+                                        isChecked={item.isChecked}
+                                        onChange={(val) => useMemoStore.getState().updateChecklistItem(memo.id, item.id, val)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                useMemoStore.getState().addChecklistItem(memo.id, '', index + 1);
+                                            }
+                                            if (e.key === 'Backspace' && item.text === '') {
+                                                useMemoStore.getState().deleteChecklistItem(memo.id, item.id);
+                                            }
+                                        }}
+                                    />
+
+                                    {/* Reply Button */}
+                                    <button
+                                        onClick={() => toggleComments(item.id)}
+                                        className={cn(
+                                            "p-1 mt-0.5 transition-colors duration-200 shrink-0",
+                                            (item.comments?.length || 0) > 0 ? "text-blue-500" : "text-slate-300 hover:text-slate-500"
+                                        )}
+                                        title="답글 달기"
+                                    >
+                                        <div className="relative flex items-center gap-1">
+                                            <MessageCircle className="w-3.5 h-3.5" />
+                                            {(item.comments?.length || 0) > 0 && (
+                                                <span className="text-[10px] font-bold">
+                                                    {item.comments?.length}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </button>
+
+                                    <button
+                                        onClick={() => useMemoStore.getState().deleteChecklistItem(memo.id, item.id)}
+                                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 transition-opacity shrink-0"
+                                    >
+                                        <Trash2 className="w-3 h-3" />
+                                    </button>
+                                </div>
+
+                                {/* Comments Section */}
+                                <AnimatePresence>
+                                    {expandedComments[item.id] && (
+                                        <motion.div
+                                            initial={{ height: 0, opacity: 0 }}
+                                            animate={{ height: 'auto', opacity: 1 }}
+                                            exit={{ height: 0, opacity: 0 }}
+                                            className="overflow-hidden ml-8 mr-2 mb-2"
+                                        >
+                                            <div className="bg-slate-50/50 rounded pl-2 pr-1 py-1 flex flex-col gap-1 border border-slate-100">
+                                                {item.comments?.map(comment => (
+                                                    <div key={comment.id} className="flex items-start gap-2 group/comment text-xs text-slate-600 mb-1">
+                                                        <div className="flex-1 whitespace-pre-wrap break-words">{comment.text}</div>
+                                                        <button
+                                                            onClick={() => useMemoStore.getState().deleteChecklistComment(memo.id, item.id, comment.id)}
+                                                            className="opacity-0 group-hover/comment:opacity-100 text-slate-300 hover:text-red-400 px-1"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                                <input
+                                                    type="text"
+                                                    placeholder="답글 입력..."
+                                                    className="w-full text-xs bg-transparent outline-none placeholder:text-slate-300 mt-1"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            const val = e.currentTarget.value;
+                                                            if (val.trim()) {
+                                                                useMemoStore.getState().addChecklistComment(memo.id, item.id, val);
+                                                                e.currentTarget.value = '';
+                                                            }
+                                                        }
+                                                    }}
+                                                    onClick={e => e.stopPropagation()}
+                                                />
+                                            </div>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </React.Fragment>
+                        ))}
+                        {/* Add New Item Button (Ghost) */}
+                        <div
+                            className="flex items-center gap-2 px-1 py-1 cursor-text opacity-50 hover:opacity-100 transition-opacity"
+                            onClick={() => useMemoStore.getState().addChecklistItem(memo.id, '')}
+                        >
+                            <span className="text-lg text-slate-400">+</span>
+                            <span className="text-sm text-slate-400">List Item</span>
+                        </div>
+                    </div>
+                ) : (
+                    // Toggle: Markdown View <-> Textarea Edit
+                    isEditing || !content ? (
+                        <textarea
+                            ref={textareaRef}
+                            value={content}
+                            onChange={handleContentChange}
+                            onFocus={() => setIsFocused(true)}
+                            onBlur={() => {
+                                setIsFocused(false);
+                                if (content.trim()) setIsEditing(false); // Switch to View on blur
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            placeholder="Write here..."
+                            className={cn(
+                                "w-full h-full p-4 resize-none bg-transparent border-none outline-none",
+                                "text-slate-700 text-sm placeholder:text-slate-300"
+                            )}
+                            style={{
+                                lineHeight: '1.5'
+                            }}
+                            spellCheck={false}
+                            autoFocus={isEditing}
+                        />
+                    ) : (
+                        <div
+                            ref={contentRef}
+                            className="w-full h-full p-4 overflow-y-auto cursor-text text-sm text-slate-700 whitespace-pre-wrap"
+                            onClick={() => setIsEditing(true)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <SimpleRenderer content={content} />
+                        </div>
+                    )
+                )}
+            </div>
+        </div>
+    );
+});
+
+MemoCard.displayName = "MemoCard";

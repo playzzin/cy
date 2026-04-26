@@ -14,6 +14,7 @@ import {
     faPenNib,
     faFlask,
     faChevronRight,
+    faChevronLeft,
     faUserGear,
     faHardDrive,
     faUserTie,
@@ -34,7 +35,8 @@ import {
     faClockRotateLeft,
     faMoneyBillWave,
     faChartSimple,
-    faBook
+    faBook,
+    faUpRightFromSquare
 } from '@fortawesome/free-solid-svg-icons';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -63,6 +65,8 @@ interface SidebarProps {
     isSidebarCollapsed: boolean;
     isMobile: boolean;
     openMobileSidebar: () => void;
+    toggleSidebar?: () => void;
+    logoUrl?: string;
 }
 
 // Map menu text/path to permission IDs
@@ -95,7 +99,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     menuPaths,
     isSidebarCollapsed,
     isMobile,
-    openMobileSidebar
+    openMobileSidebar,
+    toggleSidebar,
+    logoUrl
 }) => {
     const location = useLocation();
     const navigate = useNavigate();
@@ -287,22 +293,64 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     // Cheongyeon Style Check
-    const isCheongyeon = currentSite === 'cheongyeon';
+    const isCheongyeon = currentSite === 'test';
     const sidebarStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {};
     const logoStyle = isCheongyeon ? { color: '#ffffff' } : {};
+
+    const [logoType, setLogoType] = useState<'image' | 'video'>('image');
+
+    useEffect(() => {
+        if (logoUrl) {
+            const isVideo = logoUrl.toLowerCase().includes('.mp4') || 
+                          logoUrl.toLowerCase().includes('.webm') ||
+                          logoUrl.toLowerCase().includes('video');
+            setLogoType(isVideo ? 'video' : 'image');
+        }
+    }, [logoUrl]);
 
     return (
         <>
             <nav id="sidebar" onMouseLeave={handleMouseLeaveNav} style={sidebarStyle} className={isCheongyeon ? 'cheongyeon-sidebar' : ''}>
                 <div className="sidebar-header">
-                    <div className="logo-group" onClick={handleLogoClick} style={{ cursor: 'pointer' }}>
-                        <FontAwesomeIcon
-                            icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
-                            id="sidebar-logo-icon"
-                            style={{ color: '#1abc9c', fontSize: '24px', marginRight: '10px' }}
-                        />
-                        <span id="sidebar-logo-text" className="logo-text" style={logoStyle}>{currentSiteData.name}</span>
+                    <div className="logo-group" onClick={(!isMobile && isSidebarCollapsed && toggleSidebar) ? toggleSidebar : handleLogoClick} title={(!isMobile && isSidebarCollapsed) ? '메뉴 펼치기' : undefined} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', flex: isSidebarCollapsed ? '0 0 100%' : '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                        {logoUrl ? (
+                            logoType === 'video' ? (
+                                <video 
+                                    src={logoUrl} 
+                                    autoPlay 
+                                    loop 
+                                    muted 
+                                    playsInline
+                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', borderRadius: '4px' }}
+                                />
+                            ) : (
+                                <img 
+                                    src={logoUrl} 
+                                    alt="Logo" 
+                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', objectFit: 'contain' }}
+                                />
+                            )
+                        ) : (
+                            <FontAwesomeIcon
+                                icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
+                                id="sidebar-logo-icon"
+                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: isSidebarCollapsed ? '0' : '10px' }}
+                            />
+                        )}
+                        <span id="sidebar-logo-text" className="logo-text" style={{ ...logoStyle, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                            {currentSiteData.name}
+                        </span>
                     </div>
+                    {/* PC 전용: 접기 버튼 (펼쳐진 상태일 때만 표시) */}
+                    {!isMobile && !isSidebarCollapsed && toggleSidebar && (
+                        <button
+                            className="sidebar-pc-toggle-btn"
+                            onClick={toggleSidebar}
+                            title="메뉴 접기"
+                        >
+                            <FontAwesomeIcon icon={faChevronLeft} />
+                        </button>
+                    )}
                     <button id="mobile-close-btn" onClick={closeAll} style={isCheongyeon ? { color: 'white' } : {}}>
                         <FontAwesomeIcon icon={faXmark} />
                     </button>
@@ -364,7 +412,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         </button>
                                     ) : (
                                         <a
-                                            href="#"
+                                            href={item.path || menuPaths[item.text] || '/'}
                                             className="menu-link"
                                             onClick={(e) => {
                                                 e.preventDefault();
@@ -387,6 +435,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 }}
                                             />
                                             <span className="menu-text">{item.text}</span>
+                                            {!isSidebarCollapsed && (
+                                                <button
+                                                    className="menu-open-new-btn"
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        const path = item.path || menuPaths[item.text] || '';
+                                                        if (path) window.open(path, '_blank');
+                                                    }}
+                                                    title="새 창에서 열기"
+                                                >
+                                                    <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
+                                                </button>
+                                            )}
                                         </a>
                                     )}
                                     {hasSub && (
@@ -420,9 +482,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 if (isLeaf) {
                                                     const isSubActive = isActiveCheck(linkPath);
                                                     return (
-                                                        <li key={subUniqueKey}>
+                                                        <li key={subUniqueKey} className="submenu-leaf-item">
                                                             <a
-                                                                href="#"
+                                                                href={linkPath || '/'}
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
                                                                     if (linkPath) {
@@ -443,9 +505,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                     fontWeight: isSubActive ? 'bold' : 'normal'
                                                                 }}
                                                             >
-                                                                {/* Optional Icon for Subitems if needed, typically text only on this level in this design, but if desired: */}
-                                                                {/* {item has iconColor logic?} */}
-                                                                {linkText}
+                                                                <span>{linkText}</span>
+                                                                {!isSidebarCollapsed && (
+                                                                    <button
+                                                                        className="submenu-open-new-btn"
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            if (linkPath) window.open(linkPath, '_blank');
+                                                                        }}
+                                                                        title="새 창에서 열기"
+                                                                    >
+                                                                        <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
+                                                                    </button>
+                                                                )}
                                                             </a>
                                                         </li>
                                                     );
@@ -497,21 +570,34 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                                                                             return (
                                                                                 <li key={nestedUniqueKey}>
-                                                                                    <a
-                                                                                        href="#"
-                                                                                        onClick={(e) => {
-                                                                                            e.preventDefault();
-                                                                                            if (path) {
-                                                                                                openMenuPath(path);
-                                                                                                return;
-                                                                                            }
-                                                                                            handleSubMenuClick(nestedItem as string);
-                                                                                        }}
-                                                                                        className={isSubActive ? 'active' : ''}
-                                                                                        style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
-                                                                                    >
-                                                                                        {nestedItem}
-                                                                                    </a>
+                                                                                        <a
+                                                                                            href={path || '/'}
+                                                                                            onClick={(e) => {
+                                                                                                e.preventDefault();
+                                                                                                if (path) {
+                                                                                                    openMenuPath(path);
+                                                                                                    return;
+                                                                                                }
+                                                                                                handleSubMenuClick(nestedItem as string);
+                                                                                            }}
+                                                                                            className={isSubActive ? 'active' : ''}
+                                                                                            style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
+                                                                                        >
+                                                                                            <span>{nestedItem}</span>
+                                                                                            {!isSidebarCollapsed && (
+                                                                                                <button
+                                                                                                    className="submenu-open-new-btn"
+                                                                                                    onClick={(e) => {
+                                                                                                        e.preventDefault();
+                                                                                                        e.stopPropagation();
+                                                                                                        if (path) window.open(path, '_blank');
+                                                                                                    }}
+                                                                                                    title="새 창에서 열기"
+                                                                                                >
+                                                                                                    <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
+                                                                                                </button>
+                                                                                            )}
+                                                                                        </a>
                                                                                 </li>
                                                                             );
                                                                         } else {
@@ -526,7 +612,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                 return (
                                                                                     <li key={nestedUniqueKey}>
                                                                                         <a
-                                                                                            href="#"
+                                                                                            href={linkPath || '/'}
                                                                                             onClick={(e) => {
                                                                                                 e.preventDefault();
                                                                                                 const directPath = nestedObj.path || linkPath;
@@ -540,7 +626,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                             className={isSubActive ? 'active' : ''}
                                                                                             style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
                                                                                         >
-                                                                                            {nestedObj.text}
+                                                                                            <span>{nestedObj.text}</span>
+                                                                                            {!isSidebarCollapsed && (
+                                                                                                <button
+                                                                                                    className="submenu-open-new-btn"
+                                                                                                    onClick={(e) => {
+                                                                                                        e.preventDefault();
+                                                                                                        e.stopPropagation();
+                                                                                                        const path = nestedObj.path || linkPath || '';
+                                                                                                        if (path) window.open(path, '_blank');
+                                                                                                    }}
+                                                                                                    title="새 창에서 열기"
+                                                                                                >
+                                                                                                    <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
+                                                                                                </button>
+                                                                                            )}
                                                                                         </a>
                                                                                     </li>
                                                                                 )
@@ -704,7 +804,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                         setHoveredMenuItem(null);
                                                     }}
                                                 >
-                                                    {deepText}
+                                                    <span>{deepText}</span>
                                                 </button>
                                             );
                                         })}
