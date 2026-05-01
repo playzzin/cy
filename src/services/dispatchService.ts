@@ -8,10 +8,24 @@ import {
 import { Timestamp } from '../types/timestamp';
 
 export interface DispatchAssignment {
+    id?: string;
     siteId: string;
     siteName: string;
+    siteAddress?: string;
+    teamId?: string;
+    teamName?: string;
+    teamColor?: string;
+    siteColor?: string;
     workerIds: string[]; // Assigned workers
+    supportTeamIds?: string[];
+    supportTeams?: Array<{ id: string; name: string; color: string }>;
     vehicleIds: string[]; // Assigned vehicles
+    vehicleId?: string;
+    vehicleLabel?: string;
+    vehicleLabels?: string[];
+    startTime?: string;
+    endTime?: string;
+    status?: string;
     note?: string;
 }
 

@@ -9,7 +9,7 @@ import {
     faUsers,
     faUser
 } from '@fortawesome/free-solid-svg-icons';
-import { Card, CardTransactionCategory, CardTransaction } from '../../types/card';
+import { Card, CardAssignmentRecord, CardTransactionCategory, CardTransaction } from '../../types/card';
 import { cardService } from '../../services/cardService';
 import { Team } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
@@ -132,6 +132,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
 
     const [rows, setRows] = useState<CardLedgerRow[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [assignments, setAssignments] = useState<CardAssignmentRecord[]>([]);
     /** 원본 트랜잭션 (저장 시 기존 데이터 삭제용) */
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
@@ -169,6 +170,26 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         return map;
     }, [workers, teamInfoMap]);
 
+    const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+
+    const teamByAnyId = useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            if (team.id) map.set(String(team.id), team);
+            if (team.legacyId) map.set(String(team.legacyId), team);
+        });
+        return map;
+    }, [teams]);
+
+    const teamByName = useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const name = normalizeKey(team.name);
+            if (name && !map.has(name)) map.set(name, team);
+        });
+        return map;
+    }, [teams]);
+
     useEffect(() => {
         const y = currentDate.getFullYear();
         const m = String(currentDate.getMonth() + 1).padStart(2, '0');
@@ -180,8 +201,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         if (!yearMonth || cards.length === 0) return;
         setLoading(true);
         try {
-            const txs = await cardService.getTransactionsByMonth(yearMonth);
+            const [txs, assignmentList] = await Promise.all([
+                cardService.getTransactionsByMonth(yearMonth),
+                cardService.listAllCardAssignments().catch(() => [] as CardAssignmentRecord[])
+            ]);
             originalTxsRef.current = txs;
+            setAssignments(assignmentList);
 
             // 카드별 카테고리 합산
             const amountsMap = new Map<string, CategoryAmounts>();
@@ -230,6 +255,80 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             setLoading(false);
         }
     }, [yearMonth, cards]);
+
+    const monthRange = useMemo(() => {
+        const [y, m] = yearMonth.split('-').map(Number);
+        if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+        return {
+            monthStart: new Date(y, m - 1, 1),
+            monthEnd: new Date(y, m, 0)
+        };
+    }, [yearMonth]);
+
+    const isAssignmentActiveInMonth = (assignment: CardAssignmentRecord): boolean => {
+        if (!monthRange) return false;
+        const start = assignment.startDate ? new Date(assignment.startDate) : null;
+        const end = assignment.endDate ? new Date(assignment.endDate) : null;
+        if (start && !Number.isNaN(start.getTime()) && start > monthRange.monthEnd) return false;
+        if (end && !Number.isNaN(end.getTime()) && end < monthRange.monthStart) return false;
+        return true;
+    };
+
+    const resolveTeamBadge = (assignment: CardAssignmentRecord) => {
+        const team = assignment.assigneeId
+            ? teamByAnyId.get(String(assignment.assigneeId))
+            : teamByName.get(normalizeKey(assignment.assigneeName));
+        const name = normalizeKey(team?.name) || normalizeKey(assignment.assigneeName);
+        if (!name) return null;
+        return {
+            key: `team:${normalizeKey(team?.id ?? assignment.assigneeId ?? name)}`,
+            name,
+            color: team?.color || '#94a3b8',
+            icon: team?.icon || team?.iconKey || null
+        };
+    };
+
+    const getAssignmentSummary = (card: Card) => {
+        const cardId = normalizeKey(card.id);
+        const activeAssignments = assignments.filter((assignment) =>
+            normalizeKey(assignment.cardId) === cardId && isAssignmentActiveInMonth(assignment)
+        );
+
+        const fallbackAssignments: CardAssignmentRecord[] = activeAssignments.length > 0 ? activeAssignments : (
+            card.currentAssigneeName && card.currentAssigneeType ? [{
+                id: `current-${card.id}`,
+                cardId: card.id,
+                cardLabel: `${card.name} (${card.last4})`,
+                assigneeId: card.currentAssigneeId || '',
+                assigneeType: card.currentAssigneeType,
+                assigneeName: card.currentAssigneeName,
+                startDate: ''
+            }] : []
+        );
+
+        const teamMap = new Map<string, NonNullable<ReturnType<typeof resolveTeamBadge>>>();
+        const workerMap = new Map<string, string>();
+
+        fallbackAssignments.forEach((assignment) => {
+            if (assignment.assigneeType === 'TEAM') {
+                const badge = resolveTeamBadge(assignment);
+                if (badge) teamMap.set(badge.key, badge);
+                return;
+            }
+            const workerName = normalizeKey(assignment.assigneeName);
+            if (workerName) workerMap.set(workerName, workerName);
+        });
+
+        const assignedTeams = Array.from(teamMap.values());
+        const assignedWorkers = Array.from(workerMap.values());
+        return {
+            assignedTeams,
+            assignedWorkers,
+            billingTeams: assignedTeams,
+            billingWorkers: assignedWorkers,
+            primaryColor: assignedTeams[0]?.color || '#94a3b8'
+        };
+    };
 
     useEffect(() => {
         if (yearMonth && cards.length > 0) {
@@ -401,11 +500,13 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="w-full text-sm min-w-[1200px]">
+                        <table className="w-full text-sm min-w-[1750px]">
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
-
-                                    <th className="px-4 py-4 text-left w-28 tracking-wider bg-indigo-700 border-r border-indigo-500">배정</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
+                                    <th className="px-4 py-4 text-left w-40 tracking-wider bg-indigo-700 border-r border-indigo-500">배정 인원</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 팀</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 개인</th>
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     {CATEGORIES.map(cat => (
                                         <th key={cat} className="px-2 py-4 text-center w-28 border-l border-indigo-500">
@@ -418,49 +519,98 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
                                 {rows.map((row, idx) => {
-                                    // 1. 팀 배정인 경우: teamInfoMap 사용
-                                    // 2. 개인 배정인 경우: workerTeamMap 통해 해당 Worker의 팀 정보 사용
-                                    const teamInfo = row.card.currentAssigneeType === 'TEAM' && row.card.currentAssigneeName
-                                        ? teamInfoMap.get(row.card.currentAssigneeName)
-                                        : (row.card.currentAssigneeType !== 'TEAM' && row.card.currentAssigneeName
-                                            ? workerTeamMap.get(row.card.currentAssigneeName)
-                                            : undefined);
-
-                                    const tc = teamInfo?.color;
+                                    const assignmentSummary = getAssignmentSummary(row.card);
+                                    const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
 
                                     return (
                                         <tr key={row.card.id} className="group hover:bg-blue-50/40 transition-colors">
-                                            {/* 배정 팀/작업자 */}
                                             <td
                                                 className="px-4 py-3 border-r border-indigo-50 bg-white"
-                                                style={tc ? {
-                                                    borderLeft: `4px solid ${tc}`,
-                                                    backgroundColor: hexToRgba(tc, 0.05)
+                                                style={assignmentSummary.primaryColor ? {
+                                                    borderLeft: `4px solid ${assignmentSummary.primaryColor}`,
+                                                    backgroundColor: hexToRgba(assignmentSummary.primaryColor, 0.05)
                                                 } : undefined}
                                             >
-                                                {row.card.currentAssigneeName ? (
-                                                    <div className="flex items-center gap-2">
-                                                        <span
-                                                            className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px]"
-                                                            style={{ backgroundColor: tc || '#94a3b8' }}
-                                                        >
-                                                            <FontAwesomeIcon
-                                                                icon={row.card.currentAssigneeType === 'TEAM'
-                                                                    ? (iconMap[teamInfo?.icon || ''] || faUsers)
-                                                                    : faUser}
-                                                            />
-                                                        </span>
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-slate-700 truncate max-w-[100px]" title={row.card.currentAssigneeName}>
-                                                                {row.card.currentAssigneeName}
-                                                            </span>
-                                                            {/* 개인이지만 팀 정보가 있는 경우 팀명 표시 가능 (옵션) */}
-                                                        </div>
+                                                {assignmentSummary.assignedTeams.length > 0 ? (
+                                                    <div className="flex flex-col gap-1.5">
+                                                        {assignmentSummary.assignedTeams.map((team) => (
+                                                            <div key={`assigned-${team.key}`} className="flex items-center gap-2 min-w-0">
+                                                                <span
+                                                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                    style={{ backgroundColor: team.color }}
+                                                                >
+                                                                    <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
+                                                                </span>
+                                                                <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
+                                                                    {team.name}
+                                                                </span>
+                                                            </div>
+                                                        ))}
                                                     </div>
                                                 ) : (
                                                     <span className="text-slate-300 text-xs">-</span>
                                                 )}
                                             </td>
+
+                                            <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                                {visibleAssignedWorkers.length > 0 ? (
+                                                    <div className="space-y-1">
+                                                        {visibleAssignedWorkers.map((workerName, workerIdx) => (
+                                                            <div key={`assigned-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
+                                                                <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-emerald-500">
+                                                                    <FontAwesomeIcon icon={faUser} />
+                                                                </span>
+                                                                <span className="font-bold text-slate-700 text-xs leading-tight truncate max-w-[145px]" title={workerName}>
+                                                                    {workerName}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-300 text-xs">-</span>
+                                                )}
+                                            </td>
+
+                                            <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                                {assignmentSummary.billingTeams.length > 0 ? (
+                                                    <div className="flex flex-col gap-1.5">
+                                                        {assignmentSummary.billingTeams.map((team) => (
+                                                            <div key={`billing-${team.key}`} className="flex items-center gap-2 min-w-0">
+                                                                <span
+                                                                    className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                    style={{ backgroundColor: team.color }}
+                                                                >
+                                                                    <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
+                                                                </span>
+                                                                <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
+                                                                    {team.name}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-300 text-xs">-</span>
+                                                )}
+                                            </td>
+
+                                            <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                                {assignmentSummary.billingWorkers.length > 0 ? (
+                                                    <div className="flex flex-col gap-1.5">
+                                                        {assignmentSummary.billingWorkers.map((workerName, workerIdx) => (
+                                                            <div key={`billing-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
+                                                                <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-slate-500">
+                                                                    <FontAwesomeIcon icon={faUser} />
+                                                                </span>
+                                                                <span className="font-bold text-slate-700 text-xs leading-tight break-all">
+                                                                    {workerName}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
 
                                             {/* 카드명 */}
                                             <td className="px-4 py-3 border-r border-indigo-50 font-bold text-slate-700 bg-white group-hover:bg-blue-50/40">
@@ -506,7 +656,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={CATEGORIES.length + 4} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={CATEGORIES.length + 6} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
                                                 <p>해당 월의 데이터가 없습니다.</p>
@@ -517,7 +667,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             </tbody>
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
-                                    <td colSpan={2} className="p-4 border-r border-slate-600 text-center">합계</td>
+                                    <td colSpan={5} className="p-4 border-r border-slate-600 text-center">합계</td>
                                     {CATEGORIES.map(cat => (
                                         <td key={cat} className="p-4 border-r border-slate-600 text-right font-mono">
                                             {totals[cat].toLocaleString()}

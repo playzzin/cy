@@ -15,7 +15,7 @@ admin.initializeApp();
  * 세금계산서 즉시 발행 API
  * POST /taxinvoice/issue
  */
-export const issueTaxInvoiceApi = functions.https.onRequest(async (req, res) => {
+export const issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
     // CORS 헤더 설정
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -81,7 +81,7 @@ export const issueTaxInvoiceApi = functions.https.onRequest(async (req, res) => 
  * 세금계산서 상태 조회 API
  * GET /taxinvoice/status/:invoiceNum
  */
-export const getTaxInvoiceStatusApi = functions.https.onRequest(async (req, res) => {
+export const getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
 
     if (req.method === 'OPTIONS') {
@@ -117,7 +117,7 @@ export const getTaxInvoiceStatusApi = functions.https.onRequest(async (req, res)
  * 세금계산서 발행 이력 조회 API
  * GET /taxinvoice/list
  */
-export const getTaxInvoiceListApi = functions.https.onRequest(async (req, res) => {
+export const getTaxInvoiceListApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
 
     if (req.method === 'OPTIONS') {
@@ -157,3 +157,4 @@ export const getTaxInvoiceListApi = functions.https.onRequest(async (req, res) =
 // 카카오톡 알림톡 Functions (SOLAPI)
 // ============================================
 export * from './kakao';
+

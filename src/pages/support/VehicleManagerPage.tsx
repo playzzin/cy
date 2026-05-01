@@ -12,7 +12,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCar, faChartPie, faGasPump, faRotateRight, faCircleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 
-export const VehicleManagerPage = () => {
+interface VehicleManagerPageProps {
+    embedded?: boolean;
+}
+
+export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded = false }) => {
     // Data State
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [loading, setLoading] = useState(true);
@@ -99,7 +103,7 @@ export const VehicleManagerPage = () => {
     };
 
     return (
-        <div className="p-6 space-y-6 bg-slate-50 min-h-full">
+        <div className={`${embedded ? 'space-y-6 bg-transparent min-h-full' : 'p-6 space-y-6 bg-slate-50 min-h-full'}`}>
             {/* Header 섹션 */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -218,6 +222,7 @@ export const VehicleManagerPage = () => {
                 ) : (
                     <VehicleMonthlyLedger
                         vehicles={filteredVehicles}
+                        teams={teams}
                         loadingVehicles={loading}
                         onOpenExpenseLog={handleManageExpenses}
                     />

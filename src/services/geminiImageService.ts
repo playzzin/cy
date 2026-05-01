@@ -17,7 +17,7 @@ export async function applyAsNationLogo(imageUrl: string): Promise<{ success: bo
 }
 
 // --- Types ---
-export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'dashboard-banner' | 'custom';
+export type ImageCategory = 'favicon' | 'logo' | 'icon' | 'banner' | 'kakao-square' | 'kakao-wide' | 'og-image' | 'character' | 'birdseye' | 'business-card' | 'dashboard-banner' | 'dashboard-banner-wide' | 'custom';
 
 export interface ImagePreset {
     key: ImageCategory;
@@ -99,8 +99,12 @@ export const IMAGE_PRESETS: Record<ImageCategory, ImagePreset> = {
         description: '사용자 지정 크기', promptHint: '원하는 이미지를 자유롭게 설명하세요.'
     },
     'dashboard-banner': {
-        key: 'dashboard-banner', label: '대시보드 배너', width: 1920, height: 800, maxSizeKB: 3072,
-        description: '청연 메인 상단 배너 (1920x800)', promptHint: '와이드하고 세련된 랜딩 페이지 메인 배너 이미지.'
+        key: 'dashboard-banner', label: '대시보드 배너 (기본)', width: 1920, height: 600, maxSizeKB: 3072,
+        description: '청연 메인 상단 배너 (1920x600)', promptHint: '와이드하고 세련된 랜딩 페이지 메인 배너 이미지. 주요 피사체를 중앙에 배치.'
+    },
+    'dashboard-banner-wide': {
+        key: 'dashboard-banner-wide', label: '히어로 섹션 (초광폭)', width: 1920, height: 320, maxSizeKB: 3072,
+        description: '히어로 섹션 전용 초광폭 배너 (1920x320)', promptHint: '극도로 넓은 파노라마 뷰. 건설 현장의 웅장한 전경이나 추상적인 비즈니스 그래픽. 상하 폭이 좁으므로 수평적인 구도 중요.'
     },
     'business-card': {
         key: 'business-card', label: '명함', width: 1024, height: 600, maxSizeKB: 1024,

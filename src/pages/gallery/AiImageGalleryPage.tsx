@@ -31,7 +31,8 @@ const PRESET_ICONS: Record<ImageCategory, any> = {
     'birdseye': faBuilding,
     'business-card': faAddressCard,
     'kakao-square': faComment, 'kakao-wide': faComment, 'custom': faCube,
-    'dashboard-banner': faImages
+    'dashboard-banner': faImages,
+    'dashboard-banner-wide': faImages
 };
 
 const PRESET_COLORS: Record<ImageCategory, string> = {
@@ -47,6 +48,7 @@ const PRESET_COLORS: Record<ImageCategory, string> = {
     'kakao-wide': 'from-yellow-500 to-yellow-700',
     'custom': 'from-slate-500 to-slate-700',
     'dashboard-banner': 'from-blue-600 to-cyan-600',
+    'dashboard-banner-wide': 'from-indigo-600 to-blue-600',
 };
 
 const BADGE_COLORS: Record<ImageCategory, string> = {
@@ -62,6 +64,7 @@ const BADGE_COLORS: Record<ImageCategory, string> = {
     'kakao-wide': 'bg-yellow-500/20 text-yellow-500 border-yellow-500/30',
     'custom': 'bg-slate-500/20 text-slate-400 border-slate-500/30',
     'dashboard-banner': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    'dashboard-banner-wide': 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
 };
 
 const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
@@ -75,6 +78,8 @@ const FILTER_TABS: { key: ImageCategory | 'all'; label: string }[] = [
     { key: 'business-card', label: '명함' },
     { key: 'og-image', label: 'OG' },
     { key: 'kakao-square', label: '카카오' },
+    { key: 'dashboard-banner', label: '배너(기본)' },
+    { key: 'dashboard-banner-wide', label: '히어로(광폭)' },
     { key: 'custom', label: '커스텀' },
 ];
 
@@ -260,7 +265,7 @@ const ImageDetailModal = ({ image, onClose, onDelete, onUpdate, onApplyFavicon, 
                                 {assigningLeader ? '지정 중...' : '팀장 프로필로 지정'}
                             </button>
                         )}
-                        {['dashboard-banner', 'banner', 'custom'].includes(image.category) && (
+                        {['dashboard-banner', 'dashboard-banner-wide', 'banner', 'custom'].includes(image.category) && (
                             <button
                                 onClick={() => onApplyDashboardBanner(image)}
                                 disabled={applyingDashboardBanner}

@@ -73,6 +73,14 @@ const normalizeText = (value: unknown): string => {
     return typeof value === 'string' ? value.trim() : '';
 };
 
+const normalizeFirstText = (...values: unknown[]): string => {
+    for (const value of values) {
+        const normalized = normalizeText(value);
+        if (normalized) return normalized;
+    }
+    return '';
+};
+
 const sortEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
     const dateCompare = (left.date ?? '').localeCompare(right.date ?? '', 'en');
     if (dateCompare !== 0) return dateCompare;
@@ -179,7 +187,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     appliedYear: normalizeInteger(data.appliedYear),
                     appliedMonth: normalizeInteger(data.appliedMonth),
                     matchedEntryId: normalizeText(data.matchedEntryId),
-                    note: normalizeText(data.note),
+                    note: normalizeFirstText(data.note, data.memo, data.remark, data.remarks, data.notes),
                     teamName: normalizeText(data.teamName),
                     createdAt: normalizeText(data.createdAt),
                     updatedAt: normalizeText(data.updatedAt),

@@ -48,6 +48,10 @@ export const cardService = {
         return cardFirestoreService.getAssignmentHistory(cardId);
     },
 
+    listAllCardAssignments: async (): Promise<CardAssignmentRecord[]> => {
+        return cardFirestoreService.listAllCardAssignments();
+    },
+
     assignCard: async (
         cardId: string,
         assigneeId: string,

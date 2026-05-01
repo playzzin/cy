@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowDown, faSave, faRotateRight, faFloppyDisk, faTrash, faEdit } from '@fortawesome/free-solid-svg-icons';
+import { faArrowDown, faSave, faRotateRight, faFloppyDisk, faTrash, faEdit, faSearch } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Material, InboundTransaction } from '../../types/materials';
@@ -28,6 +28,7 @@ const MaterialInboundPage: React.FC = () => {
     const [siteName, setSiteName] = useState('');
     const [vehicleNumber, setVehicleNumber] = useState('');
     const [supplier, setSupplier] = useState('');
+    const [searchFilter, setSearchFilter] = useState('');
 
     const [sites, setSites] = useState<Site[]>([]);
     const [materials, setMaterials] = useState<Material[]>([]);
@@ -179,10 +180,13 @@ const MaterialInboundPage: React.FC = () => {
             setSites(sitesData.filter((s: any) => s.status === 'active'));
             setMaterials(materialsData);
 
+            // [FIX] 만약 이미 quantities에 데이터가 있다면 (임시저장 등),
+            // 새로 불러온 자재 목록에 존재하는 ID들만 남기고 유지합니다.
             setQuantities((prev) => {
                 const validIds = new Set(materialsData.map((m) => m.id));
-                const nextEntries = Object.entries(prev).filter(([id]) => validIds.has(id));
-                return Object.fromEntries(nextEntries);
+                const filteredEntries = Object.entries(prev).filter(([id]) => validIds.has(id));
+                // 만약 prev가 비어있고 임시저장 데이터 로드가 아직 안됐다면 빈 객체 유지
+                return Object.fromEntries(filteredEntries);
             });
         } catch (error) {
             console.error('Failed to load data:', error);
@@ -277,12 +281,24 @@ const MaterialInboundPage: React.FC = () => {
 
     materials.forEach(m => {
         const cat = (m.category || '').trim();
-        // 1. Right Column: Scaffolding (비계)
-        if (cat.includes('비계')) {
+        const itemName = (m.itemName || '').trim();
+        const spec = (m.spec || '').trim();
+
+        // 검색 필터 적용 (수량이 입력된 품목은 검색 필터와 상관없이 항상 표시)
+        const hasQty = (quantities[m.id] || 0) > 0;
+        const matchesSearch = !searchFilter ||
+            itemName.toLowerCase().includes(searchFilter.toLowerCase()) ||
+            spec.toLowerCase().includes(searchFilter.toLowerCase()) ||
+            cat.toLowerCase().includes(searchFilter.toLowerCase());
+
+        if (!hasQty && !matchesSearch) return;
+
+        // 1. Right Column: SCAFFOLDING (비계)
+        if (cat.includes('비계') || (m.itemName || '').includes('비계')) {
             scaffoldingList.push(m);
         }
         // 2. Left Column: Dongbari (동바리) OR Support (서포트) OR System (시스템 - excluding Scaffolding)
-        else if (cat.includes('동바리') || cat.includes('서포트') || cat.includes('시스템')) {
+        else if (cat.includes('동바리') || cat.includes('서포트') || (m.itemName || '').includes('동바리') || (m.itemName || '').includes('서포트') || cat.includes('시스템')) {
             dongbariList.push(m);
         }
         // 3. Others

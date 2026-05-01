@@ -87,14 +87,14 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/70">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
                     <div>
                         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <span className="bg-indigo-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm shadow-indigo-200 shadow-md">
                                 <FontAwesomeIcon icon={faUsers} />
                             </span>
-                            숙소 배정/청구관리 분리 모드
+                            숙소 배정/청구관리
                         </h2>
                         <p className="text-sm text-slate-500 mt-1 ml-10">
                             {accommodation.name} ({accommodation.address})
@@ -109,14 +109,15 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/40">
-                    <section className="bg-white rounded-2xl border border-emerald-100 shadow-sm overflow-hidden">
-                        <header className="px-5 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
-                            <h3 className="font-bold text-emerald-800 flex items-center gap-2">
-                                <span className="w-1.5 h-5 bg-emerald-500 rounded-full" />
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
+                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+                    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <header className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                <span className="w-1.5 h-5 bg-indigo-500 rounded-full" />
                                 배정 인원 목록 관리
                             </h3>
-                            <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                            <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">
                                 {activeAssignments.length}명
                             </span>
                         </header>
@@ -270,9 +271,9 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                         </div>
                     </section>
 
-                    <section className="bg-white rounded-2xl border border-indigo-100 shadow-sm overflow-hidden">
-                        <header className="px-5 py-3 bg-indigo-50 border-b border-indigo-100">
-                            <h3 className="font-bold text-indigo-800 flex items-center gap-2">
+                    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <header className="px-5 py-3 bg-slate-50 border-b border-slate-200">
+                            <h3 className="font-bold text-slate-800 flex items-center gap-2">
                                 <span className="w-1.5 h-5 bg-indigo-500 rounded-full" />
                                 청구대상 관리 (팀 1개 또는 개인 1명)
                             </h3>
@@ -456,6 +457,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                             </div>
                         </div>
                     </section>
+                    </div>
                 </div>
 
                 <div className="p-5 border-t border-slate-100 bg-white flex justify-end gap-3">

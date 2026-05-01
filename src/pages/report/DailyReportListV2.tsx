@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import Swal from 'sweetalert2';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
     faSearch,
@@ -163,6 +163,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [rows, setRows] = useState<DailyReportWorkerRow[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const siteOptions = useMemo(() => {
+        return [...sites].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [sites]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -261,10 +264,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         workerSearch
     ]);
 
-    // 10자리(YYYY-MM-DD)가 완성되어도 자동으로 조회를 트리거하지 않도록 변경
-    // 사용자가 '조회' 버튼을 누를 때만 startDate/endDate가 업데이트 되도록 관리합니다.
-
-
     const fetchRows = useCallback(async (): Promise<void> => {
         setIsLoading(true);
         try {
@@ -280,11 +279,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     }, [startDate, endDate]);
 
-    // 초기 로딩 시에만 1회 호출
     useEffect(() => {
         fetchRows();
     }, []);
-
 
     useEffect(() => {
         if (!openColumnFilter) return;
@@ -348,12 +345,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setStartDateInput(normalizedStart);
         setEndDateInput(normalizedEnd);
 
-        // 상태 반영을 위해 fetchData를 직접 호출하거나 의존성을 startDate/endDate로 넘겨야 하지만
-        // 여기서는 안전하게 normalized 값으로 직접 호출할 수 있도록 fetchRows를 수정하거나
-        // 또는 set이 비동기이므로 fetchRows 내부에서 최신 상태를 쓰게 합니다.
-        // 현재 fetchRows는 startDate, endDate에 의존하므로, 이 함수가 다음 렌더링에 호출되게 하지 않고
-        // 즉시 fetch를 할 수 있도록 인자를 받는 버전으로 고려합니다.
-        
         setIsLoading(true);
         dailyReportService.getReportWorkerRowsByRange({
             startDate: normalizedStart,
@@ -366,7 +357,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             setIsLoading(false);
         });
     }, [startDateInput, endDateInput, startDate, endDate]);
-
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         return `${String(r.reportId)}::${String(r.workerId)}`;
@@ -423,7 +413,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, [teams, normalizeTeamId]);
 
     const resolveWorkerTeamCanonicalId = useCallback((params: { workerTeamId?: string | null; workerTeamName?: string | null }) => {
-        // 소속팀명과 소속팀ID가 충돌하는 레거시 데이터가 있어, 이름 매핑을 우선 사용합니다.
         const nameKey = normalizeTeamNameKey(params.workerTeamName);
         if (nameKey) {
             const byName = teamNameCanonicalIdMap.get(nameKey);
@@ -544,7 +533,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             }
             if (wantSite && normalizeSiteId(r.siteId) !== wantSite) return false;
             
-            // 소속팀 필터: workerTeamId 우선, 없으면 workerTeamName으로 팀 ID 매핑
             if (wantWorkerTeam) {
                 const rowWorkerTeamId = resolveWorkerTeamCanonicalId({
                     workerTeamId: r.workerTeamId,
@@ -556,7 +544,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
     }, [rows, normalizeTeamId, normalizeSiteId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, resolveWorkerTeamCanonicalId, teams]);
 
-    // 1. Available Sites (Filtered by Report Team ONLY) - Worker Team selection does NOT constrain sites
     const availableSites = useMemo(() => {
         if (rows.length === 0) {
             return sites
@@ -572,7 +559,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [getFiltered, sites, selectedTeamId, rows.length]);
 
-    // 2. Available Responsible Teams (Filtered by Site ONLY)
     const availableReportTeams = useMemo(() => {
         if (rows.length === 0) {
             return teams
@@ -620,12 +606,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
     }, [getFiltered, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName, teams, selectedSiteId, rows.length]);
 
-    // 3. Available Worker Teams (Filtered by Site & Report Team)
     const availableWorkerTeams = useMemo(() => {
-        // 소속팀 옵션은 현재 선택된 현장/현장담당팀 범위 내 데이터에서만 계산
         const scopedRows = getFiltered({ siteId: selectedSiteId, teamId: selectedTeamId });
 
-        // 1단계: 현재 범위 내 행에서 소속팀 정보(ID 및 이름) 추출
         const foundTeamIds = new Set<string>();
         const foundTeamNames = new Set<string>();
         
@@ -638,41 +621,35 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (displayName) foundTeamNames.add(displayName);
         });
 
-        // 2단계: 만약 범위 내 데이터가 없다면 전체 팀 목록을 반환
         if (scopedRows.length === 0) {
             return teams
                 .slice()
                 .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
         }
 
-        // 3단계: 기존 팀 목록에서 매칭되는 항목 추출
         const matchedTeams = teams.filter(t => 
             foundTeamIds.has(String(t.id)) || 
             (t.legacyId ? foundTeamIds.has(String(t.legacyId)) : false) || 
             foundTeamNames.has(t.name ?? '')
         );
 
-        // 4단계: 팀 목록에 없지만 데이터(workerTeamName)에는 존재하는 "직접 입력" 팀들 추가 (예: 지원팀, 용역팀 등)
         const matchedTeamNamesSet = new Set(matchedTeams.map(t => t.name));
         const virtualTeams: Team[] = [];
         
         foundTeamNames.forEach(name => {
             if (!matchedTeamNamesSet.has(name)) {
                 virtualTeams.push({
-                    id: name, // 이름을 ID로 사용
+                    id: name,
                     name: name,
                     active: true,
                 } as any);
             }
         });
 
-        // 5단계: 합치고 정렬 (청연 우선)
         return [...matchedTeams, ...virtualTeams]
             .sort((a, b) => compareTeamsWithPriority(a.name ?? '', b.name ?? ''));
     }, [getFiltered, selectedSiteId, selectedTeamId, teams, normalizeTeamId, resolveWorkerTeamDisplayName]);
 
-
-    // 4. Base Display Rows (Filtered by ALL selection + Search)
     const baseFilteredRows = useMemo(() => {
         let result = getFiltered({
             siteId: selectedSiteId,
@@ -680,7 +657,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             workerTeamId: selectedWorkerTeamId
         });
 
-        // Text Search (Worker Name Only)
         const q = workerSearch.trim().toLowerCase();
         if (q) {
             result = result.filter((r) => {
@@ -761,13 +737,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             teamName: worker.teamName ?? '',
         }));
     }, [allWorkers]);
-
-    const siteOptions = useMemo(() => {
-        return sites
-            .filter((site) => Boolean(site.id))
-            .slice()
-            .sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
-    }, [sites]);
 
     const openColumnFilterOptions = useMemo(() => {
         if (!openColumnFilter) return [];
@@ -1170,17 +1139,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             siteType: String(r.siteType ?? ''),
             paymentType: String(r.paymentType ?? '')
         };
-    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, teams]);
+    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveResponsibleTeamOptionId, resolveResponsibleTeamDisplayName, teams]);
 
     const isRowDirty = useCallback((original: DailyReportWorkerRow, draft?: RowDraft) => {
         if (!draft) return false;
 
-        // 1. Check Worker Change
         if (draft.workerId && String(draft.workerId) !== String(original.workerId)) return true;
-
-        // 2. Check Name Change (Typo fix)
         if (draft.workerName !== undefined && draft.workerName !== original.workerName) return true;
-
         if (draft.siteId !== normalizeSiteId(original.siteId)) return true;
         if (draft.teamId !== normalizeTeamId(original.teamId)) return true;
         if (draft.responsibleTeamId !== resolveResponsibleTeamOptionId({
@@ -1197,8 +1162,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         if (draft.workContent !== (original.workContent ?? '')) return true;
         if (draft.siteType !== (original.siteType ?? '')) return true;
         if (draft.paymentType !== (original.paymentType ?? '')) return true;
-
-        // Check workerTeamName change
         if (draft.workerTeamName !== undefined && draft.workerTeamName !== (original.workerTeamName ?? '')) return true;
 
         return false;
@@ -1299,24 +1262,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return reportLevelUpdates;
     }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, siteOptions, teams]);
 
-    // Worker Change Logic
-    // Worker Change Logic
     const handleWorkerNameChange = useCallback((r: DailyReportWorkerRow, newName: string) => {
-        // 1. Try to find match in allWorkers (exact first, then normalized without spaces - same as input tab)
         const trimmedName = newName.trim();
         const normalizedName = trimmedName.replace(/\s+/g, '');
         const matched = allWorkers.find(w => w.name === trimmedName)
             || (normalizedName ? allWorkers.find(w => w.name.replace(/\s+/g, '') === normalizedName) : undefined);
 
         if (matched) {
-            // Check for duplicates ONLY within the same report (same reportId)
-            // 같은 일보(reportId) 내에서만 중복 체크 (다른 날짜/현장에 같은 작업자가 있는 것은 정상)
             const isDuplicate = rows.some(existingRow => {
-                // 같은 리포트 내에서만 체크
                 if (existingRow.reportId !== r.reportId) return false;
-                // 자신이 아닌 행 중에서
                 if (getRowKey(existingRow) === getRowKey(r)) return false;
-                // workerId가 같은 행이 있는지 확인 (draft가 있으면 draft 우선)
                 const existingKey = getRowKey(existingRow);
                 const existingDraft = rowDrafts[existingKey];
                 const currentId = existingDraft?.workerId ?? existingRow.workerId;
@@ -1327,7 +1282,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 toast.warning(`'${newName}' 작업자는 같은 일보에 이미 포함되어 있습니다. (이름만 변경됨)`);
                 setRowDraft(r, {
                     workerName: newName,
-                    workerId: undefined, // 중복 방지를 위해 ID 매칭 해제
+                    workerId: undefined,
                     workerTeamName: '',
                     unitPrice: '0',
                     salaryModel: ''
@@ -1335,13 +1290,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return;
             }
 
-            // 2. Lookup team from teams array
-            // Try by teamId (checking both UUID and legacyId), then fallback to teamName
             let team = matched.teamId
                 ? teams.find(t => t.id === matched.teamId || t.legacyId === matched.teamId)
                 : undefined;
 
-            // Fallback: if no team found by ID, try finding by name (try exact, then relaxed)
             if (!team && matched.teamName) {
                 team = teams.find(t => t.name === matched.teamName);
                 if (!team) {
@@ -1352,11 +1304,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             const resolvedTeamName = team?.name ?? matched.teamName ?? '';
 
-            // Worker Found -> Auto-fill (단가, 급여방식, 작업팀 모두 채움)
             const draftUpdate = {
                 workerName: newName,
                 workerId: matched.id ? String(matched.id) : undefined,
-                // 우선순위: 1. 팀 매칭 결과(resolvedTeamName) 2. 작업자 정보의 팀명(matched.teamName) 3. 작업자 정보의 팀유형(matched.teamType - 지원팀 등)
                 workerTeamName: resolvedTeamName || matched.teamName || (matched.teamType === '지원팀' ? '지원팀' : ''),
                 workerTeamId: normalizeTeamId(team?.id ? String(team.id) : (matched.teamId ? String(matched.teamId) : '')) || undefined,
                 unitPrice: String(matched.unitPrice ?? 0),
@@ -1364,7 +1314,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             };
             setRowDraft(r, draftUpdate);
         } else {
-            // Worker Not Found -> Just update name only (타이핑 중에는 다른 필드 초기화하지 않음)
             setRowDraft(r, {
                 workerName: newName
             });
@@ -1391,7 +1340,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
 
         try {
-            // Prepare updates
             const updates: any = {};
 
             if (draft.workerId && String(draft.workerId) !== String(r.workerId)) {
@@ -1405,7 +1353,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 ? normalizeTeamId(draft.workerTeamId)
                 : resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
 
-            // Resolve teamId from worker master when worker is changed
             if (draft.workerId) {
                 const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
                 if (matchedWorker?.teamId) {
@@ -1417,7 +1364,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             }
 
             updates.salaryModel = draft.salaryModel;
-            updates.payType = draft.salaryModel; // sync
+            updates.payType = draft.salaryModel;
             updates.manDay = Number(draft.manDay);
             updates.unitPrice = Number(draft.unitPrice);
             updates.workContent = draft.workContent;
@@ -1436,7 +1383,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             }
             clearRowDraft(key);
 
-            // Optimistic Update
             setRows(prev => prev.map(row => {
                 const isSameReport = row.reportId === r.reportId;
                 const isSameWorker = row.workerId === r.workerId;
@@ -1569,8 +1515,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             return;
         }
 
-        if (parsedManDay == null && parsedUnitPrice == null && nextSalaryModel == null && nextWorkContent == null) {
-            alert('변경할 값이 없습니다.');
+        if (
+            parsedManDay == null && 
+            parsedUnitPrice == null && 
+            nextSalaryModel == null && 
+            nextWorkContent == null && 
+            !bulkSiteType && 
+            !bulkPaymentType && 
+            !bulkWorkerTeamName.trim()
+        ) {
+            toast.info('변경할 값이 없습니다.');
             return;
         }
 
@@ -1579,7 +1533,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         setIsLoading(true);
         try {
-            const tasks = selected.map((r) => {
+            for (const r of selected) {
                 const updates: Partial<DailyReportWorker> = {};
                 if (parsedManDay != null) updates.manDay = parsedManDay;
                 if (parsedUnitPrice != null) updates.unitPrice = parsedUnitPrice;
@@ -1588,12 +1542,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 if (bulkSiteType) updates.siteType = bulkSiteType;
                 if (bulkPaymentType) updates.paymentType = bulkPaymentType;
                 if (bulkWorkerTeamName.trim()) updates.workerTeamName = bulkWorkerTeamName.trim();
-                return dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
-            });
-
-            const batchSize = 10;
-            for (let i = 0; i < tasks.length; i += batchSize) {
-                await Promise.all(tasks.slice(i, i + batchSize));
+                
+                await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+                
+                // 일보 수준 정보 업데이트
+                const reportUpdates: any = {};
+                if (bulkSiteType) reportUpdates.siteType = bulkSiteType;
+                if (bulkPaymentType) reportUpdates.paymentType = bulkPaymentType;
+                
+                if (Object.keys(reportUpdates).length > 0) {
+                    await dailyReportService.updateReport(r.reportId, reportUpdates);
+                }
             }
 
             toast.updated('일보');
@@ -1627,8 +1586,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
         setIsLoading(true);
         try {
-            // Execute sequentially to prevent race conditions on Report Header Stats (Total ManDay updates)
-            // Parallel execution causes multiple requests to read the same initial Total and overwrite each other's decrements.
             let successCount = 0;
             for (const r of selected) {
                 try {
@@ -1700,7 +1657,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
                     if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
                     
-                    // 소속팀 ID 및 이름 업데이트
                     if (draft.workerTeamId !== undefined) {
                         updates.teamId = normalizeTeamId(draft.workerTeamId);
                     } else {
@@ -1745,7 +1701,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 toast.warning(`${successCount}건 저장, ${failCount}건 실패 (중복 등 확인 필요)`);
             }
 
-            setRowDrafts({}); // Clear all drafts (Successful ones are updated via fetchRows, failed ones lost but safer than inconsistent state)
+            setRowDrafts({});
             await fetchRows();
         } catch (error) {
             console.error('[DailyReportListV2] Save All Failed (Critical)', error);
@@ -2299,423 +2255,279 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 )}
                                 {renderFilterHeader(
                                     'siteName',
-                                    '현장',
-                                    `px-2.5 py-2 whitespace-nowrap w-[168px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r border-[#255e94] ${isEditMode ? 'left-[134px]' : 'left-[86px]'}` : ''}`
+                                    '현장명',
+                                    'px-2.5 py-2 whitespace-nowrap w-[150px]'
                                 )}
-                                {renderFilterHeader('siteType', '현장구분', 'px-2.5 py-2 whitespace-nowrap')}
-                                {renderFilterHeader('paymentType', '결제구분', 'px-2.5 py-2 whitespace-nowrap')}
-                                {renderFilterHeader('teamName', '현장담당팀', 'px-2.5 py-2 whitespace-nowrap')}
+                                {renderFilterHeader(
+                                    'siteType',
+                                    '구분',
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px]'
+                                )}
+                                {renderFilterHeader(
+                                    'paymentType',
+                                    '결제',
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px]'
+                                )}
+                                {renderFilterHeader(
+                                    'teamName',
+                                    '현장소속팀',
+                                    'px-2.5 py-2 whitespace-nowrap w-[120px]'
+                                )}
                                 {renderFilterHeader(
                                     'workerName',
-                                    '이름',
-                                    `px-2.5 py-2 whitespace-nowrap w-[112px] ${isFixed ? `sticky z-40 bg-[#2e75b6] border-r border-[#255e94] ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`
+                                    '성명',
+                                    'px-2.5 py-2 whitespace-nowrap w-[80px]'
                                 )}
-                                {renderFilterHeader('workerTeamName', '소속팀', 'px-2.5 py-2 whitespace-nowrap')}
-                                {renderFilterHeader('salaryModel', '급여방식', 'px-2.5 py-2 whitespace-nowrap')}
-                                {renderFilterHeader('manDay', '공수', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
-                                {renderFilterHeader('unitPrice', '단가', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
-                                {renderFilterHeader('amount', '금액', 'px-2.5 py-2 whitespace-nowrap text-right', 'right')}
-                                <th className="px-2.5 py-2 whitespace-nowrap">비고</th>
+                                {renderFilterHeader(
+                                    'workerTeamName',
+                                    '소속팀',
+                                    'px-2.5 py-2 whitespace-nowrap w-[120px]'
+                                )}
+                                {renderFilterHeader(
+                                    'salaryModel',
+                                    '급여방식',
+                                    'px-2.5 py-2 whitespace-nowrap w-[80px]'
+                                )}
+                                {renderFilterHeader(
+                                    'manDay',
+                                    '공수',
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px] text-right',
+                                    'right'
+                                )}
+                                {renderFilterHeader(
+                                    'unitPrice',
+                                    '단가',
+                                    'px-2.5 py-2 whitespace-nowrap w-[90px] text-right',
+                                    'right'
+                                )}
+                                {renderFilterHeader(
+                                    'amount',
+                                    '금액',
+                                    'px-2.5 py-2 whitespace-nowrap w-[100px] text-right',
+                                    'right'
+                                )}
+                                <th className="px-2.5 py-2 whitespace-nowrap min-w-[150px]">비고(내용)</th>
                                 {isEditMode && (
-                                    <th className="px-2.5 py-2 whitespace-nowrap text-center sticky right-0 z-40 bg-[#2e75b6] border-l border-[#255e94]">
-                                        관리
-                                    </th>
+                                    <th className="px-2.5 py-2 whitespace-nowrap w-[80px] text-center">작업</th>
                                 )}
                             </tr>
                         </thead>
-                        <tbody>
-                            {sortedRows.map((r) => (
-                                (() => {
-                                    const rowKey = getRowKey(r);
-                                    const draft = rowDrafts[rowKey];
-                                    const saving = rowSavingKeys.has(rowKey);
-                                    const dirty = isRowDirty(r, draft);
+                        <tbody className="bg-white">
+                            {sortedRows.map((row) => {
+                                const key = getRowKey(row);
+                                const isSelected = selectedRowKeys.has(key);
+                                const draft = rowDrafts[key];
+                                const isDirty = isRowDirty(row, draft);
+                                const isSaving = rowSavingKeys.has(key);
 
-                                    const effectiveManDay = draft ? Number(draft.manDay) : (Number.isFinite(r.manDay) ? r.manDay : 0);
-                                    const effectiveUnitPrice = draft ? Number(draft.unitPrice) : (Number.isFinite(r.unitPrice) ? r.unitPrice : 0);
-                                    const previewAmount = Number.isFinite(effectiveManDay) && Number.isFinite(effectiveUnitPrice)
-                                        ? effectiveManDay * effectiveUnitPrice
-                                        : (Number.isFinite(r.amount) ? r.amount : 0);
+                                const displayRow = draft ? { ...row, ...draft } : row;
+                                const displayResponsibleTeamName = resolveResponsibleTeamDisplayName({
+                                    responsibleTeamId: displayRow.responsibleTeamId ?? displayRow.teamId,
+                                    responsibleTeamName: displayRow.responsibleTeamName ?? displayRow.teamName
+                                });
+                                const displayWorkerTeamName = resolveWorkerTeamDisplayName({
+                                    workerTeamId: displayRow.workerTeamId,
+                                    workerTeamName: displayRow.workerTeamName
+                                });
 
-                                    const effectiveSalaryModel = draft ? draft.salaryModel : resolveReportPayType(r);
-                                    const effectiveWorkContent = draft ? draft.workContent : String(r.workContent ?? '');
-                                    const effectiveSiteId = draft ? draft.siteId : normalizeSiteId(r.siteId);
-                                    const resolvedWorkerTeamName = resolveWorkerTeamDisplayName({
-                                        workerTeamId: r.workerTeamId,
-                                        workerTeamName: r.workerTeamName
-                                    });
-                                    const effectiveWorkerTeamName = draft
-                                        ? (draft.workerTeamName ?? '')
-                                        : resolvedWorkerTeamName;
-                                    const effectiveResponsibleTeamOptionId = (draft?.responsibleTeamId ?? resolveResponsibleTeamOptionId({
-                                        responsibleTeamId: r.responsibleTeamId,
-                                        responsibleTeamName: r.responsibleTeamName
-                                    })) || '';
-                                    const stickyActionCellBg = selectedRowKeys.has(rowKey) ? 'bg-indigo-50' : 'bg-white';
-
-                                    return (
-                                        <tr
-                                            key={rowKey}
-                                            className={`border-b border-slate-100 hover:bg-slate-50 ${selectedRowKeys.has(rowKey) ? 'bg-indigo-50/50' : ''} ${dirty ? 'ring-1 ring-indigo-200' : ''} transition-colors`}
-                                        >
-                                            {isEditMode && (
-                                                <td className={`px-2.5 py-2 whitespace-nowrap w-[48px] ${isFixed ? 'sticky left-0 z-20 bg-white border-r border-slate-100' : ''}`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        className="w-4 h-4 text-brand-600 bg-gray-100 border-gray-300 rounded focus:ring-brand-500"
-                                                        checked={selectedRowKeys.has(rowKey)}
-                                                        onChange={() => toggleSelectRow(rowKey)}
-                                                        title="선택"
-                                                    />
-                                                </td>
+                                return (
+                                    <tr
+                                        key={key}
+                                        className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''}`}
+                                    >
+                                        {isEditMode && (
+                                            <td className={`px-2.5 py-1.5 text-center ${isFixed ? 'sticky left-0 z-30 bg-inherit border-r border-slate-200' : ''}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleSelectRow(key)}
+                                                    className="w-4 h-4 text-brand-600 bg-gray-100 border-gray-300 rounded focus:ring-brand-500"
+                                                />
+                                            </td>
+                                        )}
+                                        <td className={`px-2.5 py-1.5 font-mono text-slate-500 ${isFixed ? `sticky z-30 bg-inherit border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>
+                                            {row.date}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <select
+                                                    value={displayRow.siteId}
+                                                    onChange={(e) => setRowDraft(row, { siteId: e.target.value })}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteId !== normalizeSiteId(row.siteId) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                >
+                                                    <option value="">현장 선택</option>
+                                                    {siteOptions.map(s => <option key={String(s.id)} value={String(s.id)}>{s.name}</option>)}
+                                                </select>
+                                            ) : (
+                                                <span className="truncate block" title={row.siteName ?? ''}>{row.siteName}</span>
                                             )}
-                                            <td className={`px-2.5 py-2 whitespace-nowrap w-[86px] daily-report-col-date ${isFixed ? `sticky z-20 border-r border-slate-100 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>{r.date ?? ''}</td>
-                                            <td className={`px-2.5 py-2 whitespace-nowrap w-[168px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-100 ${isEditMode ? 'left-[134px]' : 'left-[86px]'}` : ''}`}>
-                                                {isEditMode ? (
-                                                    <select
-                                                        value={effectiveSiteId}
-                                                        onChange={(e) => setRowDraft(r, { siteId: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[146px] bg-white"
-                                                    >
-                                                        <option value="">-</option>
-                                                        {siteOptions.map((site) => (
-                                                            <option key={String(site.id)} value={String(site.id)}>
-                                                                {site.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={siteOptions.map((site) => ({
-                                                            id: String(site.id ?? ''),
-                                                            name: site.name ?? ''
-                                                        }))}
-                                                        selectedId={effectiveSiteId || null}
-                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { siteId: id }); }}
-                                                        placeholder="현장 선택"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">
-                                                {isEditMode ? (
-                                                    <select
-                                                        value={draft ? draft.siteType : (r.siteType ?? '')}
-                                                        onChange={(e) => setRowDraft(r, { siteType: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
-                                                    >
-                                                        <option value="">-</option>
-                                                        <option value="도급">도급</option>
-                                                        <option value="직영">직영</option>
-                                                        <option value="지원">지원</option>
-                                                    </select>
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={[
-                                                            { id: '도급', name: '도급' },
-                                                            { id: '직영', name: '직영' },
-                                                            { id: '지원', name: '지원' }
-                                                        ]}
-                                                        selectedId={(draft ? draft.siteType : (r.siteType ?? '')) || null}
-                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { siteType: id }); }}
-                                                        placeholder="현장구분"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">
-                                                {isEditMode ? (
-                                                    <select
-                                                        value={draft ? draft.paymentType : (r.paymentType ?? '')}
-                                                        onChange={(e) => setRowDraft(r, { paymentType: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
-                                                    >
-                                                        <option value="">-</option>
-                                                        <option value="노무">노무</option>
-                                                        <option value="계산서">계산서</option>
-                                                    </select>
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={[
-                                                            { id: '노무', name: '노무' },
-                                                            { id: '계산서', name: '계산서' }
-                                                        ]}
-                                                        selectedId={(draft ? draft.paymentType : (r.paymentType ?? '')) || null}
-                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { paymentType: id }); }}
-                                                        placeholder="결제구분"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">
-                                                {isEditMode ? (
-                                                    <select
-                                                        value={effectiveResponsibleTeamOptionId}
-                                                        onChange={(e) => {
-                                                            const selectedTeam = availableReportTeams.find((team) => {
-                                                                const optionId = resolveResponsibleTeamOptionId({
-                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
-                                                                    responsibleTeamName: team.name
-                                                                });
-                                                                return optionId === e.target.value;
-                                                            });
-                                                            setRowDraft(r, {
-                                                                responsibleTeamId: e.target.value,
-                                                                responsibleTeamName: selectedTeam?.name ?? ''
-                                                            });
-                                                        }}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[118px] bg-white"
-                                                    >
-                                                        <option value="">-</option>
-                                                        {availableReportTeams.map((team) => (
-                                                            <option
-                                                                key={String(team.id ?? team.legacyId ?? team.name)}
-                                                                value={resolveResponsibleTeamOptionId({
-                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
-                                                                    responsibleTeamName: team.name
-                                                                })}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <select
+                                                    value={displayRow.siteType}
+                                                    onChange={(e) => setRowDraft(row, { siteType: e.target.value })}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteType !== (row.siteType ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                >
+                                                    <option value="">선택</option>
+                                                    <option value="도급">도급</option>
+                                                    <option value="직영">직영</option>
+                                                    <option value="지원">지원</option>
+                                                </select>
+                                            ) : (
+                                                row.siteType
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <select
+                                                    value={displayRow.paymentType}
+                                                    onChange={(e) => setRowDraft(row, { paymentType: e.target.value })}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.paymentType !== (row.paymentType ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                >
+                                                    <option value="">선택</option>
+                                                    <option value="노무">노무</option>
+                                                    <option value="계산서">계산서</option>
+                                                </select>
+                                            ) : (
+                                                row.paymentType
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <select
+                                                    value={displayRow.responsibleTeamId}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        const matchedTeam = teams.find(t => String(t.id ?? t.legacyId ?? '') === val);
+                                                        setRowDraft(row, {
+                                                            responsibleTeamId: val,
+                                                            responsibleTeamName: matchedTeam?.name ?? val
+                                                        });
+                                                    }}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.responsibleTeamId !== resolveResponsibleTeamOptionId(row) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                >
+                                                    <option value="">팀 선택</option>
+                                                    {teams.map(t => <option key={String(t.id ?? t.legacyId ?? t.name)} value={String(t.id ?? t.legacyId ?? t.name)}>{t.name}</option>)}
+                                                </select>
+                                            ) : (
+                                                <span className="truncate block" title={displayResponsibleTeamName}>{displayResponsibleTeamName}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="text"
+                                                    list="worker-list-v2"
+                                                    value={displayRow.workerName}
+                                                    onChange={(e) => handleWorkerNameChange(row, e.target.value)}
+                                                    className={`w-full px-2 py-0.5 border rounded text-sm font-bold ${isDirty && draft?.workerName !== row.workerName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                <span className="font-bold text-slate-900">{row.workerName}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="text"
+                                                    list="worker-team-list-v2"
+                                                    value={displayRow.workerTeamName}
+                                                    onChange={(e) => setRowDraft(row, { workerTeamName: e.target.value })}
+                                                    className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workerTeamName !== (row.workerTeamName ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                <span className="truncate block text-slate-500" title={displayWorkerTeamName}>{displayWorkerTeamName}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="text"
+                                                    list="daily-report-v2-salary-model-options"
+                                                    value={displayRow.salaryModel}
+                                                    onChange={(e) => setRowDraft(row, { salaryModel: e.target.value })}
+                                                    className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.salaryModel !== resolveReportPayType(row) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                <span className="text-slate-500">{resolveReportPayType(row)}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5 text-right font-mono">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="number"
+                                                    step="0.1"
+                                                    value={displayRow.manDay}
+                                                    onChange={(e) => setRowDraft(row, { manDay: e.target.value })}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm text-right font-bold ${isDirty && Number(draft?.manDay) !== row.manDay ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                <span className="font-bold">{formatManDay(row.manDay)}</span>
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5 text-right font-mono">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="number"
+                                                    value={displayRow.unitPrice}
+                                                    onChange={(e) => setRowDraft(row, { unitPrice: e.target.value })}
+                                                    className={`w-full px-1 py-0.5 border rounded text-sm text-right ${isDirty && Number(draft?.unitPrice) !== row.unitPrice ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                formatNumber(Math.round(row.unitPrice))
+                                            )}
+                                        </td>
+                                        <td className="px-2.5 py-1.5 text-right font-mono font-bold text-indigo-600">
+                                            {formatNumber(Math.round((Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0)))}
+                                        </td>
+                                        <td className="px-2.5 py-1.5">
+                                            {isEditMode ? (
+                                                <input
+                                                    type="text"
+                                                    value={displayRow.workContent}
+                                                    onChange={(e) => setRowDraft(row, { workContent: e.target.value })}
+                                                    className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workContent !== (row.workContent ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                />
+                                            ) : (
+                                                <span className="truncate block text-slate-400 text-xs" title={row.workContent ?? ''}>{row.workContent}</span>
+                                            )}
+                                        </td>
+                                        {isEditMode && (
+                                            <td className="px-2.5 py-1.5 text-center">
+                                                <div className="flex items-center justify-center gap-1">
+                                                    {isDirty ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleSaveRow(row)}
+                                                                disabled={isSaving}
+                                                                className="w-7 h-7 flex items-center justify-center bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:bg-slate-300"
+                                                                title="저장"
                                                             >
-                                                                {team.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={availableReportTeams.map((team) => ({
-                                                            id: resolveResponsibleTeamOptionId({
-                                                                responsibleTeamId: team.id ?? team.legacyId ?? '',
-                                                                responsibleTeamName: team.name
-                                                            }),
-                                                            name: team.name ?? ''
-                                                        }))}
-                                                        selectedId={effectiveResponsibleTeamOptionId || null}
-                                                        onSelect={(id) => {
-                                                            const selectedTeam = availableReportTeams.find((team) => {
-                                                                const optionId = resolveResponsibleTeamOptionId({
-                                                                    responsibleTeamId: team.id ?? team.legacyId ?? '',
-                                                                    responsibleTeamName: team.name
-                                                                });
-                                                                return optionId === id;
-                                                            });
-                                                            void handleQuickRowUpdate(r, {
-                                                                responsibleTeamId: id,
-                                                                responsibleTeamName: selectedTeam?.name ?? ''
-                                                            });
-                                                        }}
-                                                        placeholder="담당팀 선택"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
+                                                                <FontAwesomeIcon icon={isSaving ? faSpinner : faSave} spin={isSaving} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => clearRowDraft(key)}
+                                                                disabled={isSaving}
+                                                                className="w-7 h-7 flex items-center justify-center bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
+                                                                title="취소"
+                                                            >
+                                                                <FontAwesomeIcon icon={faTrashCan} />
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[10px] text-slate-300 font-bold italic">CLEAN</span>
+                                                    )}
+                                                </div>
                                             </td>
-                                            <td className={`px-2.5 py-2 whitespace-nowrap font-semibold w-[112px] ${isFixed ? `sticky z-20 bg-white border-r border-slate-200 ${isEditMode ? 'left-[302px]' : 'left-[254px]'}` : ''}`}>
-                                                {isEditMode ? (
-                                                    <>
-                                                        <input
-                                                            list="worker-list-v2"
-                                                            type="text"
-                                                            value={draft ? (draft.workerName ?? r.workerName) : r.workerName}
-                                                            onChange={(e) => handleWorkerNameChange(r, e.target.value)}
-                                                            disabled={saving}
-                                                            className="px-2 py-1 border border-slate-300 rounded text-sm w-[94px] bg-white"
-                                                        />
-                                                    </>
-                                                ) : (
-                                                    <InputPopover
-                                                        value={draft ? (draft.workerName ?? r.workerName) : (r.workerName ?? '')}
-                                                        onChange={(value) => { void handleQuickWorkerNameUpdate(r, String(value ?? '')); }}
-                                                        placeholder="이름 입력"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">
-                                                {isEditMode ? (
-                                                    <input
-                                                        type="text"
-                                                        list="worker-team-list-v2"
-                                                        value={effectiveWorkerTeamName}
-                                                        onChange={(e) => {
-                                                            const nextName = e.target.value;
-                                                            const nextTeamId = teamNameCanonicalIdMap.get(normalizeTeamNameKey(nextName)) ?? '';
-                                                            setRowDraft(r, {
-                                                                workerTeamName: nextName,
-                                                                workerTeamId: nextTeamId || undefined
-                                                            });
-                                                        }}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[104px] bg-white"
-                                                        placeholder="소속팀"
-                                                    />
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={availableWorkerTeams.map((team) => ({
-                                                            id: normalizeTeamId(team.id ?? team.legacyId ?? '') || String(team.name ?? ''),
-                                                            name: team.name ?? ''
-                                                        }))}
-                                                        selectedId={(draft?.workerTeamId ?? resolveWorkerTeamCanonicalId({ workerTeamId: r.workerTeamId, workerTeamName: r.workerTeamName })) || null}
-                                                        onSelect={(id) => {
-                                                            const selectedTeam = availableWorkerTeams.find((team) => {
-                                                                const teamId = normalizeTeamId(team.id ?? team.legacyId ?? '') || String(team.name ?? '');
-                                                                return teamId === id;
-                                                            });
-                                                            void handleQuickRowUpdate(r, {
-                                                                workerTeamId: id || undefined,
-                                                                workerTeamName: selectedTeam?.name ?? ''
-                                                            });
-                                                        }}
-                                                        placeholder="소속팀 선택"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap">
-                                                {isEditMode ? (
-                                                    <input
-                                                        type="text"
-                                                        list="daily-report-v2-salary-model-options"
-                                                        value={effectiveSalaryModel}
-                                                        onChange={(e) => setRowDraft(r, { salaryModel: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[112px] bg-white"
-                                                        placeholder="급여방식"
-                                                    />
-                                                ) : (
-                                                    <SingleSelectPopover
-                                                        options={SALARY_MODEL_OPTIONS.map((option) => ({ id: option, name: option }))}
-                                                        selectedId={effectiveSalaryModel || null}
-                                                        onSelect={(id) => { void handleQuickRowUpdate(r, { salaryModel: id }); }}
-                                                        placeholder="급여방식"
-                                                        minimal
-                                                        disabled={saving}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap text-right">
-                                                {isEditMode ? (
-                                                    <input
-                                                        type="number"
-                                                        value={draft ? draft.manDay : (Number.isFinite(r.manDay) ? String(r.manDay) : '0')}
-                                                        onChange={(e) => setRowDraft(r, { manDay: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[72px] text-right bg-white"
-                                                    />
-                                                ) : (
-                                                    <InputPopover
-                                                        value={draft ? draft.manDay : (Number.isFinite(r.manDay) ? String(r.manDay) : '0')}
-                                                        onChange={(value) => { void handleQuickRowUpdate(r, { manDay: String(value ?? '0') }); }}
-                                                        type="number"
-                                                        placeholder="공수"
-                                                        minimal
-                                                        disabled={saving}
-                                                        formatDisplay={(value) => formatManDay(Number(value || 0))}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap text-right">
-                                                {isEditMode ? (
-                                                    <input
-                                                        type="number"
-                                                        value={draft ? draft.unitPrice : (Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0')}
-                                                        onChange={(e) => setRowDraft(r, { unitPrice: e.target.value })}
-                                                        disabled={saving}
-                                                        className="px-2 py-1 border border-slate-300 rounded text-sm w-[92px] text-right bg-white"
-                                                    />
-                                                ) : (
-                                                    <InputPopover
-                                                        value={draft ? draft.unitPrice : (Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0')}
-                                                        onChange={(value) => { void handleQuickRowUpdate(r, { unitPrice: String(value ?? '0') }); }}
-                                                        type="number"
-                                                        placeholder="단가"
-                                                        minimal
-                                                        disabled={saving}
-                                                        formatDisplay={(value) => formatNumber(Math.round(Number(value || 0)))}
-                                                    />
-                                                )}
-                                            </td>
-                                            <td className="px-2.5 py-2 whitespace-nowrap text-right font-bold">
-                                                {formatNumber(Math.round(previewAmount))}
-                                            </td>
-                                            <td className="px-2.5 py-2 min-w-[240px]">
-                                                {isEditMode ? (
-                                                    <div className="flex flex-col gap-2">
-                                                        <textarea
-                                                            value={effectiveWorkContent}
-                                                            onChange={(e) => setRowDraft(r, { workContent: e.target.value })}
-                                                            disabled={saving}
-                                                            className="px-2 py-1 border border-slate-300 rounded text-sm w-full bg-white min-h-[54px] resize-y"
-                                                            placeholder="작업 내용 입력"
-                                                        />
-                                                    </div>
-                                                ) : (
-                                                    <InputPopover
-                                                        value={effectiveWorkContent}
-                                                        onChange={(value) => { void handleQuickRowUpdate(r, { workContent: String(value ?? '') }); }}
-                                                        placeholder="작업 내용 입력"
-                                                        minimal
-                                                        disabled={saving}
-                                                        formatDisplay={(value) => (
-                                                            <div className="max-h-[60px] overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed scrollbar-thin scrollbar-thumb-slate-200 text-left">
-                                                                {String(value ?? '') || <span className="text-slate-300 italic">내역 없음</span>}
-                                                            </div>
-                                                        )}
-                                                    />
-                                                )}
-                                            </td>
-                                            {isEditMode && (
-                                                <td className={`px-2.5 py-2 whitespace-nowrap sticky right-0 z-20 border-l border-slate-100 ${stickyActionCellBg}`}>
-                                                    <div className="flex items-center gap-1.5 min-w-[82px]">
-                                                        <button
-                                                            onClick={() => handleSaveRow(r)}
-                                                            disabled={!dirty || saving}
-                                                            className={`flex-1 px-2 py-1 rounded text-[11px] font-bold border ${(!dirty || saving)
-                                                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                                                : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
-                                                                }`}
-                                                        >
-                                                            {saving ? '저장중' : '저장'}
-                                                        </button>
-                                                        <button
-                                                            onClick={() => clearRowDraft(rowKey)}
-                                                            disabled={saving || !draft}
-                                                            className={`flex-1 px-2 py-1 rounded text-[11px] font-bold border ${(saving || !draft)
-                                                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                                                                }`}
-                                                        >
-                                                            취소
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            )}
-                                        </tr>
-                                    );
-                                })()
-                            ))}
+                                        )}
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                     </div>
                 )}
-
-                <div className="daily-report-v2-summarybar">
-                    <div className="daily-report-v2-summaryitem">
-                        <span className="daily-report-v2-summarylabel">총공수</span>
-                        <span className="daily-report-v2-summaryvalue">{totals.totalManDay.toFixed(1)}</span>
-                    </div>
-                    <div className="daily-report-v2-summaryitem">
-                        <span className="daily-report-v2-summarylabel">총금액</span>
-                        <span className="daily-report-v2-summaryvalue">{formatNumber(Math.round(totals.totalAmount))}</span>
-                    </div>
-                </div>
             </div>
         </div>
     );

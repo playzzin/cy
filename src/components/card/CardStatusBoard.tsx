@@ -112,11 +112,112 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return card.currentAssigneeType === 'TEAM' ? '팀' : '개인';
     };
 
-    // ... (existing loading and empty state checks)
+    if (loading) {
+        return (
+            <div className="h-64 flex items-center justify-center text-slate-400">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            </div>
+        );
+    }
+
+    if (cards.length === 0) {
+        return (
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-20 text-center">
+                <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-300">
+                    <FontAwesomeIcon icon={faCreditCard} className="text-4xl" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-700 mb-2">등록된 지원 카드가 없습니다</h3>
+                <p className="text-slate-400 mb-6">새로운 카드를 등록하여 관리를 시작해보세요.</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="space-y-8 animate-fade-in-up">
-            {/* ... (existing Stats Cards and View Mode Toggle) */}
+        <div className="space-y-6 animate-fade-in-up">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 w-32 h-32 bg-slate-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
+                    <div className="relative z-10">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">총 보유 카드</p>
+                        <div className="flex items-baseline gap-2">
+                            <h3 className="text-3xl font-extrabold text-slate-800">{stats.total}</h3>
+                            <span className="text-sm font-bold text-slate-400">장</span>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-slate-500 bg-slate-100 w-fit px-2 py-1 rounded-lg">
+                            <FontAwesomeIcon icon={faCreditCard} className="text-slate-400" /> 전체 지원카드
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 w-32 h-32 bg-emerald-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
+                    <div className="relative z-10">
+                        <p className="text-xs font-bold text-emerald-600/70 uppercase tracking-wider mb-2">사용 중</p>
+                        <div className="flex items-baseline gap-2">
+                            <h3 className="text-3xl font-extrabold text-slate-800">{stats.assigned}</h3>
+                            <span className="text-sm font-bold text-slate-400">장</span>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-emerald-700 bg-emerald-50 w-fit px-2 py-1 rounded-lg">
+                            <FontAwesomeIcon icon={faCheckCircle} /> 사용률 {stats.total > 0 ? Math.round((stats.assigned / stats.total) * 100) : 0}%
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-indigo-100 shadow-[0_4px_20px_-4px_rgba(99,102,241,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
+                    <div className="relative z-10">
+                        <p className="text-xs font-bold text-indigo-600/70 uppercase tracking-wider mb-2">보관 중</p>
+                        <div className="flex items-baseline gap-2">
+                            <h3 className="text-3xl font-extrabold text-slate-800">{stats.available}</h3>
+                            <span className="text-sm font-bold text-slate-400">장</span>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-indigo-700 bg-indigo-50 w-fit px-2 py-1 rounded-lg">
+                            <FontAwesomeIcon icon={faClock} /> 즉시 배정 가능
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-[0_4px_20px_-4px_rgba(249,115,22,0.1)] hover:shadow-lg transition-shadow relative overflow-hidden group">
+                    <div className="absolute right-0 top-0 w-32 h-32 bg-orange-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
+                    <div className="relative z-10">
+                        <p className="text-xs font-bold text-orange-600/70 uppercase tracking-wider mb-2">정지/해지</p>
+                        <div className="flex items-baseline gap-2">
+                            <h3 className="text-3xl font-extrabold text-slate-800">{stats.suspended + stats.closed}</h3>
+                            <span className="text-sm font-bold text-slate-400">장</span>
+                        </div>
+                        <div className="mt-4 flex items-center gap-2 text-xs font-medium text-orange-700 bg-orange-50 w-fit px-2 py-1 rounded-lg">
+                            <FontAwesomeIcon icon={faBan} /> 정지 {stats.suspended} · 해지 {stats.closed}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex justify-end">
+                <div className="flex bg-slate-100 rounded-lg p-0.5">
+                    <button
+                        onClick={() => setViewMode('list')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5
+                            ${viewMode === 'list'
+                                ? 'bg-white text-indigo-600 shadow-sm'
+                                : 'text-slate-400 hover:text-slate-600'}`}
+                        title="목록형"
+                    >
+                        <FontAwesomeIcon icon={faList} />
+                        목록
+                    </button>
+                    <button
+                        onClick={() => setViewMode('card')}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5
+                            ${viewMode === 'card'
+                                ? 'bg-white text-indigo-600 shadow-sm'
+                                : 'text-slate-400 hover:text-slate-600'}`}
+                        title="카드형"
+                    >
+                        <FontAwesomeIcon icon={faTh} />
+                        카드
+                    </button>
+                </div>
+            </div>
 
             {/* ── 목록형 (Table) ── */}
             {viewMode === 'list' ? (

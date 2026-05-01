@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -17,7 +17,11 @@ import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
 
-const AccommodationManager: React.FC = () => {
+interface AccommodationManagerProps {
+    embedded?: boolean;
+}
+
+const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = false }) => {
     const { currentUser } = useAuth();
     const [canUseAccommodationManager, setCanUseAccommodationManager] = useState<boolean | null>(null);
     const [activeTab, setActiveTab] = useState<'status' | 'ledger'>('status');
@@ -830,23 +834,28 @@ const AccommodationManager: React.FC = () => {
     const occupancyRate = totalCount > 0 ? Math.round((occupiedCount / totalCount) * 100) : 0;
 
     return (
-        <div className="min-h-screen bg-slate-50/50 p-6 xl:p-10">
-            <div className="max-w-[1800px] mx-auto space-y-8">
+        <div className={embedded ? 'space-y-6 bg-transparent min-h-full' : 'p-6 space-y-6 bg-slate-50 min-h-full'}>
+            <div className={embedded ? 'space-y-6' : 'space-y-6'}>
 
                 {/* Header Section */}
-                <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-                    <div>
-                        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight flex items-center gap-3">
-                            <span className="bg-indigo-600 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200">
-                                <FontAwesomeIcon icon={faBuilding} className="text-lg" />
-                            </span>
-                            숙소 관리 통합 콘솔
-                        </h1>
-                        <p className="text-slate-500 mt-2 font-medium ml-14">
-                            부동산 계약 현황, 월별 공과금 정산, 청구 관리 및 작업자 배정을 통합 관리합니다.
-                        </p>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
+                            <FontAwesomeIcon icon={faBuilding} className="text-white text-xl" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">숙소 통합관리</h1>
+                            <p className="text-sm text-slate-500 font-medium">숙소 배정 현황 및 공과금/청구 내역을 관리합니다.</p>
+                        </div>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={loadData}
+                            className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+                            title="새로고침"
+                        >
+                            <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
+                        </button>
                         <button
                             onClick={handleSeedAllAccommodations}
                             disabled={seeding}
@@ -859,7 +868,7 @@ const AccommodationManager: React.FC = () => {
                         </button>
                         <button
                             onClick={handleAddClick}
-                            className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-indigo-700 transition shadow-lg shadow-indigo-200 hover:-translate-y-0.5 flex items-center gap-2"
+                            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95"
                         >
                             <FontAwesomeIcon icon={faPlus} />
                             신규 숙소 등록
@@ -867,32 +876,47 @@ const AccommodationManager: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Modern Navigation Tabs */}
-                <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200 inline-flex">
-                    {[
-                        { id: 'status', label: '숙소 현황판', icon: faChartPie },
-                        { id: 'ledger', label: '월별 공과금 대장', icon: faFileInvoiceDollar },
-                    ].map((tab) => (
+                {/* 필터 및 탭 섹션 */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex p-1 bg-slate-100 rounded-xl w-fit">
                         <button
-                            key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)}
-                            className={`px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2.5
-                                ${activeTab === tab.id
-                                    ? 'bg-indigo-50 text-indigo-700 shadow-sm ring-1 ring-indigo-100'
-                                    : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
-                                }
-                            `}
+                            onClick={() => setActiveTab('status')}
+                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
-                            <FontAwesomeIcon icon={tab.icon} className={activeTab === tab.id ? 'text-indigo-600' : 'text-slate-400'} />
-                            {tab.label}
+                            <FontAwesomeIcon icon={faChartPie} className="mr-2" />
+                            배정 및 청구현황
                         </button>
-                    ))}
+                        <button
+                            onClick={() => setActiveTab('ledger')}
+                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            <FontAwesomeIcon icon={faFileInvoiceDollar} className="mr-2" />
+                            숙소 통합관리대장
+                        </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 px-2">
+                        <span className="text-sm font-bold text-slate-500">팀별 필터:</span>
+                        <select
+                            value={selectedTeamId}
+                            onChange={(e) => setSelectedTeamId(e.target.value)}
+                            disabled={activeTab !== 'status' || filterStatus !== 'active'}
+                            className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-48 p-2 outline-none disabled:text-slate-300"
+                        >
+                            <option value="">전체 팀 보기</option>
+                            {selectableTeams.map((team) => (
+                                <option key={team.id} value={team.id}>
+                                    {team.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 {/* Content Area */}
                 <div className="animate-fade-in-up">
                     {activeTab === 'status' ? (
-                        <div className="space-y-8">
+                        <div className="space-y-6">
                             {/* Alerts Section */}
                             <div className="space-y-4">
                                 {/* Expiration Alert (Priority) */}
@@ -947,47 +971,27 @@ const AccommodationManager: React.FC = () => {
                                 )}
                             </div>
 
-                            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-1">
+                            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
                                 <div className="flex items-center gap-4">
                                     <button
                                         onClick={() => setFilterStatus('active')}
-                                        className={`pb-3 px-1 text-sm font-bold transition-all relative
-                                            ${filterStatus === 'active' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}
+                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
+                                            ${filterStatus === 'active' ? 'bg-indigo-50 text-indigo-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
                                         `}
                                     >
                                         운영 중인 숙소 ({occupiedCount}호)
-                                        {filterStatus === 'active' && (
-                                            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-indigo-600 rounded-full"></div>
-                                        )}
                                     </button>
                                     <button
                                         onClick={() => setFilterStatus('inactive')}
-                                        className={`pb-3 px-1 text-sm font-bold transition-all relative
-                                            ${filterStatus === 'inactive' ? 'text-slate-600' : 'text-slate-400 hover:text-slate-600'}
+                                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all
+                                            ${filterStatus === 'inactive' ? 'bg-slate-100 text-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}
                                         `}
                                     >
                                         계약 종료 / 보관함 ({vacantCount}호)
-                                        {filterStatus === 'inactive' && (
-                                            <div className="absolute bottom-0 left-0 w-full h-0.5 bg-slate-600 rounded-full"></div>
-                                        )}
                                     </button>
                                 </div>
 
-                                <div className="flex items-center gap-3 mb-2">
-                                    {filterStatus === 'active' && (
-                                        <select
-                                            value={selectedTeamId}
-                                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                                            className="px-3 py-2 rounded-lg border border-slate-200 text-sm font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 min-w-[200px]"
-                                        >
-                                            <option value="">전체 팀 보기</option>
-                                            {selectableTeams.map((team) => (
-                                                <option key={team.id} value={team.id}>
-                                                    {team.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    )}
+                                <div className="flex items-center gap-3">
                                     {/* View Mode Toggle */}
                                     <div className="flex bg-slate-100 rounded-lg p-0.5">
                                         <button
@@ -1019,7 +1023,7 @@ const AccommodationManager: React.FC = () => {
                             </div>
 
                             {/* Summary Stats Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-5">
                                 <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] hover:shadow-lg transition-shadow relative overflow-hidden group">
                                     <div className="absolute right-0 top-0 w-32 h-32 bg-slate-50 rounded-full -mr-10 -mt-10 group-hover:scale-110 transition-transform"></div>
                                     <div className="relative z-10">
@@ -1097,7 +1101,7 @@ const AccommodationManager: React.FC = () => {
                                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                                 </div>
                             ) : accommodations.length === 0 ? (
-                                <div className="bg-white rounded-3xl border border-dashed border-slate-300 p-20 text-center">
+                                <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-20 text-center">
                                     <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-300">
                                         <FontAwesomeIcon icon={faBuilding} className="text-4xl" />
                                     </div>
@@ -1597,7 +1601,7 @@ const AccommodationManager: React.FC = () => {
                             )}
 
                             {/* Ownership Summary Breakdown */}
-                            <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in-up">
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-fade-in-up">
                                 <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex justify-between items-center">
                                     <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
                                         <FontAwesomeIcon icon={faChartPie} className="text-indigo-500" />
@@ -1683,7 +1687,7 @@ const AccommodationManager: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <div className="bg-indigo-50/70 rounded-2xl border border-indigo-100 shadow-sm p-5">
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
                                 <h2 className="text-sm font-extrabold text-indigo-900">배정/청구관리 통합 안내</h2>
                                 <p className="text-xs text-indigo-700 mt-1 leading-relaxed">
                                     현황판에서 숙소 행/카드를 클릭하거나 `배정/청구관리` 버튼을 누르면, 배정 등록과 청구대상(팀/개인) 설정을 한 화면에서 함께 관리합니다.

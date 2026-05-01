@@ -1,10 +1,37 @@
-export type IssueStatus = 'issued' | 'pending' | 'deferred' | 'cancelled';
+import {
+    faCheckCircle,
+    faClock,
+    faForward,
+    faBan,
+    faFileSignature,
+} from '@fortawesome/free-solid-svg-icons';
+
+export type IssueStatus = 'ready' | 'issued' | 'pending' | 'deferred';
+
+export const STATUS_CONFIG: Record<IssueStatus, { label: string; color: string; icon: any; bg: string; border: string }> = {
+    ready: {
+        label: '준비', color: 'text-violet-700', icon: faFileSignature,
+        bg: 'bg-white', border: 'border-violet-200',
+    },
+    issued: {
+        label: '완료', color: 'text-green-700', icon: faCheckCircle,
+        bg: 'bg-green-50', border: 'border-green-200',
+    },
+    pending: {
+        label: '대기', color: 'text-amber-700', icon: faClock,
+        bg: 'bg-amber-50', border: 'border-amber-200',
+    },
+    deferred: {
+        label: '이월', color: 'text-blue-700', icon: faForward,
+        bg: 'bg-blue-50', border: 'border-blue-200',
+    },
+};
 
 export interface TaxInvoiceIssue {
     id?: string;
     yearMonth: string;         // e.g. "2026-03"
     no: number;                // 순번
-    isNew: boolean;            // 신규 입력 여부
+    isNew: string;             // 신규/입력/다원 상태
     issueDate: string;         // 발행일 (YYYY-MM-DD)
     recipient: string;         // 공급받는자 (업체명)
     item: string;              // 품목

@@ -38,6 +38,15 @@ export const taxInvoiceListService = {
         await deleteDoc(doc(db, COLLECTION_NAME, id));
     },
 
+    async deleteIssuesBatch(ids: string[]): Promise<void> {
+        const { writeBatch } = await import('firebase/firestore');
+        const batch = writeBatch(db);
+        ids.forEach(id => {
+            batch.delete(doc(db, COLLECTION_NAME, id));
+        });
+        await batch.commit();
+    },
+
     async getIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
         // 복합 인덱스 없이도 동작하도록 where만 사용 후 in-memory 정렬
         const q = query(
@@ -92,12 +101,18 @@ export const taxInvoiceListService = {
             // 현장담당팀 (responsibleTeamName)
             const teamName = row.responsibleTeamName || row.teamName || '';
 
-            // 발주사: sites 컬렉션에서 조회
+            // 현장 데이터 조회
             const site = siteId
                 ? siteIdMap.get(siteId.trim())
                 : siteNameMap.get(siteName.trim());
-            // 발주사: site.clientCompanyName (일보 입력에서 '발주'로 표시되는 필드)
-            const companyName: string = (site as any)?.clientCompanyName || (site as any)?.companyName || '';
+
+            // 발주사 또는 협력사 결정: 현장구분이 '지원'인 경우 협력사(partnerName)를 우선 사용
+            let companyName: string = '';
+            if (siteType === '지원') {
+                companyName = (site as any)?.partnerName || (site as any)?.clientCompanyName || (site as any)?.companyName || '';
+            } else {
+                companyName = (site as any)?.clientCompanyName || (site as any)?.companyName || '';
+            }
 
             const key = `${siteId || siteName}|${siteType}|${paymentType}`;
 

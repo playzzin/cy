@@ -84,6 +84,12 @@ export const cardFirestoreService = {
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord));
     },
 
+    async listAllCardAssignments(): Promise<CardAssignmentRecord[]> {
+        const q = query(collection(db, ASSIGNMENTS_COLLECTION), orderBy('startDate', 'desc'));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord));
+    },
+
     async assignCard(params: {
         cardId: string;
         assigneeId: string;

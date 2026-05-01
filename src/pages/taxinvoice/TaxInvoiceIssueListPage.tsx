@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faFileInvoiceDollar,
@@ -10,12 +10,17 @@ import {
     faClock,
     faForward,
     faBan,
+    faFileSignature,
     faBuilding,
     faChevronLeft,
     faChevronRight,
+    faFilter,
+    faSearch,
+    faFileExcel,
 } from '@fortawesome/free-solid-svg-icons';
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
-import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary } from '../../types/taxInvoiceList';
+import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary, STATUS_CONFIG } from '../../types/taxInvoiceList';
+import { exportIssuesToExcel } from '../../utils/taxInvoiceExcelUtils';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -29,32 +34,13 @@ const formatYearMonth = (ym: string) => {
     return `${y}년 ${Number(m)}월`;
 };
 
-const STATUS_CONFIG: Record<IssueStatus, { label: string; color: string; icon: any; bg: string; border: string }> = {
-    issued: {
-        label: '발행완료', color: 'text-green-700', icon: faCheckCircle,
-        bg: 'bg-green-50', border: 'border-green-200',
-    },
-    pending: {
-        label: '발행대기', color: 'text-amber-700', icon: faClock,
-        bg: 'bg-amber-50', border: 'border-amber-200',
-    },
-    deferred: {
-        label: '발행이월', color: 'text-blue-700', icon: faForward,
-        bg: 'bg-blue-50', border: 'border-blue-200',
-    },
-    cancelled: {
-        label: '발행취소', color: 'text-red-700', icon: faBan,
-        bg: 'bg-red-50', border: 'border-red-200',
-    },
-};
-
 const SITE_TYPE_OPTIONS = ['전체', '지원', '도급', '직영'];
 const PAYMENT_TYPE_OPTIONS = ['전체', '계산서', '노무'];
 
 const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'> => ({
     yearMonth,
     no,
-    isNew: true,
+    isNew: '입력',
     issueDate: `${yearMonth}-01`,
     recipient: '',
     item: '',
@@ -307,21 +293,37 @@ interface EditableCellProps {
     type?: 'text' | 'number' | 'date';
     onCommit: (id: string | undefined, field: EditableField, value: string | number | boolean) => void;
     className?: string;
+    // Keyboard Navigation
+    rowIndex?: number;
+    colIndex?: number;
+    isFocused?: boolean;
+    onNavigate?: (direction: 'up' | 'down' | 'left' | 'right' | 'tab' | 'untab') => void;
 }
 
 const EditableCell: React.FC<EditableCellProps> = ({
-    value, field, rowId, type = 'text', onCommit, className = ''
+    value, field, rowId, type = 'text', onCommit, className = '',
+    rowIndex, colIndex, isFocused, onNavigate
 }) => {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState(String(value));
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // 부모로부터 포커스 명령을 받았을 때 에디팅 모드 진입
+    useEffect(() => {
+        if (isFocused) {
+            setDraft(String(value));
+            setEditing(true);
+        }
+    }, [isFocused, value]);
+
     useEffect(() => {
         if (editing && inputRef.current) {
             inputRef.current.focus();
-            inputRef.current.select();
+            if (type !== 'date') {
+                inputRef.current.select();
+            }
         }
-    }, [editing]);
+    }, [editing, type]);
 
     const commit = () => {
         let finalValue: string | number | boolean = draft;
@@ -332,18 +334,68 @@ const EditableCell: React.FC<EditableCellProps> = ({
         setEditing(false);
     };
 
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        const target = e.target as HTMLInputElement;
+        const isFirstChar = target.selectionStart === 0 && target.selectionEnd === 0;
+        const isLastChar = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
+
+        if (e.key === 'Enter') {
+            commit();
+            if (onNavigate) onNavigate('down');
+        }
+        if (e.key === 'Escape') {
+            setDraft(String(value));
+            setEditing(false);
+        }
+        
+        if (onNavigate) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                commit();
+                onNavigate('up');
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                commit();
+                onNavigate('down');
+            } else if (e.key === 'ArrowLeft' && isFirstChar) {
+                // 커서가 맨 앞에 있을 때 왼쪽 키 누르면 이동
+                e.preventDefault();
+                commit();
+                onNavigate('left');
+            } else if (e.key === 'ArrowRight' && isLastChar) {
+                // 커서가 맨 뒤에 있을 때 오른쪽 키 누르면 이동
+                e.preventDefault();
+                commit();
+                onNavigate('right');
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                commit();
+                onNavigate(e.shiftKey ? 'untab' : 'tab');
+            }
+        }
+    };
+
     if (editing) {
         return (
             <input
                 ref={inputRef}
-                type={type === 'number' ? 'number' : type}
+                // number 타입은 selectionStart를 지원하지 않아 text로 변경하여 엑셀 스타일 이동 지원
+                type={type === 'date' ? 'date' : 'text'}
+                inputMode={type === 'number' ? 'decimal' : undefined}
                 value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onBlur={commit}
-                onKeyDown={e => {
-                    if (e.key === 'Enter') commit();
-                    if (e.key === 'Escape') { setDraft(String(value)); setEditing(false); }
+                onChange={e => {
+                    const val = e.target.value;
+                    if (type === 'number') {
+                        // 숫자, 소수점, 마이너스 기호만 허용
+                        if (val === '' || /^-?\d*\.?\d*$/.test(val.replace(/,/g, ''))) {
+                            setDraft(val);
+                        }
+                    } else {
+                        setDraft(val);
+                    }
                 }}
+                onBlur={commit}
+                onKeyDown={handleKeyDown}
                 className={`w-full px-2 py-1 text-xs border border-indigo-400 rounded-lg outline-none bg-indigo-50 focus:ring-2 focus:ring-indigo-200 ${className}`}
             />
         );
@@ -352,11 +404,108 @@ const EditableCell: React.FC<EditableCellProps> = ({
     return (
         <span
             onClick={() => { setDraft(String(value)); setEditing(true); }}
-            className={`block cursor-pointer px-1 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 transition-colors min-w-0 truncate ${className}`}
+            className={`block cursor-pointer px-1 py-0.5 rounded hover:bg-indigo-50 hover:text-indigo-700 transition-colors min-h-[1.25rem] min-w-[2rem] truncate ${className}`}
             title={String(value)}
         >
-            {type === 'number' ? fmt(Number(value)) : String(value)}
+            {type === 'number' 
+                ? fmt(Number(value)) 
+                : (String(value) || '\u00A0')
+            }
         </span>
+    );
+};
+
+// ─────────────────────────────────────────────
+// Column Filter Popover
+// ─────────────────────────────────────────────
+interface ColumnFilterProps {
+    label: string;
+    value: string;
+    onChange: (val: string) => void;
+    options?: string[]; // For select-type filters
+}
+
+const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, options }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const popoverRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        if (isOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div className="relative inline-block ml-1" ref={popoverRef}>
+            <button
+                onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+                className={`p-1 rounded transition-colors ${value ? 'text-indigo-600 bg-indigo-50' : 'text-slate-300 hover:text-slate-500 hover:bg-slate-100'}`}
+            >
+                <FontAwesomeIcon icon={faFilter} className="text-[10px]" />
+            </button>
+
+            {isOpen && (
+                <div className="absolute top-full left-0 mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-200 z-50 p-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">{label} 필터</p>
+                    
+                    {/* 검색창 (목록이 있을 때도 필터링을 위해 항상 표시 또는 조건부 표시) */}
+                    <div className="relative mb-2">
+                        <input
+                            autoFocus={!options}
+                            type="text"
+                            value={options ? (window as any)._filterSearch || '' : value}
+                            onChange={(e) => {
+                                if (options) {
+                                    (window as any)._filterSearch = e.target.value;
+                                    setIsOpen(true); // 리렌더링 유도
+                                } else {
+                                    onChange(e.target.value);
+                                }
+                            }}
+                            placeholder="검색..."
+                            className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-400 outline-none"
+                            onKeyDown={(e) => { if (e.key === 'Enter') setIsOpen(false); }}
+                        />
+                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-2 text-slate-300 text-[10px]" />
+                    </div>
+
+                    {options && (
+                        <div className="space-y-1 max-h-48 overflow-y-auto border-t pt-2 border-slate-100">
+                            <button
+                                onClick={() => { onChange(''); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                                className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${!value ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                            >
+                                전체 (All)
+                            </button>
+                            {options
+                                .filter(opt => !((window as any)._filterSearch) || opt.toLowerCase().includes(((window as any)._filterSearch).toLowerCase()))
+                                .map(opt => (
+                                    <button
+                                        key={opt}
+                                        onClick={() => { onChange(opt); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                                        className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${value === opt ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
+                                    >
+                                        {opt}
+                                    </button>
+                                ))}
+                        </div>
+                    )}
+                    
+                    {value && (
+                        <button 
+                            onClick={() => { onChange(''); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                            className="mt-2 w-full py-1 text-[10px] font-bold text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                        >
+                            필터 초기화
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
     );
 };
 
@@ -368,14 +517,62 @@ interface SelectCellProps {
     rowId: string | undefined;
     onCommit: (id: string | undefined, field: EditableField, value: string | number | boolean) => void;
     badgeClass?: string;
+    // Keyboard Navigation
+    rowIndex?: number;
+    colIndex?: number;
+    isFocused?: boolean;
+    onNavigate?: (direction: 'up' | 'down' | 'left' | 'right' | 'tab' | 'untab') => void;
 }
 
-const SelectCell: React.FC<SelectCellProps> = ({ value, options, field, rowId, onCommit, badgeClass = '' }) => {
+const SelectCell: React.FC<SelectCellProps> = ({ 
+    value, options, field, rowId, onCommit, badgeClass = '',
+    rowIndex, colIndex, isFocused, onNavigate
+}) => {
+    const selectRef = useRef<HTMLSelectElement>(null);
+
+    useEffect(() => {
+        if (isFocused && selectRef.current) {
+            selectRef.current.focus();
+        }
+    }, [isFocused]);
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLSelectElement>) => {
+        if (onNavigate) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                onNavigate('up');
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                onNavigate('down');
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                onNavigate('left');
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                onNavigate('right');
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                onNavigate(e.shiftKey ? 'untab' : 'tab');
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                onNavigate('down');
+            }
+        }
+    };
+
     return (
         <select
+            ref={selectRef}
             value={value || ''}
             onChange={e => onCommit(rowId, field, e.target.value)}
-            className={`text-xs border-0 bg-transparent cursor-pointer outline-none font-bold w-full ${badgeClass}`}
+            onKeyDown={handleKeyDown}
+            onFocus={() => {
+                if (onNavigate && (!isFocused)) {
+                    // 마우스 클릭 등으로 포커스 되었을 때 부모 상태 동기화
+                    onNavigate('none' as any); 
+                }
+            }}
+            className={`text-xs border-0 bg-transparent cursor-pointer outline-none font-bold w-full focus:ring-2 focus:ring-indigo-400 rounded ${badgeClass}`}
         >
             <option value="">-</option>
             {options.map(opt => (
@@ -401,6 +598,69 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const [loadingSites, setLoadingSites] = useState(false);
     const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
 
+    // Column Filters State
+    const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+
+    const updateFilter = (field: string, val: string) => {
+        setColumnFilters(prev => ({ ...prev, [field]: val }));
+    };
+
+    // Column Filter Options (Unique Values)
+    const uniqueRecipients = useMemo(() => Array.from(new Set(issues.map(i => i.recipient))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueItems = useMemo(() => Array.from(new Set(issues.map(i => i.item))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueNotes = useMemo(() => Array.from(new Set(issues.map(i => i.note))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueTeams = useMemo(() => Array.from(new Set(issues.map(i => i.teamName))).filter((v): v is string => !!v).sort(), [issues]);
+
+    // Keyboard Navigation State
+    const [activeCell, setActiveCell] = useState<{ r: number, c: number } | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+    const EDITABLE_COLUMNS: EditableField[] = [
+        'isNew',
+        'issueDate',
+        'recipient',
+        'item',
+        'supplyAmount',
+        'note',
+        'manDays',
+        'teamName',
+        'siteType',
+        'paymentType',
+        'issueStatus',
+        'remark'
+    ];
+
+    // Keyboard Navigation Handler
+    const handleNavigate = (r: number, c: number, direction: 'up' | 'down' | 'left' | 'right' | 'tab' | 'untab') => {
+        let nextR = r;
+        let nextC = c;
+
+        switch (direction) {
+            case 'up': nextR = Math.max(0, r - 1); break;
+            case 'down': nextR = Math.min(filteredIssues.length - 1, r + 1); break;
+            case 'left': nextC = Math.max(0, c - 1); break;
+            case 'right': nextC = Math.min(EDITABLE_COLUMNS.length - 1, c + 1); break;
+            case 'tab':
+                if (c < EDITABLE_COLUMNS.length - 1) {
+                    nextC = c + 1;
+                } else if (r < filteredIssues.length - 1) {
+                    nextR = r + 1;
+                    nextC = 0;
+                }
+                break;
+            case 'untab':
+                if (c > 0) {
+                    nextC = c - 1;
+                } else if (r > 0) {
+                    nextR = r - 1;
+                    nextC = EDITABLE_COLUMNS.length - 1;
+                }
+                break;
+        }
+
+        setActiveCell({ r: nextR, c: nextC });
+    };
+
     // ── Load issues ──
     const loadIssues = async () => {
         setLoading(true);
@@ -416,7 +676,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
     };
 
-    useEffect(() => { loadIssues(); setSiteData([]); }, [yearMonth]);
+    useEffect(() => { 
+        setIssues([]); // 월 변경 시 즉시 목록을 비워 순번 꼬임 방지
+        setSiteData([]); 
+        loadIssues(); 
+    }, [yearMonth]);
 
     // ── Month navigation ──
     const stepMonth = (delta: number) => {
@@ -444,9 +708,50 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         try {
             await taxInvoiceListService.deleteIssue(id);
             setIssues(prev => prev.filter(i => i.id !== id));
+            setSelectedIds(prev => {
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+            });
         } catch (e) {
             console.error(e);
         }
+    };
+
+    const handleBulkDelete = async () => {
+        if (selectedIds.size === 0) return;
+        if (!window.confirm(`선택한 ${selectedIds.size}개의 항목을 모두 삭제하시겠습니까?`)) return;
+        
+        setLoading(true);
+        try {
+            const ids = Array.from(selectedIds);
+            await taxInvoiceListService.deleteIssuesBatch(ids);
+            setIssues(prev => prev.filter(i => i.id && !selectedIds.has(i.id)));
+            setSelectedIds(new Set());
+        } catch (e) {
+            console.error('일괄 삭제 실패:', e);
+            alert('일괄 삭제 중 오류가 발생했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.size === filteredIssues.length) {
+            setSelectedIds(new Set());
+        } else {
+            setSelectedIds(new Set(filteredIssues.map(i => i.id).filter(Boolean) as string[]));
+        }
+    };
+
+    const toggleSelection = (id: string | undefined) => {
+        if (!id) return;
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
     };
 
     // ── Inline edit commit ──
@@ -480,12 +785,6 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         await handleCellCommit(id, 'scanCompleted', !current);
     };
 
-    // ── isNew toggle ──
-    const handleNewToggle = async (id: string | undefined, current: boolean) => {
-        if (!id) return;
-        await handleCellCommit(id, 'isNew', !current);
-    };
-
     // ── Load site data ──
     const handleLoadSites = async () => {
         setLoadingSites(true);
@@ -506,7 +805,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         const newIssues: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'>[] = selected.map((s, idx) => ({
             yearMonth,
             no: maxNo + idx + 1,
-            isNew: true,
+            isNew: '입력',
             issueDate: `${yearMonth}-01`,
             recipient: s.companyName,    // 발주사 → 공급받는자
             item: '',                    // 품목 (나중에 수정 가능)
@@ -515,7 +814,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
             manDays: s.manDays,
             teamName: s.teamName,        // 현장담당팀
             remark: '',                  // 특이사항 (나중에 입력)
-            issueStatus: 'pending' as IssueStatus,
+            issueStatus: 'ready' as IssueStatus,
             scanCompleted: false,
             siteId: s.siteId,
             siteName: s.siteName,
@@ -537,25 +836,46 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Derived stats ──
     const stats = {
-        issued: issues.filter(i => i.issueStatus === 'issued').length,
+        ready: issues.filter(i => i.issueStatus === 'ready').length,
         pending: issues.filter(i => i.issueStatus === 'pending').length,
+        issued: issues.filter(i => i.issueStatus === 'issued').length,
         deferred: issues.filter(i => i.issueStatus === 'deferred').length,
-        cancelled: issues.filter(i => i.issueStatus === 'cancelled').length,
     };
 
     const totalSupply = issues
-        .filter(i => i.issueStatus !== 'cancelled')
         .reduce((acc, i) => acc + (i.supplyAmount || 0), 0);
 
     const totalManDays = issues
-        .filter(i => i.issueStatus !== 'cancelled')
         .reduce((acc, i) => acc + (i.manDays || 0), 0);
     const totalManDaysRounded = Math.round(totalManDays * 10) / 10;
 
-    // Filtered issues by status
-    const filteredIssues = statusFilter === 'all'
-        ? issues
-        : issues.filter(i => i.issueStatus === statusFilter);
+    // Filtered issues by all criteria
+    const filteredIssues = issues.filter(issue => {
+        // 1. Sidebar Status Filter
+        if (statusFilter !== 'all' && issue.issueStatus !== statusFilter) return false;
+
+        // 2. Column Header Filters
+        for (const [field, val] of Object.entries(columnFilters)) {
+            if (!val) continue;
+            
+            const issueVal = String((issue as any)[field] ?? '').toLowerCase();
+            const searchVal = val.toLowerCase();
+
+            // Status, Type 필터는 정확히 일치, 나머지는 포함 여부
+            if (['issueStatus', 'siteType', 'paymentType'].includes(field)) {
+                // Status는 label로 필터링될 수 있으므로 매칭 로직 주의
+                if (field === 'issueStatus') {
+                    const label = STATUS_CONFIG[issue.issueStatus].label;
+                    if (label !== val) return false;
+                } else {
+                    if (issueVal !== searchVal) return false;
+                }
+            } else {
+                if (!issueVal.includes(searchVal)) return false;
+            }
+        }
+        return true;
+    });
 
     // Deferred sites (status === 'deferred')
     const deferredSites = issues
@@ -570,6 +890,19 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     // ─────────────────────────────────────────────
     return (
         <div className="flex flex-col p-6 gap-5 bg-slate-50 min-h-full">
+            {/* 숫자 입력창 스핀 버튼 제거 스타일 */}
+            <style>
+                {`
+                    input::-webkit-outer-spin-button,
+                    input::-webkit-inner-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                    }
+                    input[type=number] {
+                        -moz-appearance: textfield;
+                    }
+                `}
+            </style>
             {/* ── Header ── */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -603,6 +936,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     </div>
 
                     <button
+                        onClick={() => exportIssuesToExcel(filteredIssues, yearMonth)}
+                        disabled={filteredIssues.length === 0}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50"
+                    >
+                        <FontAwesomeIcon icon={faFileExcel} />
+                        엑셀 다운로드
+                    </button>
+
+                    <button
                         onClick={handleLoadSites}
                         disabled={loadingSites}
                         className="flex items-center gap-2 px-4 py-2 bg-slate-700 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all shadow-sm disabled:opacity-60"
@@ -618,6 +960,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <FontAwesomeIcon icon={faPlus} />
                         행 추가
                     </button>
+
+                    {selectedIds.size > 0 && (
+                        <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-all border border-red-200 active:scale-95"
+                        >
+                            <FontAwesomeIcon icon={faTrash} />
+                            선택 삭제 ({selectedIds.size})
+                        </button>
+                    )}
 
                     <button
                         onClick={loadIssues}
@@ -649,26 +1001,29 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                 <span className="text-sm font-bold text-slate-600">전체</span>
                                 <span className="text-sm font-black text-slate-700">{issues.length}건</span>
                             </button>
-                            {(Object.entries(STATUS_CONFIG) as [IssueStatus, typeof STATUS_CONFIG[IssueStatus]][]).map(
-                                ([key, cfg]) => (
-                                    <button
-                                        key={key}
-                                        onClick={() => setStatusFilter(prev => prev === key ? 'all' : key as IssueStatus)}
-                                        className={`w-full flex items-center justify-between p-2.5 rounded-xl border transition-all ${
-                                            statusFilter === key
-                                                ? `${cfg.bg} ${cfg.border} ring-2 ring-offset-1 ring-current ${cfg.color}`
-                                                : `${cfg.bg} ${cfg.border} hover:brightness-95`
-                                        }`}
-                                    >
-                                        <div className={`flex items-center gap-2 text-sm font-bold ${cfg.color}`}>
-                                            <FontAwesomeIcon icon={cfg.icon} className="text-xs" />
-                                            {cfg.label}
-                                        </div>
-                                        <span className={`text-sm font-black ${cfg.color}`}>
-                                            {stats[key]}건
-                                        </span>
-                                    </button>
-                                )
+                            {(['ready', 'pending', 'issued', 'deferred'] as IssueStatus[]).map(
+                                (key) => {
+                                     const cfg = STATUS_CONFIG[key];
+                                     return (
+                                         <button
+                                             key={key}
+                                             onClick={() => setStatusFilter(prev => prev === key ? 'all' : key as IssueStatus)}
+                                             className={`w-full flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                                                 statusFilter === key
+                                                     ? `${cfg.bg} ${cfg.border} ring-2 ring-offset-1 ring-current ${cfg.color}`
+                                                     : `${cfg.bg} ${cfg.border} hover:brightness-95`
+                                             }`}
+                                         >
+                                             <div className={`flex items-center gap-2 text-sm font-bold ${cfg.color}`}>
+                                                 <FontAwesomeIcon icon={cfg.icon} className="text-xs" />
+                                                 {cfg.label}
+                                             </div>
+                                             <span className={`text-sm font-black ${cfg.color}`}>
+                                                 {stats[key]}건
+                                             </span>
+                                         </button>
+                                     );
+                                 }
                             )}
                         </div>
                         <div className="mt-3 pt-3 border-t border-slate-100">
@@ -751,20 +1106,84 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                         <table className="w-full text-xs">
                             <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
+                                    <th className="px-3 py-3 text-center w-10">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                            checked={filteredIssues.length > 0 && selectedIds.size === filteredIssues.length}
+                                            onChange={toggleSelectAll}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-10">No</th>
                                     <th className="px-2 py-3 text-center font-black text-slate-500 w-12">신규</th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-24">발행일</th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-28">공급받는자</th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-28">품목</th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-28">
+                                        공급받는자
+                                        <ColumnFilter 
+                                            label="공급받는자" 
+                                            value={columnFilters.recipient || ''} 
+                                            onChange={(v) => updateFilter('recipient', v)} 
+                                            options={uniqueRecipients}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-28">
+                                        품목
+                                        <ColumnFilter 
+                                            label="품목" 
+                                            value={columnFilters.item || ''} 
+                                            onChange={(v) => updateFilter('item', v)} 
+                                            options={uniqueItems}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-right font-black text-slate-500 w-24">공급가</th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500">비고</th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-32">
+                                        비고
+                                        <ColumnFilter 
+                                            label="비고" 
+                                            value={columnFilters.note || ''} 
+                                            onChange={(v) => updateFilter('note', v)} 
+                                            options={uniqueNotes}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-right font-black text-slate-500 w-16">공수</th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-20">팀</th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-20">현장구분</th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-20">결제구분</th>
-                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-24">발행</th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-20">
+                                        팀
+                                        <ColumnFilter 
+                                            label="팀" 
+                                            value={columnFilters.teamName || ''} 
+                                            onChange={(v) => updateFilter('teamName', v)} 
+                                            options={uniqueTeams}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-24">
+                                        현장구분
+                                        <ColumnFilter 
+                                            label="현장구분" 
+                                            value={columnFilters.siteType || ''} 
+                                            onChange={(v) => updateFilter('siteType', v)} 
+                                            options={['지원', '도급', '직영']}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-24">
+                                        결제구분
+                                        <ColumnFilter 
+                                            label="결제구분" 
+                                            value={columnFilters.paymentType || ''} 
+                                            onChange={(v) => updateFilter('paymentType', v)} 
+                                            options={['계산서', '노무']}
+                                        />
+                                    </th>
+                                    <th className="px-3 py-3 text-center font-black text-slate-500 w-24">
+                                        발행
+                                        <ColumnFilter 
+                                            label="발행상태" 
+                                            value={columnFilters.issueStatus || ''} 
+                                            onChange={(v) => updateFilter('issueStatus', v)} 
+                                            options={Object.values(STATUS_CONFIG).map(c => c.label)}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-center font-black text-slate-500 w-14">스캔</th>
-                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-32">특이사항</th>
+                                    <th className="px-3 py-3 text-left font-black text-slate-500 w-56">특이사항</th>
                                     <th className="px-3 py-3 text-center font-black text-slate-500 w-10">삭제</th>
                                 </tr>
                             </thead>
@@ -784,39 +1203,54 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         </td>
                                     </tr>
                                 ) : (
-                                    filteredIssues.map(issue => {
+                                    filteredIssues.map((issue, idx) => {
                                         const isSaving = saving.has(issue.id ?? '');
+                                        const isSelected = selectedIds.has(issue.id ?? '');
                                         const statusCfg = STATUS_CONFIG[issue.issueStatus] || STATUS_CONFIG.pending;
                                         return (
                                             <tr
                                                 key={issue.id}
                                                 style={{
                                                     backgroundColor:
+                                                        isSelected ? '#e0e7ff' : // Indigo 100 for selection
+                                                        issue.issueStatus === 'ready' ? '#ffffff' :
                                                         issue.issueStatus === 'issued' ? '#bbf7d0' :
                                                         issue.issueStatus === 'pending' ? '#fde68a' :
                                                         issue.issueStatus === 'deferred' ? '#bfdbfe' :
-                                                        issue.issueStatus === 'cancelled' ? '#fecaca' :
+                                                        
                                                         undefined,
                                                 }}
-                                                className={`hover:brightness-95 transition-colors ${isSaving ? 'opacity-60' : ''} ${
-                                                    issue.issueStatus === 'cancelled' ? 'line-through text-slate-400' : ''
+                                                className={`group transition-all hover:brightness-95 ${isSelected ? 'ring-2 ring-inset ring-indigo-500 z-10' : ''} ${isSaving ? 'opacity-60 pointer-events-none' : ''} ${
+                                                    ''
                                                 }`}
                                             >
+                                                {/* Checkbox */}
+                                                <td className="px-3 py-2 text-center">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                                        checked={isSelected}
+                                                        onChange={() => toggleSelection(issue.id)}
+                                                    />
+                                                </td>
+
                                                 {/* No */}
                                                 <td className="px-3 py-2 font-bold text-slate-600">{issue.no}</td>
 
                                                 {/* 신규 */}
                                                 <td className="px-2 py-2 text-center">
-                                                    <button
-                                                        onClick={() => handleNewToggle(issue.id, issue.isNew)}
-                                                        className={`px-1.5 py-0.5 rounded text-[10px] font-black transition-colors ${
-                                                            issue.isNew
-                                                                ? 'bg-violet-100 text-violet-700'
-                                                                : 'bg-slate-100 text-slate-400'
-                                                        }`}
-                                                    >
-                                                        {issue.isNew ? '입력' : '-'}
-                                                    </button>
+                                                    <SelectCell
+                                                        value={typeof issue.isNew === 'boolean' ? (issue.isNew ? '입력' : '') : issue.isNew}
+                                                        options={['입력', '신규', '다원']}
+                                                        field="isNew"
+                                                        rowId={issue.id}
+                                                        onCommit={handleCellCommit}
+                                                        badgeClass={issue.isNew === '입력' ? 'text-violet-700' : (issue.isNew === '신규' ? 'text-blue-700' : 'text-emerald-700')}
+                                                        rowIndex={idx}
+                                                        colIndex={0}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 0}
+                                                        onNavigate={(dir) => handleNavigate(idx, 0, dir)}
+                                                    />
                                                 </td>
 
                                                 {/* 발행일 */}
@@ -827,6 +1261,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         type="date"
                                                         onCommit={handleCellCommit}
+                                                        rowIndex={idx}
+                                                        colIndex={1}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 1}
+                                                        onNavigate={(dir) => handleNavigate(idx, 1, dir)}
                                                     />
                                                 </td>
 
@@ -838,6 +1276,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         className="font-bold"
+                                                        rowIndex={idx}
+                                                        colIndex={2}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 2}
+                                                        onNavigate={(dir) => handleNavigate(idx, 2, dir)}
                                                     />
                                                 </td>
 
@@ -848,6 +1290,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         field="item"
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
+                                                        rowIndex={idx}
+                                                        colIndex={3}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 3}
+                                                        onNavigate={(dir) => handleNavigate(idx, 3, dir)}
                                                     />
                                                 </td>
 
@@ -860,6 +1306,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         type="number"
                                                         onCommit={handleCellCommit}
                                                         className={`text-right ${issue.supplyAmount < 0 ? 'text-red-600' : 'text-slate-800'}`}
+                                                        rowIndex={idx}
+                                                        colIndex={4}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 4}
+                                                        onNavigate={(dir) => handleNavigate(idx, 4, dir)}
                                                     />
                                                 </td>
 
@@ -871,6 +1321,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         className="text-slate-500"
+                                                        rowIndex={idx}
+                                                        colIndex={5}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 5}
+                                                        onNavigate={(dir) => handleNavigate(idx, 5, dir)}
                                                     />
                                                 </td>
 
@@ -883,6 +1337,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         type="number"
                                                         onCommit={handleCellCommit}
                                                         className="text-right font-semibold text-slate-700"
+                                                        rowIndex={idx}
+                                                        colIndex={6}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 6}
+                                                        onNavigate={(dir) => handleNavigate(idx, 6, dir)}
                                                     />
                                                 </td>
 
@@ -894,6 +1352,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         className="text-center text-slate-600"
+                                                        rowIndex={idx}
+                                                        colIndex={7}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 7}
+                                                        onNavigate={(dir) => handleNavigate(idx, 7, dir)}
                                                     />
                                                 </td>
 
@@ -906,6 +1368,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         badgeClass="text-violet-700"
+                                                        rowIndex={idx}
+                                                        colIndex={8}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 8}
+                                                        onNavigate={(dir) => handleNavigate(idx, 8, dir)}
                                                     />
                                                 </td>
 
@@ -918,22 +1384,29 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         badgeClass="text-amber-700"
+                                                        rowIndex={idx}
+                                                        colIndex={9}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 9}
+                                                        onNavigate={(dir) => handleNavigate(idx, 9, dir)}
                                                     />
                                                 </td>
 
                                                 {/* 발행 상태 */}
                                                 <td className="px-3 py-2 text-center">
-                                                    <select
-                                                        value={issue.issueStatus}
-                                                        onChange={e => handleStatusChange(issue.id, e.target.value as IssueStatus)}
-                                                        className="text-xs border-0 bg-transparent cursor-pointer outline-none font-bold w-full"
-                                                    >
-                                                        {(Object.entries(STATUS_CONFIG) as [IssueStatus, typeof STATUS_CONFIG[IssueStatus]][]).map(
-                                                            ([k, cfg]) => (
-                                                                <option key={k} value={k}>{cfg.label}</option>
-                                                            )
-                                                        )}
-                                                    </select>
+                                                    <SelectCell
+                                                        value={STATUS_CONFIG[issue.issueStatus]?.label || issue.issueStatus}
+                                                        options={['ready', 'pending', 'issued', 'deferred'].map(k => STATUS_CONFIG[k as IssueStatus].label)}
+                                                        field="issueStatus"
+                                                        rowId={issue.id}
+                                                        onCommit={(id, f, v) => {
+                                                            const key = (Object.entries(STATUS_CONFIG) as [IssueStatus, any][]).find(([_, cfg]) => cfg.label === v)?.[0] || 'ready';
+                                                            handleStatusChange(id, key as IssueStatus);
+                                                        }}
+                                                        rowIndex={idx}
+                                                        colIndex={10}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 10}
+                                                        onNavigate={(dir) => handleNavigate(idx, 10, dir)}
+                                                    />
                                                 </td>
 
                                                 {/* 스캔 */}
@@ -962,6 +1435,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
                                                         className="text-slate-500 text-xs"
+                                                        rowIndex={idx}
+                                                        colIndex={11}
+                                                        isFocused={activeCell?.r === idx && activeCell?.c === 11}
+                                                        onNavigate={(dir) => handleNavigate(idx, 11, dir)}
                                                     />
                                                 </td>
 
@@ -985,7 +1462,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                 <tfoot>
                                     <tr className="bg-slate-50 border-t-2 border-slate-200 font-black text-slate-700">
                                         <td colSpan={5} className="px-3 py-3 text-sm">
-                                            합계 ({issues.filter(i => i.issueStatus !== 'cancelled').length}건)
+                                            합계 ({issues.length}건)
                                         </td>
                                         <td className="px-3 py-3 text-right text-sm">
                                             {fmt(totalSupply)}

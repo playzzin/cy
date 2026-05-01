@@ -22,7 +22,7 @@ const PRIMARY_COLOR = '#0f172a'; // slate-900 (Header)
 // --- Preset Data for Autocomplete ---
 const COMMON_CATEGORIES = ['시스템 동바리', '시스템 비계', '시스템 비계 (발판포함)', '선택 항목', '기타'];
 const COMMON_SECTIONS = ['설치/해체 (m3)', '설치/해체 (m2)', '추가 설치 (m3)', '추가 설치 (m2)', '망 설치 (m2)', '운반비'];
-const COMMON_UNITS = ['m3', 'm2', '인', '식', 'kg'];
+const COMMON_UNITS = ['㎡', '㎥'];
 
 // --- Types ---
 type DocumentType = 'estimate' | 'transaction';
@@ -49,6 +49,7 @@ type EstimateDraft = {
     scopeNotes: string;
     notes: string;
     installRatio: number;
+    estimateMode: 'standard' | 'rental';
     supplierName: string;
     supplierCompany: string;
     supplierContact: string;
@@ -91,7 +92,19 @@ const createItem = (input: Partial<EstimateItem> = {}): EstimateItem => ({
     note: '',
     pointBase: 4000,
     pointMultiplier: 1500,
-    date: (input as any).date || '',
+    itemDate: (input as any).itemDate || new Date().toISOString().split('T')[0],
+    
+    // 추가 필드 기본값
+    laborUnitPrice: input.laborUnitPrice || input.finalUnitPrice || 0,
+    rentalUnitPrice: input.rentalUnitPrice || 0,
+    period: input.period || 1,
+    
+    teamName: input.teamName || '',
+    itemType: input.itemType || 'outgoing',
+    additionalAmount: input.additionalAmount || 0,
+    status: input.status || '',
+    remarks: input.remarks || '',
+    etc: input.etc || '',
 });
 
 const getEmptyDraft = (type: DocumentType = 'estimate'): EstimateDraft => ({
@@ -115,7 +128,8 @@ const getEmptyDraft = (type: DocumentType = 'estimate'): EstimateDraft => ({
     scopeNotes: DEFAULT_SCOPE_NOTES,
     notes: '설치/해체 시공',
     installRatio: 50,
-    supplierName: '', supplierCompany: '', supplierContact: '', supplierAddress: '', supplierBizNo: '', supplierAccount: '', supplierFax: '', supplierManager: '이재욱', supplierManagerContact: '010-2365-7692'
+    estimateMode: 'standard',
+    supplierName: '', supplierCompany: '', supplierContact: '', supplierAddress: '', supplierBizNo: '', supplierAccount: '', supplierFax: '031-509-7693', supplierManager: '이재욱', supplierManagerContact: '010-2365-7692'
 });
 
 const LOGO_FALLBACK = "https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EA%B8%B4%EB%A1%9C%EA%B3%A0.png?alt=media&token=fca01385-1946-4b6c-8d98-776945928bc5";
@@ -123,20 +137,36 @@ const LOGO_FALLBACK = "https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.fi
 const formatCurrency = (v: number | null | undefined): string => new Intl.NumberFormat('ko-KR').format(Math.round(v || 0));
 const formatDecimal = (v: number | null | undefined): string => (v || 0).toLocaleString('ko-KR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const numberToKorean = (num: number): string => {
+    if (num === 0) return '영';
+    const numChar = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
     const unit = ['', '십', '백', '천'];
-    const gUnit = ['', '만', '억', '조'];
-    const numChar = ['영', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
-    let res = '';
-    const sNum = String(Math.floor(num));
-    for (let i = 0; i < sNum.length; i++) {
-        const n = Number(sNum[sNum.length - 1 - i]);
-        if (n > 0) res = numChar[n] + unit[i % 4] + res;
-        if (i % 4 === 3) {
-            const group = Math.floor(i / 4);
-            if (Number(sNum.slice(Math.max(0, sNum.length - 4 - i), sNum.length - i)) > 0) res = gUnit[group] + res;
+    const gUnit = ['', '만', '억', '조', '경'];
+    
+    let result = '';
+    let str = String(Math.floor(num));
+    let groupIdx = 0;
+
+    while (str.length > 0) {
+        const groupStr = str.substring(Math.max(0, str.length - 4));
+        str = str.substring(0, Math.max(0, str.length - 4));
+        
+        let groupResult = '';
+        for (let i = 0; i < groupStr.length; i++) {
+            const digit = Number(groupStr[i]);
+            if (digit > 0) {
+                const uIdx = groupStr.length - 1 - i;
+                // 십, 백, 천 단위 앞의 '일'은 생략 (금액 표기 관례)
+                const char = (digit === 1 && uIdx > 0) ? '' : numChar[digit];
+                groupResult += char + unit[uIdx];
+            }
         }
+        
+        if (groupResult.length > 0) {
+            result = groupResult + gUnit[groupIdx] + result;
+        }
+        groupIdx++;
     }
-    return res || '영';
+    return result;
 };
 
 // ─── 공통 스타일 및 유틸리티 ──────────────────────────────────────────────────
@@ -204,17 +234,17 @@ const verticalHeaderStyle: React.CSSProperties = {
 // ─── 하위 컴포넌트 외부 분리 (포커스 유지 및 성능 최적화) ───────────────────────────
 
 const TitleComponent = React.memo(({ text, logoUrl }: { text: string; logoUrl?: string }) => (
-    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px', marginTop: '10px', paddingBottom: '12px', borderBottom: '2.5px solid #000', width: '100%' }}>
-        <div style={{ flex: '0 0 200px', display: 'flex', alignItems: 'center' }}>
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', marginTop: '4px', paddingBottom: '0px', borderBottom: '2.5px solid #000', width: '100%' }}>
+        <div style={{ flex: '0 0 250px', display: 'flex', alignItems: 'center' }}>
             {logoUrl && (
                 <img
                     src={logoUrl}
                     alt="Logo"
-                    style={{ height: '75px', width: 'auto', objectFit: 'contain' }}
+                    style={{ height: '115px', width: 'auto', objectFit: 'contain' }}
                 />
             )}
         </div>
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-end', paddingBottom: '10px' }}>
             <span style={{ fontSize: '28pt', fontWeight: 900, fontFamily: EXCEL_FONT, letterSpacing: '0.5em', color: '#000', textAlign: 'center' }}>
                 {text}
             </span>
@@ -236,7 +266,7 @@ const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft, setShowComp
     const rowHeight = '16.6%';
 
     return (
-        <div style={{ display: 'flex', gap: '20px', marginBottom: '12px', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', gap: '20px', marginBottom: '5px', alignItems: 'stretch' }}>
             {/* 공급받는자 박스 */}
             <div style={{ ...tableWrapperStyle, flex: 1, marginBottom: 0 }}>
                 <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -291,7 +321,7 @@ const InfoTableComponent = React.memo(({ draft, isEdit, updateDraft, setShowComp
                             <td style={{ ...labelCellStyle(), borderBottom: BORDER_THIN, borderRight: BORDER_THIN, height: rowHeight }}>상&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;호</td>
                             <td colSpan={3} style={{ ...cellStyle(), borderBottom: BORDER_THIN, fontWeight: 700, position: 'relative' }}>
                                 {wrapInput('supplierCompany')}
-                                <img src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EB%8F%84%EC%9E%A5.jpg?alt=media&token=04a70f81-44dc-406d-ab92-b438d264e537" alt="도장" style={{ position: 'absolute', top: '-10px', right: '10px', width: '48px', height: '48px', mixBlendMode: 'multiply', opacity: 0.9, pointerEvents: 'none', zIndex: 10 }} />
+                                <img src="https://firebasestorage.googleapis.com/v0/b/cyee-9c1e4.firebasestorage.app/o/%EC%B2%AD%EC%97%B0%EB%8F%84%EC%9E%A5.jpg?alt=media&token=04a70f81-44dc-406d-ab92-b438d264e537" alt="도장" style={{ position: 'absolute', top: '15px', right: '10px', width: '48px', height: '48px', mixBlendMode: 'multiply', opacity: 0.9, pointerEvents: 'none', zIndex: 10 }} />
                             </td>
                         </tr>
                         <tr>
@@ -351,7 +381,7 @@ const AmountBarComponent = React.memo(({ subtotal, totalAmt, taxAmt, label, isTr
     const currentTaxAmt = taxAmt || (subtotal ? Math.round(subtotal * (vatRate / 100)) : 0);
 
     return (
-        <div style={{ ...tableWrapperStyle, marginBottom: '20px' }}>
+        <div style={{ ...tableWrapperStyle, marginBottom: '8px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <colgroup>
                     <col style={{ width: '80px' }} />
@@ -366,11 +396,11 @@ const AmountBarComponent = React.memo(({ subtotal, totalAmt, taxAmt, label, isTr
                     <tr style={{ height: '36px' }}>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>{label || (isTransaction ? '합계금액' : '금      액')}</td>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>일 금</td>
-                        <td style={{ ...cellStyle(), fontWeight: 700, fontSize: '11pt', textAlign: 'center', borderRight: BORDER_THIN }}>{numberToKorean(totalAmt)} 원정</td>
+                        <td style={{ ...cellStyle(), fontWeight: 700, fontSize: '9.5pt', textAlign: 'center', borderRight: BORDER_THIN }}>일금 {numberToKorean(totalAmt)}원 정</td>
                         <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>공급가액: {formatCurrency(subtotal)}</td>
                         <td style={{ ...cellStyle(), fontSize: '9pt', textAlign: 'right', paddingRight: '8px', borderRight: BORDER_THIN }}>부가세: {formatCurrency(currentTaxAmt)}</td>
                         <td style={{ ...labelCellStyle(), borderRight: BORDER_THIN }}>총액</td>
-                        <td style={{ ...cellStyle(), fontWeight: 900, fontSize: '11pt', textAlign: 'right', paddingRight: '12px', color: '#0056b3' }}>{formatCurrency(totalAmt)} 원</td>
+                        <td style={{ ...cellStyle(), fontWeight: 900, fontSize: '9.5pt', textAlign: 'right', paddingRight: '12px', color: '#0056b3' }}>{formatCurrency(totalAmt)} 원</td>
                     </tr>
                 </tbody>
             </table>
@@ -382,6 +412,7 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
     const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
     const installRatio = draft.installRatio || 50;
     const removeRatio = 100 - installRatio;
+    const isRental = draft.estimateMode === 'rental';
 
     const moveItem = (id: string, direction: 'up' | 'down') => {
         setDraft((prev: any) => {
@@ -408,15 +439,29 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
         <div style={tableWrapperStyle}>
             <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
                 <colgroup>
-                    <col style={{ width: '130px' }} />
-                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '140px' }} />
                     <col style={{ width: '50px' }} />
-                    <col style={{ width: '70px' }} />
+                    <col style={{ width: '80px' }} />
+                    {/* 인건비 */}
                     <col style={{ width: '90px' }} />
                     <col style={{ width: '100px' }} />
-                    <col style={{ width: '90px' }} />
-                    <col style={{ width: '90px' }} />
-                    <col style={{ width: '100px' }} />
+                    
+                    {isRental ? (
+                        <>
+                            {/* 임대료 */}
+                            <col style={{ width: '80px' }} />
+                            <col style={{ width: '50px' }} />
+                            <col style={{ width: '100px' }} />
+                        </>
+                    ) : (
+                        <>
+                            {/* 청구 */}
+                            <col style={{ width: '100px' }} />
+                            <col style={{ width: '100px' }} />
+                        </>
+                    )}
+                    <col style={{ width: 'auto' }} />
                     {isEdit && <col style={{ width: '30px' }} />}
                 </colgroup>
                 <thead>
@@ -426,33 +471,39 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단위</th>
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>물 량</th>
                         <th colSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>인 건 비</th>
-                        <th colSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>청 구</th>
+                        {isRental ? (
+                            <th colSpan={3} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>임 대 료</th>
+                        ) : (
+                            <th colSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THIN })}>청 구</th>
+                        )}
                         <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>비 고</th>
                         {isEdit && <th rowSpan={2} style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>삭제</th>}
                     </tr>
                     <tr style={{ height: '28px' }}>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단 가</th>
                         <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>금 액</th>
-                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>설치 {installRatio}%</th>
-                        <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>해체 {removeRatio}%</th>
+                        {isRental ? (
+                            <>
+                                <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>단 가</th>
+                                <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>기</th>
+                                <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>금 액</th>
+                            </>
+                        ) : (
+                            <>
+                                <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>설치 {installRatio}%</th>
+                                <th style={labelCellStyle({ border: BORDER_THIN, borderBottom: BORDER_THICK })}>해체 {removeRatio}%</th>
+                            </>
+                        )}
                     </tr>
                 </thead>
                 <tbody>
                     {(() => {
-                        const mandatoryCategories = ['시스템 동바리', '시스템 비계'];
                         const allExistingCategories = Array.from(new Set(itemsWithCalc.map((i: any) => i.category || '')));
-
-                        // 필수 카테고리 유지
-                        mandatoryCategories.forEach(mc => {
-                            if (!allExistingCategories.includes(mc)) {
-                                allExistingCategories.push(mc);
-                            }
-                        });
-
-                        // "기타" 또는 빈 이름 제거 (필수 카테고리는 위에서 이미 추가됨)
                         const finalCategories = allExistingCategories.filter(cat => cat && cat !== '기타');
 
                         const totalQty = itemsWithCalc.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
+                        const totalLabor = itemsWithCalc.reduce((s: number, i: any) => s + (i.laborAmount || 0), 0);
+                        const totalRental = itemsWithCalc.reduce((s: number, i: any) => s + (i.rentalAmount || 0), 0);
                         const totalInstall = itemsWithCalc.reduce((s: number, i: any) => s + (i.install50 || 0), 0);
                         const totalRemove = itemsWithCalc.reduce((s: number, i: any) => s + (i.remove50 || 0), 0);
 
@@ -460,7 +511,7 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                             <>
                                 {finalCategories.map((cat: any, cIdx: number) => {
                                     const realItems = itemsWithCalc.filter((i: any) => (i.category || '') === cat);
-                                    const MIN_ROWS = 4; // 6줄에서 4줄로 더 축소
+                                    const MIN_ROWS = 4;
                                     const displayItems = [...realItems];
                                     while (displayItems.length < MIN_ROWS) {
                                         displayItems.push({ id: `empty-${cat}-${displayItems.length}`, category: cat, isFiller: true });
@@ -468,24 +519,32 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
 
                                     const gQty = realItems.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
                                     const gAmount = realItems.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+                                    const gLabor = realItems.reduce((s: number, i: any) => s + (i.laborAmount || 0), 0);
+                                    const gRental = realItems.reduce((s: number, i: any) => s + (i.rentalAmount || 0), 0);
                                     const gInstall = realItems.reduce((s: number, i: any) => s + (i.install50 || 0), 0);
                                     const gRemove = realItems.reduce((s: number, i: any) => s + (i.remove50 || 0), 0);
 
                                     return (
-                                        <React.Fragment key={`group-${cat}-${cIdx}`}>
+                                        <React.Fragment key={`group-idx-${cIdx}`}>
                                             {displayItems.map((item: any, rIdx: number) => (
                                                 <tr key={item.id} style={{ height: '28px' }} className="group/row hover:bg-slate-50">
                                                     {rIdx === 0 && (
-                                                        <td rowSpan={displayItems.length + 1} style={{ ...cellStyle(), border: BORDER_THIN, fontWeight: 900, backgroundColor: '#fcfcfc', color: '#64748b', fontSize: '11pt', verticalAlign: 'middle' }}>
+                                                        <td rowSpan={displayItems.length + 1} style={{ ...cellStyle(), border: BORDER_THIN, fontWeight: 900, backgroundColor: '#fcfcfc', color: '#64748b', fontSize: '9.5pt', verticalAlign: 'middle' }}>
                                                             {isEdit && !item.isFiller ? (
                                                                 <>
                                                                     <input
                                                                         value={cat}
                                                                         list="categories-list"
                                                                         onChange={e => {
-                                                                            if (realItems[0]) updateItem(realItems[0].id, 'category', e.target.value);
+                                                                            const newCat = e.target.value;
+                                                                            setDraft((prev: any) => ({
+                                                                                ...prev,
+                                                                                items: prev.items.map((i: any) => 
+                                                                                    (i.category || '') === cat ? { ...i, category: newCat } : i
+                                                                                )
+                                                                            }));
                                                                         }}
-                                                                        style={{ ...inputStyle, fontWeight: 900, fontSize: '11pt', color: '#64748b' }}
+                                                                        style={{ ...inputStyle, fontWeight: 900, fontSize: '9.5pt', color: '#64748b' }}
                                                                     />
                                                                     <datalist id="categories-list">
                                                                         {COMMON_CATEGORIES.map(c => <option key={c} value={c} />)}
@@ -513,18 +572,47 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
                                                         {item.isFiller ? '' : (isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '-'))}
                                                     </td>
+                                                    
+                                                    {/* 인건비 */}
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
-                                                        {item.isFiller ? '' : (isEdit ? <input type="number" value={item.finalUnitPrice || ''} onChange={e => updateItem(item.id, 'finalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '-'))}
+                                                        {item.isFiller ? '' : (isEdit ? (
+                                                            <input 
+                                                                type="number" 
+                                                                value={isRental ? (item.laborUnitPrice || '') : (item.finalUnitPrice || '')} 
+                                                                onChange={e => updateItem(item.id, isRental ? 'laborUnitPrice' : 'finalUnitPrice', Number(e.target.value))} 
+                                                                style={{ ...inputStyle, textAlign: 'right' }} 
+                                                            />
+                                                        ) : (isRental ? (item.laborUnitPrice ? formatCurrency(item.laborUnitPrice) : '-') : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '-')))}
                                                     </td>
-                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>
-                                                        {item.isFiller ? '' : (item.amount ? formatCurrency(item.amount) : '-')}
+                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: isRental ? 400 : 700 }}>
+                                                        {item.isFiller ? '' : (isRental ? (item.laborAmount ? formatCurrency(item.laborAmount) : '-') : (item.amount ? formatCurrency(item.amount) : '-'))}
                                                     </td>
-                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
-                                                        {item.isFiller ? '' : (item.install50 ? formatCurrency(item.install50) : '-')}
-                                                    </td>
-                                                    <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
-                                                        {item.isFiller ? '' : (item.remove50 ? formatCurrency(item.remove50) : '-')}
-                                                    </td>
+
+                                                    {isRental ? (
+                                                        <>
+                                                            {/* 임대료 방식 전용 컬럼 */}
+                                                            <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                                {item.isFiller ? '' : (isEdit ? <input type="number" value={item.rentalUnitPrice || ''} onChange={e => updateItem(item.id, 'rentalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.rentalUnitPrice ? formatCurrency(item.rentalUnitPrice) : '-'))}
+                                                            </td>
+                                                            <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                                {item.isFiller ? '' : (isEdit ? <input type="number" value={item.period || ''} onChange={e => updateItem(item.id, 'period', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.period ? formatDecimal(item.period) : '1'))}
+                                                            </td>
+                                                            <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>
+                                                                {item.isFiller ? '' : (item.rentalAmount ? formatCurrency(item.rentalAmount) : '-')}
+                                                            </td>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            {/* 표준 방식 전용 컬럼 */}
+                                                            <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                                {item.isFiller ? '' : (item.install50 ? formatCurrency(item.install50) : '-')}
+                                                            </td>
+                                                            <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                                                {item.isFiller ? '' : (item.remove50 ? formatCurrency(item.remove50) : '-')}
+                                                            </td>
+                                                        </>
+                                                    )}
+
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN }}>
                                                         {item.isFiller ? '' : (isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={inputStyle} /> : (item.note || ''))}
                                                     </td>
@@ -542,9 +630,21 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gQty ? formatDecimal(gQty) : '0'}</td>
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gAmount ? formatCurrency(gAmount) : '0'}</td>
-                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gInstall ? formatCurrency(gInstall) : '0'}</td>
-                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gRemove ? formatCurrency(gRemove) : '0'}</td>
+                                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{isRental ? (gLabor ? formatCurrency(gLabor) : '0') : (gAmount ? formatCurrency(gAmount) : '0')}</td>
+                                                
+                                                {isRental ? (
+                                                    <>
+                                                        <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                                                        <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
+                                                        <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gRental ? formatCurrency(gRental) : '0'}</td>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gInstall ? formatCurrency(gInstall) : '0'}</td>
+                                                        <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 800 }}>{gRemove ? formatCurrency(gRemove) : '0'}</td>
+                                                    </>
+                                                )}
+                                                
                                                 <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
                                                 {isEdit && (
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0', backgroundColor: '#f5f3ff' }}>
@@ -561,13 +661,25 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
                                         </React.Fragment>
                                     );
                                 })}
-                                <tr style={{ height: '40px', backgroundColor: '#f8fafc' }}>
-                                    <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: '12pt', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
+                                <tr style={{ height: '32px', backgroundColor: '#f8fafc' }}>
+                                    <td colSpan={3} style={{ ...labelCellStyle(), border: BORDER_THICK, fontSize: '10pt', fontWeight: 950, letterSpacing: '1.5em', textAlign: 'center', backgroundColor: '#f8fafc', color: '#000' }}>총&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;계</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalQty ? formatDecimal(totalQty) : '0'}</td>
                                     <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '13pt', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalInstall ? formatCurrency(totalInstall) : '0'}</td>
-                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '11pt' }}>{totalRemove ? formatCurrency(totalRemove) : '0'}</td>
+                                    <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, color: '#000', fontSize: '10pt', backgroundColor: '#ffff00' }}>{formatCurrency(subtotal)}</td>
+                                    
+                                    {isRental ? (
+                                        <>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalRental ? formatCurrency(totalRental) : '0'}</td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalInstall ? formatCurrency(totalInstall) : '0'}</td>
+                                            <td style={{ ...cellStyle(), border: BORDER_THICK, textAlign: 'right', paddingRight: '4px', fontWeight: 950, fontSize: '9.5pt' }}>{totalRemove ? formatCurrency(totalRemove) : '0'}</td>
+                                        </>
+                                    )}
+                                    
                                     <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>
                                     {isEdit && <td style={{ ...cellStyle(), border: BORDER_THICK }}></td>}
                                 </tr>
@@ -582,61 +694,100 @@ const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, upda
 
 const TransactionTable = React.memo(({ draft, itemsWithCalc, isEdit, updateItem, addEmptyItem, setDraft }: any) => {
     const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
-    const vatRate = draft.vatRate || 10;
+    const statusOptions = ['입금 완료', '다원 발행', '청연 발행', '노무 처리', '발행 요청'];
+    
     return (
         <div style={tableWrapperStyle}>
             <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
-                <colgroup><col style={{ width: '36px' }} /><col style={{ width: '160px' }} /><col style={{ width: '60px' }} /><col style={{ width: '65px' }} /><col style={{ width: '90px' }} /><col style={{ width: '100px' }} /><col style={{ width: '100px' }} /><col style={{ width: 'auto' }} />{isEdit && <col style={{ width: '45px' }} />}</colgroup>
+                <colgroup>
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '70px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '130px' }} />
+                    <col style={{ width: '50px' }} />
+                    <col style={{ width: '60px' }} />
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '80px' }} />
+                    <col style={{ width: 'auto' }} />
+                    {isEdit && <col style={{ width: '35px' }} />}
+                </colgroup>
                 <thead>
                     <tr style={{ height: '32px' }}>
-                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>No</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>날짜</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>종류</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>팀명</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>상태</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>품목</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>단위</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>수량</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>단가</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>공급가액</th>
-                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>세액</th>
+                        <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>추가금</th>
                         <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>비고</th>
-                        {isEdit && <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}>삭제</th>}
+                        {isEdit && <th style={{ ...labelCellStyle(), border: BORDER_THIN, borderBottom: BORDER_THICK }}></th>}
                     </tr>
                 </thead>
                 <tbody style={{ borderBottom: BORDER_THICK }}>
-                    {itemsWithCalc.filter((item: any) => {
-                        const isDefault = item.category === '시스템 동바리' || item.category === '시스템 비계';
-                        const hasValue = item.quantity > 0 || item.amount > 0 || (item.note && item.note.trim() !== '');
-                        return !isDefault || hasValue;
-                    }).map((item: any, idx: number) => {
+                    {itemsWithCalc.map((item: any) => {
                         const supplyAmt = item.amount || 0;
-                        const vatAmt = supplyAmt ? Math.round(supplyAmt * vatRate / 100) : 0;
                         return (
-                            <tr key={item.id} style={{ height: '24px' }}>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'center' }}>{idx + 1}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>{isEdit ? <input value={item.category} onChange={e => updateItem(item.id, 'category', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.category}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>{isEdit ? <input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} style={inputStyle} /> : item.unit}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '')}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{isEdit ? <input type="number" value={item.finalUnitPrice || ''} onChange={e => updateItem(item.id, 'finalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '')}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>{supplyAmt ? formatCurrency(supplyAmt) : ''}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>{vatAmt ? formatCurrency(vatAmt) : ''}</td>
-                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>{isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.note}</td>
-                                {isEdit && <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}><button onClick={() => setDraft((d: any) => ({ ...d, items: d.items.filter((it: any) => it.id !== item.id) }))} style={{ width: '100%', height: '100%', background: '#ef5350', color: '#fff', border: 'none', cursor: 'pointer' }}>×</button></td>}
+                            <tr key={item.id} style={{ height: '26px' }}>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                    {isEdit ? <input value={item.itemDate || ''} onChange={e => updateItem(item.id, 'itemDate', e.target.value)} style={inputStyle} placeholder="날짜" /> : (item.itemDate || '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                    {isEdit ? (
+                                        <select value={item.itemType || 'outgoing'} onChange={e => updateItem(item.id, 'itemType', e.target.value)} style={{ ...inputStyle, fontSize: '8pt' }}>
+                                            <option value="outgoing">간 것</option>
+                                            <option value="incoming">받은 것</option>
+                                        </select>
+                                    ) : (item.itemType === 'incoming' ? '받은 것' : '간 것')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                    {isEdit ? <input value={item.teamName || ''} onChange={e => updateItem(item.id, 'teamName', e.target.value)} style={inputStyle} placeholder="팀명" /> : (item.teamName || '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                    {isEdit ? (
+                                        <select value={item.status || ''} onChange={e => updateItem(item.id, 'status', e.target.value)} style={{ ...inputStyle, fontSize: '8pt' }}>
+                                            <option value="">-상태-</option>
+                                            {statusOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                        </select>
+                                    ) : (item.status || '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>
+                                    {isEdit ? <input value={item.category} onChange={e => updateItem(item.id, 'category', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.category}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN }}>
+                                    {isEdit ? <input value={item.unit} onChange={e => updateItem(item.id, 'unit', e.target.value)} style={inputStyle} /> : item.unit}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                    {isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                    {isEdit ? <input type="number" value={item.finalUnitPrice || ''} onChange={e => updateItem(item.id, 'finalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>
+                                    {supplyAmt ? formatCurrency(supplyAmt) : ''}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
+                                    {isEdit ? <input type="number" value={item.additionalAmount || ''} onChange={e => updateItem(item.id, 'additionalAmount', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.additionalAmount ? formatCurrency(item.additionalAmount) : '')}
+                                </td>
+                                <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'left', paddingLeft: '4px' }}>
+                                    {isEdit ? <input value={item.note || ''} onChange={e => updateItem(item.id, 'note', e.target.value)} style={{ ...inputStyle, textAlign: 'left' }} /> : item.note}
+                                </td>
+                                {isEdit && (
+                                    <td style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}>
+                                        <button onClick={() => setDraft((d: any) => ({ ...d, items: d.items.filter((it: any) => it.id !== item.id) }))} style={{ width: '100%', height: '100%', background: '#ef5350', color: '#fff', border: 'none', cursor: 'pointer' }}>×</button>
+                                    </td>
+                                )}
                             </tr>
                         );
                     })}
-                    {!isEdit && Array.from({ length: Math.max(0, 15 - itemsWithCalc.length) }).map((_, i) => (
-                        <tr key={`empty-${i}`} style={{ height: '24px' }}>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
-                        </tr>
-                    ))}
                     {isEdit && (
                         <tr style={{ height: '32px', backgroundColor: '#f8fafc' }}>
-                            <td colSpan={8} style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}>
+                            <td colSpan={12} style={{ ...cellStyle(), border: BORDER_THIN, padding: '0' }}>
                                 <button 
                                     onClick={() => setDraft((d: any) => ({ ...d, items: [...d.items, createItem()] }))}
                                     style={{ width: '100%', height: '100%', background: 'transparent', color: '#6366f1', border: 'none', cursor: 'pointer', fontWeight: 900, fontSize: '11pt' }}
@@ -644,9 +795,233 @@ const TransactionTable = React.memo(({ draft, itemsWithCalc, isEdit, updateItem,
                                     + 항목 추가
                                 </button>
                             </td>
-                            <td style={{ ...cellStyle(), border: BORDER_THIN }}></td>
                         </tr>
                     )}
+                </tbody>
+            </table>
+        </div>
+    );
+});
+
+// --- 팀별 지원 현황표 (산진형 정리표) ---
+const TeamSummaryTable = React.memo(({ draft, itemsWithCalc }: any) => {
+    const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
+    
+    const issueDate = new Date(draft.issueDate);
+    const year = issueDate.getFullYear();
+    const month = String(issueDate.getMonth() + 1).padStart(2, '0');
+
+    const statusColors: any = { 
+        '입금 완료': '#ffb74d', 
+        '다원 발행': '#64b5f6', 
+        '청연 발행': '#fff176', 
+        '노무 처리': '#81c784', 
+        '발행 요청': '#f06292' 
+    };
+
+    const toggleExpand = (teamName: string) => {
+        setExpandedTeams(prev => {
+            const next = new Set(prev);
+            if (next.has(teamName)) next.delete(teamName);
+            else next.add(teamName);
+            return next;
+        });
+    };
+
+    const groupItems = (type: 'outgoing' | 'incoming') => {
+        const filtered = itemsWithCalc.filter((i: any) => (i.itemType || 'outgoing') === type && i.teamName);
+        const grouped: any = {};
+        filtered.forEach((item: any) => {
+            const team = item.teamName;
+            if (!grouped[team]) {
+                grouped[team] = {
+                    teamName: team, 
+                    quantity: 0, 
+                    amount: 0, 
+                    additionalAmount: 0, 
+                    total: 0,
+                    remarks: [], 
+                    etc: [], 
+                    status: item.status || '',
+                    items: []
+                };
+            }
+            grouped[team].quantity += (item.quantity || 0);
+            grouped[team].amount += (item.amount || 0);
+            grouped[team].additionalAmount += (item.additionalAmount || 0);
+            grouped[team].total += (item.amount || 0) + (item.additionalAmount || 0);
+            if (item.note) grouped[team].remarks.push(item.note);
+            if (item.etc) grouped[team].etc.push(item.etc);
+            grouped[team].items.push(item);
+        });
+        return Object.values(grouped);
+    };
+
+    const outgoingData = groupItems('outgoing');
+    const incomingData = groupItems('incoming');
+
+    const totalOutgoingQty = outgoingData.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
+    const totalOutgoingAmount = outgoingData.reduce((s: number, i: any) => s + (i.amount || 0), 0);
+    const totalOutgoingAdd = outgoingData.reduce((s: number, i: any) => s + (i.additionalAmount || 0), 0);
+    const totalOutgoingTotal = outgoingData.reduce((s: number, i: any) => s + (i.total || 0), 0);
+
+    const totalIncomingQty = incomingData.reduce((s: number, i: any) => s + (i.quantity || 0), 0);
+    const totalIncomingTotal = incomingData.reduce((s: number, i: any) => s + (i.total || 0), 0);
+
+    const headerStyle: React.CSSProperties = { 
+        ...labelCellStyle(), 
+        background: 'linear-gradient(to bottom, #fdfdfd 0%, #d1d1d1 50%, #9e9e9e 100%)', 
+        border: '1px solid #455a64', 
+        fontSize: '10pt', 
+        fontWeight: 900, 
+        height: '32px',
+        color: '#000',
+        textShadow: '0.5px 0.5px 0px #fff'
+    };
+    
+    const dataCellStyle = (status?: string): React.CSSProperties => ({ 
+        ...cellStyle(), 
+        border: '1px solid #455a64', 
+        fontSize: '10pt', 
+        height: '28px', 
+        backgroundColor: status ? statusColors[status] || '#fff' : '#fff',
+        transition: 'all 0.2s'
+    });
+
+    const renderDetailRows = (teamData: any) => (
+        <tr className="print:hidden">
+            <td colSpan={9} style={{ padding: '0', border: '1px solid #455a64', backgroundColor: '#f8fafc' }}>
+                <div style={{ padding: '10px 15px', borderLeft: '6px solid #6366f1' }}>
+                    <div style={{ fontSize: '9pt', fontWeight: 800, color: '#4338ca', marginBottom: '6px' }}>
+                        ↳ [{teamData.teamName}] 상세 내역
+                    </div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8.5pt' }}>
+                        <thead>
+                            <tr style={{ backgroundColor: '#eef2ff', height: '24px' }}>
+                                <th style={{ border: '1px solid #cbd5e1', width: '90px' }}>날짜</th>
+                                <th style={{ border: '1px solid #cbd5e1', textAlign: 'left', paddingLeft: '8px' }}>품목</th>
+                                <th style={{ border: '1px solid #cbd5e1', width: '60px' }}>공수</th>
+                                <th style={{ border: '1px solid #cbd5e1', width: '100px' }}>단가</th>
+                                <th style={{ border: '1px solid #cbd5e1', width: '100px' }}>금액</th>
+                                <th style={{ border: '1px solid #cbd5e1', width: '100px' }}>추가</th>
+                                <th style={{ border: '1px solid #cbd5e1', textAlign: 'left', paddingLeft: '8px' }}>비고</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {teamData.items.map((item: any, i: number) => (
+                                <tr key={i} style={{ height: '22px', backgroundColor: '#fff' }}>
+                                    <td style={{ border: '1px solid #cbd5e1', textAlign: 'center' }}>{item.itemDate || ''}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', paddingLeft: '8px' }}>{item.category || ''}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', textAlign: 'right', paddingRight: '4px' }}>{formatDecimal(item.quantity)}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', textAlign: 'right', paddingRight: '4px' }}>{formatCurrency(item.finalUnitPrice)}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', textAlign: 'right', paddingRight: '4px' }}>{formatCurrency(item.amount)}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', textAlign: 'right', paddingRight: '4px' }}>{item.additionalAmount ? formatCurrency(item.additionalAmount) : ''}</td>
+                                    <td style={{ border: '1px solid #cbd5e1', paddingLeft: '8px' }}>{item.note || ''}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </td>
+        </tr>
+    );
+
+    return (
+        <div style={{ marginTop: '50px', width: '100%', pageBreakBefore: 'always' }} className="no-print-break">
+            <div style={{ textAlign: 'center', marginBottom: '25px' }}>
+                <span style={{ fontSize: '26pt', fontWeight: 950, borderBottom: '4px double #000', paddingBottom: '4px' }}>
+                    {year}년 {month}월 {draft.supplierCompany || '청연이엔지'} 지원 현황
+                </span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <colgroup>
+                    <col style={{ width: '45px' }} /><col style={{ width: '110px' }} /><col style={{ width: '70px' }} /><col style={{ width: '90px' }} />
+                    <col style={{ width: '110px' }} /><col style={{ width: '90px' }} /><col style={{ width: '110px' }} /><col style={{ width: 'auto' }} /><col style={{ width: '120px' }} />
+                </colgroup>
+                <tbody>
+                    <tr style={{ height: '32px' }}>
+                        <td rowSpan={outgoingData.reduce((acc: number, row: any) => acc + (expandedTeams.has(row.teamName) ? 2 : 1), 0) + Math.max(0, 12 - outgoingData.length) + 2} style={{ ...verticalHeaderStyle, border: '1px solid #455a64', backgroundColor: '#ffd54f', fontSize: '15pt', color: '#000' }}>
+                            <div style={{ writingMode: 'vertical-rl', textAlign: 'center', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(180deg)', fontWeight: 950 }}>지 원 간 것</div>
+                        </td>
+                        <td style={headerStyle}>팀 명</td><td style={headerStyle}>공 수</td><td style={headerStyle}>단 가</td><td style={headerStyle}>금 액</td><td style={headerStyle}>추 가</td><td style={headerStyle}>합 계</td><td style={headerStyle}>비 고</td><td style={headerStyle}>기 타</td>
+                    </tr>
+                    {outgoingData.map((row: any, idx) => (
+                        <React.Fragment key={`out-${idx}`}>
+                            <tr onClick={() => toggleExpand(row.teamName)} style={{ cursor: 'pointer' }} className="hover:filter hover:brightness-95 group">
+                                <td style={{ ...dataCellStyle(row.status), fontWeight: expandedTeams.has(row.teamName) ? 800 : 400 }}>
+                                    {expandedTeams.has(row.teamName) ? '▼ ' : '▶ '}{row.teamName}
+                                </td>
+                                <td style={dataCellStyle(row.status)}>{formatDecimal(row.quantity)}</td>
+                                <td style={{ ...dataCellStyle(row.status), color: row.amount / (row.quantity || 1) !== 230000 ? '#d32f2f' : '#000', fontWeight: row.amount / (row.quantity || 1) !== 230000 ? 700 : 400 }}>{formatCurrency(row.amount / (row.quantity || 1))}</td>
+                                <td style={dataCellStyle(row.status)}>{formatCurrency(row.amount)}</td>
+                                <td style={dataCellStyle(row.status)}>{row.additionalAmount ? formatCurrency(row.additionalAmount) : ''}</td>
+                                <td style={{ ...dataCellStyle(row.status), fontWeight: 700 }}>{formatCurrency(row.total)}</td>
+                                <td style={{ ...dataCellStyle(row.status), textAlign: 'left', paddingLeft: '8px' }}>{Array.from(new Set(row.remarks)).join(', ')}</td>
+                                <td style={dataCellStyle(row.status)}>{Array.from(new Set(row.etc)).join(', ')}</td>
+                            </tr>
+                            {expandedTeams.has(row.teamName) && renderDetailRows(row)}
+                        </React.Fragment>
+                    ))}
+                    {Array.from({ length: Math.max(0, 12 - outgoingData.length) }).map((_, i) => (
+                        <tr key={i}>{Array.from({ length: 8 }).map((_, j) => <td key={j} style={dataCellStyle()}></td>)}</tr>
+                    ))}
+                    <tr style={{ height: '32px' }}>
+                        <td style={{ ...headerStyle, background: '#f5f5f5' }}>합 계</td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc' }}>{formatDecimal(totalOutgoingQty)}</td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc' }}>{formatCurrency(totalOutgoingAmount)}</td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc' }}>{formatCurrency(totalOutgoingAdd)}</td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc', color: '#0056b3' }}>{formatCurrency(totalOutgoingTotal)}</td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                    </tr>
+
+                    {/* 상태 범례 */}
+                    <tr style={{ height: '35px' }}>
+                        <td colSpan={1} style={{ border: 'none' }}></td>
+                        <td style={{ ...headerStyle, backgroundColor: statusColors['입금 완료'], background: statusColors['입금 완료'] }}>입금 완료</td>
+                        <td colSpan={2} style={{ ...headerStyle, backgroundColor: statusColors['다원 발행'], background: statusColors['다원 발행'] }}>다원 발행</td>
+                        <td colSpan={2} style={{ ...headerStyle, backgroundColor: statusColors['청연 발행'], background: statusColors['청연 발행'] }}>청연 발행</td>
+                        <td style={{ ...headerStyle, backgroundColor: statusColors['노무 처리'], background: statusColors['노무 처리'] }}>노무 처리</td>
+                        <td colSpan={2} style={{ ...headerStyle, backgroundColor: statusColors['발행 요청'], background: statusColors['발행 요청'] }}>발행 요청</td>
+                    </tr>
+
+                    <tr style={{ height: '32px' }}>
+                        <td rowSpan={incomingData.reduce((acc: number, row: any) => acc + (expandedTeams.has(row.teamName) ? 2 : 1), 0) + Math.max(0, 8 - incomingData.length) + 2} style={{ ...verticalHeaderStyle, border: '1px solid #455a64', backgroundColor: '#bbdefb', fontSize: '15pt', color: '#000' }}>
+                            <div style={{ writingMode: 'vertical-rl', textAlign: 'center', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(180deg)', fontWeight: 950 }}>지 원 받 은 것</div>
+                        </td>
+                        <td style={headerStyle}>팀 명</td><td style={headerStyle}>공 수</td><td style={headerStyle}>단 가</td><td style={headerStyle}>금 액</td><td style={headerStyle}>추 가</td><td style={headerStyle}>합 계</td><td style={headerStyle}>비 고</td><td style={headerStyle}>기 타</td>
+                    </tr>
+                    {incomingData.map((row: any, idx) => (
+                        <React.Fragment key={`in-${idx}`}>
+                            <tr onClick={() => toggleExpand(row.teamName)} style={{ cursor: 'pointer' }} className="hover:filter hover:brightness-95 group">
+                                <td style={{ ...dataCellStyle(row.status), fontWeight: expandedTeams.has(row.teamName) ? 800 : 400 }}>
+                                    {expandedTeams.has(row.teamName) ? '▼ ' : '▶ '}{row.teamName}
+                                </td>
+                                <td style={dataCellStyle(row.status)}>{formatDecimal(row.quantity)}</td>
+                                <td style={dataCellStyle(row.status)}>{formatCurrency(row.amount / (row.quantity || 1))}</td>
+                                <td style={dataCellStyle(row.status)}>{formatCurrency(row.amount)}</td>
+                                <td style={dataCellStyle(row.status)}>{row.additionalAmount ? formatCurrency(row.additionalAmount) : ''}</td>
+                                <td style={{ ...dataCellStyle(row.status), fontWeight: 700 }}>{formatCurrency(row.total)}</td>
+                                <td style={{ ...dataCellStyle(row.status), textAlign: 'left', paddingLeft: '8px' }}>{Array.from(new Set(row.remarks)).join(', ')}</td>
+                                <td style={dataCellStyle(row.status)}>{Array.from(new Set(row.etc)).join(', ')}</td>
+                            </tr>
+                            {expandedTeams.has(row.teamName) && renderDetailRows(row)}
+                        </React.Fragment>
+                    ))}
+                    {Array.from({ length: Math.max(0, 8 - incomingData.length) }).map((_, i) => (
+                        <tr key={i}>{Array.from({ length: 8 }).map((_, j) => <td key={j} style={dataCellStyle()}></td>)}</tr>
+                    ))}
+                    <tr style={{ height: '32px' }}>
+                        <td style={{ ...headerStyle, background: '#f5f5f5' }}>합 계</td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc' }}>{formatDecimal(totalIncomingQty)}</td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), fontWeight: 950, backgroundColor: '#f8fafc', color: '#c2185b' }}>{formatCurrency(totalIncomingTotal)}</td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                        <td style={{ ...dataCellStyle(), backgroundColor: '#f8fafc' }}></td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -729,7 +1104,7 @@ const EstimatePageContent: React.FC = () => {
                     supplierName: main.ceoName || '',
                     supplierAddress: main.address || '',
                     supplierContact: main.phone || '',
-                    supplierFax: main.fax || '',
+                    supplierFax: main.fax || '031-509-7693',
                     supplierAccount: main.bankName && main.accountNumber ? `${main.bankName} ${main.accountNumber}` : '',
                     supplierManager: '이재욱',
                     supplierManagerContact: '010-2365-7692'
@@ -742,10 +1117,35 @@ const EstimatePageContent: React.FC = () => {
     useEffect(() => { loadData(); }, []);
 
     const itemsWithCalc = useMemo(() => draft.items.map(item => {
-        const amount = (item.finalUnitPrice || 0) * (item.quantity || 0);
+        const qty = item.quantity || 0;
+        // 임대료 방식일 때 인건비 단가가 없으면 기존 단가를 기본값으로 사용
+        const laborPrice = item.laborUnitPrice || (draft.estimateMode === 'rental' ? (item.finalUnitPrice || 0) : 0);
+        const rentalPrice = item.rentalUnitPrice || 0;
+        const period = item.period || 1;
+
+        let amount = 0;
+        let laborAmount = 0;
+        let rentalAmount = 0;
+
+        if (draft.estimateMode === 'rental') {
+            laborAmount = laborPrice * qty;
+            rentalAmount = rentalPrice * qty * period;
+            amount = laborAmount + rentalAmount;
+        } else {
+            amount = (item.finalUnitPrice || 0) * qty;
+        }
+
         const ratio = (draft.installRatio || 50) / 100;
-        return { ...item, amount, install50: Math.round(amount * ratio), remove50: amount - Math.round(amount * ratio) };
-    }), [draft.items, draft.installRatio]);
+        return { 
+            ...item, 
+            amount, 
+            laborAmount,
+            rentalAmount,
+            laborUnitPrice: laborPrice, // 계산에 사용된 실제 단가 반영
+            install50: Math.round(amount * ratio), 
+            remove50: amount - Math.round(amount * ratio) 
+        };
+    }), [draft.items, draft.installRatio, draft.estimateMode]);
 
     // --- [심층 개선] 모든 합계 계산을 하나의 useMemo로 통합 (정합성 100% 보장) ---
     const { subtotal, requiredSubtotal, optionalSubtotal, tax, total } = useMemo(() => {
@@ -757,12 +1157,19 @@ const EstimatePageContent: React.FC = () => {
             .filter(item => item.category === '선택 항목')
             .reduce((sum, item) => sum + (item.amount || 0), 0);
 
-        const sub = required + optional;
-        const taxAmt = draft.includeVat ? Math.round(sub * (draft.vatRate / 100)) : 0;
-        const totalAmt = sub + taxAmt - (draft.discount || 0);
+        const baseSub = required + optional;
+        const discount = draft.discount || 0;
+        // 할인을 적용한 공급가액 (0보다 작아지지 않도록 처리)
+        const taxableSub = Math.max(0, baseSub - discount);
+        
+        // 부가세 계산 (부가세 포함 옵션이 켜져 있을 때만 계산)
+        const taxAmt = draft.includeVat ? Math.round(taxableSub * (draft.vatRate / 100)) : 0;
+        
+        // 최종 총액 = 할인된 공급가액 + 부가세
+        const totalAmt = taxableSub + taxAmt;
 
         return {
-            subtotal: sub,
+            subtotal: baseSub,
             requiredSubtotal: required,
             optionalSubtotal: optional,
             tax: taxAmt,
@@ -858,11 +1265,12 @@ const EstimatePageContent: React.FC = () => {
         if (pane === 'transaction-edit') {
             return (
                 <div className="flex-1 overflow-auto p-8 print:p-0 print:overflow-visible">
-                    <div className="mx-auto max-w-5xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
+                    <div className="mx-auto max-w-7xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
                         <TitleComponent text="거 래 명 세 표" logoUrl={LOGO_FALLBACK} />
                         <InfoTableComponent draft={draft} isEdit={true} updateDraft={updateDraft} />
                         <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} isTransaction={true} draft={draft} />
                         <TransactionTable draft={draft} itemsWithCalc={itemsWithCalc} isEdit={true} updateItem={updateItem} addEmptyItem={addEmptyItem} setDraft={setDraft} />
+                        <TeamSummaryTable draft={draft} itemsWithCalc={itemsWithCalc} />
                     </div>
                 </div>
             );
@@ -870,7 +1278,7 @@ const EstimatePageContent: React.FC = () => {
         // default: edit (estimate edit)
         return (
             <div className="flex-1 overflow-auto p-8 print:p-0 print:overflow-visible">
-                <div className="mx-auto max-w-5xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
+                <div className="mx-auto max-w-7xl bg-white p-10 shadow-sm border border-slate-200 rounded-2xl print:border-none print:shadow-none print:p-0 print:max-w-none">
                     <TitleComponent text={draft.title || '견 적 서'} logoUrl={LOGO_FALLBACK} />
                     <InfoTableComponent draft={draft} isEdit={true} updateDraft={updateDraft} />
                     <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} label="" isTransaction={false} draft={draft} />
@@ -878,16 +1286,18 @@ const EstimatePageContent: React.FC = () => {
 
                     <div className="mt-8">
                         <div className="space-y-3">
-                            <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">특약사항 (Special Terms)</label>
+                            <label className="text-[16px] font-black text-slate-800 uppercase tracking-wider border-l-4 border-indigo-500 pl-3">특약사항 (Special Terms)</label>
                             <textarea
                                 ref={scopeNotesRef}
                                 value={draft.scopeNotes}
                                 onChange={e => updateDraft('scopeNotes', e.target.value)}
-                                className="w-full p-4 text-[12px] leading-relaxed border-2 border-slate-100 rounded-xl focus:border-indigo-500 focus:ring-0 transition-all resize-none bg-slate-50/50 overflow-hidden"
+                                spellCheck="false"
+                                className="w-full p-4 text-[14px] leading-relaxed border-2 border-slate-100 rounded-xl focus:border-indigo-500 focus:ring-0 transition-all resize-none bg-slate-50/50 overflow-hidden"
                                 style={{ minHeight: '400px' }}
                             />
                         </div>
                     </div>
+                    <TeamSummaryTable draft={draft} itemsWithCalc={itemsWithCalc} />
                 </div>
             </div>
         );
@@ -944,9 +1354,6 @@ const EstimatePageContent: React.FC = () => {
                         <button onClick={saveEstimate} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 text-white px-5 py-2 text-[12px] font-black hover:bg-indigo-600 disabled:opacity-50 shadow-xl transition-all">
                             <FontAwesomeIcon icon={saving ? faSpinner : faSave} spin={saving} /> {saving ? '저장 중...' : '문서 저장'}
                         </button>
-                        <button onClick={() => window.print()} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 text-white px-5 py-2 text-[12px] font-black hover:bg-indigo-700 shadow-xl transition-all">
-                            <FontAwesomeIcon icon={faPrint} /> 인쇄/PDF
-                        </button>
                     </div>
                 </div>
             </header>
@@ -999,6 +1406,29 @@ const EstimatePageContent: React.FC = () => {
                         )}
                     </div>
 
+                    {/* 견적 방식 전환 필터 (임대료 방식 도입) */}
+                    {(!pane.includes('transaction')) && (
+                        <div className="flex items-center gap-2 mr-2">
+                            <span className="text-[11px] font-black text-slate-400 uppercase tracking-tighter">Mode</span>
+                            <div className="flex p-0.5 bg-indigo-50 rounded-lg border border-indigo-100 shadow-inner">
+                                <button 
+                                    onClick={() => updateDraft('estimateMode', 'standard')} 
+                                    className={`px-4 py-1.5 text-[11px] font-black rounded-md transition-all ${draft.estimateMode !== 'rental' ? 'bg-white text-indigo-600 shadow-sm' : 'text-indigo-300 hover:text-indigo-500'}`}
+                                >
+                                    기본 표준
+                                </button>
+                                <button 
+                                    onClick={() => updateDraft('estimateMode', 'rental')} 
+                                    className={`px-4 py-1.5 text-[11px] font-black rounded-md transition-all ${draft.estimateMode === 'rental' ? 'bg-white text-indigo-600 shadow-sm' : 'text-indigo-300 hover:text-indigo-500'}`}
+                                >
+                                    임대료형
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="h-8 w-px bg-slate-100 mx-2" />
+
                     {/* 탭 전환 필터 */}
                     <div className="flex p-0.5 bg-slate-100 rounded-lg border border-slate-200 ml-auto shrink-0">
                         <button onClick={() => setPane('edit')} className={`px-4 py-1.5 text-[10px] font-black rounded-md transition-all ${!pane.includes('transaction') ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>견적서 리스트</button>
@@ -1037,11 +1467,12 @@ const EstimateDocument = React.memo(({ draft, itemsWithCalc, subtotal, total, ta
             <InfoTableComponent draft={draft} isEdit={false} />
             <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} label="" isTransaction={false} draft={draft} />
             <EstimateTable draft={draft} itemsWithCalc={itemsWithCalc} subtotal={subtotal} isEdit={false} />
+            <TeamSummaryTable draft={draft} itemsWithCalc={itemsWithCalc} />
 
             <div className="mt-8 grid grid-cols-1 gap-6">
                 <div className="p-6 border-2 border-slate-100 rounded-2xl bg-slate-50/30">
-                    <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-3">특이사항 (Notes)</h4>
-                    <div className="text-[12px] leading-relaxed text-slate-700 whitespace-pre-wrap font-medium">
+                    <h4 className="text-[16px] font-black text-slate-800 uppercase tracking-wider mb-4 border-l-4 border-indigo-500 pl-3">특약사항 (Special Terms)</h4>
+                    <div className="text-[14px] leading-relaxed text-slate-700 whitespace-pre-wrap font-medium">
                         {draft.scopeNotes || '별도 특이사항 없음'}
                     </div>
                 </div>
@@ -1073,9 +1504,6 @@ const TransactionDocument = React.memo(({ draft, itemsWithCalc, subtotal, total,
     return (
         <div className="flex flex-col gap-6">
             <TitleComponent text="거 래 명 세 표" logoUrl={logoUrl} />
-            <div style={{ textAlign: 'right', marginBottom: '-10px', fontSize: '9pt', color: '#64748b' }}>
-                작성일자: {draft.issueDate}
-            </div>
             <InfoTableComponent draft={draft} isEdit={false} />
             <AmountBarComponent subtotal={subtotal} totalAmt={total} taxAmt={tax} isTransaction={true} draft={draft} />
             <TransactionTable 
@@ -1087,6 +1515,7 @@ const TransactionDocument = React.memo(({ draft, itemsWithCalc, subtotal, total,
                 })} 
                 isEdit={false} 
             />
+            <TeamSummaryTable draft={draft} itemsWithCalc={itemsWithCalc} />
             <div className="mt-4 p-4 border border-slate-200 text-center font-bold text-slate-600">
                 위 금액을 정히 영수(청구)함
             </div>

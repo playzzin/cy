@@ -39,10 +39,12 @@ const toComparableMillis = (value: unknown): number => {
     return 0;
 };
 
-const buildMaterialSelectionKey = (material: Pick<Material, 'itemName' | 'spec'>): string => {
+const buildMaterialSelectionKey = (material: Pick<Material, 'category' | 'itemName' | 'spec' | 'unit'>): string => {
+    const category = trimText(material.category).replace(/\s+/g, ' ').toLowerCase();
     const itemName = trimText(material.itemName).replace(/\s+/g, ' ').toLowerCase();
     const spec = trimText(material.spec).replace(/\s+/g, ' ').toLowerCase();
-    return `${itemName}::${spec}`;
+    const unit = trimText(material.unit).replace(/\s+/g, ' ').toLowerCase();
+    return `${category}::${itemName}::${spec}::${unit}`;
 };
 
 const getMaterialQualityScore = (material: Partial<Material>): number => {

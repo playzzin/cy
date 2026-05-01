@@ -176,3 +176,13 @@ export class BarobillKakaoService {
 }
 
 export const barobillKakaoService = new BarobillKakaoService();
+
+// 세금계산서 서비스 등에서 기대하는 독립 함수 export (모든 형식 허용하여 충돌 방지)
+export const sendAlimtalk = (data: any) => 
+    barobillKakaoService.sendAlimTalk(data.to, data.templateCode || data.templateId, data.content || '', data.refNum);
+
+// 알림톡 템플릿 코드 상수
+export const KAKAO_TEMPLATES = {
+    TAX_INVOICE_ISSUED: 'TEMPLATE_001', // 실제 등록된 코드로 변경 필요
+    ESTIMATE_SENT: 'TEMPLATE_002'
+};

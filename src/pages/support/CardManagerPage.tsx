@@ -11,7 +11,11 @@ import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes } from '@fortawesome/free-solid-svg-icons';
 
-export const CardManagerPage: React.FC = () => {
+interface CardManagerPageProps {
+    embedded?: boolean;
+}
+
+export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = false }) => {
     // Data State
     const [cards, setCards] = useState<Card[]>([]);
     const [loading, setLoading] = useState(true);
@@ -111,7 +115,7 @@ export const CardManagerPage: React.FC = () => {
     };
 
     return (
-        <div className="p-6 space-y-6 bg-slate-50 min-h-full">
+        <div className={`${embedded ? 'space-y-6 bg-transparent min-h-full' : 'p-6 space-y-6 bg-slate-50 min-h-full'}`}>
             {/* Header 섹션 */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -222,7 +226,7 @@ export const CardManagerPage: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <CardMonthlyLedger cards={filteredCards} loadingCards={loading} />
+                    <CardMonthlyLedger cards={filteredCards} teams={teams} loadingCards={loading} />
                 )}
             </div>
 

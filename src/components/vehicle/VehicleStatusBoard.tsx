@@ -178,7 +178,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
 
     if (vehicles.length === 0) {
         return (
-            <div className="bg-white rounded-3xl border border-dashed border-slate-300 p-20 text-center">
+            <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-20 text-center">
                 <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-300">
                     <FontAwesomeIcon icon={faCar} className="text-4xl" />
                 </div>
@@ -189,7 +189,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
     }
 
     return (
-        <div className="space-y-8 animate-fade-in-up">
+        <div className="space-y-6 animate-fade-in-up">
             {/* Alerts Section */}
             {expiringVehicles.length > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-4 shadow-sm">

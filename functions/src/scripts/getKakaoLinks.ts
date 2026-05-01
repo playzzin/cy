@@ -27,15 +27,13 @@ async function getLinks() {
                 request: require('request').defaults({ strictSSL: false, rejectUnauthorized: false }) // soap might use axios or request
             };
             // soap.createClient(url, options, callback)
-            soap.createClient(wsdlUrl, {
+            const soapOptions: any = {
                 wsdl_options: { rejectUnauthorized: false },
                 defaults: { rejectUnauthorized: false }
-            }, (err, client) => {
+            };
+            soap.createClient(wsdlUrl, soapOptions, (err, client) => {
                 if (err) reject(err);
                 else {
-                    // Method call options if needed, but usually client handles it.
-                    // Also need to ensure the client request uses the same insecure agent if needed.
-                    // But typically wsdl_options handles the initial load.
                     resolve(client);
                 }
             });

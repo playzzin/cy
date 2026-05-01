@@ -201,6 +201,8 @@ const DB_HEADERS = [
     '팀명',
 ] as const;
 
+const NOTE_HEADER_ALIASES = ['비고', '비 고', '메모', '비고/메모', '메모/비고', '특이사항', 'remark', 'remarks', 'memo', 'note'] as const;
+
 const emptyInputRow = (): InputRow => ({
     transactionType: '',
     date: '',
@@ -286,6 +288,7 @@ const toNumberOrNull = (value: unknown): number | null => {
 };
 
 const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+const normalizeHeaderKey = (value: unknown) => normalizeText(value).replace(/\s+/g, '').toLowerCase();
 const normalizeBankName = (value: unknown) => (
     String(value ?? '')
         .toLowerCase()
@@ -511,20 +514,43 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
 
     const headerRow = rows[0].map((cell) => normalizeText(cell));
     const headerIndex = new Map<string, number>();
+    const normalizedHeaderIndex = new Map<string, number>();
     headerRow.forEach((header, index) => {
-        if (header) headerIndex.set(header, index);
+        if (!header) return;
+        headerIndex.set(header, index);
+
+        const normalizedHeader = normalizeHeaderKey(header);
+        if (normalizedHeader && !normalizedHeaderIndex.has(normalizedHeader)) {
+            normalizedHeaderIndex.set(normalizedHeader, index);
+        }
     });
 
     const requiredHeaders = ['구분', '날짜', '거래처명'];
-    const hasRequiredHeaders = requiredHeaders.every((header) => headerIndex.has(header));
+    const hasRequiredHeaders = requiredHeaders.every((header) => (
+        headerIndex.has(header) || normalizedHeaderIndex.has(normalizeHeaderKey(header))
+    ));
 
     if (!hasRequiredHeaders) {
         throw new Error('업로드 파일에서 DB 헤더를 찾지 못했습니다. DB 시트 또는 동일한 헤더 형식의 파일을 올려주세요.');
     }
 
+    const getHeaderIndex = (header: string) => {
+        const exactIndex = headerIndex.get(header);
+        if (exactIndex !== undefined) return exactIndex;
+        return normalizedHeaderIndex.get(normalizeHeaderKey(header));
+    };
+
     const readCell = (row: unknown[], header: string) => {
-        const index = headerIndex.get(header);
+        const index = getHeaderIndex(header);
         return index === undefined ? '' : row[index];
+    };
+
+    const readFirstCell = (row: unknown[], headers: readonly string[]) => {
+        for (const header of headers) {
+            const value = readCell(row, header);
+            if (normalizeText(value)) return value;
+        }
+        return '';
     };
 
     const entries: Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'updatedAt'>[] = [];
@@ -538,7 +564,7 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
             readCell(row, '현장명')
         );
         const description = normalizeText(readCell(row, '내용'));
-        const manDays = headerIndex.has('공수') ? toNumberOrNull(readCell(row, '공수')) : null;
+        const manDays = getHeaderIndex('공수') !== undefined ? toNumberOrNull(readCell(row, '공수')) : null;
         const supplyAmount = toNumberOrNull(readCell(row, '공급가액')) ?? 0;
         const taxAmount = toNumberOrNull(readCell(row, '부가세')) ?? 0;
         const totalAmount = toNumberOrNull(readCell(row, '합계')) ?? 0;
@@ -548,7 +574,7 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
             readCell(row, '적용월')
         ) ?? getMonthFromDate(date);
         const matchedEntryId = normalizeText(readCell(row, '매칭매출ID'));
-        const note = normalizeText(readCell(row, '비고'));
+        const note = normalizeText(readFirstCell(row, NOTE_HEADER_ALIASES));
         const teamName = normalizeText(
             readCell(row, '팀명')
         ) || fallbackTeamName;
@@ -766,6 +792,17 @@ const getSummaryDisplayedSettledAmount = (row: SummaryRow) => {
     return row.settledAmount;
 };
 
+const appendSummaryNote = (currentNote: string, nextNote: unknown) => {
+    const current = normalizeText(currentNote);
+    const next = normalizeText(nextNote);
+
+    if (!next) return current;
+    if (!current) return next;
+    if (current.split(' / ').includes(next)) return current;
+
+    return `${current} / ${next}`;
+};
+
 const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): LedgerRow[] => {
     const scopedEntries = entries
         .filter((entry) => entry.transactionType === filter.transactionType)
@@ -927,7 +964,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         invoice: WorkingSummaryRow,
         paymentAmount: number,
         paymentDate: string,
-        options?: { recordDate?: boolean }
+        options?: { recordDate?: boolean; note?: string }
     ) => {
         if (paymentAmount <= 0) return paymentAmount;
 
@@ -942,6 +979,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDates.includes(paymentDate)) {
             invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
         }
+        invoice.note = appendSummaryNote(invoice.note, options?.note);
 
         return 0;
     };
@@ -1072,19 +1110,19 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         if (paymentEntry.matchedEntryId) {
             const matchedInvoice = invoiceById.get(paymentEntry.matchedEntryId);
             if (matchedInvoice) {
-                applyPaymentToInvoice(matchedInvoice, paymentAmount, paymentEntry.date);
+                applyPaymentToInvoice(matchedInvoice, paymentAmount, paymentEntry.date, { note: paymentEntry.note });
             }
             return;
         }
 
         if (selfInvoice) {
-            applyPaymentToInvoice(selfInvoice, paymentAmount, paymentEntry.date);
+            applyPaymentToInvoice(selfInvoice, paymentAmount, paymentEntry.date, { note: paymentEntry.note });
             return;
         }
 
         const legacyMatchedInvoice = findLegacyMatchedInvoice(paymentEntry, paymentAmount);
         if (legacyMatchedInvoice) {
-            applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date);
+            applyPaymentToInvoice(legacyMatchedInvoice, paymentAmount, paymentEntry.date, { note: paymentEntry.note });
             return;
         }
 
@@ -1099,20 +1137,20 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         if (adjustmentEntry.matchedEntryId) {
             const matchedInvoice = invoiceById.get(adjustmentEntry.matchedEntryId);
             if (matchedInvoice) {
-                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date);
+                applyPaymentToInvoice(matchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
             }
             return;
         }
 
         const directOffsetInvoice = findDirectOffsetInvoice(adjustmentEntry);
         if (directOffsetInvoice) {
-            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date);
+            applyPaymentToInvoice(directOffsetInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
             return;
         }
 
         const legacyMatchedInvoice = findLegacyMatchedInvoice(adjustmentEntry, adjustmentAmount);
         if (legacyMatchedInvoice) {
-            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date);
+            applyPaymentToInvoice(legacyMatchedInvoice, adjustmentAmount, adjustmentEntry.date, { note: adjustmentEntry.note });
             return;
         }
 

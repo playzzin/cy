@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faGasPump } from '@fortawesome/free-solid-svg-icons';
+import { faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faGasPump, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { vehicleService } from '../../services/vehicleService';
-import { Vehicle, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
+import { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
+import { Team } from '../../services/teamService';
+import { iconMap } from '../../constants/iconMap';
 
 // ── 독립 EditableCell 컴포넌트 ──
 interface EditableCellProps {
@@ -100,12 +102,14 @@ interface VehicleLedgerRow {
 
 interface VehicleMonthlyLedgerProps {
     vehicles: Vehicle[];
+    teams?: Team[];
     loadingVehicles: boolean;
     onOpenExpenseLog: (vehicle: Vehicle) => void;
 }
 
 export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     vehicles,
+    teams = [],
     loadingVehicles,
     onOpenExpenseLog
 }) => {
@@ -117,7 +121,28 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
 
     const [rows, setRows] = useState<VehicleLedgerRow[]>([]);
+    const [assignments, setAssignments] = useState<VehicleAssignmentRecord[]>([]);
     const originalExpensesRef = useRef<VehicleExpenseRecord[]>([]);
+
+    const normalizeKey = (value: unknown): string => String(value ?? '').trim();
+
+    const teamByAnyId = useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            if (team.id) map.set(String(team.id), team);
+            if (team.legacyId) map.set(String(team.legacyId), team);
+        });
+        return map;
+    }, [teams]);
+
+    const teamByName = useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const name = normalizeKey(team.name);
+            if (name && !map.has(name)) map.set(name, team);
+        });
+        return map;
+    }, [teams]);
 
     useEffect(() => {
         const y = currentDate.getFullYear();
@@ -129,8 +154,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         if (!yearMonth) return;
         setLoading(true);
         try {
-            const expenses = await vehicleService.getExpensesByMonth(yearMonth);
+            const [expenses, assignmentList] = await Promise.all([
+                vehicleService.getExpensesByMonth(yearMonth),
+                vehicleService.listAllVehicleAssignments().catch(() => [] as VehicleAssignmentRecord[])
+            ]);
             originalExpensesRef.current = expenses;
+            setAssignments(assignmentList);
 
             const amountsMap = new Map<string, ExpenseAmounts>();
             const noteMap = new Map<string, string>();
@@ -181,6 +210,80 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
             setLoading(false);
         }
     }, [yearMonth, vehicles]);
+
+    const monthRange = useMemo(() => {
+        const [y, m] = yearMonth.split('-').map(Number);
+        if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+        return {
+            monthStart: new Date(y, m - 1, 1),
+            monthEnd: new Date(y, m, 0)
+        };
+    }, [yearMonth]);
+
+    const isAssignmentActiveInMonth = (assignment: VehicleAssignmentRecord): boolean => {
+        if (!monthRange) return false;
+        const start = assignment.startDate ? new Date(assignment.startDate) : null;
+        const end = assignment.endDate ? new Date(assignment.endDate) : null;
+        if (start && !Number.isNaN(start.getTime()) && start > monthRange.monthEnd) return false;
+        if (end && !Number.isNaN(end.getTime()) && end < monthRange.monthStart) return false;
+        return true;
+    };
+
+    const resolveTeamBadge = (assignment: VehicleAssignmentRecord) => {
+        const team = assignment.assigneeId
+            ? teamByAnyId.get(String(assignment.assigneeId))
+            : teamByName.get(normalizeKey(assignment.assigneeName));
+        const name = normalizeKey(team?.name) || normalizeKey(assignment.assigneeName);
+        if (!name) return null;
+        return {
+            key: `team:${normalizeKey(team?.id ?? assignment.assigneeId ?? name)}`,
+            name,
+            color: team?.color || '#94a3b8',
+            icon: team?.icon || team?.iconKey || null
+        };
+    };
+
+    const getAssignmentSummary = (vehicle: Vehicle) => {
+        const vehicleId = normalizeKey(vehicle.id);
+        const activeAssignments = assignments.filter((assignment) =>
+            normalizeKey(assignment.vehicleId) === vehicleId && isAssignmentActiveInMonth(assignment)
+        );
+
+        const fallbackAssignments: VehicleAssignmentRecord[] = activeAssignments.length > 0 ? activeAssignments : (
+            vehicle.currentAssigneeName && vehicle.currentAssigneeType ? [{
+                id: `current-${vehicle.id}`,
+                vehicleId: vehicle.id,
+                vehiclePlate: vehicle.licensePlate,
+                assigneeId: vehicle.currentAssigneeId || '',
+                assigneeType: vehicle.currentAssigneeType,
+                assigneeName: vehicle.currentAssigneeName,
+                startDate: ''
+            }] : []
+        );
+
+        const teamMap = new Map<string, NonNullable<ReturnType<typeof resolveTeamBadge>>>();
+        const workerMap = new Map<string, string>();
+
+        fallbackAssignments.forEach((assignment) => {
+            if (assignment.assigneeType === 'TEAM') {
+                const badge = resolveTeamBadge(assignment);
+                if (badge) teamMap.set(badge.key, badge);
+                return;
+            }
+            const workerName = normalizeKey(assignment.assigneeName);
+            if (workerName) workerMap.set(workerName, workerName);
+        });
+
+        const assignedTeams = Array.from(teamMap.values());
+        const assignedWorkers = Array.from(workerMap.values());
+        return {
+            assignedTeams,
+            assignedWorkers,
+            billingTeams: assignedTeams,
+            billingWorkers: assignedWorkers,
+            primaryColor: assignedTeams[0]?.color || '#94a3b8'
+        };
+    };
 
     useEffect(() => {
         if (yearMonth) loadData();
@@ -355,9 +458,13 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="w-full text-sm min-w-[1200px]">
+                        <table className="w-full text-sm min-w-[1750px]">
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
+                                    <th className="px-4 py-4 text-left w-40 tracking-wider bg-indigo-700 border-r border-indigo-500">배정 인원</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 팀</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 개인</th>
                                     <th className="px-4 py-4 text-left w-44 tracking-wider bg-indigo-700">차량번호</th>
                                     <th className="px-4 py-4 text-left w-40 border-l border-indigo-500">차종/모델</th>
                                     <th className="px-2 py-4 text-right w-28 border-l border-indigo-500 bg-indigo-800/30">렌트비</th>
@@ -372,8 +479,100 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {rows.map((row, idx) => (
+                                {rows.map((row, idx) => {
+                                    const assignmentSummary = getAssignmentSummary(row.vehicle);
+                                    const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
+
+                                    return (
                                     <tr key={row.vehicle.id} className="group hover:bg-blue-50/40 transition-colors">
+                                        <td
+                                            className="px-4 py-3 border-r border-indigo-50 bg-white"
+                                            style={assignmentSummary.primaryColor ? {
+                                                borderLeft: `4px solid ${assignmentSummary.primaryColor}`,
+                                                backgroundColor: `${assignmentSummary.primaryColor}0D`
+                                            } : undefined}
+                                        >
+                                            {assignmentSummary.assignedTeams.length > 0 ? (
+                                                <div className="flex flex-col gap-1.5">
+                                                    {assignmentSummary.assignedTeams.map((team) => (
+                                                        <div key={`assigned-${team.key}`} className="flex items-center gap-2 min-w-0">
+                                                            <span
+                                                                className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                style={{ backgroundColor: team.color }}
+                                                            >
+                                                                <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
+                                                            </span>
+                                                            <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
+                                                                {team.name}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
+
+                                        <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                            {visibleAssignedWorkers.length > 0 ? (
+                                                <div className="space-y-1">
+                                                    {visibleAssignedWorkers.map((workerName, workerIdx) => (
+                                                        <div key={`assigned-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
+                                                            <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-emerald-500">
+                                                                <FontAwesomeIcon icon={faUser} />
+                                                            </span>
+                                                            <span className="font-bold text-slate-700 text-xs leading-tight truncate max-w-[145px]" title={workerName}>
+                                                                {workerName}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
+
+                                        <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                            {assignmentSummary.billingTeams.length > 0 ? (
+                                                <div className="flex flex-col gap-1.5">
+                                                    {assignmentSummary.billingTeams.map((team) => (
+                                                        <div key={`billing-${team.key}`} className="flex items-center gap-2 min-w-0">
+                                                            <span
+                                                                className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                style={{ backgroundColor: team.color }}
+                                                            >
+                                                                <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
+                                                            </span>
+                                                            <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
+                                                                {team.name}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
+
+                                        <td className="px-4 py-3 border-r border-indigo-50 bg-white">
+                                            {assignmentSummary.billingWorkers.length > 0 ? (
+                                                <div className="flex flex-col gap-1.5">
+                                                    {assignmentSummary.billingWorkers.map((workerName, workerIdx) => (
+                                                        <div key={`billing-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
+                                                            <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-slate-500">
+                                                                <FontAwesomeIcon icon={faUser} />
+                                                            </span>
+                                                            <span className="font-bold text-slate-700 text-xs leading-tight break-all">
+                                                                {workerName}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-slate-300 text-xs">-</span>
+                                            )}
+                                        </td>
+
                                         <td className="px-4 py-3 font-bold text-slate-700 group-hover:text-indigo-700 bg-white">
                                             {row.vehicle.licensePlate}
                                             <div className="text-[10px] text-slate-400 font-normal mt-0.5">{row.vehicle.type}</div>
@@ -418,10 +617,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             />
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={EXPENSE_TYPES.length + 6} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faGasPump} className="text-4xl text-slate-300" />
                                                 <p>차량 목록이 없거나 불러올 수 없습니다.</p>
@@ -432,7 +632,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             </tbody>
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
-                                    <td colSpan={2} className="p-4 border-r border-slate-600 text-center">합계</td>
+                                    <td colSpan={6} className="p-4 border-r border-slate-600 text-center">합계</td>
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-200/70">{totals.rentFee.toLocaleString()}</td>
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-200/70">{totals.leaseFee.toLocaleString()}</td>
                                     {EXPENSE_TYPES.map(type => (

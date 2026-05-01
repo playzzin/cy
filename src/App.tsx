@@ -10,6 +10,7 @@ import { DashboardExecutiveView } from './components/dashboard/executive/Dashboa
 import DailyReportPage from './pages/report/DailyReportPage';
 import TestSettingsPage from './pages/settings/TestSettingsPage';
 import DailyDispatchPage from './pages/assignment/DailyDispatchPage';
+import FieldSchedulePlannerPage from './pages/assignment/FieldSchedulePlannerPage';
 import TeamAssignmentPage from './pages/assignment/TeamAssignmentPage';
 import SiteAssignmentPage from './pages/assignment/SiteAssignmentPage';
 import SupportAssignmentPage from './pages/assignment/SupportAssignmentPage';
@@ -17,7 +18,6 @@ import PositionManager from './pages/hr/PositionManager';
 import RateChangePage from './pages/hr/RateChangePage';
 import SupportSettingsPage from './pages/support/SupportSettingsPage';
 import SupportStatusPage from './pages/support/SupportStatusPage';
-import AccommodationManager from './pages/support/AccommodationManager';
 import WorkerSummaryPage from './pages/manpower/WorkerSummaryPage';
 import VehicleCardIntegratedPage from './pages/support/VehicleCardIntegratedPage';
 import MaterialMasterPage from './pages/materials/MaterialMasterPage';
@@ -144,7 +144,9 @@ import CheongyeonHistoryPage from './pages/cheongyeon/history';
 import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
 import NationwideDashboardHome from './pages/jeonkuk/NationwideDashboardHome';
 import CompanyLandingPage from './pages/company/CompanyLandingPage';
-import EstimatePage from './pages/estimate/EstimatePage';
+import EstimateManagePage from './pages/estimate/EstimateManagePage';
+import DetailedEstimatePage from './pages/estimate/DetailedEstimatePage';
+import TransactionManagePage from './pages/estimate/TransactionManagePage';
 import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
 import AccountManagementPage from './pages/database/AccountManagementPage';
 import ConstructionCompanyDatabase from './pages/database/ConstructionCompanyDatabase';
@@ -397,6 +399,7 @@ const App: React.FC = () => {
 
             {/* Assignment Management */}
             <Route path="/assignment/daily-dispatch" element={<DailyDispatchPage />} />
+            <Route path="/assignment/field-schedule" element={<FieldSchedulePlannerPage />} />
             <Route path="/assignment/team-assignment" element={<TeamAssignmentPage />} />
             <Route path="/assignment/site-assignment" element={<SiteAssignmentPage />} />
 
@@ -408,7 +411,7 @@ const App: React.FC = () => {
             {/* Support Management */}
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
-            <Route path="/support/accommodation" element={<AccommodationManager />} />
+            <Route path="/support/accommodation" element={<SupportManagerPage />} />
             <Route path="/support/vehicles" element={<SupportManagerPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
 
@@ -495,9 +498,13 @@ const App: React.FC = () => {
             <Route path="/company/management" element={<CompanyManagementPage />} />
             <Route path="/company/registration" element={<CompanyRegistrationPage />} />
             <Route path="/estimate" element={<Navigate to="/estimate/manage" replace />} />
-            <Route path="/estimate/manage" element={<EstimatePage />} />
-            <Route path="/estimate/list" element={<EstimatePage />} />
-            <Route path="/estimate/new" element={<EstimatePage />} />
+            <Route path="/estimate/manage" element={<EstimateManagePage />} />
+            <Route path="/estimate/detail-manage" element={<DetailedEstimatePage />} />
+            <Route path="/estimate/list" element={<EstimateManagePage />} />
+            <Route path="/estimate/new" element={<EstimateManagePage />} />
+            <Route path="/transaction/manage" element={<TransactionManagePage />} />
+            <Route path="/transaction/list" element={<TransactionManagePage />} />
+            <Route path="/transaction/new" element={<TransactionManagePage />} />
             <Route path="/estimate/request" element={<EstimateRequestPage />} />
 
             {/* Gallery */}
