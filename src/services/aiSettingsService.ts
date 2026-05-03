@@ -37,6 +37,14 @@ export interface AiModelBinding {
 const AI_SETTINGS_STORAGE_KEY = 'cy_ai_settings_v1';
 const GEMINI_API_KEY_STORAGE_KEY = 'gemini_api_key';
 
+const getEnvironmentApiKey = (): string => {
+    return String(
+        process.env.REACT_APP_GEMINI_API_KEY ||
+        process.env.REACT_APP_GOOGLE_API_KEY ||
+        ''
+    ).trim();
+};
+
 export const AI_TEXT_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
     { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (권장)' },
     { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
@@ -82,7 +90,7 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         id: 'worker-registration',
         name: '근로자 등록/관리',
         description: '신분증/통장 OCR 분석',
-        paths: ['/jeonkuk/worker-registration', '/manpower/smart-registration'],
+        paths: ['/jeonkuk/worker-registration', '/manpower/smart-registration', '/database/manpower-db'],
         modelScope: 'textModel'
     },
     {
@@ -123,7 +131,7 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
 ];
 
 const DEFAULT_MODELS: AiModelSettings = {
-    textModel: 'gemini-2.0-flash',
+    textModel: 'gemini-2.5-flash',
     analyticsModel: 'gemini-2.5-flash',
     imageModel: 'gemini-2.5-flash-image'
 };
@@ -243,7 +251,8 @@ export const aiSettingsService = {
     },
 
     getApiKey(): string {
-        return String(localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) || '');
+        const storedKey = String(localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY) || '').trim();
+        return storedKey || getEnvironmentApiKey();
     },
 
     setApiKey(key: string): void {

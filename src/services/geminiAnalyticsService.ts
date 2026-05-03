@@ -13,6 +13,7 @@
 
 import { dailyReportService, DailyReport } from './dailyReportService';
 import { aiSettingsService } from './aiSettingsService';
+import { manpowerAnalyticsService, SUPPORT_DIRECTIONS, type SupportDirection } from './manpowerAnalyticsService';
 
 // ===========================
 // Types
@@ -27,6 +28,7 @@ export interface AnalyticsQuery {
     companyName?: string;
     salaryModel?: string;
     workerTeamName?: string;
+    supportDirection?: SupportDirection;
     // 비교분석용 이전 기간
     compareStartDate?: string;
     compareEndDate?: string;
@@ -48,6 +50,8 @@ const VALID_ANALYSIS_TYPES: AnalysisType[] = [
     'worker_detail', 'site_summary', 'team_summary', 'worker_ranking',
     'daily_summary', 'support_analysis', 'salary_model_analysis', 'comparison', 'general'
 ];
+
+const VALID_SUPPORT_DIRECTIONS: SupportDirection[] = SUPPORT_DIRECTIONS;
 
 // --- Aggregated Summary Types ---
 
@@ -191,6 +195,40 @@ export interface ChatMessage {
 // ===========================
 
 const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS = 30_000;
+const GEMINI_ANALYTICS_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
+
+const getAnalyticsModelCandidates = (): string[] => {
+    const selectedModel = aiSettingsService.getModels().analyticsModel || 'gemini-2.5-flash';
+    return Array.from(new Set([selectedModel, ...GEMINI_ANALYTICS_FALLBACK_MODELS].filter(Boolean)));
+};
+
+const shouldRetryWithFallbackModel = (status: number, message: string): boolean => {
+    if (status && ![400, 403, 404, 429].includes(status)) return false;
+    return /denied|permission|quota|resource_exhausted|not found|not supported|model|access|timeout|timed out/i.test(message);
+};
+
+const formatGeminiAnalyticsError = (error: unknown, attemptedModels: string[]): string => {
+    const message = error instanceof Error ? error.message : String(error);
+
+    if (/abort|timeout|timed out|시간.*초과/i.test(message)) {
+        return `Gemini 통계 분석 응답이 ${GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다. 네트워크 상태를 확인하거나 /settings/ai에서 통계 모델을 gemini-2.0-flash로 바꾼 뒤 다시 시도해 주세요.`;
+    }
+
+    if (/project has been denied access|denied access|permission/i.test(message)) {
+        return '현재 API 키의 Google Cloud 프로젝트가 Gemini 통계 분석 모델 접근을 거부했습니다. Billing 연결, Generative Language API 사용 설정, 모델 권한을 확인해 주세요.';
+    }
+
+    if (/api[_ -]?key[_ -]?invalid|invalid api key|key not valid/i.test(message)) {
+        return '저장된 Gemini API 키가 유효하지 않습니다. /settings/ai 또는 localStorage의 gemini_api_key 값을 확인해 주세요.';
+    }
+
+    if (/quota|resource_exhausted|429/i.test(message)) {
+        return 'Gemini API 사용량 한도 또는 분당 제한에 걸렸습니다. 잠시 후 다시 시도하거나 Google AI Studio/Cloud 콘솔에서 할당량을 확인해 주세요.';
+    }
+
+    return `${message}\n시도한 모델: ${attemptedModels.join(', ')}`;
+};
 
 // ===========================
 // Enhanced System Prompt with Few-Shot Examples
@@ -218,7 +256,7 @@ function buildSystemPrompt(): string {
 - 작업자: name, manDay(0~1.5), unitPrice, role, salaryModel(일급제/월급제/지원팀/용역팀)
 
 ## 출력: 유효한 JSON만 (텍스트/마크다운 금지)
-{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"compareStartDate":null,"compareEndDate":null,"analysisType":"...","parsedQuestion":"..."}
+{"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","siteName":null,"teamName":null,"workerTeamName":null,"workerName":null,"companyName":null,"salaryModel":null,"supportDirection":null,"compareStartDate":null,"compareEndDate":null,"analysisType":"...","parsedQuestion":"..."}
 
 ## compareStartDate / compareEndDate
 - comparison 분석에서만 사용. 비교 대상 이전 기간.
@@ -231,6 +269,15 @@ function buildSystemPrompt(): string {
 - workerTeamName: 작업자 소속팀 (작업자가 소속된 팀). "1팀 소속 작업자" "1팀 인원" "1팀 사람들" "1팀 작업자"
 - "1팀 공수" 같이 애매한 경우 → teamName 사용 (시스템이 자동으로 소속팀 결과도 대안으로 제공)
 - 명확히 "소속" "인원" "작업자" 키워드가 있으면 → workerTeamName 사용
+
+## 지원팀 분석 규칙
+- supportDirection은 null 또는 다음 4개 중 하나만 사용: 외부지원간곳, 외부지원온곳, 내부지원간곳, 내부지원온곳
+- 외부 + 온곳/들어온/받은/지원받은 => 외부지원온곳
+- 외부 + 간곳/나간/보낸/지원간 => 외부지원간곳
+- 내부 + 온곳/들어온/받은/지원받은 => 내부지원온곳
+- 내부 + 간곳/나간/보낸/지원간 => 내부지원간곳
+- 지원 질문에서 teamName은 현장담당팀/받은 팀, workerTeamName은 작업자 소속팀/보낸 팀으로 해석
+- "지원", "지원팀", "용역", "외부지원", "내부지원", "온곳", "간곳" 질문은 analysisType=support_analysis
 
 ## analysisType
 team_summary: 팀별/팀순위/팀공수/각팀
@@ -314,7 +361,7 @@ async function callGeminiText(prompt: string, systemInstruction?: string): Promi
     aiSettingsService.assertCurrentPageEnabled('AI 통계 분석');
 
     const geminiApiKey = aiSettingsService.getApiKey() || process.env.REACT_APP_GOOGLE_API_KEY || '';
-    const geminiModel = aiSettingsService.getModels().analyticsModel || 'gemini-2.5-flash';
+    const modelCandidates = getAnalyticsModelCandidates();
     if (!geminiApiKey) {
         throw new Error('Google API 키가 설정되지 않았습니다. (/settings/ai)');
     }
@@ -331,20 +378,52 @@ async function callGeminiText(prompt: string, systemInstruction?: string): Promi
         body.systemInstruction = { parts: [{ text: systemInstruction }] };
     }
 
-    const endpoint = `${GEMINI_API_URL_BASE}/${geminiModel}:generateContent?key=${geminiApiKey}`;
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
+    let lastError: Error | null = null;
+    for (let index = 0; index < modelCandidates.length; index += 1) {
+        const geminiModel = modelCandidates[index];
+        const hasFallback = index < modelCandidates.length - 1;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS);
 
-    if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Gemini API 오류 (${response.status}): ${errText.substring(0, 200)}`);
+        try {
+            const endpoint = `${GEMINI_API_URL_BASE}/${geminiModel}:generateContent?key=${geminiApiKey}`;
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+
+            if (!response.ok) {
+                const errText = await response.text();
+                const error = new Error(`Gemini API 오류 (${response.status}, ${geminiModel}): ${errText.substring(0, 500)}`);
+                if (hasFallback && shouldRetryWithFallbackModel(response.status, errText)) {
+                    lastError = error;
+                    continue;
+                }
+                throw error;
+            }
+
+            const data = await response.json();
+            return (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+        } catch (error) {
+            const isAbort = error instanceof Error && error.name === 'AbortError';
+            const normalizedError = isAbort
+                ? new Error(`Gemini API 응답 시간이 초과되었습니다 (${geminiModel}).`)
+                : (error instanceof Error ? error : new Error(String(error)));
+            lastError = normalizedError;
+
+            if (hasFallback && (isAbort || shouldRetryWithFallbackModel(0, normalizedError.message))) {
+                continue;
+            }
+
+            throw new Error(formatGeminiAnalyticsError(normalizedError, modelCandidates.slice(0, index + 1)));
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
-    const data = await response.json();
-    return (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+    throw new Error(formatGeminiAnalyticsError(lastError || 'Gemini API 호출에 실패했습니다.', modelCandidates));
 }
 
 // ===========================
@@ -375,6 +454,32 @@ function extractJSON(text: string): Record<string, unknown> | null {
 // ===========================
 // Query Validation & Auto-Correction
 // ===========================
+
+function parseSupportDirectionValue(value: unknown): SupportDirection | undefined {
+    const normalized = String(value ?? '').replace(/\s+/g, '');
+    if (!normalized || normalized === 'null' || normalized === 'undefined') return undefined;
+    return VALID_SUPPORT_DIRECTIONS.find(direction => direction === normalized);
+}
+
+function detectSupportDirectionFromText(text: string): SupportDirection | undefined {
+    const normalized = text.replace(/\s+/g, '');
+    const explicitMatches = VALID_SUPPORT_DIRECTIONS.filter(direction => normalized.includes(direction));
+    if (explicitMatches.length === 1) return explicitMatches[0];
+    if (explicitMatches.length > 1) return undefined;
+
+    const hasExternal = /외부|타사|협력사|용역/.test(normalized);
+    const hasInternal = /내부|청연/.test(normalized);
+    const hasIncoming = /온곳|들어온|받은|받는|지원받|온지원|들어오는/.test(normalized);
+    const hasOutgoing = /간곳|나간|보낸|보내는|지원간|간지원|나가는/.test(normalized);
+
+    const candidates: SupportDirection[] = [];
+    if (hasExternal && hasIncoming) candidates.push('외부지원온곳');
+    if (hasExternal && hasOutgoing) candidates.push('외부지원간곳');
+    if (hasInternal && hasIncoming) candidates.push('내부지원온곳');
+    if (hasInternal && hasOutgoing) candidates.push('내부지원간곳');
+    if (candidates.length === 1) return candidates[0];
+    return parseSupportDirectionValue(normalized);
+}
 
 function validateAndCorrectQuery(
     parsed: Record<string, unknown>,
@@ -436,6 +541,13 @@ function validateAndCorrectQuery(
         }
     }
 
+    const detectedSupportDirection = detectSupportDirectionFromText(originalQuestion);
+    const isSupportQuestion = /지원|용역|온곳|간곳|지원받|지원간|외부지원|내부지원/.test(originalQuestion);
+    if (analysisType === 'general' && (detectedSupportDirection || isSupportQuestion)) {
+        analysisType = 'support_analysis';
+        logs.push('분석유형 자동감지: support_analysis');
+    }
+
     // salaryModel auto-detection
     let salaryModel = parsed.salaryModel ? String(parsed.salaryModel).trim() : undefined;
     if (salaryModel === 'null' || salaryModel === '') salaryModel = undefined;
@@ -472,6 +584,16 @@ function validateAndCorrectQuery(
         [compareStartDate, compareEndDate] = [compareEndDate, compareStartDate];
     }
 
+    let supportDirection = parseSupportDirectionValue(parsed.supportDirection);
+    if (!supportDirection && detectedSupportDirection) {
+        supportDirection = detectedSupportDirection;
+        logs.push(`지원방향 자동감지: ${supportDirection}`);
+    }
+    if (supportDirection && analysisType !== 'support_analysis') {
+        analysisType = 'support_analysis';
+        logs.push('지원방향 기준으로 분석유형 보정: support_analysis');
+    }
+
     const query: AnalyticsQuery = {
         startDate,
         endDate,
@@ -481,6 +603,7 @@ function validateAndCorrectQuery(
         workerName: cleanStr(parsed.workerName),
         companyName: cleanStr(parsed.companyName),
         salaryModel,
+        supportDirection,
         compareStartDate,
         compareEndDate,
         analysisType,
@@ -599,6 +722,121 @@ interface RawQueryResult {
     appliedFilters: string[];
 }
 
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+async function executeSupportAggregate(query: AnalyticsQuery, rawReportCount: number): Promise<RawQueryResult> {
+    const supportData = await manpowerAnalyticsService.getSupportAnalysis(query.startDate, query.endDate, {
+        supportDirection: query.supportDirection,
+        teamName: query.teamName,
+        workerTeamName: query.workerTeamName,
+        siteName: query.siteName,
+        workerName: query.workerName,
+    });
+
+    const appliedFilters: string[] = ['지원팀 분석: 외부/내부 + 온곳/간곳 방향 기준'];
+    if (query.supportDirection) appliedFilters.push(`지원방향: "${query.supportDirection}"`);
+    if (query.siteName) appliedFilters.push(`현장: "${query.siteName}"`);
+    if (query.teamName) appliedFilters.push(`팀: "${query.teamName}"`);
+    if (query.workerTeamName) appliedFilters.push(`작업자 소속팀: "${query.workerTeamName}"`);
+    if (query.workerName) appliedFilters.push(`작업자: "${query.workerName}"`);
+
+    const detailRows: AnalyticsDetailRow[] = supportData.flows.map(flow => ({
+        date: flow.dates[0] || query.startDate,
+        siteName: flow.toSiteName || '',
+        teamName: flow.supportInTeamName || flow.fromTeamName || '',
+        companyName: flow.counterpartyName,
+        workers: [{
+            name: flow.workerName,
+            role: flow.direction || '지원',
+            manDay: flow.totalManDay,
+            unitPrice: flow.totalManDay > 0 ? Math.round(flow.totalAmount / flow.totalManDay) : 0,
+            amount: flow.totalAmount,
+            salaryModel: flow.direction || '지원',
+            teamName: flow.supportOutTeamName || flow.fromTeamName,
+            siteName: flow.toSiteName,
+        }],
+        totalManDay: flow.totalManDay,
+        totalAmount: flow.totalAmount,
+        workerCount: 1,
+    }));
+
+    const siteMap = new Map<string, { manDay: number; amount: number; workerIds: Set<string>; teamIds: Set<string>; dates: Set<string> }>();
+    supportData.flows.forEach(flow => {
+        const siteName = flow.toSiteName || '미지정';
+        if (!siteMap.has(siteName)) {
+            siteMap.set(siteName, { manDay: 0, amount: 0, workerIds: new Set(), teamIds: new Set(), dates: new Set() });
+        }
+        const site = siteMap.get(siteName)!;
+        site.manDay += flow.totalManDay;
+        site.amount += flow.totalAmount;
+        if (flow.workerId) site.workerIds.add(flow.workerId);
+        if (flow.supportInTeamName || flow.fromTeamName) site.teamIds.add(flow.supportInTeamName || flow.fromTeamName);
+        flow.dates.forEach(date => site.dates.add(date));
+    });
+
+    const teamAgg: TeamAggRow[] = supportData.teamSummaries.map(team => {
+        const totalTeamManDay = team.sentManDay + team.receivedManDay;
+        const totalTeamAmount = team.sentAmount + team.receivedAmount;
+        return {
+            teamName: team.teamName,
+            totalManDay: round1(totalTeamManDay),
+            totalAmount: Math.round(totalTeamAmount),
+            workerCount: Math.max(team.sentWorkerCount, team.receivedWorkerCount),
+            days: 0,
+            avgDailyManDay: 0,
+        };
+    }).sort((a, b) => b.totalManDay - a.totalManDay);
+
+    const siteAgg: SiteAggRow[] = Array.from(siteMap.entries()).map(([siteName, site]) => ({
+        siteName,
+        totalManDay: round1(site.manDay),
+        totalAmount: Math.round(site.amount),
+        workerCount: site.workerIds.size,
+        teamCount: site.teamIds.size,
+        days: site.dates.size,
+    })).sort((a, b) => b.totalManDay - a.totalManDay);
+
+    const workerAgg: WorkerAggRow[] = supportData.supportWorkers.map(worker => ({
+        name: worker.workerName,
+        totalManDay: worker.totalManDay,
+        totalAmount: worker.totalAmount,
+        workDays: worker.workDays,
+        avgManDay: worker.workDays > 0 ? round1(worker.totalManDay / worker.workDays) : 0,
+        sites: worker.sites,
+        teams: worker.supportOutTeams?.length ? worker.supportOutTeams : worker.teams,
+        salaryModel: worker.directions?.join(', ') || worker.salaryModel,
+    })).sort((a, b) => b.totalManDay - a.totalManDay);
+
+    const dailyAgg: DailyAggRow[] = supportData.dailyTrend.map(day => ({
+        date: day.date,
+        totalManDay: day.supportManDay,
+        totalAmount: day.supportAmount,
+        workerCount: 0,
+        teamCount: 0,
+        siteCount: 0,
+    }));
+
+    const salaryModelAgg: SalaryModelAggRow[] = (supportData.supportByDirection ?? []).map(direction => ({
+        salaryModel: direction.direction,
+        totalManDay: direction.totalManDay,
+        totalAmount: direction.totalAmount,
+        workerCount: direction.workerCount,
+        workDays: direction.flowCount,
+    })).sort((a, b) => b.totalManDay - a.totalManDay);
+
+    return {
+        detailRows,
+        teamAgg,
+        siteAgg,
+        workerAgg,
+        dailyAgg,
+        salaryModelAgg,
+        rawReportCount,
+        filteredReportCount: detailRows.length,
+        appliedFilters,
+    };
+}
+
 async function executeAndAggregate(query: AnalyticsQuery): Promise<RawQueryResult> {
     let reports: DailyReport[];
     try {
@@ -612,6 +850,10 @@ async function executeAndAggregate(query: AnalyticsQuery): Promise<RawQueryResul
     }
 
     const rawReportCount = reports.length;
+    if (query.analysisType === 'support_analysis') {
+        return executeSupportAggregate(query, rawReportCount);
+    }
+
     const appliedFilters: string[] = [];
     let filtered = reports;
 
@@ -897,7 +1139,13 @@ async function generateInsight(
             lines.push(`${i + 1}. ${w.name}: ${w.totalManDay}공수, ${w.workDays}일, ${w.salaryModel || '-'}, ${w.teams.join('/')}`)
         );
     }
-    if (type === 'support_analysis' || type === 'salary_model_analysis') {
+    if (type === 'support_analysis') {
+        lines.push('\n[지원 방향별]');
+        data.salaryModelAgg.forEach(s =>
+            lines.push(`${s.salaryModel}: ${s.totalManDay}공수, ${s.workerCount}명, ${s.workDays}개 흐름`)
+        );
+    }
+    if (type === 'salary_model_analysis') {
         lines.push('\n[급여방식별]');
         data.salaryModelAgg.forEach(s =>
             lines.push(`${s.salaryModel}: ${s.totalManDay}공수, ${s.workerCount}명, ${s.workDays}일`)
@@ -994,7 +1242,7 @@ export async function analyzeWithAI(question: string): Promise<AnalyticsResult> 
 
         // --- 애매한 팀 필터: teamName만 설정 + workerTeamName 미설정 → 양쪽 결과 비교 ---
         let alternativeResult: AnalyticsResult['alternativeResult'] | undefined;
-        if (query.teamName && !query.workerTeamName) {
+        if (query.teamName && !query.workerTeamName && query.analysisType !== 'support_analysis') {
             // 작업자 소속팀 기준으로도 조회
             const altQuery: AnalyticsQuery = {
                 ...query,

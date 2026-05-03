@@ -52,6 +52,20 @@ interface DateRange {
 
 type TabId = 'dashboard' | 'calendar' | 'team' | 'site' | 'worker' | 'support' | 'ai';
 
+const DATA_LOAD_TIMEOUT_MS = 30_000;
+const DATA_LOAD_TIMEOUT_MESSAGE = '통계 데이터 조회가 30초 이상 지연되고 있습니다. 네트워크 또는 Firebase 응답 상태를 확인한 뒤 다시 시도해 주세요.';
+
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+    });
+};
+
 // --- Animation Variants ---
 
 const containerVariants: Variants = {
@@ -400,6 +414,19 @@ const SupportView: React.FC<{
     if (!supportData) return <p className="text-center text-slate-500 py-12">지원팀 데이터가 없습니다.</p>;
 
     const hasSupportData = supportData.totalSupportManDay > 0;
+    const directionRows = supportData.supportByDirection ?? [];
+    const directionTone: Record<string, string> = {
+        외부지원간곳: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+        외부지원온곳: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
+        내부지원간곳: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+        내부지원온곳: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    };
+    const directionHelp: Record<string, string> = {
+        외부지원간곳: '청연 팀이 외부 현장으로 나간 지원',
+        외부지원온곳: '외부 팀이 청연 현장으로 들어온 지원',
+        내부지원간곳: '청연 팀이 다른 청연 팀 현장으로 나간 지원',
+        내부지원온곳: '다른 청연 팀이 우리 현장으로 들어온 지원',
+    };
 
     return (
         <div className="space-y-6">
@@ -443,11 +470,52 @@ const SupportView: React.FC<{
                 </div>
             </motion.div>
 
+            {hasSupportData && directionRows.length > 0 && (
+                <motion.div variants={itemVariants} className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50">
+                    <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                        <div className="w-1 h-5 bg-cyan-500 rounded-full" />
+                        지원 방향별 요약
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        {directionRows.map(row => (
+                            <div key={row.direction} className="rounded-xl border border-slate-700/50 bg-slate-900/30 p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <span className={`inline-flex rounded-lg border px-2 py-1 text-xs font-semibold ${directionTone[row.direction] || 'border-slate-600 bg-slate-700/40 text-slate-300'}`}>
+                                            {row.direction}
+                                        </span>
+                                        <p className="mt-2 text-xs text-slate-500 leading-relaxed">{directionHelp[row.direction]}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-xl font-bold text-white">{formatNumber(row.totalManDay)}</div>
+                                        <div className="text-[11px] text-slate-500">공수</div>
+                                    </div>
+                                </div>
+                                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                                    <div className="rounded-lg bg-slate-950/40 px-2 py-2">
+                                        <div className="font-semibold text-slate-200">{row.workerCount}명</div>
+                                        <div className="text-slate-500">인원</div>
+                                    </div>
+                                    <div className="rounded-lg bg-slate-950/40 px-2 py-2">
+                                        <div className="font-semibold text-slate-200">{row.siteCount}</div>
+                                        <div className="text-slate-500">현장</div>
+                                    </div>
+                                    <div className="rounded-lg bg-slate-950/40 px-2 py-2">
+                                        <div className="font-semibold text-slate-200">{row.flowCount}</div>
+                                        <div className="text-slate-500">흐름</div>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </motion.div>
+            )}
+
             {!hasSupportData ? (
                 <motion.div variants={itemVariants} className="bg-slate-800/50 p-12 rounded-2xl border border-slate-700/50 text-center">
                     <FontAwesomeIcon icon={faHandshake} className="text-4xl text-slate-600 mb-4" />
                     <p className="text-slate-400 text-lg">선택한 기간에 지원팀 데이터가 없습니다.</p>
-                    <p className="text-slate-600 text-sm mt-2">작업자의 급여방식(salaryModel)이 '지원팀' 또는 '용역팀'인 데이터를 분석합니다.</p>
+                    <p className="text-slate-600 text-sm mt-2">현장 담당팀, 작업자 소속팀, 내부/외부 회사 정보를 기준으로 지원 방향을 분류합니다.</p>
                 </motion.div>
             ) : (
                 <>
@@ -500,8 +568,10 @@ const SupportView: React.FC<{
                                     <thead>
                                         <tr className="text-slate-400 text-xs border-b border-slate-700">
                                             <th className="p-2">팀명</th>
-                                            <th className="p-2 text-right">지원 공수</th>
-                                            <th className="p-2 text-right">지원 금액</th>
+                                            <th className="p-2 text-right">보낸 공수</th>
+                                            <th className="p-2 text-right">받은 공수</th>
+                                            <th className="p-2 text-right">보낸 금액</th>
+                                            <th className="p-2 text-right">받은 금액</th>
                                             <th className="p-2 text-right">인원</th>
                                         </tr>
                                     </thead>
@@ -510,12 +580,14 @@ const SupportView: React.FC<{
                                             <tr key={idx} className="border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors">
                                                 <td className="p-2 text-sm font-medium text-white">{ts.teamName}</td>
                                                 <td className="p-2 text-sm text-right text-amber-400 font-bold">{ts.sentManDay.toFixed(1)}</td>
+                                                <td className="p-2 text-sm text-right text-cyan-400 font-bold">{ts.receivedManDay.toFixed(1)}</td>
                                                 <td className="p-2 text-sm text-right text-slate-300">{formatCurrency(ts.sentAmount)}</td>
-                                                <td className="p-2 text-sm text-right text-slate-400">{ts.sentWorkerCount}명</td>
+                                                <td className="p-2 text-sm text-right text-slate-300">{formatCurrency(ts.receivedAmount)}</td>
+                                                <td className="p-2 text-sm text-right text-slate-400">{Math.max(ts.sentWorkerCount, ts.receivedWorkerCount)}명</td>
                                             </tr>
                                         ))}
                                         {supportData.teamSummaries.length === 0 && (
-                                            <tr><td colSpan={4} className="text-center p-6 text-slate-600">데이터 없음</td></tr>
+                                            <tr><td colSpan={6} className="text-center p-6 text-slate-600">데이터 없음</td></tr>
                                         )}
                                     </tbody>
                                 </table>
@@ -531,12 +603,17 @@ const SupportView: React.FC<{
                             <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
                                 {supportData.flows.slice(0, 20).map((flow, idx) => (
                                     <div key={idx} className="flex items-center gap-2 p-3 rounded-xl bg-slate-900/30 border border-slate-700/20">
-                                        <div className="flex-shrink-0">
-                                            <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg">{flow.fromTeamName}</span>
+                                        <div className="flex-shrink-0 flex flex-col gap-1">
+                                            <span className={`text-[10px] px-2 py-0.5 rounded-lg border ${directionTone[flow.direction || ''] || 'border-slate-600 bg-slate-700/40 text-slate-300'}`}>
+                                                {flow.direction || '지원'}
+                                            </span>
+                                            <span className="text-xs text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg">{flow.supportOutTeamName || flow.fromTeamName}</span>
                                         </div>
                                         <FontAwesomeIcon icon={faArrowRight} className="text-slate-600 text-xs flex-shrink-0" />
                                         <div className="flex-shrink-0">
-                                            <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg truncate max-w-[120px] inline-block">{flow.toSiteName || '미지정'}</span>
+                                            <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg truncate max-w-[180px] inline-block">
+                                                {flow.supportInTeamName ? `${flow.supportInTeamName} / ` : ''}{flow.toSiteName || '미지정'}
+                                            </span>
                                         </div>
                                         <div className="ml-auto text-right flex-shrink-0">
                                             <div className="text-xs text-white font-bold">{flow.workerName}</div>
@@ -564,11 +641,12 @@ const SupportView: React.FC<{
                                         <th className="p-3">순위</th>
                                         <th className="p-3">성명</th>
                                         <th className="p-3">급여방식</th>
+                                        <th className="p-3">지원방향</th>
                                         <th className="p-3 text-right">총 공수</th>
                                         <th className="p-3 text-right">근무 일수</th>
                                         <th className="p-3 text-right">총 금액</th>
-                                        <th className="p-3">소속팀</th>
-                                        <th className="p-3">투입 현장</th>
+                                        <th className="p-3">보낸 팀</th>
+                                        <th className="p-3">받은 팀/현장</th>
                                     </tr>
                                 </thead>
                                 <tbody className="text-slate-300">
@@ -579,15 +657,24 @@ const SupportView: React.FC<{
                                             <td className="p-3">
                                                 <span className="text-xs px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400">{sw.salaryModel}</span>
                                             </td>
+                                            <td className="p-3">
+                                                <div className="flex flex-wrap gap-1">
+                                                    {(sw.directions && sw.directions.length > 0 ? sw.directions : ['지원']).map(direction => (
+                                                        <span key={direction} className={`text-[10px] px-2 py-0.5 rounded-lg border ${directionTone[direction] || 'border-slate-600 bg-slate-700/40 text-slate-300'}`}>
+                                                            {direction}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </td>
                                             <td className="p-3 text-right font-bold text-amber-400">{sw.totalManDay.toFixed(1)}</td>
                                             <td className="p-3 text-right">{sw.workDays}일</td>
                                             <td className="p-3 text-right">{formatCurrency(sw.totalAmount)}</td>
-                                            <td className="p-3 text-xs text-slate-500 truncate max-w-[120px]">{sw.teams.join(', ')}</td>
-                                            <td className="p-3 text-xs text-slate-500 truncate max-w-[150px]">{sw.sites.join(', ')}</td>
+                                            <td className="p-3 text-xs text-slate-500 truncate max-w-[120px]">{(sw.supportOutTeams?.length ? sw.supportOutTeams : sw.teams).join(', ')}</td>
+                                            <td className="p-3 text-xs text-slate-500 truncate max-w-[180px]">{[...(sw.supportInTeams || []), ...sw.sites].filter(Boolean).join(', ')}</td>
                                         </tr>
                                     ))}
                                     {supportData.supportWorkers.length === 0 && (
-                                        <tr><td colSpan={8} className="text-center p-8 text-slate-500">지원 작업자 데이터가 없습니다.</td></tr>
+                                        <tr><td colSpan={9} className="text-center p-8 text-slate-500">지원 작업자 데이터가 없습니다.</td></tr>
                                     )}
                                 </tbody>
                             </table>
@@ -1272,6 +1359,8 @@ const DailyReportStatisticsPage: React.FC = () => {
         endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd')
     });
     const [loading, setLoading] = useState(false);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
     const [activeTab, setActiveTab] = useState<TabId>('dashboard');
 
     // Data State
@@ -1314,11 +1403,14 @@ const DailyReportStatisticsPage: React.FC = () => {
 
     // Fetch Data
     useEffect(() => {
+        let cancelled = false;
+
         const fetchData = async () => {
             setLoading(true);
+            setLoadError(null);
             try {
                 const { startDate, endDate } = dateRange;
-                const [statResult, teamResult, siteResult, workerResult, periodResult, dailySummaryResult, supportResult] = await Promise.all([
+                const [statResult, teamResult, siteResult, workerResult, periodResult, dailySummaryResult, supportResult] = await withTimeout(Promise.all([
                     manpowerAnalyticsService.getManpowerStatistics(startDate, endDate),
                     manpowerAnalyticsService.getTeamManpower(startDate, endDate),
                     manpowerAnalyticsService.getSiteManpower(startDate, endDate),
@@ -1326,7 +1418,9 @@ const DailyReportStatisticsPage: React.FC = () => {
                     manpowerAnalyticsService.getManpowerByPeriod(startDate, endDate),
                     manpowerAnalyticsService.getDailySummary(startDate, endDate),
                     manpowerAnalyticsService.getSupportAnalysis(startDate, endDate)
-                ]);
+                ]), DATA_LOAD_TIMEOUT_MS, DATA_LOAD_TIMEOUT_MESSAGE);
+
+                if (cancelled) return;
 
                 setStats(statResult);
                 setTeamData(teamResult);
@@ -1348,14 +1442,23 @@ const DailyReportStatisticsPage: React.FC = () => {
                 setDailyTrend(Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)));
 
             } catch (error) {
+                if (cancelled) return;
+                const message = error instanceof Error ? error.message : '통계 데이터를 불러오지 못했습니다.';
                 console.error("Failed to fetch analytics:", error);
+                setLoadError(message);
             } finally {
-                setLoading(false);
+                if (!cancelled) {
+                    setLoading(false);
+                }
             }
         };
 
         fetchData();
-    }, [dateRange]);
+
+        return () => {
+            cancelled = true;
+        };
+    }, [dateRange, reloadToken]);
 
     // AI Submit Handler
     const handleAiSubmit = useCallback(async (question: string) => {
@@ -1524,6 +1627,24 @@ const DailyReportStatisticsPage: React.FC = () => {
                         </button>
                     ))}
                 </div>
+
+                {loadError && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="flex flex-col gap-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                        <span>{loadError}</span>
+                        <button
+                            type="button"
+                            onClick={() => setReloadToken((value) => value + 1)}
+                            className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-400/40 px-3 py-2 text-xs font-bold text-rose-50 transition-colors hover:bg-rose-500/20"
+                        >
+                            <FontAwesomeIcon icon={faSync} />
+                            다시 시도
+                        </button>
+                    </motion.div>
+                )}
 
                 {/* Content Area */}
                 <AnimatePresence mode="wait">

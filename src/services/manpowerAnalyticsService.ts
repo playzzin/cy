@@ -5,6 +5,15 @@
  */
 
 import { dailyReportService, DailyReport, DailyReportWorker } from './dailyReportService';
+import { teamService, type Team } from './teamService';
+import { companyService, type Company } from './companyService';
+import { siteService, type Site } from './siteService';
+
+const MANPOWER_BY_PERIOD_CACHE_TTL_MS = 10_000;
+const manpowerByPeriodCache = new Map<string, {
+    createdAt: number;
+    promise: Promise<ManpowerData[]>;
+}>();
 
 // ===========================
 // Types
@@ -70,6 +79,32 @@ export interface DailySummary {
     sites: Array<{ siteId: string; siteName: string; manDay: number; workerCount: number; amount: number }>;
 }
 
+export type SupportDirection = '외부지원간곳' | '외부지원온곳' | '내부지원간곳' | '내부지원온곳';
+
+export const SUPPORT_DIRECTIONS: SupportDirection[] = [
+    '외부지원간곳',
+    '외부지원온곳',
+    '내부지원간곳',
+    '내부지원온곳',
+];
+
+export interface SupportAnalysisFilter {
+    supportDirection?: SupportDirection;
+    teamName?: string;
+    workerTeamName?: string;
+    siteName?: string;
+    workerName?: string;
+}
+
+export interface SupportDirectionSummary {
+    direction: SupportDirection;
+    totalManDay: number;
+    totalAmount: number;
+    workerCount: number;
+    siteCount: number;
+    flowCount: number;
+}
+
 export interface SupportFlowItem {
     fromTeamId: string;
     fromTeamName: string;
@@ -80,6 +115,16 @@ export interface SupportFlowItem {
     totalManDay: number;
     totalAmount: number;
     dates: string[];
+    direction?: SupportDirection;
+    supportOutTeamId?: string;
+    supportOutTeamName?: string;
+    supportInTeamId?: string;
+    supportInTeamName?: string;
+    siteResponsibleTeamId?: string;
+    siteResponsibleTeamName?: string;
+    counterpartyName?: string;
+    supportScope?: '외부' | '내부';
+    flowType?: '간곳' | '온곳';
 }
 
 export interface SupportTeamSummary {
@@ -100,6 +145,7 @@ export interface SupportAnalysis {
     supportRatio: number; // 전체 대비 지원 비율 (%)
     flows: SupportFlowItem[];
     teamSummaries: SupportTeamSummary[];
+    supportByDirection?: SupportDirectionSummary[];
     dailyTrend: Array<{ date: string; supportManDay: number; supportAmount: number; normalManDay: number }>;
     supportWorkers: Array<{
         workerId: string;
@@ -110,6 +156,9 @@ export interface SupportAnalysis {
         workDays: number;
         teams: string[];
         sites: string[];
+        directions?: SupportDirection[];
+        supportOutTeams?: string[];
+        supportInTeams?: string[];
     }>;
 }
 
@@ -125,9 +174,15 @@ export class ManpowerAnalyticsService {
         startDate: string,
         endDate: string
     ): Promise<ManpowerData[]> {
-        const reports = await dailyReportService.getReports({ startDate, endDate });
+        const cacheKey = `${startDate}::${endDate}`;
+        const cached = manpowerByPeriodCache.get(cacheKey);
+        const now = Date.now();
 
-        return reports.map(r => ({
+        if (cached && now - cached.createdAt < MANPOWER_BY_PERIOD_CACHE_TTL_MS) {
+            return cached.promise;
+        }
+
+        const promise = dailyReportService.getReports({ startDate, endDate }).then((reports) => reports.map(r => ({
             date: r.date,
             siteId: r.siteId || '',
             siteName: r.siteName || '',
@@ -135,7 +190,16 @@ export class ManpowerAnalyticsService {
             teamName: r.teamName || '',
             workers: r.workers || [],
             totalManDay: typeof r.totalManDay === 'number' ? r.totalManDay : 0
-        }));
+        })));
+
+        manpowerByPeriodCache.set(cacheKey, { createdAt: now, promise });
+        promise.catch(() => {
+            if (manpowerByPeriodCache.get(cacheKey)?.promise === promise) {
+                manpowerByPeriodCache.delete(cacheKey);
+            }
+        });
+
+        return promise;
     }
 
     /**
@@ -517,27 +581,218 @@ export class ManpowerAnalyticsService {
 
     /**
      * 지원팀 분석
-     * salaryModel이 '지원팀' 또는 '용역팀'인 작업자를 지원으로 분류
+     * 지원 정산 페이지와 같은 외부/내부, 온곳/간곳 방향 기준으로 분류
      */
     async getSupportAnalysis(
         startDate: string,
-        endDate: string
+        endDate: string,
+        filters: SupportAnalysisFilter = {}
     ): Promise<SupportAnalysis> {
-        const data = await this.getManpowerByPeriod(startDate, endDate);
+        return this.getDirectionalSupportAnalysis(startDate, endDate, filters);
+    }
 
-        const isSupportWorker = (w: DailyReportWorker): boolean => {
-            const model = (w.salaryModel || w.payType || '').trim();
-            return model === '지원팀' || model === '용역팀' || model === '지원';
+    private async getDirectionalSupportAnalysis(
+        startDate: string,
+        endDate: string,
+        filters: SupportAnalysisFilter
+    ): Promise<SupportAnalysis> {
+        const [data, teams, companies, sites] = await Promise.all([
+            this.getManpowerByPeriod(startDate, endDate),
+            teamService.getTeams().catch(() => [] as Team[]),
+            companyService.getCompanies().catch(() => [] as Company[]),
+            siteService.getSites().catch(() => [] as Site[]),
+        ]);
+
+        type TeamRef = { id: string; name: string; team?: Team };
+        type DirectionBucket = {
+            direction: SupportDirection;
+            totalManDay: number;
+            totalAmount: number;
+            workerIds: Set<string>;
+            siteIds: Set<string>;
+            flowKeys: Set<string>;
         };
 
-        let totalManDay = 0;
-        let totalSupportManDay = 0;
-        let totalSupportAmount = 0;
-        const supportWorkerIds = new Set<string>();
+        const normalize = (value: unknown): string => String(value ?? '').trim();
+        const toKey = (value: unknown): string => normalize(value).toLowerCase().replace(/\s+/g, '');
+        const pickString = (...values: unknown[]): string => {
+            for (const value of values) {
+                const normalized = normalize(value);
+                if (normalized) return normalized;
+            }
+            return '';
+        };
+        const matchesText = (value: unknown, keyword?: string): boolean => {
+            const kw = toKey(keyword);
+            if (!kw) return true;
+            const target = toKey(value);
+            return target.includes(kw) || kw.includes(target);
+        };
+        const round1 = (num: number): number => Math.round(num * 10) / 10;
 
-        // 지원 흐름 추적
+        const teamById = new Map<string, Team>();
+        const teamByName = new Map<string, Team>();
+        teams.forEach(team => {
+            if (team.id) teamById.set(String(team.id), team);
+            if (team.name) teamByName.set(toKey(team.name), team);
+        });
+
+        const companyById = new Map<string, Company>();
+        const companyByName = new Map<string, Company>();
+        companies.forEach(company => {
+            if (company.id) companyById.set(String(company.id), company);
+            if (company.name) companyByName.set(toKey(company.name), company);
+        });
+
+        const siteById = new Map<string, Site>();
+        const siteByName = new Map<string, Site>();
+        sites.forEach(site => {
+            if (site.id) siteById.set(String(site.id), site);
+            if (site.name) siteByName.set(toKey(site.name), site);
+        });
+
+        const findCompany = (id?: string | null, name?: string | null): Company | undefined => {
+            const cleanId = normalize(id);
+            const cleanName = normalize(name);
+            if (cleanId && companyById.has(cleanId)) return companyById.get(cleanId);
+            if (cleanName && companyByName.has(toKey(cleanName))) return companyByName.get(toKey(cleanName));
+            return undefined;
+        };
+
+        const isCheongyeonCompany = (company?: Company, fallbackName?: string): boolean => {
+            const isMyCompany = Boolean(company && (company as any).isMyCompany);
+            const name = toKey(`${company?.name ?? ''} ${fallbackName ?? ''}`);
+            return isMyCompany || name.includes('청연') || name.includes('cheongyeon');
+        };
+
+        const resolveTeam = (
+            id?: string | null,
+            name?: string | null,
+            fallbackId?: string | null,
+            fallbackName?: string | null
+        ): TeamRef => {
+            const cleanId = normalize(id);
+            const cleanName = normalize(name);
+            const fallbackCleanId = normalize(fallbackId);
+            const fallbackCleanName = normalize(fallbackName);
+            const team =
+                (cleanId ? teamById.get(cleanId) : undefined) ||
+                (cleanName ? teamByName.get(toKey(cleanName)) : undefined) ||
+                (fallbackCleanId ? teamById.get(fallbackCleanId) : undefined) ||
+                (fallbackCleanName ? teamByName.get(toKey(fallbackCleanName)) : undefined);
+
+            return {
+                id: normalize(team?.id) || cleanId || fallbackCleanId || toKey(cleanName || fallbackCleanName),
+                name: normalize(team?.name) || cleanName || fallbackCleanName || '미지정',
+                team,
+            };
+        };
+
+        const findSite = (report: ManpowerData): Site | undefined => {
+            const byId = report.siteId ? siteById.get(report.siteId) : undefined;
+            if (byId) return byId;
+            return report.siteName ? siteByName.get(toKey(report.siteName)) : undefined;
+        };
+
+        const resolveWorkerTeam = (worker: DailyReportWorker, report: ManpowerData): TeamRef => (
+            resolveTeam(worker.teamId, worker.workerTeamName, report.teamId, report.teamName)
+        );
+
+        const resolveTargetTeam = (report: ManpowerData, site?: Site): TeamRef => {
+            const rawReport = report as ManpowerData & Partial<DailyReport>;
+            return resolveTeam(
+                rawReport.responsibleTeamId || site?.responsibleTeamId,
+                rawReport.responsibleTeamName || site?.responsibleTeamName,
+                report.teamId,
+                report.teamName
+            );
+        };
+
+        const isTeamCheongyeon = (teamRef: TeamRef): boolean => {
+            const team = teamRef.team;
+            const company = findCompany(team?.companyId, team?.companyName);
+            return isCheongyeonCompany(company, team?.companyName);
+        };
+
+        const classifyWorker = (
+            report: ManpowerData,
+            worker: DailyReportWorker,
+            sourceTeam: TeamRef,
+            targetTeam: TeamRef,
+            site?: Site
+        ): SupportDirection[] => {
+            const rawReport = report as ManpowerData & Partial<DailyReport>;
+            const siteOwnerName = pickString(
+                rawReport.constructorCompanyName,
+                site?.constructorCompanyName,
+                rawReport.companyName,
+                site?.companyName
+            );
+            const siteOwnerCompany =
+                findCompany(rawReport.constructorCompanyId || site?.constructorCompanyId, siteOwnerName) ||
+                findCompany(rawReport.companyId || site?.companyId, rawReport.companyName || site?.companyName);
+
+            const hasSiteOwnerInfo = Boolean(siteOwnerName || siteOwnerCompany);
+            const siteIsCheongyeon = isCheongyeonCompany(siteOwnerCompany, siteOwnerName);
+            const siteClassification: 'internal' | 'external' =
+                hasSiteOwnerInfo && !siteIsCheongyeon ? 'external' : 'internal';
+
+            const sourceIsCheongyeon = isTeamCheongyeon(sourceTeam);
+            const targetIsCheongyeon = isTeamCheongyeon(targetTeam) || siteIsCheongyeon;
+            const sourceKey = sourceTeam.id || toKey(sourceTeam.name);
+            const targetKey = targetTeam.id || toKey(targetTeam.name);
+            const hasBothTeams = Boolean(sourceKey && targetKey);
+            const isDifferentTeam = hasBothTeams && sourceKey !== targetKey;
+            const salaryModel = normalize(worker.salaryModel || worker.payType);
+            const isSupportModel = /지원|용역/.test(salaryModel);
+            const isSupportTeam = /지원|용역/.test(`${sourceTeam.name} ${worker.workerTeamName || ''}`);
+
+            const directions: SupportDirection[] = [];
+            if (sourceIsCheongyeon && targetIsCheongyeon && isDifferentTeam) {
+                directions.push('내부지원간곳', '내부지원온곳');
+            } else if (siteClassification === 'external' && sourceIsCheongyeon) {
+                directions.push('외부지원간곳');
+            } else if (siteClassification === 'internal' && targetIsCheongyeon && !sourceIsCheongyeon) {
+                directions.push('외부지원온곳');
+            } else if (siteClassification === 'internal' && targetIsCheongyeon && (isSupportModel || isSupportTeam)) {
+                directions.push('외부지원온곳');
+            }
+
+            return Array.from(new Set(directions));
+        };
+
+        const matchesFilters = (
+            direction: SupportDirection,
+            report: ManpowerData,
+            worker: DailyReportWorker,
+            sourceTeam: TeamRef,
+            targetTeam: TeamRef
+        ): boolean => {
+            if (filters.supportDirection && filters.supportDirection !== direction) return false;
+            if (filters.siteName && !matchesText(report.siteName, filters.siteName)) return false;
+            if (filters.workerName && !matchesText(worker.name, filters.workerName)) return false;
+            if (filters.workerTeamName && !matchesText(sourceTeam.name, filters.workerTeamName)) return false;
+            if (filters.teamName && !(
+                matchesText(targetTeam.name, filters.teamName) ||
+                matchesText(sourceTeam.name, filters.teamName) ||
+                matchesText(report.teamName, filters.teamName)
+            )) {
+                return false;
+            }
+            return true;
+        };
+
+        const directionMap = new Map<SupportDirection, DirectionBucket>();
+        SUPPORT_DIRECTIONS.forEach(direction => directionMap.set(direction, {
+            direction,
+            totalManDay: 0,
+            totalAmount: 0,
+            workerIds: new Set(),
+            siteIds: new Set(),
+            flowKeys: new Set(),
+        }));
+
         const flowMap = new Map<string, SupportFlowItem>();
-        // 팀별 지원 요약
         const teamSupportMap = new Map<string, {
             teamId: string;
             teamName: string;
@@ -548,135 +803,231 @@ export class ManpowerAnalyticsService {
             receivedAmount: number;
             receivedWorkerIds: Set<string>;
         }>();
-        // 일별 추이
-        const dailyMap = new Map<string, { supportManDay: number; supportAmount: number; normalManDay: number }>();
-        // 지원 작업자 상세
+        const dailyMap = new Map<string, { supportManDay: number; supportAmount: number; totalManDay: number }>();
         const supportWorkerMap = new Map<string, {
             workerId: string;
             workerName: string;
             salaryModel: string;
             totalManDay: number;
             totalAmount: number;
-            workDays: number;
+            dates: Set<string>;
             teams: Set<string>;
             sites: Set<string>;
+            directions: Set<SupportDirection>;
+            supportOutTeams: Set<string>;
+            supportInTeams: Set<string>;
         }>();
 
-        data.forEach(report => {
-            totalManDay += report.totalManDay;
+        const supportWorkerIds = new Set<string>();
+        let totalManDay = 0;
+        let totalSupportManDay = 0;
+        let totalSupportAmount = 0;
 
-            if (!dailyMap.has(report.date)) {
-                dailyMap.set(report.date, { supportManDay: 0, supportAmount: 0, normalManDay: 0 });
+        const ensureTeamSummary = (team: TeamRef) => {
+            const key = team.id || team.name || '미지정';
+            if (!teamSupportMap.has(key)) {
+                teamSupportMap.set(key, {
+                    teamId: team.id,
+                    teamName: team.name,
+                    sentManDay: 0,
+                    sentAmount: 0,
+                    sentWorkerIds: new Set(),
+                    receivedManDay: 0,
+                    receivedAmount: 0,
+                    receivedWorkerIds: new Set(),
+                });
             }
-            const dayEntry = dailyMap.get(report.date)!;
+            return teamSupportMap.get(key)!;
+        };
 
-            report.workers.forEach(w => {
-                const manDay = typeof w.manDay === 'number' ? w.manDay : 0;
-                const unitPrice = typeof w.unitPrice === 'number' ? w.unitPrice : 0;
+        data.forEach(report => {
+            const workers = report.workers || [];
+            const reportWorkerManDay = workers.reduce((sum, worker) => (
+                sum + (typeof worker.manDay === 'number' ? worker.manDay : 0)
+            ), 0);
+            const reportTotalManDay = report.totalManDay > 0 ? report.totalManDay : reportWorkerManDay;
+
+            totalManDay += reportTotalManDay;
+            if (!dailyMap.has(report.date)) {
+                dailyMap.set(report.date, { supportManDay: 0, supportAmount: 0, totalManDay: 0 });
+            }
+            dailyMap.get(report.date)!.totalManDay += reportTotalManDay;
+
+            const site = findSite(report);
+            const targetTeam = resolveTargetTeam(report, site);
+            const rawReport = report as ManpowerData & Partial<DailyReport>;
+
+            workers.forEach(worker => {
+                const manDay = typeof worker.manDay === 'number' ? worker.manDay : 0;
+                if (manDay <= 0) return;
+
+                const sourceTeam = resolveWorkerTeam(worker, report);
+                const directions = classifyWorker(report, worker, sourceTeam, targetTeam, site);
+                if (directions.length === 0) return;
+
+                const matchedDirections = directions.filter(direction => (
+                    matchesFilters(direction, report, worker, sourceTeam, targetTeam)
+                ));
+                if (matchedDirections.length === 0) return;
+
+                const unitPrice = typeof worker.unitPrice === 'number' ? worker.unitPrice : 0;
                 const amount = manDay * unitPrice;
+                const workerKey = normalize(worker.workerId) || `${normalize(worker.name) || '미지정'}:${sourceTeam.id || sourceTeam.name}`;
+                const workerName = normalize(worker.name) || '미지정';
 
-                if (isSupportWorker(w)) {
-                    totalSupportManDay += manDay;
-                    totalSupportAmount += amount;
-                    dayEntry.supportManDay += manDay;
-                    dayEntry.supportAmount += amount;
+                totalSupportManDay += manDay;
+                totalSupportAmount += amount;
+                supportWorkerIds.add(workerKey);
+                const dayEntry = dailyMap.get(report.date)!;
+                dayEntry.supportManDay += manDay;
+                dayEntry.supportAmount += amount;
 
-                    const wid = String(w.workerId);
-                    if (wid && !wid.startsWith('unknown')) {
-                        supportWorkerIds.add(wid);
+                if (!supportWorkerMap.has(workerKey)) {
+                    supportWorkerMap.set(workerKey, {
+                        workerId: workerKey,
+                        workerName,
+                        salaryModel: normalize(worker.salaryModel || worker.payType),
+                        totalManDay: 0,
+                        totalAmount: 0,
+                        dates: new Set(),
+                        teams: new Set(),
+                        sites: new Set(),
+                        directions: new Set(),
+                        supportOutTeams: new Set(),
+                        supportInTeams: new Set(),
+                    });
+                }
+                const supportWorker = supportWorkerMap.get(workerKey)!;
+                supportWorker.totalManDay += manDay;
+                supportWorker.totalAmount += amount;
+                supportWorker.dates.add(report.date);
+                if (sourceTeam.name) supportWorker.teams.add(sourceTeam.name);
+                if (report.siteName) supportWorker.sites.add(report.siteName);
+                if (sourceTeam.name) supportWorker.supportOutTeams.add(sourceTeam.name);
+                if (targetTeam.name) supportWorker.supportInTeams.add(targetTeam.name);
+                matchedDirections.forEach(direction => supportWorker.directions.add(direction));
 
-                        // 지원 작업자 상세
-                        if (!supportWorkerMap.has(wid)) {
-                            supportWorkerMap.set(wid, {
-                                workerId: wid,
-                                workerName: w.name,
-                                salaryModel: (w.salaryModel || w.payType || '').trim(),
-                                totalManDay: 0,
-                                totalAmount: 0,
-                                workDays: 0,
-                                teams: new Set(),
-                                sites: new Set()
-                            });
-                        }
-                        const sw = supportWorkerMap.get(wid)!;
-                        sw.totalManDay += manDay;
-                        sw.totalAmount += amount;
-                        if (manDay > 0) sw.workDays += 1;
-                        if (report.teamName) sw.teams.add(report.teamName);
-                        if (report.siteName) sw.sites.add(report.siteName);
-                    }
+                matchedDirections.forEach(direction => {
+                    const directionBucket = directionMap.get(direction)!;
+                    const flowKey = [
+                        direction,
+                        sourceTeam.id || sourceTeam.name,
+                        targetTeam.id || targetTeam.name,
+                        report.siteId || report.siteName,
+                        workerKey,
+                    ].join('|');
 
-                    // 지원 흐름: 팀 → 현장
-                    const flowKey = `${report.teamId}:${report.siteId}:${wid}`;
+                    directionBucket.totalManDay += manDay;
+                    directionBucket.totalAmount += amount;
+                    directionBucket.workerIds.add(workerKey);
+                    if (report.siteId || report.siteName) directionBucket.siteIds.add(report.siteId || report.siteName);
+                    directionBucket.flowKeys.add(flowKey);
+
                     if (!flowMap.has(flowKey)) {
                         flowMap.set(flowKey, {
-                            fromTeamId: report.teamId,
-                            fromTeamName: report.teamName,
+                            direction,
+                            fromTeamId: sourceTeam.id,
+                            fromTeamName: sourceTeam.name,
                             toSiteId: report.siteId,
                             toSiteName: report.siteName,
-                            workerId: wid,
-                            workerName: w.name,
+                            workerId: workerKey,
+                            workerName,
                             totalManDay: 0,
                             totalAmount: 0,
-                            dates: []
+                            dates: [],
+                            supportOutTeamId: sourceTeam.id,
+                            supportOutTeamName: sourceTeam.name,
+                            supportInTeamId: targetTeam.id,
+                            supportInTeamName: targetTeam.name,
+                            siteResponsibleTeamId: rawReport.responsibleTeamId || site?.responsibleTeamId,
+                            siteResponsibleTeamName: rawReport.responsibleTeamName || site?.responsibleTeamName,
+                            counterpartyName: direction.startsWith('외부') ? pickString(
+                                rawReport.constructorCompanyName,
+                                site?.constructorCompanyName,
+                                rawReport.companyName,
+                                site?.companyName
+                            ) : targetTeam.name,
+                            supportScope: direction.startsWith('외부') ? '외부' : '내부',
+                            flowType: direction.endsWith('간곳') ? '간곳' : '온곳',
                         });
                     }
+
                     const flow = flowMap.get(flowKey)!;
                     flow.totalManDay += manDay;
                     flow.totalAmount += amount;
                     if (!flow.dates.includes(report.date)) flow.dates.push(report.date);
 
-                    // 팀 지원 요약 - 보낸 팀
-                    if (report.teamId) {
-                        if (!teamSupportMap.has(report.teamId)) {
-                            teamSupportMap.set(report.teamId, {
-                                teamId: report.teamId,
-                                teamName: report.teamName,
-                                sentManDay: 0, sentAmount: 0, sentWorkerIds: new Set(),
-                                receivedManDay: 0, receivedAmount: 0, receivedWorkerIds: new Set()
-                            });
-                        }
-                        const ts = teamSupportMap.get(report.teamId)!;
-                        ts.sentManDay += manDay;
-                        ts.sentAmount += amount;
-                        if (wid && !wid.startsWith('unknown')) ts.sentWorkerIds.add(wid);
+                    if (direction.endsWith('간곳')) {
+                        const sourceSummary = ensureTeamSummary(sourceTeam);
+                        sourceSummary.sentManDay += manDay;
+                        sourceSummary.sentAmount += amount;
+                        sourceSummary.sentWorkerIds.add(workerKey);
                     }
-                } else {
-                    dayEntry.normalManDay += manDay;
-                }
+                    if (direction.endsWith('온곳')) {
+                        const targetSummary = ensureTeamSummary(targetTeam);
+                        targetSummary.receivedManDay += manDay;
+                        targetSummary.receivedAmount += amount;
+                        targetSummary.receivedWorkerIds.add(workerKey);
+                    }
+                });
             });
         });
 
         return {
-            totalSupportManDay,
-            totalSupportAmount,
+            totalSupportManDay: round1(totalSupportManDay),
+            totalSupportAmount: Math.round(totalSupportAmount),
             totalSupportWorkers: supportWorkerIds.size,
-            supportRatio: totalManDay > 0 ? (totalSupportManDay / totalManDay) * 100 : 0,
-            flows: Array.from(flowMap.values()).sort((a, b) => b.totalManDay - a.totalManDay),
+            supportRatio: totalManDay > 0 ? round1((totalSupportManDay / totalManDay) * 100) : 0,
+            flows: Array.from(flowMap.values())
+                .map(flow => ({
+                    ...flow,
+                    totalManDay: round1(flow.totalManDay),
+                    totalAmount: Math.round(flow.totalAmount),
+                    dates: [...flow.dates].sort(),
+                }))
+                .sort((a, b) => b.totalManDay - a.totalManDay),
             teamSummaries: Array.from(teamSupportMap.values()).map(ts => ({
                 teamId: ts.teamId,
                 teamName: ts.teamName,
-                sentManDay: ts.sentManDay,
-                sentAmount: ts.sentAmount,
+                sentManDay: round1(ts.sentManDay),
+                sentAmount: Math.round(ts.sentAmount),
                 sentWorkerCount: ts.sentWorkerIds.size,
-                receivedManDay: ts.receivedManDay,
-                receivedAmount: ts.receivedAmount,
-                receivedWorkerCount: ts.receivedWorkerIds.size
-            })).sort((a, b) => b.sentManDay - a.sentManDay),
-            dailyTrend: Array.from(dailyMap.entries()).map(([date, d]) => ({
+                receivedManDay: round1(ts.receivedManDay),
+                receivedAmount: Math.round(ts.receivedAmount),
+                receivedWorkerCount: ts.receivedWorkerIds.size,
+            })).sort((a, b) => (
+                (b.sentManDay + b.receivedManDay) - (a.sentManDay + a.receivedManDay)
+            )),
+            supportByDirection: SUPPORT_DIRECTIONS.map(direction => {
+                const bucket = directionMap.get(direction)!;
+                return {
+                    direction,
+                    totalManDay: round1(bucket.totalManDay),
+                    totalAmount: Math.round(bucket.totalAmount),
+                    workerCount: bucket.workerIds.size,
+                    siteCount: bucket.siteIds.size,
+                    flowCount: bucket.flowKeys.size,
+                };
+            }),
+            dailyTrend: Array.from(dailyMap.entries()).map(([date, day]) => ({
                 date,
-                ...d
+                supportManDay: round1(day.supportManDay),
+                supportAmount: Math.round(day.supportAmount),
+                normalManDay: round1(Math.max(0, day.totalManDay - day.supportManDay)),
             })).sort((a, b) => a.date.localeCompare(b.date)),
-            supportWorkers: Array.from(supportWorkerMap.values()).map(sw => ({
-                workerId: sw.workerId,
-                workerName: sw.workerName,
-                salaryModel: sw.salaryModel,
-                totalManDay: sw.totalManDay,
-                totalAmount: sw.totalAmount,
-                workDays: sw.workDays,
-                teams: Array.from(sw.teams),
-                sites: Array.from(sw.sites)
-            })).sort((a, b) => b.totalManDay - a.totalManDay)
+            supportWorkers: Array.from(supportWorkerMap.values()).map(worker => ({
+                workerId: worker.workerId,
+                workerName: worker.workerName,
+                salaryModel: worker.salaryModel || '지원',
+                totalManDay: round1(worker.totalManDay),
+                totalAmount: Math.round(worker.totalAmount),
+                workDays: worker.dates.size,
+                teams: Array.from(worker.teams),
+                sites: Array.from(worker.sites),
+                directions: SUPPORT_DIRECTIONS.filter(direction => worker.directions.has(direction)),
+                supportOutTeams: Array.from(worker.supportOutTeams),
+                supportInTeams: Array.from(worker.supportInTeams),
+            })).sort((a, b) => b.totalManDay - a.totalManDay),
         };
     }
 }
