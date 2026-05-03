@@ -22,6 +22,7 @@ import {
     Download,
     GripVertical,
     MapPin,
+    Plus,
     RefreshCw,
     Save,
     Search,
@@ -39,8 +40,8 @@ import { vehicleService } from '../../services/vehicleService';
 import { Vehicle } from '../../types/vehicle';
 
 type ScheduleStatus = 'draft' | 'confirmed' | 'working' | 'done';
-type DragKind = 'team' | 'worker' | 'vehicle' | 'schedule';
-type LeftPanelTab = 'teams' | 'support' | 'vehicles';
+type DragKind = 'team' | 'worker' | 'vehicle' | 'site' | 'schedule';
+type LeftPanelTab = 'sites' | 'teams' | 'support' | 'vehicles';
 type RosterKind = 'team' | 'support' | 'unassigned';
 
 interface ScheduleItem {
@@ -75,6 +76,7 @@ interface TeamRoster {
     color: string;
     kind: RosterKind;
     leaderName?: string;
+    sourceLabel?: string;
     workers: Worker[];
 }
 
@@ -86,15 +88,10 @@ interface DragPayload {
 }
 
 const UNASSIGNED_TEAM_ID = 'unassigned';
-const UNASSIGNED_SUPPORT_TEAM_ID = 'unassigned-support';
 const DEFAULT_RESOURCE_COLOR = '#64748b';
+const TEMP_DRAFT_STORAGE_PREFIX = 'fieldSchedulePlannerDraft';
 
-const STATUS_META: Record<ScheduleStatus, { label: string; className: string }> = {
-    draft: { label: '작성중', className: 'bg-slate-100 text-slate-600' },
-    confirmed: { label: '확정', className: 'bg-emerald-100 text-emerald-700' },
-    working: { label: '진행', className: 'bg-blue-100 text-blue-700' },
-    done: { label: '완료', className: 'bg-zinc-100 text-zinc-600' },
-};
+const getTempDraftStorageKey = (date: string) => `${TEMP_DRAFT_STORAGE_PREFIX}:${date}`;
 
 const getTodayInputValue = () => {
     const now = new Date();
@@ -133,6 +130,9 @@ const getScheduleVehicleIds = (schedule: Partial<ScheduleItem>) =>
 const makeSiteKey = (schedule: Pick<ScheduleItem, 'siteId' | 'siteName'>) =>
     schedule.siteId ? `id:${schedule.siteId}` : schedule.siteName.trim() ? `name:${schedule.siteName.trim()}` : '';
 
+const makeSiteSelectionKey = (site: Site) =>
+    makeSiteKey({ siteId: site.id || '', siteName: site.name });
+
 const mergeSupportTeams = (supportTeams: ScheduleSupportTeam[]) => {
     const map = new Map<string, ScheduleSupportTeam>();
     supportTeams.forEach((team) => {
@@ -152,7 +152,6 @@ const mergeScheduleEntries = (base: ScheduleItem, incoming: ScheduleItem): Sched
         const incomingIndex = getScheduleVehicleIds(incoming).indexOf(vehicleId);
         return incoming.vehicleLabels?.[incomingIndex] || incoming.vehicleLabel;
     });
-
     return {
         ...base,
         teamId: base.teamId || incoming.teamId,
@@ -196,6 +195,22 @@ const getTeamColor = (team: Partial<Team> | undefined) => {
     return normalizeColor(team?.color) || DEFAULT_RESOURCE_COLOR;
 };
 
+const normalizeComparableText = (value?: unknown) =>
+    String(value ?? '')
+        .replace(/\s+/g, '')
+        .toLowerCase();
+
+const sameText = (left?: unknown, right?: unknown) => {
+    const normalizedLeft = normalizeComparableText(left);
+    const normalizedRight = normalizeComparableText(right);
+    return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+};
+
+const koreanNameCollator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' });
+
+const compareKoreanName = (left?: unknown, right?: unknown) =>
+    koreanNameCollator.compare(String(left ?? ''), String(right ?? ''));
+
 const hexToRgba = (hex: string, opacity: number) => {
     const normalized = hex.replace('#', '');
     if (normalized.length !== 6) return `rgba(37, 99, 235, ${opacity})`;
@@ -213,30 +228,129 @@ const isInactiveWorker = (worker?: Worker) => {
 const isUnavailableVehicle = (vehicle?: Vehicle) =>
     vehicle?.status === 'MAINTENANCE' || vehicle?.status === 'DISPOSED';
 
-const includesSupportKeyword = (...values: unknown[]) =>
+const getWorkerAssignedTeam = (worker: Worker | undefined, teamsById: Map<string, Team>, teams: Team[]) => {
+    if (!worker) return undefined;
+
+    const teamId = String(worker.teamId || '');
+    if (teamId) {
+        const byId = teamsById.get(teamId);
+        if (byId) return byId;
+
+        const byLegacyId = teams.find((team) => String(team.legacyId || '') === teamId);
+        if (byLegacyId) return byLegacyId;
+    }
+
+    return teams.find((team) => sameText(team.name, worker.teamName));
+};
+
+const getVehicleAssignedTeam = (vehicle: Vehicle | undefined, teamsById: Map<string, Team>, teams: Team[]) => {
+    if (!vehicle || String(vehicle.currentAssigneeType || '').toUpperCase() !== 'TEAM') return undefined;
+
+    const assigneeId = String(vehicle.currentAssigneeId || '');
+    if (assigneeId) {
+        const byId = teamsById.get(assigneeId);
+        if (byId) return byId;
+
+        const byLegacyId = teams.find((team) => String(team.legacyId || '') === assigneeId);
+        if (byLegacyId) return byLegacyId;
+    }
+
+    return teams.find((team) => sameText(team.name, vehicle.currentAssigneeName));
+};
+
+const includesKeyword = (keywords: string[], ...values: unknown[]) =>
     values.some((value) => {
-        const text = String(value ?? '').trim();
-        return text.includes('지원') || text.includes('용역');
+        const text = normalizeComparableText(value);
+        return Boolean(text) && keywords.some((keyword) => text.includes(normalizeComparableText(keyword)));
     });
+
+const includesSupportKeyword = (...values: unknown[]) =>
+    includesKeyword(['지원', '용역'], ...values);
+
+const includesConstructionKeyword = (...values: unknown[]) =>
+    includesKeyword(['시공사', '시공팀', '시공'], ...values);
+
+const includesCheongyeonKeyword = (...values: unknown[]) =>
+    includesKeyword(['청연이엔지', '청연엔지', '청연', 'cheongyeon'], ...values);
 
 const isSupportWorker = (worker?: Worker) =>
     includesSupportKeyword(worker?.teamType, worker?.salaryModel, worker?.payType, worker?.role);
 
-const isSupportTeam = (team: Team, teamWorkers: Worker[]) => {
-    const supportRate = Number(team.supportRate);
-    return (
-        includesSupportKeyword(
-            team.name,
-            team.type,
-            team.role,
-            team.defaultSalaryModel,
-            team.supportDescription,
-            team.serviceDescription
-        ) ||
-        Boolean(team.supportModel) ||
-        (Number.isFinite(supportRate) && supportRate > 0) ||
-        teamWorkers.some(isSupportWorker)
+const isFieldTeamSource = (team: Team, teamWorkers: Worker[] = []) =>
+    includesConstructionKeyword(team.name, team.type, team.role, team.companyName, team.parentTeamName) ||
+    includesCheongyeonKeyword(team.name, team.type, team.role, team.companyName, team.parentTeamName) ||
+    teamWorkers.some((worker) =>
+        includesConstructionKeyword(worker.teamName, worker.teamType, worker.role, worker.companyName) ||
+        includesCheongyeonKeyword(worker.teamName, worker.teamType, worker.companyName)
     );
+
+const isSupportTeam = (team: Team, teamWorkers: Worker[]) => {
+    if (isFieldTeamSource(team, teamWorkers)) return false;
+
+    const explicitSupportTeam = includesSupportKeyword(
+        team.name,
+        team.type,
+        team.role,
+        team.companyName,
+        team.parentTeamName,
+        team.defaultSalaryModel,
+        team.supportModel,
+        team.supportDescription,
+        team.serviceDescription
+    );
+    if (explicitSupportTeam) return true;
+
+    return teamWorkers.length > 0 && teamWorkers.every(isSupportWorker);
+};
+
+const getWorkerSourceLabel = (worker?: Worker) => {
+    if (includesConstructionKeyword(worker?.teamType, worker?.role, worker?.companyName)) return '시공사';
+    if (includesCheongyeonKeyword(worker?.companyName, worker?.teamType, worker?.teamName)) return '(주)청연이엔지';
+    return String(worker?.companyName || worker?.teamType || '작업자').trim();
+};
+
+const getTeamSourceLabel = (team: Team, teamWorkers: Worker[]) => {
+    if (includesConstructionKeyword(team.type, team.role, team.companyName, team.name)) return '시공사';
+    if (includesCheongyeonKeyword(team.companyName, team.parentTeamName, team.name, team.role)) return '(주)청연이엔지';
+    if (teamWorkers.some((worker) => includesConstructionKeyword(worker.teamType, worker.role, worker.companyName))) return '시공사';
+    if (teamWorkers.some((worker) => includesCheongyeonKeyword(worker.companyName, worker.teamName, worker.teamType))) {
+        return '(주)청연이엔지';
+    }
+    return String(team.companyName || team.type || '팀').trim();
+};
+
+const workerMatchesTeam = (worker: Worker, team: Team, memberIds: Set<string>, memberNames: Set<string>) => {
+    if (!worker.id) return false;
+    if (worker.teamId) return Boolean(team.id && worker.teamId === team.id);
+    if (memberIds.has(worker.id)) return true;
+    if (memberNames.has(normalizeComparableText(worker.name))) return true;
+    return sameText(worker.teamName, team.name);
+};
+
+const groupUnassignedWorkers = (workers: Worker[], kind: RosterKind, fallbackName: string, fallbackId: string): TeamRoster[] => {
+    const groups = new Map<string, TeamRoster>();
+
+    workers.forEach((worker) => {
+        const existing = groups.get(fallbackId);
+        if (existing) {
+            existing.workers.push(worker);
+            return;
+        }
+
+        groups.set(fallbackId, {
+            id: fallbackId,
+            name: fallbackName,
+            color: normalizeColor(worker.color) || DEFAULT_RESOURCE_COLOR,
+            kind,
+            sourceLabel: getWorkerSourceLabel(worker),
+            workers: [worker],
+        });
+    });
+
+    return Array.from(groups.values()).map((group) => ({
+        ...group,
+        workers: [...group.workers].sort((left, right) => compareKoreanName(left.name, right.name)),
+    }));
 };
 
 const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number) => {
@@ -250,12 +364,15 @@ const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number) => {
 const DraggableWorkerPill: React.FC<{
     worker: Worker;
     sourceScheduleId?: string;
+    teamColor?: string;
     onRemove?: () => void;
     selectable?: boolean;
     selected?: boolean;
     onToggleSelect?: () => void;
-}> = ({ worker, sourceScheduleId, onRemove, selectable, selected, onToggleSelect }) => {
+}> = ({ worker, sourceScheduleId, teamColor, onRemove, selectable, selected, onToggleSelect }) => {
     const workerId = worker.id || '';
+    const workerTeamColor = normalizeColor(teamColor) || normalizeColor(worker.color) || DEFAULT_RESOURCE_COLOR;
+    const inactive = isInactiveWorker(worker);
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: sourceScheduleId ? `schedule-worker:${sourceScheduleId}:${workerId}` : `worker:${workerId}`,
         data: {
@@ -267,9 +384,17 @@ const DraggableWorkerPill: React.FC<{
         disabled: !workerId,
     });
 
-    const style = transform
-        ? { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1 }
-        : { opacity: isDragging ? 0.35 : 1 };
+    const style: React.CSSProperties = {
+        transform: transform ? CSS.Translate.toString(transform) : undefined,
+        opacity: isDragging ? 0.35 : 1,
+        borderColor: inactive ? '#fecaca' : selected ? workerTeamColor : hexToRgba(workerTeamColor, 0.45),
+        backgroundColor: inactive
+            ? '#fef2f2'
+            : selected
+                ? hexToRgba(workerTeamColor, 0.14)
+                : hexToRgba(workerTeamColor, 0.06),
+        boxShadow: selected && !inactive ? `0 0 0 2px ${hexToRgba(workerTeamColor, 0.16)}` : undefined,
+    };
 
     return (
         <span
@@ -287,12 +412,8 @@ const DraggableWorkerPill: React.FC<{
                 }
             }}
             className={`inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold ${
-                selected
-                    ? 'border-blue-300 bg-blue-50 text-blue-700'
-                    : isInactiveWorker(worker)
-                    ? 'border-red-200 bg-red-50 text-red-700'
-                    : 'border-slate-200 bg-white text-slate-700'
-            } ${selectable ? 'cursor-pointer hover:border-blue-300 hover:bg-blue-50' : ''}`}
+                inactive ? 'text-red-700' : 'text-slate-800'
+            } ${selectable ? 'cursor-pointer hover:shadow-sm' : ''}`}
         >
             <span
                 {...attributes}
@@ -304,13 +425,17 @@ const DraggableWorkerPill: React.FC<{
             </span>
             {selectable ? (
                 <span
-                    className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                        selected ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300 bg-white'
-                    }`}
+                    className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border bg-white"
+                    style={
+                        selected && !inactive
+                            ? { borderColor: workerTeamColor, backgroundColor: workerTeamColor, color: '#fff' }
+                            : { borderColor: hexToRgba(workerTeamColor, 0.45) }
+                    }
                 >
                     {selected ? <Check size={10} /> : null}
                 </span>
             ) : null}
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: inactive ? '#ef4444' : workerTeamColor }} />
             <span className="truncate">{worker.name}</span>
             {onRemove ? (
                 <button
@@ -331,8 +456,11 @@ const DraggableWorkerPill: React.FC<{
 
 const DraggableVehicleCard: React.FC<{
     vehicle: Vehicle;
-    assigned?: boolean;
-}> = ({ vehicle, assigned }) => {
+    selected?: boolean;
+    assignedTeamColor?: string;
+    onToggleSelect?: () => void;
+    onAdd?: () => void;
+}> = ({ vehicle, selected, assignedTeamColor, onToggleSelect, onAdd }) => {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: `vehicle:${vehicle.id}`,
         data: {
@@ -342,40 +470,172 @@ const DraggableVehicleCard: React.FC<{
         } satisfies DragPayload,
     });
 
-    const style = transform
-        ? { transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.35 : 1 }
-        : { opacity: isDragging ? 0.35 : 1 };
+    const style: React.CSSProperties = {
+        transform: transform ? CSS.Translate.toString(transform) : undefined,
+        opacity: isDragging ? 0.35 : 1,
+        borderColor: selected
+            ? '#2563eb'
+            : isUnavailableVehicle(vehicle)
+                ? '#fecaca'
+                : assignedTeamColor
+                    ? hexToRgba(assignedTeamColor, 0.55)
+                    : '#cbd5e1',
+        backgroundColor: !selected && assignedTeamColor && !isUnavailableVehicle(vehicle) ? hexToRgba(assignedTeamColor, 0.07) : undefined,
+        boxShadow: selected ? '0 0 0 3px rgba(37, 99, 235, 0.16)' : undefined,
+    };
 
     return (
         <article
             ref={setNodeRef}
             style={style}
-            className={`flex cursor-grab items-center gap-3 rounded-lg border bg-white p-3 shadow-sm transition hover:border-slate-300 active:cursor-grabbing ${
-                isUnavailableVehicle(vehicle) ? 'border-red-200 bg-red-50' : 'border-slate-200'
+            onClick={onToggleSelect}
+            className={`flex h-12 cursor-pointer items-center gap-2 rounded-lg border-2 bg-white px-2.5 shadow-sm transition hover:shadow-md ${
+                isUnavailableVehicle(vehicle) ? 'bg-red-50' : ''
             }`}
-            {...attributes}
-            {...listeners}
         >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600">
-                <Truck size={17} />
-            </span>
-            <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-black text-slate-900">{vehicle.licensePlate}</span>
-                <span className="block truncate text-xs font-medium text-slate-500">
-                    {vehicle.model || vehicle.currentAssigneeName || '차량'}
-                </span>
-            </span>
             <span
-                className={`rounded-full px-2 py-0.5 text-[11px] font-black ${
-                    isUnavailableVehicle(vehicle)
-                        ? 'bg-red-100 text-red-700'
-                        : assigned
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-slate-100 text-slate-500'
-                }`}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-600"
+                style={
+                    assignedTeamColor && !isUnavailableVehicle(vehicle)
+                        ? { backgroundColor: hexToRgba(assignedTeamColor, 0.12), color: assignedTeamColor }
+                        : undefined
+                }
             >
-                {isUnavailableVehicle(vehicle) ? '사용불가' : assigned ? '배정' : '대기'}
+                <Truck size={15} />
             </span>
+            <h3 className="min-w-0 flex-1 truncate text-xs font-black text-slate-900">{vehicle.licensePlate}</h3>
+            <button
+                type="button"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onAdd?.();
+                }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-blue-700"
+                title="차량 추가"
+            >
+                <Plus size={14} />
+            </button>
+            <button
+                type="button"
+                {...attributes}
+                {...listeners}
+                onClick={(event) => event.stopPropagation()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                title="차량 드래그"
+            >
+                <GripVertical size={14} />
+            </button>
+        </article>
+    );
+};
+
+const DraggableSiteCard: React.FC<{
+    site: Site;
+    color: string;
+    selected: boolean;
+    onSelect: () => void;
+    onRegister: () => void;
+}> = ({ site, color, selected, onSelect, onRegister }) => {
+    const siteId = site.id || site.name;
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+        id: `site:${siteId}`,
+        data: {
+            kind: 'site',
+            id: siteId,
+            label: site.name,
+        } satisfies DragPayload,
+        disabled: !siteId,
+    });
+
+    const style: React.CSSProperties = {
+        transform: transform ? CSS.Translate.toString(transform) : undefined,
+        opacity: isDragging ? 0.35 : 1,
+        borderColor: selected ? color : hexToRgba(color, 0.5),
+        boxShadow: selected ? `0 0 0 3px ${hexToRgba(color, 0.18)}` : undefined,
+    };
+
+    return (
+        <article
+            ref={setNodeRef}
+            style={style}
+            onClick={onSelect}
+            className="flex h-12 cursor-pointer items-center gap-2 rounded-lg border-2 bg-white px-2.5 shadow-sm transition hover:shadow-md"
+        >
+            <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+            <h3 className="min-w-0 flex-1 truncate text-xs font-black text-slate-900">{site.name}</h3>
+            <button
+                type="button"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onRegister();
+                }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-blue-700"
+                title="현장 등록"
+            >
+                <Plus size={14} />
+            </button>
+            <button
+                type="button"
+                {...attributes}
+                {...listeners}
+                onClick={(event) => event.stopPropagation()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                title="현장 드래그"
+            >
+                <GripVertical size={14} />
+            </button>
+        </article>
+    );
+};
+
+const SupportRosterLineCard: React.FC<{
+    roster: TeamRoster;
+    selected: boolean;
+    onSelect: () => void;
+    onAdd: () => void;
+}> = ({ roster, selected, onSelect, onAdd }) => {
+    const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+        id: `team:${roster.id}`,
+        data: { kind: 'team', id: roster.id, label: roster.name } satisfies DragPayload,
+    });
+
+    const style: React.CSSProperties = {
+        transform: transform ? CSS.Translate.toString(transform) : undefined,
+        opacity: isDragging ? 0.35 : 1,
+        borderColor: selected ? roster.color : hexToRgba(roster.color, 0.5),
+        boxShadow: selected ? `0 0 0 3px ${hexToRgba(roster.color, 0.18)}` : undefined,
+    };
+
+    return (
+        <article
+            ref={setNodeRef}
+            style={style}
+            onClick={onSelect}
+            className="flex h-12 cursor-pointer items-center gap-2 rounded-lg border-2 bg-white px-2.5 shadow-sm transition hover:shadow-md"
+        >
+            <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: roster.color }} />
+            <h3 className="min-w-0 flex-1 truncate text-xs font-black text-slate-900">{roster.name}</h3>
+            <button
+                type="button"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onAdd();
+                }}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-blue-700"
+                title="지원팀 추가"
+            >
+                <Plus size={14} />
+            </button>
+            <button
+                type="button"
+                {...attributes}
+                {...listeners}
+                onClick={(event) => event.stopPropagation()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                title="지원팀 드래그"
+            >
+                <GripVertical size={14} />
+            </button>
         </article>
     );
 };
@@ -385,8 +645,20 @@ const TeamRosterCard: React.FC<{
     selected: boolean;
     onSelect: () => void;
     selectedWorkerIds: Set<string>;
+    supportSelected: boolean;
+    onToggleSupportTeam: () => void;
     onToggleWorker: (workerId: string) => void;
-}> = ({ roster, selected, onSelect, selectedWorkerIds, onToggleWorker }) => {
+    onToggleAllWorkers: () => void;
+}> = ({
+    roster,
+    selected,
+    onSelect,
+    selectedWorkerIds,
+    supportSelected,
+    onToggleSupportTeam,
+    onToggleWorker,
+    onToggleAllWorkers,
+}) => {
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: `team:${roster.id}`,
         data: { kind: 'team', id: roster.id, label: roster.name } satisfies DragPayload,
@@ -397,20 +669,38 @@ const TeamRosterCard: React.FC<{
         : { opacity: isDragging ? 0.35 : 1 };
     const isSupportRoster = roster.kind === 'support';
     const selectedCount = roster.workers.filter((worker) => worker.id && selectedWorkerIds.has(worker.id)).length;
+    const allWorkersSelected = !isSupportRoster && roster.workers.length > 0 && selectedCount === roster.workers.length;
+    const someWorkersSelected = !isSupportRoster && selectedCount > 0;
+    const rosterSelected = selected || supportSelected;
+    const cardStyle: React.CSSProperties = {
+        ...style,
+        borderColor: rosterSelected ? roster.color : hexToRgba(roster.color, 0.55),
+        boxShadow: rosterSelected ? `0 0 0 3px ${hexToRgba(roster.color, 0.18)}` : undefined,
+    };
 
     return (
         <article
             ref={setNodeRef}
-            style={style}
-            className={`rounded-lg border bg-white p-3 shadow-sm transition ${
-                selected ? 'border-blue-400 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-300'
-            }`}
+            style={cardStyle}
+            className="rounded-lg border-2 bg-white p-3 shadow-sm transition hover:shadow-md"
         >
             <div className="flex items-start justify-between gap-3">
                 <button type="button" onClick={onSelect} className="min-w-0 flex-1 text-left">
                     <div className="flex items-center gap-2">
                         <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: roster.color }} />
                         <h3 className="truncate text-sm font-black text-slate-900">{roster.name}</h3>
+                        {roster.sourceLabel ? (
+                            <span
+                                className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black"
+                                style={{
+                                    borderColor: hexToRgba(roster.color, 0.35),
+                                    backgroundColor: hexToRgba(roster.color, 0.08),
+                                    color: roster.color,
+                                }}
+                            >
+                                {roster.sourceLabel}
+                            </span>
+                        ) : null}
                         {roster.kind === 'support' ? (
                             <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black text-blue-700">
                                 지원팀
@@ -438,11 +728,32 @@ const TeamRosterCard: React.FC<{
                     className="mt-3 flex flex-wrap gap-1.5 rounded-md p-2"
                     style={{ backgroundColor: hexToRgba(roster.color, 0.06) }}
                 >
+                    <label
+                        onClick={(event) => event.stopPropagation()}
+                        className="mb-1 flex w-full cursor-pointer items-center justify-between rounded-md bg-white px-2 py-1.5 text-xs font-black text-slate-700"
+                    >
+                        <span className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={allWorkersSelected}
+                                ref={(node) => {
+                                    if (node) node.indeterminate = someWorkersSelected && !allWorkersSelected;
+                                }}
+                                onChange={onToggleAllWorkers}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                            />
+                            전체 선택
+                        </span>
+                        <span className="text-slate-400">
+                            {selectedCount}/{roster.workers.length}
+                        </span>
+                    </label>
                     {roster.workers.length > 0 ? (
                         roster.workers.map((worker) => (
                             <DraggableWorkerPill
                                 key={worker.id}
                                 worker={worker}
+                                teamColor={roster.kind === 'unassigned' ? normalizeColor(worker.color) || roster.color : roster.color}
                                 selectable
                                 selected={Boolean(worker.id && selectedWorkerIds.has(worker.id))}
                                 onToggleSelect={() => worker.id && onToggleWorker(worker.id)}
@@ -452,7 +763,29 @@ const TeamRosterCard: React.FC<{
                         <span className="text-xs font-semibold text-slate-400">등록된 작업자가 없습니다.</span>
                     )}
                 </div>
-            ) : null}
+            ) : (
+                <button
+                    type="button"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onToggleSupportTeam();
+                    }}
+                    className={`mt-3 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs font-black ${
+                        supportSelected
+                            ? 'border-blue-300 bg-blue-50 text-blue-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50'
+                    }`}
+                >
+                    <span
+                        className={`flex h-4 w-4 items-center justify-center rounded border ${
+                            supportSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300 bg-white'
+                        }`}
+                    >
+                        {supportSelected ? <Check size={11} /> : null}
+                    </span>
+                    팀명 선택
+                </button>
+            )}
 
             {selected && !isSupportRoster ? (
                 <div className="mt-3 rounded-md bg-slate-50 px-2.5 py-2 text-xs font-bold text-slate-600">
@@ -465,28 +798,28 @@ const TeamRosterCard: React.FC<{
 
 const ScheduleCard: React.FC<{
     schedule: ScheduleItem;
-    sites: Site[];
     workersById: Map<string, Worker>;
+    workerTeamColorById: Map<string, string>;
     vehiclesById: Map<string, Vehicle>;
+    vehicleAssignedTeamColorById: Map<string, string>;
     issues: string[];
-    isSupportSchedule: boolean;
-    onPatch: (patch: Partial<ScheduleItem>) => void;
-    onSelectSite: (siteId: string) => void;
-    onDuplicate: () => void;
+    selectedDestination: boolean;
+    recentlyUpdated: boolean;
+    onSelectDestination: () => void;
     onDelete: () => void;
     onRemoveWorker: (workerId: string) => void;
     onRemoveSupportTeam: (teamId: string) => void;
     onRemoveVehicle: (vehicleId: string) => void;
 }> = ({
     schedule,
-    sites,
     workersById,
+    workerTeamColorById,
     vehiclesById,
+    vehicleAssignedTeamColorById,
     issues,
-    isSupportSchedule,
-    onPatch,
-    onSelectSite,
-    onDuplicate,
+    selectedDestination,
+    recentlyUpdated,
+    onSelectDestination,
     onDelete,
     onRemoveWorker,
     onRemoveSupportTeam,
@@ -515,7 +848,24 @@ const ScheduleCard: React.FC<{
     };
 
     return (
-        <article ref={setRefs} style={style} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:shadow-md">
+        <article
+            ref={setRefs}
+            style={style}
+            onClick={onSelectDestination}
+            className={`relative cursor-pointer rounded-lg bg-white p-4 shadow-sm transition hover:shadow-md ${
+                recentlyUpdated
+                    ? 'border-2 border-emerald-400 ring-4 ring-emerald-100 animate-pulse'
+                    : 'border border-slate-200'
+            }`}
+        >
+            {selectedDestination ? (
+                <span
+                    className="absolute right-12 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg shadow-blue-200"
+                    title="선택 중인 이동 대상"
+                >
+                    <MapPin size={17} />
+                </span>
+            ) : null}
             <div
                 className="-mx-4 -mt-4 mb-3 h-1 rounded-t-lg"
                 style={{ backgroundColor: schedule.siteColor || schedule.teamColor }}
@@ -524,9 +874,6 @@ const ScheduleCard: React.FC<{
                 <div className="min-w-0">
                     <div className="mb-1 flex items-center gap-2">
                         <span className="h-3 w-3 rounded-full" style={{ backgroundColor: schedule.teamColor }} />
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${STATUS_META[schedule.status].className}`}>
-                            {STATUS_META[schedule.status].label}
-                        </span>
                         {issues.length > 0 ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-black text-red-600">
                                 <AlertTriangle size={12} />
@@ -551,65 +898,28 @@ const ScheduleCard: React.FC<{
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2">
-                <label className="block">
-                    <span className="mb-1 block text-[11px] font-black text-slate-400">상태</span>
-                    <select
-                        value={schedule.status}
-                        onChange={(event) => onPatch({ status: event.target.value as ScheduleStatus })}
-                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-400"
-                    >
-                        {Object.entries(STATUS_META).map(([key, meta]) => (
-                            <option key={key} value={key}>
-                                {meta.label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-            </div>
-
-            <label className="mt-2 block">
-                <span className="mb-1 block text-[11px] font-black text-slate-400">현장</span>
-                <select
-                    value={schedule.siteId}
-                    onChange={(event) => onSelectSite(event.target.value)}
-                    className="h-9 w-full rounded-md border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-blue-400"
-                >
-                    <option value="">현장 선택</option>
-                    {sites.map((site) => (
-                        <option key={site.id} value={site.id}>
-                            {site.name}
-                        </option>
-                    ))}
-                </select>
-            </label>
-
-            {(!isSupportSchedule || schedule.workerIds.length > 0) ? (
+            {schedule.workerIds.length > 0 ? (
                 <div
                     className="mt-3 rounded-md border border-dashed border-slate-200 p-2"
                     style={{ backgroundColor: hexToRgba(schedule.teamColor, 0.05) }}
                 >
-                    <div className="mb-2 flex items-center justify-between">
+                    <div className="mb-2 flex items-center">
                         <span className="text-[11px] font-black text-slate-500">작업자 {schedule.workerIds.length}명</span>
-                        <span className="text-[11px] font-semibold text-slate-400">작업자를 드래그해서 추가</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
-                        {schedule.workerIds.length > 0 ? (
-                            schedule.workerIds.map((workerId) => {
-                                const worker = workersById.get(workerId);
-                                if (!worker) return null;
-                                return (
-                                    <DraggableWorkerPill
-                                        key={workerId}
-                                        worker={worker}
-                                        sourceScheduleId={schedule.id}
-                                        onRemove={() => onRemoveWorker(workerId)}
-                                    />
-                                );
-                            })
-                        ) : (
-                            <span className="text-xs font-semibold text-slate-400">작업자가 비어 있습니다.</span>
-                        )}
+                        {schedule.workerIds.map((workerId) => {
+                            const worker = workersById.get(workerId);
+                            if (!worker) return null;
+                            return (
+                                <DraggableWorkerPill
+                                    key={workerId}
+                                    worker={worker}
+                                    teamColor={workerTeamColorById.get(workerId) || schedule.teamColor}
+                                    sourceScheduleId={schedule.id}
+                                    onRemove={() => onRemoveWorker(workerId)}
+                                />
+                            );
+                        })}
                     </div>
                 </div>
             ) : null}
@@ -645,25 +955,39 @@ const ScheduleCard: React.FC<{
                 </div>
             ) : null}
 
-            <div className="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50 p-2">
-                <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[11px] font-black text-slate-500">차량</span>
-                    <span className="text-[11px] font-semibold text-slate-400">차량을 드래그해서 등록</span>
-                </div>
-                {scheduleVehicleIds.length > 0 ? (
+            {scheduleVehicleIds.length > 0 ? (
+                <div className="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50 p-2">
+                    <div className="mb-2 flex items-center">
+                        <span className="text-[11px] font-black text-slate-500">차량</span>
+                    </div>
                     <div className="flex flex-wrap gap-1.5">
                         {scheduleVehicleIds.map((vehicleId, index) => {
                             const assignedVehicle = vehiclesById.get(vehicleId);
+                            const vehicleTeamColor = vehicleAssignedTeamColorById.get(vehicleId);
+                            const vehicleUnavailable = isUnavailableVehicle(assignedVehicle);
                             return (
                                 <span
                                     key={vehicleId}
                                     className={`inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-bold ${
-                                        isUnavailableVehicle(assignedVehicle)
+                                        vehicleUnavailable
                                             ? 'border-red-200 bg-red-50 text-red-700'
-                                            : 'border-slate-200 bg-white text-slate-700'
+                                            : 'text-slate-800'
                                     }`}
+                                    style={
+                                        vehicleUnavailable
+                                            ? undefined
+                                            : vehicleTeamColor
+                                                ? {
+                                                    borderColor: hexToRgba(vehicleTeamColor, 0.5),
+                                                    backgroundColor: hexToRgba(vehicleTeamColor, 0.08),
+                                                }
+                                            : {
+                                                borderColor: '#cbd5e1',
+                                                backgroundColor: '#f8fafc',
+                                            }
+                                    }
                                 >
-                                    <Truck size={13} />
+                                    <Truck size={13} style={vehicleUnavailable || !vehicleTeamColor ? undefined : { color: vehicleTeamColor }} />
                                     <span className="truncate">
                                         {assignedVehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}
                                     </span>
@@ -682,10 +1006,8 @@ const ScheduleCard: React.FC<{
                             );
                         })}
                     </div>
-                ) : (
-                    <span className="text-xs font-semibold text-slate-400">차량이 비어 있습니다.</span>
-                )}
-            </div>
+                </div>
+            ) : null}
 
             {issues.length > 0 ? (
                 <div className="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-xs font-bold text-red-700">
@@ -693,25 +1015,7 @@ const ScheduleCard: React.FC<{
                 </div>
             ) : null}
 
-            <label className="mt-3 block">
-                <span className="mb-1 block text-[11px] font-black text-slate-400">메모</span>
-                <input
-                    value={schedule.memo}
-                    onChange={(event) => onPatch({ memo: event.target.value })}
-                    placeholder="특이사항"
-                    className="h-9 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:border-blue-400"
-                />
-            </label>
-
             <div className="mt-3 flex justify-end gap-1">
-                <button
-                    type="button"
-                    onClick={onDuplicate}
-                    className="flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                >
-                    <ClipboardCopy size={14} />
-                    복사
-                </button>
                 <button
                     type="button"
                     onClick={onDelete}
@@ -736,7 +1040,10 @@ const FieldSchedulePlannerPage: React.FC = () => {
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [selectedSiteId, setSelectedSiteId] = useState('');
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
-    const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>('teams');
+    const [selectedSupportTeamIds, setSelectedSupportTeamIds] = useState<string[]>([]);
+    const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+    const [recentlyUpdatedSiteKey, setRecentlyUpdatedSiteKey] = useState('');
+    const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>('sites');
     const [searchTerm, setSearchTerm] = useState('');
     const [loading, setLoading] = useState(true);
     const [dirty, setDirty] = useState(false);
@@ -744,6 +1051,7 @@ const FieldSchedulePlannerPage: React.FC = () => {
     const [message, setMessage] = useState('');
     const [activePayload, setActivePayload] = useState<DragPayload | null>(null);
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
+    const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -777,13 +1085,18 @@ const FieldSchedulePlannerPage: React.FC = () => {
     );
 
     const rosters = useMemo<TeamRoster[]>(() => {
-        const activeTeams = teams.filter((team) => team.status !== 'closed');
+        const activeTeams = teams
+            .filter((team) => team.status !== 'closed')
+            .sort((left, right) => compareKoreanName(left.name, right.name));
+        const activeWorkers = workers.filter((worker) => worker.id && !isInactiveWorker(worker));
         const rows: TeamRoster[] = activeTeams.map((team) => {
             const memberIds = new Set([...(team.assignedWorkers || []), ...(team.memberIds || [])]);
-            const teamWorkers = workers.filter((worker) => {
-                if (!worker.id) return false;
-                return worker.teamId === team.id || memberIds.has(worker.id);
-            });
+            const memberNames = new Set((team.memberNames || []).map((name) => normalizeComparableText(name)));
+            const teamWorkers = activeWorkers
+                .filter((worker) => {
+                    return workerMatchesTeam(worker, team, memberIds, memberNames);
+                })
+                .sort((left, right) => compareKoreanName(left.name, right.name));
             const kind: RosterKind = isSupportTeam(team, teamWorkers) ? 'support' : 'team';
 
             return {
@@ -792,51 +1105,75 @@ const FieldSchedulePlannerPage: React.FC = () => {
                 color: getTeamColor(team),
                 kind,
                 leaderName: team.leaderName || undefined,
+                sourceLabel: getTeamSourceLabel(team, teamWorkers),
                 workers: teamWorkers,
             };
         });
 
         const assignedWorkerIds = new Set(rows.flatMap((row) => row.workers.map((worker) => worker.id || '')));
-        const unassignedWorkers = workers.filter((worker) => worker.id && !assignedWorkerIds.has(worker.id));
-        const unassignedSupportWorkers = unassignedWorkers.filter(isSupportWorker);
+        const unassignedWorkers = activeWorkers.filter((worker) => worker.id && !assignedWorkerIds.has(worker.id));
         const unassignedRegularWorkers = unassignedWorkers.filter((worker) => !isSupportWorker(worker));
 
-        if (unassignedRegularWorkers.length > 0) {
-            rows.push({
-                id: UNASSIGNED_TEAM_ID,
-                name: '미배정 작업자',
-                color: DEFAULT_RESOURCE_COLOR,
-                kind: 'unassigned',
-                leaderName: undefined,
-                workers: unassignedRegularWorkers,
-            });
-        }
-
-        if (unassignedSupportWorkers.length > 0) {
-            rows.push({
-                id: UNASSIGNED_SUPPORT_TEAM_ID,
-                name: '미배정 지원팀',
-                color: DEFAULT_RESOURCE_COLOR,
-                kind: 'support',
-                leaderName: undefined,
-                workers: unassignedSupportWorkers,
-            });
-        }
+        rows.push(...groupUnassignedWorkers(unassignedRegularWorkers, 'unassigned', '미배정 작업자', UNASSIGNED_TEAM_ID));
 
         return rows;
     }, [teams, workers]);
 
-    const assignedVehicleIds = useMemo(
-        () => new Set(schedules.flatMap((schedule) => getScheduleVehicleIds(schedule))),
-        [schedules]
+    const assignedWorkerIdSet = useMemo(() => {
+        const set = new Set<string>();
+        schedules.forEach((schedule) => schedule.workerIds.forEach((workerId) => workerId && set.add(workerId)));
+        return set;
+    }, [schedules]);
+
+    const assignedSupportTeamKeySet = useMemo(() => {
+        const set = new Set<string>();
+        schedules.forEach((schedule) => {
+            schedule.supportTeams.forEach((team) => {
+                const key = team.id || team.name;
+                if (key) set.add(key);
+            });
+        });
+        return set;
+    }, [schedules]);
+
+    const assignedVehicleIdSet = useMemo(() => {
+        const set = new Set<string>();
+        schedules.forEach((schedule) => getScheduleVehicleIds(schedule).forEach((vehicleId) => vehicleId && set.add(vehicleId)));
+        return set;
+    }, [schedules]);
+
+    const registeredSiteKeySet = useMemo(() => {
+        const set = new Set<string>();
+        schedules.forEach((schedule) => {
+            const key = makeSiteKey(schedule);
+            if (key) set.add(key);
+        });
+        return set;
+    }, [schedules]);
+
+    const availableRosters = useMemo(
+        () =>
+            rosters
+                .map((roster) => {
+                    if (roster.kind === 'support') return roster;
+                    return {
+                        ...roster,
+                        workers: roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id)),
+                    };
+                })
+                .filter((roster) => {
+                    if (roster.kind === 'support') return !assignedSupportTeamKeySet.has(roster.id || roster.name);
+                    return roster.workers.length > 0;
+                }),
+        [assignedSupportTeamKeySet, assignedWorkerIdSet, rosters]
     );
 
     const panelRosters = useMemo(
         () =>
-            rosters.filter((roster) =>
+            availableRosters.filter((roster) =>
                 leftPanelTab === 'support' ? roster.kind === 'support' : roster.kind !== 'support'
-            ),
-        [leftPanelTab, rosters]
+            ).sort((left, right) => compareKoreanName(left.name, right.name)),
+        [availableRosters, leftPanelTab]
     );
 
     const filteredRosters = useMemo(() => {
@@ -845,26 +1182,72 @@ const FieldSchedulePlannerPage: React.FC = () => {
         return panelRosters.filter((roster) => {
             const workerNames =
                 roster.kind === 'support' ? '' : roster.workers.map((worker) => `${worker.name} ${worker.role || ''}`).join(' ');
-            return `${roster.name} ${roster.leaderName || ''} ${workerNames}`.toLowerCase().includes(term);
-        });
+            return `${roster.name} ${roster.sourceLabel || ''} ${roster.leaderName || ''} ${workerNames}`.toLowerCase().includes(term);
+        }).sort((left, right) => compareKoreanName(left.name, right.name));
     }, [panelRosters, searchTerm]);
 
     const filteredVehicles = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
-        return vehicles.filter((vehicle) => {
-            if (!term) return true;
-            return `${vehicle.licensePlate} ${vehicle.model || ''} ${vehicle.currentAssigneeName || ''}`.toLowerCase().includes(term);
+        return vehicles
+            .filter((vehicle) => {
+                if (assignedVehicleIdSet.has(vehicle.id)) return false;
+                if (!term) return true;
+                return `${vehicle.licensePlate} ${vehicle.model || ''} ${vehicle.currentAssigneeName || ''}`.toLowerCase().includes(term);
+            })
+            .sort((left, right) => compareKoreanName(left.licensePlate || left.model, right.licensePlate || right.model));
+    }, [assignedVehicleIdSet, searchTerm, vehicles]);
+
+    const vehicleAssignedTeamColorById = useMemo(() => {
+        const map = new Map<string, string>();
+        vehicles.forEach((vehicle) => {
+            const assignedTeam = getVehicleAssignedTeam(vehicle, teamsById, teams);
+            const color = normalizeColor(assignedTeam?.color);
+            if (vehicle.id && color) map.set(vehicle.id, color);
         });
-    }, [searchTerm, vehicles]);
+        return map;
+    }, [teams, teamsById, vehicles]);
+
+    const workerTeamColorById = useMemo(() => {
+        const map = new Map<string, string>();
+        workers.forEach((worker) => {
+            const assignedTeam = getWorkerAssignedTeam(worker, teamsById, teams);
+            const color = normalizeColor(assignedTeam?.color) || normalizeColor(worker.color);
+            if (worker.id && color) map.set(worker.id, color);
+        });
+        return map;
+    }, [teams, teamsById, workers]);
+
+    const filteredSites = useMemo(() => {
+        const term = searchTerm.trim().toLowerCase();
+        return sites
+            .filter((site) => {
+                if (registeredSiteKeySet.has(makeSiteSelectionKey(site))) return false;
+                if (!term) return true;
+                return `${site.name} ${site.address || ''} ${site.responsibleTeamName || ''} ${site.companyName || ''} ${site.code || ''}`
+                    .toLowerCase()
+                    .includes(term);
+            })
+            .sort((left, right) => compareKoreanName(left.name, right.name));
+    }, [registeredSiteKeySet, searchTerm, sites]);
 
     const selectedRoster = useMemo(
-        () => rosters.find((roster) => roster.id === selectedTeamId) || rosters[0],
-        [rosters, selectedTeamId]
+        () => availableRosters.find((roster) => roster.id === selectedTeamId) || availableRosters[0],
+        [availableRosters, selectedTeamId]
     );
     const selectedWorkerIdSet = useMemo(() => new Set(selectedWorkerIds), [selectedWorkerIds]);
+    const selectedSupportTeamIdSet = useMemo(() => new Set(selectedSupportTeamIds), [selectedSupportTeamIds]);
+    const selectedVehicleIdSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
     const selectedWorkers = useMemo(
         () => selectedWorkerIds.map((workerId) => workersById.get(workerId)).filter((worker): worker is Worker => Boolean(worker)),
         [selectedWorkerIds, workersById]
+    );
+    const selectedSupportTeams = useMemo(
+        () => selectedSupportTeamIds.map((teamId) => availableRosters.find((roster) => roster.id === teamId)).filter((team): team is TeamRoster => Boolean(team)),
+        [availableRosters, selectedSupportTeamIds]
+    );
+    const selectedVehicles = useMemo(
+        () => selectedVehicleIds.map((vehicleId) => vehiclesById.get(vehicleId)).filter((vehicle): vehicle is Vehicle => Boolean(vehicle)),
+        [selectedVehicleIds, vehiclesById]
     );
     const isSupportScheduleItem = useCallback(
         (schedule: ScheduleItem) => {
@@ -880,21 +1263,23 @@ const FieldSchedulePlannerPage: React.FC = () => {
             const isSupportSchedule = isSupportScheduleItem(schedule);
             if (!schedule.siteId && !schedule.siteName.trim()) issues.push('현장이 선택되지 않았습니다.');
             const scheduleVehicleIds = getScheduleVehicleIds(schedule);
-            if (scheduleVehicleIds.length === 0) issues.push('차량이 등록되지 않았습니다.');
-            if (!isSupportSchedule && schedule.workerIds.length === 0) issues.push('작업자 또는 지원팀이 없습니다.');
+            const hasAssignedResources =
+                schedule.workerIds.length > 0 || schedule.supportTeams.length > 0 || scheduleVehicleIds.length > 0;
+            if (hasAssignedResources && scheduleVehicleIds.length === 0) issues.push('차량이 등록되지 않았습니다.');
+            if (hasAssignedResources && !isSupportSchedule && schedule.workerIds.length === 0) {
+                issues.push('작업자 또는 지원팀이 없습니다.');
+            }
 
             schedule.workerIds.forEach((workerId) => {
                 const worker = workersById.get(workerId);
                 const duplicated = allSchedules.filter((entry) => entry.workerIds.includes(workerId));
                 if (duplicated.length > 1) issues.push(`${worker?.name || '작업자'} 중복 배정`);
-                if (isInactiveWorker(worker)) issues.push(`${worker?.name || '작업자'} 상태 확인 필요`);
             });
 
             scheduleVehicleIds.forEach((vehicleId) => {
                 const vehicle = vehiclesById.get(vehicleId);
                 const duplicated = allSchedules.filter((entry) => getScheduleVehicleIds(entry).includes(vehicleId));
                 if (duplicated.length > 1) issues.push(`${vehicle?.licensePlate || '차량'} 중복 배정`);
-                if (isUnavailableVehicle(vehicle)) issues.push(`${vehicle?.licensePlate || '차량'} 사용 불가 상태`);
             });
 
             return Array.from(new Set(issues));
@@ -910,7 +1295,10 @@ const FieldSchedulePlannerPage: React.FC = () => {
     const mapAssignmentToSchedule = useCallback(
         (assignment: DispatchAssignment, index: number): ScheduleItem => {
             const raw = assignment as DispatchAssignment & Partial<ScheduleItem> & { supportTeamIds?: string[] };
-            const rawWorkerIds = cleanIds(assignment.workerIds || []);
+            const rawWorkerIds = cleanIds(assignment.workerIds || []).filter((workerId) => {
+                const worker = workersById.get(workerId);
+                return Boolean(worker && !isInactiveWorker(worker));
+            });
             const firstWorkerTeamId = rawWorkerIds.map((workerId) => workersById.get(workerId)?.teamId || '').find(Boolean);
             const teamId = raw.teamId || firstWorkerTeamId || UNASSIGNED_TEAM_ID;
             const team = teamsById.get(teamId);
@@ -993,7 +1381,10 @@ const FieldSchedulePlannerPage: React.FC = () => {
             const dispatch = await dispatchService.getDispatchByDate(date);
             const nextSchedules = (dispatch?.assignments || []).map((assignment, index) => {
                 const raw = assignment as DispatchAssignment & Partial<ScheduleItem> & { supportTeamIds?: string[] };
-                const rawWorkerIds = cleanIds(assignment.workerIds || []);
+                const rawWorkerIds = cleanIds(assignment.workerIds || []).filter((workerId) => {
+                    const worker = workerMap.get(workerId);
+                    return Boolean(worker && !isInactiveWorker(worker));
+                });
                 const teamId =
                     raw.teamId ||
                     rawWorkerIds.map((workerId) => workerMap.get(workerId)?.teamId || '').find(Boolean) ||
@@ -1056,6 +1447,11 @@ const FieldSchedulePlannerPage: React.FC = () => {
     }, [loadData]);
 
     useEffect(() => {
+        if (typeof window === 'undefined') return;
+        setHasTemporaryDraft(Boolean(window.localStorage.getItem(getTempDraftStorageKey(date))));
+    }, [date]);
+
+    useEffect(() => {
         if (!selectedTeamId && rosters[0]) {
             setSelectedTeamId(rosters[0].id);
         }
@@ -1071,12 +1467,47 @@ const FieldSchedulePlannerPage: React.FC = () => {
         setSelectedWorkerIds((prev) => prev.filter((workerId) => availableWorkerIds.has(workerId)));
     }, [selectedRoster]);
 
+    useEffect(() => {
+        setSelectedWorkerIds((prev) => prev.filter((workerId) => !assignedWorkerIdSet.has(workerId)));
+        setSelectedSupportTeamIds((prev) => prev.filter((teamId) => !assignedSupportTeamKeySet.has(teamId)));
+        setSelectedVehicleIds((prev) => prev.filter((vehicleId) => !assignedVehicleIdSet.has(vehicleId)));
+    }, [assignedSupportTeamKeySet, assignedVehicleIdSet, assignedWorkerIdSet]);
+
+    useEffect(() => {
+        if (!recentlyUpdatedSiteKey) return;
+        const timeout = window.setTimeout(() => setRecentlyUpdatedSiteKey(''), 900);
+        return () => window.clearTimeout(timeout);
+    }, [recentlyUpdatedSiteKey]);
+
     const toggleWorkerSelection = (rosterId: string, workerId: string) => {
         setSelectedTeamId(rosterId);
         setSelectedWorkerIds((prev) => {
             const base = selectedTeamId === rosterId ? prev : [];
             return base.includes(workerId) ? base.filter((id) => id !== workerId) : [...base, workerId];
         });
+    };
+
+    const toggleAllWorkers = (roster: TeamRoster) => {
+        setSelectedTeamId(roster.id);
+        const workerIds = cleanIds(roster.workers.map((worker) => worker.id));
+        setSelectedWorkerIds((prev) => {
+            const current = selectedTeamId === roster.id ? prev : [];
+            const allSelected = workerIds.length > 0 && workerIds.every((workerId) => current.includes(workerId));
+            return allSelected ? [] : workerIds;
+        });
+    };
+
+    const toggleSupportTeamSelection = (roster: TeamRoster) => {
+        setSelectedTeamId(roster.id);
+        setSelectedSupportTeamIds((prev) =>
+            prev.includes(roster.id) ? prev.filter((teamId) => teamId !== roster.id) : [...prev, roster.id]
+        );
+    };
+
+    const toggleVehicleSelection = (vehicleId: string) => {
+        setSelectedVehicleIds((prev) =>
+            prev.includes(vehicleId) ? prev.filter((id) => id !== vehicleId) : [...prev, vehicleId]
+        );
     };
 
     const updateSchedules = (updater: React.SetStateAction<ScheduleItem[]>) => {
@@ -1128,8 +1559,13 @@ const FieldSchedulePlannerPage: React.FC = () => {
     };
 
     const upsertScheduleForSite = (incoming: ScheduleItem) => {
+        const siteKey = makeSiteKey(incoming);
+        setRecentlyUpdatedSiteKey(siteKey);
+        if (incoming.siteId) {
+            setSelectedSiteId(incoming.siteId);
+        }
         updateSchedules((prev) => {
-            const key = makeSiteKey(incoming);
+            const key = siteKey;
             const incomingWorkerIds = new Set(incoming.workerIds);
             const incomingVehicleIds = new Set(getScheduleVehicleIds(incoming));
             const cleanedPrev = prev.map((schedule) => {
@@ -1153,6 +1589,80 @@ const FieldSchedulePlannerPage: React.FC = () => {
             next[existingIndex] = mergeScheduleEntries(next[existingIndex], incoming);
             return next;
         });
+    };
+
+    const registerSiteToBoard = (siteIdOrName?: string) => {
+        const site =
+            (siteIdOrName ? sitesById.get(siteIdOrName) : undefined) ||
+            sites.find((entry) => entry.name === siteIdOrName) ||
+            selectedSite;
+        if (!site) {
+            setMessage('등록할 현장을 먼저 선택하세요.');
+            return;
+        }
+
+        const siteColor = getSiteColor(site, selectedRoster?.color || DEFAULT_RESOURCE_COLOR);
+        const next: ScheduleItem = {
+            id: makeScheduleId(),
+            date,
+            teamId: '',
+            teamName: '',
+            teamColor: siteColor,
+            siteId: site.id || '',
+            siteName: site.name,
+            siteAddress: site.address || '',
+            siteColor,
+            workerIds: [],
+            supportTeams: [],
+            vehicleIds: [],
+            vehicleLabels: [],
+            vehicleId: '',
+            vehicleLabel: '',
+            status: 'draft',
+            memo: '',
+        };
+
+        setSelectedSiteId(site.id || '');
+        upsertScheduleForSite(next);
+        boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        setMessage(`${site.name} 현장을 먼저 등록했습니다. 이후 작업자, 지원팀, 차량을 추가하세요.`);
+    };
+
+    const moveVehicleToBoard = (vehicle: Vehicle) => {
+        if (!selectedSiteId || !selectedSite) {
+            setMessage('이동 대상 현장을 먼저 선택하세요.');
+            return;
+        }
+        if (isUnavailableVehicle(vehicle)) {
+            setMessage('사용할 수 없는 차량입니다.');
+            return;
+        }
+
+        const siteColor = getSiteColor(selectedSite, selectedRoster?.color || DEFAULT_RESOURCE_COLOR);
+        const next: ScheduleItem = {
+            id: makeScheduleId(),
+            date,
+            teamId: '',
+            teamName: '',
+            teamColor: selectedRoster?.color || siteColor,
+            siteId: selectedSiteId,
+            siteName: selectedSite.name,
+            siteAddress: selectedSite.address || '',
+            siteColor,
+            workerIds: [],
+            supportTeams: [],
+            vehicleIds: [vehicle.id],
+            vehicleLabels: [vehicle.licensePlate],
+            vehicleId: vehicle.id,
+            vehicleLabel: vehicle.licensePlate,
+            status: 'draft',
+            memo: '',
+        };
+
+        upsertScheduleForSite(next);
+        setSelectedVehicleIds((prev) => prev.filter((vehicleId) => vehicleId !== vehicle.id));
+        boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        setMessage(`${selectedSite.name}에 ${vehicle.licensePlate} 차량을 추가했습니다.`);
     };
 
     const moveRosterToBoard = (roster: TeamRoster, overrides: Partial<ScheduleItem> = {}) => {
@@ -1185,8 +1695,44 @@ const FieldSchedulePlannerPage: React.FC = () => {
     };
 
     const moveSelectedToBoard = () => {
-        if (!selectedRoster) return;
-        moveRosterToBoard(selectedRoster);
+        if (!selectedSiteId || !selectedSite) {
+            setMessage('이동 대상 현장을 먼저 선택하세요.');
+            return;
+        }
+
+        const supportTeams = selectedSupportTeams.map((team) => ({
+            id: team.id,
+            name: team.name,
+            color: team.color,
+        }));
+        const workerIds = cleanIds(selectedWorkerIds);
+        const vehicleIds = cleanIds(selectedVehicleIds);
+
+        if (workerIds.length === 0 && supportTeams.length === 0 && vehicleIds.length === 0) {
+            setMessage('추가할 작업자, 지원팀 또는 차량을 선택하세요.');
+            return;
+        }
+
+        const sourceRoster = selectedRoster || selectedSupportTeams[0] || rosters[0];
+        if (!sourceRoster) return;
+
+        const next = makeScheduleFromRoster(sourceRoster, {
+            siteId: selectedSiteId,
+            siteName: selectedSite.name,
+            siteAddress: selectedSite.address || '',
+            siteColor: getSiteColor(selectedSite, sourceRoster.color),
+            workerIds,
+            supportTeams,
+            vehicleIds,
+            vehicleLabels: vehicleIds.map((vehicleId) => vehiclesById.get(vehicleId)?.licensePlate || ''),
+        });
+
+        upsertScheduleForSite(next);
+        setSelectedWorkerIds([]);
+        setSelectedSupportTeamIds([]);
+        setSelectedVehicleIds([]);
+        boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        setMessage(`${selectedSite.name}에 선택한 리소스를 추가했습니다.`);
     };
 
     const addSupportTeamToSchedule = (scheduleId: string, teamId: string) => {
@@ -1363,10 +1909,19 @@ const FieldSchedulePlannerPage: React.FC = () => {
             if (activeData.kind === 'team') {
                 addSupportTeamToSchedule(targetScheduleId, activeData.id);
             }
+            if (activeData.kind === 'site') {
+                applySiteToSchedule(targetScheduleId, activeData.id);
+                setSelectedSiteId(activeData.id);
+            }
             return;
         }
 
         if (overData?.kind === 'board-drop') {
+            if (activeData.kind === 'site') {
+                registerSiteToBoard(activeData.id);
+                return;
+            }
+
             if (activeData.kind === 'team') {
                 const roster = rosters.find((entry) => entry.id === activeData.id);
                 if (roster) moveRosterToBoard(roster);
@@ -1387,13 +1942,9 @@ const FieldSchedulePlannerPage: React.FC = () => {
             }
 
             if (activeData.kind === 'vehicle') {
-                const roster = selectedRoster || rosters[0];
                 const vehicle = vehiclesById.get(activeData.id);
-                if (!roster || !vehicle) return;
-                moveRosterToBoard(roster, {
-                    vehicleIds: [activeData.id],
-                    vehicleLabels: [vehicle.licensePlate],
-                });
+                if (!vehicle) return;
+                moveVehicleToBoard(vehicle);
             }
         }
     };
@@ -1427,12 +1978,61 @@ const FieldSchedulePlannerPage: React.FC = () => {
             await dispatchService.saveDispatch(date, assignments);
             setSchedules(normalizedSchedules);
             setDirty(false);
+            if (typeof window !== 'undefined') {
+                window.localStorage.removeItem(getTempDraftStorageKey(date));
+                setHasTemporaryDraft(false);
+            }
             setMessage('일정이 저장되었습니다.');
         } catch (error) {
             console.error('[FieldSchedulePlanner] Failed to save', error);
             setMessage('저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleTemporarySave = () => {
+        if (typeof window === 'undefined') return;
+
+        const normalizedSchedules = mergeSchedulesBySite(schedules);
+        const payload = {
+            version: 1,
+            date,
+            savedAt: new Date().toISOString(),
+            selectedSiteId,
+            schedules: normalizedSchedules,
+        };
+
+        window.localStorage.setItem(getTempDraftStorageKey(date), JSON.stringify(payload));
+        setHasTemporaryDraft(true);
+        setMessage('임시저장되었습니다.');
+    };
+
+    const handleLoadTemporaryDraft = () => {
+        if (typeof window === 'undefined') return;
+
+        const raw = window.localStorage.getItem(getTempDraftStorageKey(date));
+        if (!raw) {
+            setHasTemporaryDraft(false);
+            setMessage('불러올 임시저장이 없습니다.');
+            return;
+        }
+
+        try {
+            const parsed = JSON.parse(raw) as {
+                schedules?: ScheduleItem[];
+                selectedSiteId?: string;
+            };
+            const draftSchedules = Array.isArray(parsed.schedules) ? parsed.schedules : [];
+            setSchedules(mergeSchedulesBySite(draftSchedules));
+            setSelectedSiteId(parsed.selectedSiteId || '');
+            setDirty(true);
+            setMessage('임시저장을 불러왔습니다.');
+        } catch (error) {
+            console.error('[FieldSchedulePlanner] Failed to load temporary draft', error);
+            window.localStorage.removeItem(getTempDraftStorageKey(date));
+            setHasTemporaryDraft(false);
+            setMessage('임시저장을 불러오지 못했습니다.');
         }
     };
 
@@ -1481,17 +2081,35 @@ const FieldSchedulePlannerPage: React.FC = () => {
 
     const selectedSite = selectedSiteId ? sitesById.get(selectedSiteId) : undefined;
     const selectedSiteColor = selectedSite ? getSiteColor(selectedSite, selectedRoster?.color) : '';
-    const isSelectedSupportRoster = selectedRoster?.kind === 'support';
+    const selectedResourceCount = selectedWorkerIds.length + selectedSupportTeamIds.length + selectedVehicleIds.length;
     const canMoveSelected =
-        Boolean(selectedRoster && selectedSiteId) && (isSelectedSupportRoster || selectedWorkerIds.length > 0);
+        Boolean(selectedSiteId) && selectedResourceCount > 0;
     const moveTargetLabel = selectedSite?.name || '현장 선택';
-    const moveSourceLabel = selectedRoster?.name || '팀 선택';
+    const moveSourceLabel =
+        selectedWorkerIds.length > 0
+            ? selectedRoster?.name || '팀 선택'
+            : selectedSupportTeams.length > 0
+                ? selectedSupportTeams[0].name
+                : selectedVehicleIds.length > 0
+                    ? '차량'
+                    : '대상 선택';
     const selectedWorkerNames = selectedWorkers.map((worker) => worker.name);
-    const moveWorkerLabel = isSelectedSupportRoster
-        ? '팀명 배치'
-        : selectedWorkers.length > 0
+    const selectedResourceParts = [
+        selectedWorkers.length > 0
             ? `${selectedWorkerNames.slice(0, 3).join(', ')}${selectedWorkerNames.length > 3 ? ` 외 ${selectedWorkerNames.length - 3}명` : ''}`
-            : '작업자 선택';
+            : '',
+        selectedSupportTeams.length > 0 ? `지원팀 ${selectedSupportTeams.length}팀` : '',
+        selectedVehicles.length > 0 ? `차량 ${selectedVehicles.length}대` : '',
+    ].filter(Boolean);
+    const moveWorkerLabel = selectedResourceParts.join(' · ') || '작업자/지원팀/차량 선택';
+    const addGuideLabel = selectedSite
+        ? selectedResourceParts.length > 0
+            ? `${selectedSite.name}으로 ${selectedResourceParts.join(', ')} 추가`
+            : `${selectedSite.name} 현장만 먼저 등록할 수 있습니다.`
+        : '현장 카드를 먼저 선택하세요';
+    const selectedDestinationScheduleKey = selectedSite
+        ? makeSiteKey({ siteId: selectedSite.id || '', siteName: selectedSite.name } as Pick<ScheduleItem, 'siteId' | 'siteName'>)
+        : '';
 
     return (
         <div className="min-h-full bg-slate-100 text-slate-900">
@@ -1565,6 +2183,24 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
+                                    onClick={handleTemporarySave}
+                                    className="flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 text-sm font-bold text-amber-700 hover:bg-amber-100"
+                                >
+                                    <Save size={16} />
+                                    임시저장
+                                </button>
+                                {hasTemporaryDraft ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleLoadTemporaryDraft}
+                                        className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                    >
+                                        <RefreshCw size={16} />
+                                        임시불러오기
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
                                     onClick={handleSave}
                                     disabled={saving || !dirty}
                                     className="flex h-10 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -1584,12 +2220,28 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     <input
                                         value={searchTerm}
                                         onChange={(event) => setSearchTerm(event.target.value)}
-                                        placeholder={leftPanelTab === 'vehicles' ? '차량번호, 모델 검색' : '팀, 작업자 검색'}
+                                        placeholder={
+                                            leftPanelTab === 'vehicles'
+                                                ? '차량번호, 모델 검색'
+                                                : leftPanelTab === 'sites'
+                                                    ? '현장명, 주소 검색'
+                                                    : '팀, 작업자 검색'
+                                        }
                                         className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none transition focus:border-blue-400 focus:bg-white"
                                     />
                                 </div>
 
-                                <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+                                <div className="mt-3 grid grid-cols-4 gap-1 rounded-lg bg-slate-100 p-1">
+                                    <button
+                                        type="button"
+                                        onClick={() => setLeftPanelTab('sites')}
+                                        className={`flex h-8 items-center justify-center gap-1.5 rounded-md text-xs font-black ${
+                                            leftPanelTab === 'sites' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'
+                                        }`}
+                                    >
+                                        <MapPin size={14} />
+                                        현장
+                                    </button>
                                     <button
                                         type="button"
                                         onClick={() => setLeftPanelTab('teams')}
@@ -1622,13 +2274,24 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     </button>
                                 </div>
 
-                                <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-xs font-bold leading-5 text-blue-700">
-                                    {leftPanelTab === 'vehicles'
-                                        ? '차량을 일정 카드로 드래그하면 해당 카드에 차량이 등록됩니다.'
-                                        : leftPanelTab === 'support'
-                                            ? '지원팀명을 선택하고 이동 버튼으로 현장에 배치합니다.'
-                                            : '현장을 선택하고 작업자를 체크한 뒤 보드로 이동 버튼으로 등록합니다.'}
-                                </div>
+                                {leftPanelTab !== 'sites' ? (
+                                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                        <div className="mb-2 flex min-w-0 items-center gap-2 px-1 text-xs font-bold text-slate-600">
+                                            <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selectedSiteColor || '#cbd5e1' }} />
+                                            <span className="min-w-0 flex-1 truncate">{moveTargetLabel}</span>
+                                            <span className="shrink-0 text-slate-400">{selectedResourceCount}개 선택</span>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={moveSelectedToBoard}
+                                            disabled={!canMoveSelected}
+                                            className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                        >
+                                            <Plus size={17} />
+                                            추가하기
+                                        </button>
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
@@ -1636,6 +2299,50 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm font-semibold text-slate-500">
                                         데이터를 불러오는 중입니다.
                                     </div>
+                                ) : leftPanelTab === 'sites' ? (
+                                    filteredSites.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {filteredSites.map((site) => {
+                                                const siteColor = getSiteColor(site, selectedRoster?.color || DEFAULT_RESOURCE_COLOR);
+                                                const siteKey = makeSiteSelectionKey(site);
+                                                return (
+                                                    <DraggableSiteCard
+                                                        key={site.id || site.name}
+                                                        site={site}
+                                                        color={siteColor}
+                                                        selected={Boolean(selectedSite && siteKey === makeSiteSelectionKey(selectedSite))}
+                                                        onSelect={() => {
+                                                            setSelectedSiteId(site.id || '');
+                                                            setMessage(`이동 대상: ${site.name}`);
+                                                        }}
+                                                        onRegister={() => registerSiteToBoard(site.id || site.name)}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
+                                            표시할 현장이 없습니다.
+                                        </div>
+                                    )
+                                ) : leftPanelTab === 'support' ? (
+                                    filteredRosters.length > 0 ? (
+                                        <div className="space-y-2">
+                                            {filteredRosters.map((roster) => (
+                                                <SupportRosterLineCard
+                                                    key={roster.id}
+                                                    roster={roster}
+                                                    selected={selectedSupportTeamIdSet.has(roster.id)}
+                                                    onSelect={() => toggleSupportTeamSelection(roster)}
+                                                    onAdd={() => moveRosterToBoard(roster)}
+                                                />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
+                                            표시할 지원팀이 없습니다.
+                                        </div>
+                                    )
                                 ) : leftPanelTab !== 'vehicles' ? (
                                     filteredRosters.length > 0 ? (
                                         filteredRosters.map((roster) => (
@@ -1645,22 +2352,30 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                                 selected={selectedRoster?.id === roster.id}
                                                 onSelect={() => setSelectedTeamId(roster.id)}
                                                 selectedWorkerIds={selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
+                                                supportSelected={selectedSupportTeamIdSet.has(roster.id)}
+                                                onToggleSupportTeam={() => toggleSupportTeamSelection(roster)}
                                                 onToggleWorker={(workerId) => toggleWorkerSelection(roster.id, workerId)}
+                                                onToggleAllWorkers={() => toggleAllWorkers(roster)}
                                             />
                                         ))
                                     ) : (
                                         <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
-                                            {leftPanelTab === 'support' ? '표시할 지원팀이 없습니다.' : '표시할 팀이나 작업자가 없습니다.'}
+                                            표시할 팀이나 작업자가 없습니다.
                                         </div>
                                     )
                                 ) : filteredVehicles.length > 0 ? (
-                                    filteredVehicles.map((vehicle) => (
-                                        <DraggableVehicleCard
-                                            key={vehicle.id}
-                                            vehicle={vehicle}
-                                            assigned={assignedVehicleIds.has(vehicle.id)}
-                                        />
-                                    ))
+                                    <div className="space-y-2">
+                                        {filteredVehicles.map((vehicle) => (
+                                            <DraggableVehicleCard
+                                                key={vehicle.id}
+                                                vehicle={vehicle}
+                                                selected={selectedVehicleIdSet.has(vehicle.id)}
+                                                assignedTeamColor={vehicleAssignedTeamColorById.get(vehicle.id)}
+                                                onToggleSelect={() => toggleVehicleSelection(vehicle.id)}
+                                                onAdd={() => moveVehicleToBoard(vehicle)}
+                                            />
+                                        ))}
+                                    </div>
                                 ) : (
                                     <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
                                         표시할 차량이 없습니다.
@@ -1671,43 +2386,7 @@ const FieldSchedulePlannerPage: React.FC = () => {
 
                         <main className="min-w-0 overflow-hidden bg-slate-100">
                             <div className="border-b border-slate-200 bg-white px-5 py-4">
-                                <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1.1fr_1.4fr] xl:items-end">
-                                    <label className="block">
-                                        <span className="mb-1 block text-xs font-black text-slate-500">선택 팀</span>
-                                        <select
-                                            value={selectedRoster?.id || ''}
-                                            onChange={(event) => setSelectedTeamId(event.target.value)}
-                                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-400"
-                                        >
-                                            {rosters.map((roster) => (
-                                                <option key={roster.id} value={roster.id}>
-                                                    {roster.kind === 'support' ? '[지원팀] ' : ''}
-                                                    {roster.name}
-                                                    {roster.kind === 'support' ? ' (팀 등록)' : ` (${roster.workers.length}명)`}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-
-                                    <label className="block">
-                                        <span className="mb-1 block text-xs font-black text-slate-500">현장</span>
-                                        <select
-                                            value={selectedSiteId}
-                                            onChange={(event) => setSelectedSiteId(event.target.value)}
-                                            style={{ borderColor: selectedSiteColor || undefined }}
-                                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-blue-400"
-                                        >
-                                            <option value="">현장 선택</option>
-                                            {sites.map((site) => (
-                                                <option key={site.id} value={site.id}>
-                                                    {site.name}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </label>
-                                </div>
-
-                                <div className="mt-3 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 xl:grid-cols-[1fr_auto] xl:items-center">
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                                     <div className="min-w-0">
                                         <div className="mb-2 text-xs font-black text-slate-500">이동 경로</div>
                                         <div className="flex flex-wrap items-center gap-2 text-sm font-black text-slate-800">
@@ -1725,16 +2404,10 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                                 <span className="truncate">{moveTargetLabel}</span>
                                             </span>
                                         </div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-500">
+                                            <span>{addGuideLabel}</span>
+                                        </div>
                                     </div>
-                                    <button
-                                        type="button"
-                                        onClick={moveSelectedToBoard}
-                                        disabled={!canMoveSelected}
-                                        className="flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                                    >
-                                        <ChevronRight size={17} />
-                                        보드로 이동
-                                    </button>
                                 </div>
 
                                 <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
@@ -1750,7 +2423,7 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     </span>
                                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1">
                                         <Truck size={13} />
-                                        차량은 카드에 드래그 등록
+                                        차량 선택 후 추가 가능
                                     </span>
                                     {totalIssues > 0 ? (
                                         <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-red-600">
@@ -1798,32 +2471,43 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                         일정을 불러오는 중입니다.
                                     </div>
                                 ) : schedules.length > 0 ? (
-                                    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 2xl:grid-cols-3">
-                                        {schedules.map((schedule) => (
-                                            <ScheduleCard
-                                                key={schedule.id}
-                                                schedule={schedule}
-                                                sites={sites}
-                                                workersById={workersById}
-                                                vehiclesById={vehiclesById}
-                                                issues={getScheduleIssues(schedule)}
-                                                isSupportSchedule={isSupportScheduleItem(schedule)}
-                                                onPatch={(patch) => patchSchedule(schedule.id, patch)}
-                                                onSelectSite={(siteId) => applySiteToSchedule(schedule.id, siteId)}
-                                                onDuplicate={() => duplicateSchedule(schedule)}
-                                                onDelete={() => deleteSchedule(schedule.id)}
-                                                onRemoveWorker={(workerId) => removeWorkerFromSchedule(schedule.id, workerId)}
-                                                onRemoveSupportTeam={(teamId) => removeSupportTeamFromSchedule(schedule.id, teamId)}
-                                                onRemoveVehicle={(vehicleId) => removeVehicleFromSchedule(schedule.id, vehicleId)}
-                                            />
-                                        ))}
+                                    <div
+                                        className="grid gap-3"
+                                        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
+                                    >
+                                        {schedules.map((schedule) => {
+                                            const scheduleKey = makeSiteKey(schedule);
+                                            return (
+                                                <ScheduleCard
+                                                    key={schedule.id}
+                                                    schedule={schedule}
+                                                    workersById={workersById}
+                                                    workerTeamColorById={workerTeamColorById}
+                                                    vehiclesById={vehiclesById}
+                                                    vehicleAssignedTeamColorById={vehicleAssignedTeamColorById}
+                                                    issues={getScheduleIssues(schedule)}
+                                                    selectedDestination={Boolean(selectedDestinationScheduleKey && scheduleKey === selectedDestinationScheduleKey)}
+                                                    recentlyUpdated={Boolean(recentlyUpdatedSiteKey && scheduleKey === recentlyUpdatedSiteKey)}
+                                                    onSelectDestination={() => {
+                                                        if (schedule.siteId) {
+                                                            setSelectedSiteId(schedule.siteId);
+                                                            setMessage(`이동 대상: ${schedule.siteName}`);
+                                                        }
+                                                    }}
+                                                    onDelete={() => deleteSchedule(schedule.id)}
+                                                    onRemoveWorker={(workerId) => removeWorkerFromSchedule(schedule.id, workerId)}
+                                                    onRemoveSupportTeam={(teamId) => removeSupportTeamFromSchedule(schedule.id, teamId)}
+                                                    onRemoveVehicle={(vehicleId) => removeVehicleFromSchedule(schedule.id, vehicleId)}
+                                                />
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="flex min-h-[460px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center">
                                         <UserPlus size={36} className="text-slate-400" />
                                         <p className="mt-3 text-base font-black text-slate-800">아직 만든 일정이 없습니다.</p>
                                         <p className="mt-1 max-w-md text-sm leading-6 text-slate-500">
-                                            현장을 선택하고 작업자를 고른 뒤 이동 경로의 보드로 이동 버튼을 누르세요.
+                                            좌측 현장 탭에서 현장을 먼저 등록하거나, 현장 선택 후 작업자와 차량을 추가하세요.
                                         </p>
                                     </div>
                                 )}
