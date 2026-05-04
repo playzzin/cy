@@ -52,7 +52,8 @@ const CheongyeonHeader: React.FC<CheongyeonHeaderProps> = ({ currentSiteData, on
                 {/* Logo & Brand */}
                 <div
                     className="flex items-center gap-4 cursor-pointer group"
-                    onClick={() => navigate('/dashboard')}
+                    onClick={onMenuClick}
+                    title="메뉴 토글"
                 >
                     <div className={`
                         w-12 h-12 rounded-xl flex items-center justify-center overflow-hidden transition-all duration-300 bg-white
@@ -77,7 +78,7 @@ const CheongyeonHeader: React.FC<CheongyeonHeaderProps> = ({ currentSiteData, on
                     </div>
                 </div>
 
-                {/* Right Side: Profile & Menu Toggle */}
+                {/* Right Side: Profile */}
                 <div className="flex items-center gap-4">
 
                     {/* Profile Dropdown */}
@@ -133,21 +134,6 @@ const CheongyeonHeader: React.FC<CheongyeonHeaderProps> = ({ currentSiteData, on
                             </div>
                         )}
                     </div>
-
-                    {/* Menu Toggle */}
-                    <button
-                        className={`
-                            relative overflow-hidden group w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300
-                            ${scrolled
-                                ? 'bg-white/10 hover:bg-amber-500 text-white'
-                                : 'bg-white text-slate-900 hover:bg-amber-500 hover:text-white'
-                            }
-                        `}
-                        onClick={onMenuClick}
-                        title="Menu"
-                    >
-                        <FontAwesomeIcon icon={faBars} className="text-lg relative z-10 transition-transform duration-300 group-hover:rotate-180" />
-                    </button>
                 </div>
             </div>
         </header>

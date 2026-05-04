@@ -21,6 +21,7 @@ export const teamService = {
     updateTeam: async (id: string, team: Partial<Team>): Promise<void> => {
         const existing = await teamFirestoreService.getTeam(id);
         const nameChanged = team.name && existing && existing.name !== team.name;
+        const colorChanged = team.color && existing && existing.color !== team.color;
 
         const normalizedUpdates: Partial<Team> = { ...team };
         if (typeof normalizedUpdates.iconKey !== 'string' && normalizedUpdates.iconKey !== undefined) {
@@ -39,6 +40,21 @@ export const teamService = {
                 await manpowerService.updateWorkersTeamName(id, team.name);
             } catch (e) {
                 console.error("Failed to sync team name to workers:", e);
+            }
+        }
+
+        if (colorChanged && team.color) {
+            try {
+                const [{ manpowerService }, { siteService }] = await Promise.all([
+                    import('./manpowerService'),
+                    import('./siteService')
+                ]);
+                await Promise.all([
+                    manpowerService.updateWorkersTeamColor(id, team.color),
+                    siteService.updateSitesColorByResponsibleTeam(id, team.color, team.name || existing?.name)
+                ]);
+            } catch (e) {
+                console.error("Failed to sync team color:", e);
             }
         }
     },

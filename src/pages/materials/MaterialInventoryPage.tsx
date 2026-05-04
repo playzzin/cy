@@ -4,6 +4,7 @@ import { faBoxes, faSearch, faExclamationTriangle, faCheckCircle, faPlus } from 
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Inventory } from '../../types/materials';
+import { createSiteIdSet, filterCheongyeonMaterialSites, filterInventoriesBySites } from './materialSiteFilters';
 
 const MaterialInventoryPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -40,9 +41,11 @@ const MaterialInventoryPage: React.FC = () => {
                 materialService.getAllInventory(),
                 siteService.getSites(),
             ]);
+            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows);
+            const cheongyeonSiteIds = createSiteIdSet(cheongyeonSites);
             console.log(`[DEBUG] Received inventory data: ${data.length} items`, data);
-            setInventories(data);
-            setSites(siteRows.filter((s) => s.status === 'active'));
+            setInventories(filterInventoriesBySites(data, cheongyeonSiteIds));
+            setSites(cheongyeonSites);
         } catch (error) {
             console.error('Failed to load inventory:', error);
             // toast.error('재고 현황을 불러오지 못했습니다.'); // toast가 있다면 사용, 없으면 alert

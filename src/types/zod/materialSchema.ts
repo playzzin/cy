@@ -3,6 +3,7 @@ import { z } from 'zod';
 // Material Master Schema
 export const MaterialSchema = z.object({
     id: z.string(),
+    materialKey: z.string().optional(),
     itemName: z.string(),
     category: z.string().optional(),
     spec: z.string().optional(),
@@ -19,6 +20,7 @@ export type MaterialZod = z.infer<typeof MaterialSchema>;
 export const MaterialInboundSchema = z.object({
     id: z.string(),
     materialId: z.string(),
+    materialKey: z.string().optional(),
     itemName: z.string(),
     category: z.string().optional(),
     spec: z.string().optional(),
@@ -41,6 +43,7 @@ export type MaterialInboundZod = z.infer<typeof MaterialInboundSchema>;
 export const MaterialOutboundSchema = z.object({
     id: z.string(),
     materialId: z.string(),
+    materialKey: z.string().optional(),
     itemName: z.string(),
     category: z.string().optional(),
     spec: z.string().optional(),

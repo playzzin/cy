@@ -19,6 +19,7 @@ import SingleSelectPopover, { InputPopover } from '../../components/common/Singl
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { useNavigate } from 'react-router-dom';
+import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
 
 const SITE_COLUMNS = [
     { key: 'name', label: '현장명' },
@@ -44,7 +45,7 @@ interface SiteHistoryData {
 
 const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlightedId }) => {
     // Context & Auth
-    const { companies, teams, sites, refreshSites } = useMasterData();
+    const { companies, teams, sites, refreshTeams, refreshSites } = useMasterData();
     const { currentUser } = useAuth();
     const navigate = useNavigate();
 
@@ -60,6 +61,34 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         });
         return map;
     }, [companies]);
+
+    const teamLookup = useMemo(() => {
+        const byAnyId = new Map<string, Team>();
+        const byName = new Map<string, Team>();
+
+        teams.forEach((team) => {
+            if (team.id) byAnyId.set(String(team.id).trim(), team);
+            if (team.legacyId) byAnyId.set(String(team.legacyId).trim(), team);
+            if (team.name) byName.set(String(team.name).trim().toLowerCase(), team);
+        });
+
+        return { byAnyId, byName };
+    }, [teams]);
+
+    const resolveResponsibleTeam = (site: Site): Team | undefined => {
+        const rawTeamId = String(site.responsibleTeamId ?? '').trim();
+        if (rawTeamId) {
+            const byId = teamLookup.byAnyId.get(rawTeamId);
+            if (byId) return byId;
+        }
+
+        const rawTeamName = String(site.responsibleTeamName ?? '').trim().toLowerCase();
+        if (rawTeamName) {
+            return teamLookup.byName.get(rawTeamName);
+        }
+
+        return undefined;
+    };
 
     const getFilteredTeamsForSite = (site: Site): Team[] => {
         const rawCompanyId = site.companyId ? String(site.companyId).trim() : '';
@@ -161,6 +190,10 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     useEffect(() => {
         loadStats();
     }, []);
+
+    useEffect(() => {
+        refreshTeams();
+    }, [refreshTeams]);
 
     if (isRestricted === true) {
         return (
@@ -528,10 +561,8 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                     filteredSites.map((site) => {
                                         const isHighlighted = site.id === highlightedId;
 
-                                        const responsibleTeam = site.responsibleTeamId
-                                            ? teams.find(t => t.id === site.responsibleTeamId)
-                                            : undefined;
-                                        const responsibleTeamColor = responsibleTeam?.color || '#6366f1';
+                                        const responsibleTeam = resolveResponsibleTeam(site);
+                                        const responsibleTeamColor = responsibleTeam?.color || DEFAULT_TEAM_COLOR;
 
                                         const siteCompany = site.companyId
                                             ? companies.find(c => c.id === site.companyId)
@@ -588,7 +619,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             icon: (
                                                                                 <span
                                                                                     className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-200 flex-shrink-0"
-                                                                                    style={{ backgroundColor: t.color || '#6366f1' }}
+                                                                                    style={{ backgroundColor: t.color || DEFAULT_TEAM_COLOR }}
                                                                                 >
                                                                                     <FontAwesomeIcon icon={faUsers} className="text-white text-[8px]" />
                                                                                 </span>
@@ -599,7 +630,8 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             const team = teams.find(t => t.id === id);
                                                                             handleSiteSelectChange(site.id!, {
                                                                                 responsibleTeamId: id,
-                                                                                responsibleTeamName: team?.name || ''
+                                                                                responsibleTeamName: team?.name || '',
+                                                                                color: team?.color || ''
                                                                             });
                                                                         }}
                                                                         placeholder="담당팀 선택"
@@ -681,12 +713,13 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     </select>
                                                                 ) : col.key === 'name' ? (
                                                                     <div className="flex items-center gap-2">
-                                                                        <input
-                                                                            type="color"
-                                                                            value={site.color || '#6366f1'}
-                                                                            onChange={(e) => handleSiteSelectChange(site.id!, { color: e.target.value })}
-                                                                            className="h-8 w-8 rounded border border-slate-300 cursor-pointer p-0"
-                                                                        />
+                                                                        <span
+                                                                            className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-slate-300"
+                                                                            style={{ backgroundColor: responsibleTeamColor }}
+                                                                            title="현장담당팀 색상"
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faUsers} className="text-white text-xs" />
+                                                                        </span>
                                                                         <input
                                                                             type="text"
                                                                             value={site.name}
@@ -729,9 +762,9 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                     <div className="flex items-center gap-2">
                                                                         <span
                                                                             className="inline-flex items-center justify-center w-8 h-8 rounded-full border border-slate-200 flex-shrink-0"
-                                                                            style={{ backgroundColor: site.color || siteCompanyColor || '#F3F4F6' }}
+                                                                            style={{ backgroundColor: responsibleTeamColor || siteCompanyColor || '#F3F4F6' }}
                                                                         >
-                                                                            <FontAwesomeIcon icon={faHardHat} className={`text-xs ${site.color || siteCompanyColor ? 'text-white' : 'text-slate-400'}`} />
+                                                                            <FontAwesomeIcon icon={faHardHat} className={`text-xs ${responsibleTeamColor || siteCompanyColor ? 'text-white' : 'text-slate-400'}`} />
                                                                         </span>
                                                                         <span className="font-bold text-slate-800">{site.name}</span>
                                                                     </div>
@@ -743,7 +776,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             icon: (
                                                                                 <span
                                                                                     className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-slate-200 flex-shrink-0"
-                                                                                    style={{ backgroundColor: t.color || '#6366f1' }}
+                                                                                    style={{ backgroundColor: t.color || DEFAULT_TEAM_COLOR }}
                                                                                 >
                                                                                     <FontAwesomeIcon icon={faUsers} className="text-white text-[8px]" />
                                                                                 </span>
@@ -754,14 +787,15 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             const team = teams.find(t => t.id === id);
                                                                             handleSiteSelectChange(site.id!, {
                                                                                 responsibleTeamId: id,
-                                                                                responsibleTeamName: team?.name || ''
+                                                                                responsibleTeamName: team?.name || '',
+                                                                                color: team?.color || ''
                                                                             });
                                                                         }}
                                                                         placeholder="-"
                                                                         minimal={true}
                                                                         renderSelected={(opt) => {
-                                                                            const team = teams.find(t => t.id === opt.id);
-                                                                            const color = team?.color || '#6366f1';
+                                                                            const team = teams.find(t => t.id === opt.id) || resolveResponsibleTeam(site);
+                                                                            const color = team?.color || DEFAULT_TEAM_COLOR;
                                                                             return (
                                                                                 <div className="flex items-center gap-2">
                                                                                     <span

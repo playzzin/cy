@@ -347,7 +347,8 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
         '법인차량 관리',
         '법인카드 관리',
         '차량/카드 관리',
-        '차량/카드 통합 관리'
+        '차량/카드 통합 관리',
+        '경비내역'
     ]);
     const legacyAssetLabels = new Set([
         '법인차량 관리',
@@ -357,6 +358,7 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
         '차량/카드 통합 관리'
     ]);
     const unifiedAssetLabel = '차량/카드 통합 관리';
+    const expenseLedgerLabel = '경비내역';
     let changed = false;
 
     Object.entries(config).forEach(([siteKey, site]) => {
@@ -378,6 +380,13 @@ const normalizeSupportAssetMenu = (config: SiteDataType): boolean => {
 
                 nextSub.splice(insertIndex, 0, unifiedAssetLabel);
                 menuItem.sub = nextSub;
+                changed = true;
+            }
+
+            if (!menuItem.sub.some((child) => getMenuText(child) === expenseLedgerLabel)) {
+                const insertAfterIndex = menuItem.sub.findIndex((child) => getMenuText(child) === unifiedAssetLabel);
+                const insertIndex = insertAfterIndex >= 0 ? insertAfterIndex + 1 : menuItem.sub.length;
+                menuItem.sub.splice(insertIndex, 0, expenseLedgerLabel);
                 changed = true;
             }
         });

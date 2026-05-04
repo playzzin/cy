@@ -49,7 +49,7 @@ const MaterialMasterPage: React.FC = () => {
     const loadData = async () => {
         setLoading(true);
         try {
-            const data = await materialService.getAllMaterials();
+            const data = await materialService.getUniqueMaterialsForSelection();
             setMaterials(data);
         } catch (error) {
             console.error('Failed to load materials:', error);
@@ -90,7 +90,7 @@ const MaterialMasterPage: React.FC = () => {
     };
 
     const handleEdit = (material: Material) => {
-        setEditingItem(material);
+        setEditingItem(material.isCatalogDefault ? undefined : material);
         setFormData({
             category: material.category,
             itemName: material.itemName,
@@ -98,7 +98,7 @@ const MaterialMasterPage: React.FC = () => {
             unit: material.unit,
             safetyStock: material.safetyStock || 0,
             description: material.description || '',
-            isActive: material.isActive
+            isActive: true
         });
         setShowForm(true);
     };
@@ -112,7 +112,8 @@ const MaterialMasterPage: React.FC = () => {
         // 중복 체크 (신규 등록 시에만)
         if (!editingItem) {
             const isDuplicate = materials.some(
-                m => m.itemName.trim() === formData.itemName.trim() && 
+                m => !m.isCatalogDefault &&
+                     m.itemName.trim() === formData.itemName.trim() &&
                      m.spec.trim() === formData.spec.trim() &&
                      m.isActive !== false
             );
@@ -329,15 +330,19 @@ const MaterialMasterPage: React.FC = () => {
                                             <button
                                                 onClick={() => handleEdit(material)}
                                                 className="text-blue-600 hover:text-blue-800 mx-1"
+                                                title={material.isCatalogDefault ? '마스터 등록' : '수정'}
                                             >
                                                 <FontAwesomeIcon icon={faEdit} />
                                             </button>
-                                            <button
-                                                onClick={() => handleDelete(material.id, material.itemName, material.spec)}
-                                                className="text-red-600 hover:text-red-800 mx-1"
-                                            >
-                                                <FontAwesomeIcon icon={faTrash} />
-                                            </button>
+                                            {!material.isCatalogDefault && (
+                                                <button
+                                                    onClick={() => handleDelete(material.id, material.itemName, material.spec)}
+                                                    className="text-red-600 hover:text-red-800 mx-1"
+                                                    title="삭제"
+                                                >
+                                                    <FontAwesomeIcon icon={faTrash} />
+                                                </button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}

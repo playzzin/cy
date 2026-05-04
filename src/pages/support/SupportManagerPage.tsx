@@ -3,35 +3,41 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { VehicleManagerPage } from './VehicleManagerPage';
 import { CardManagerPage } from './CardManagerPage';
 import AccommodationManager from './AccommodationManager';
+import ExpenseLedgerPage from './ExpenseLedgerPage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faCar, faCreditCard, faLifeRing } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faCar, faCreditCard, faFileInvoiceDollar, faLifeRing } from '@fortawesome/free-solid-svg-icons';
 
 const tabs = [
   { id: 'vehicle', label: '차량 지원', icon: faCar },
   { id: 'card', label: '카드 지원', icon: faCreditCard },
   { id: 'accommodation', label: '숙소 관리', icon: faBuilding },
+  { id: 'expense', label: '경비 정산', icon: faFileInvoiceDollar },
 ];
+
+type SupportTabId = 'vehicle' | 'card' | 'accommodation' | 'expense';
 
 const SupportManagerPage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const initialTab = useMemo<'vehicle' | 'card' | 'accommodation'>(() => {
+  const initialTab = useMemo<SupportTabId>(() => {
+    if (location.pathname.includes('/support/expense-ledger')) return 'expense';
     if (location.pathname.includes('/support/cards')) return 'card';
     if (location.pathname.includes('/support/accommodation')) return 'accommodation';
     return 'vehicle';
   }, [location.pathname]);
-  const [activeTab, setActiveTab] = useState<'vehicle' | 'card' | 'accommodation'>(initialTab);
+  const [activeTab, setActiveTab] = useState<SupportTabId>(initialTab);
 
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
-  const handleTabChange = (tabId: 'vehicle' | 'card' | 'accommodation') => {
+  const handleTabChange = (tabId: SupportTabId) => {
     setActiveTab(tabId);
     const pathMap = {
       vehicle: '/support/vehicles',
       card: '/support/cards',
       accommodation: '/support/accommodation',
+      expense: '/support/expense-ledger',
     };
     navigate(pathMap[tabId], { replace: true });
   };
@@ -57,7 +63,7 @@ const SupportManagerPage: React.FC = () => {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => handleTabChange(tab.id as 'vehicle' | 'card' | 'accommodation')}
+                  onClick={() => handleTabChange(tab.id as SupportTabId)}
                   className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2.5
                     ${activeTab === tab.id
                       ? 'bg-white text-indigo-600 shadow-sm'
@@ -77,6 +83,7 @@ const SupportManagerPage: React.FC = () => {
           {activeTab === 'vehicle' && <VehicleManagerPage embedded />}
           {activeTab === 'card' && <CardManagerPage embedded />}
           {activeTab === 'accommodation' && <AccommodationManager embedded />}
+          {activeTab === 'expense' && <ExpenseLedgerPage embedded />}
         </div>
       </div>
     </div>

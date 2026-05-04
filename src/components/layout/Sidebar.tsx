@@ -312,7 +312,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <>
             <nav id="sidebar" onMouseLeave={handleMouseLeaveNav} style={sidebarStyle} className={isCheongyeon ? 'cheongyeon-sidebar' : ''}>
                 <div className="sidebar-header">
-                    <div className="logo-group" onClick={(!isMobile && isSidebarCollapsed && toggleSidebar) ? toggleSidebar : handleLogoClick} title={(!isMobile && isSidebarCollapsed) ? '메뉴 펼치기' : undefined} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', flex: isSidebarCollapsed ? '0 0 100%' : '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
+                    <div className="logo-group" onClick={toggleSidebar ? toggleSidebar : handleLogoClick} title="메뉴 토글" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', flex: isSidebarCollapsed ? '0 0 100%' : '1 1 auto', minWidth: 0, overflow: 'hidden' }}>
                         {logoUrl ? (
                             logoType === 'video' ? (
                                 <video 

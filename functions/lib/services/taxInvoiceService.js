@@ -4,44 +4,11 @@
  *
  * SOAP 방식으로 바로빌 API와 통신합니다.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.issueTaxInvoice = issueTaxInvoice;
-exports.getTaxInvoiceStatus = getTaxInvoiceStatus;
-const soap = __importStar(require("soap"));
+exports.getTaxInvoiceStatus = exports.issueTaxInvoice = void 0;
+const soap = require("soap");
 const barobill_1 = require("../config/barobill");
+const barobillKakaoService_1 = require("./barobillKakaoService");
 /**
  * 세금계산서 즉시 발행
  */
@@ -82,12 +49,12 @@ async function issueTaxInvoice(data) {
                 InvoiceeBizClass: data.invoiceeBizClass || '',
                 InvoiceeContactName: '',
                 InvoiceeTEL: '',
-                InvoiceeHP: '',
+                InvoiceeHP: data.invoiceeHP || '',
                 InvoiceeEmail: data.invoiceeEmail || '',
                 // 세금계산서 기본 정보
                 WriteDate: data.writeDate,
-                TaxType: 1, // 과세
-                IssueType: 1, // 정발행
+                TaxType: 1,
+                IssueType: 1,
                 SupplyCostTotal: data.supplyCostTotal.toString(),
                 TaxTotal: data.taxTotal.toString(),
                 TotalAmount: data.totalAmount.toString(),
@@ -98,17 +65,41 @@ async function issueTaxInvoice(data) {
                 ...buildItemsData(data.items),
             };
             // RegistAndIssueTaxInvoice 메서드 호출 (등록 + 즉시발행)
-            client.RegistAndIssueTaxInvoice(requestData, (err, result) => {
+            client.RegistAndIssueTaxInvoice(requestData, async (err, result) => {
                 if (err) {
                     reject({ code: -2, message: `API 호출 실패: ${err.message}` });
                     return;
                 }
                 const response = parseBarobillResponse(result);
+                // 성공 시 카카오톡 알림 발송
+                if (response.code === 0 && response.invoiceNum && data.invoiceeHP) {
+                    try {
+                        // 날짜 포맷 (YYYYMMDD -> YYYY-MM-DD)
+                        const formattedDate = data.writeDate.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+                        // 금액 포맷 (천단위 콤마)
+                        const formattedAmount = data.totalAmount.toLocaleString('ko-KR');
+                        await (0, barobillKakaoService_1.sendAlimtalk)({
+                            to: data.invoiceeHP,
+                            templateId: 'TAX_INVOICE_ISSUED',
+                            variables: {
+                                companyName: data.invoicerCorpName,
+                                invoiceDate: formattedDate,
+                                totalAmount: formattedAmount + '원',
+                                invoiceNum: response.invoiceNum
+                            }
+                        });
+                    }
+                    catch (notifyError) {
+                        // 알림 발송 실패가 세금계산서 발행 성공 여부에 영향을 주지 않도록 로깅만 함
+                        console.error('Failed to send Kakao notification for tax invoice:', notifyError);
+                    }
+                }
                 resolve(response);
             });
         });
     });
 }
+exports.issueTaxInvoice = issueTaxInvoice;
 /**
  * 품목 데이터를 바로빌 형식으로 변환
  */
@@ -188,4 +179,5 @@ async function getTaxInvoiceStatus(invoiceNum) {
         });
     });
 }
+exports.getTaxInvoiceStatus = getTaxInvoiceStatus;
 //# sourceMappingURL=taxInvoiceService.js.map

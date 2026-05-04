@@ -28,6 +28,7 @@ import WorkerModal from '../manpower/WorkerModal';
 import SignatureGeneratorModal from '../../components/signatures/SignatureGeneratorModal';
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import SingleSelectPopover, { InputPopover } from '../../components/common/SingleSelectPopover';
+import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
 
 const WORKER_COLUMNS = [
     { key: 'name', label: '이름' },
@@ -217,7 +218,8 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                 companyId: team.companyId || '',
                 companyName: team.companyName || '',
                 salaryModel: newSalaryModel,
-                payType: newSalaryModel
+                payType: newSalaryModel,
+                color: team.color || DEFAULT_TEAM_COLOR
             };
 
             setWorkers(prev => prev.map(w => w.id === workerId ? { ...w, ...updates } : w));
@@ -1006,13 +1008,13 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                 <td key={key} className="px-4 py-3 font-medium text-gray-900 border border-slate-200">
                                                                     {isEditMode ? (
                                                                         <div className="flex items-center gap-2">
-                                                                            <input
-                                                                                type="color"
-                                                                                value={worker.color || '#0f766e'}
-                                                                                onChange={(e) => handleWorkerChange(worker.id!, 'color', e.target.value)}
-                                                                                onBlur={(e) => handleWorkerBlur(worker.id!, 'color', e.target.value)}
-                                                                                className="h-8 w-8 rounded border border-slate-300 cursor-pointer"
-                                                                            />
+                                                                            <span
+                                                                                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-slate-300"
+                                                                                style={{ backgroundColor: iconColor }}
+                                                                                title="소속팀 색상"
+                                                                            >
+                                                                                <FontAwesomeIcon icon={faUsers} className="text-white text-xs" />
+                                                                            </span>
                                                                             <input
                                                                                 type="text"
                                                                                 value={worker.name}
@@ -1188,7 +1190,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                                 id: t.id || '',
                                                                                 name: t.name,
                                                                                 icon: <FontAwesomeIcon icon={resolveIcon(t.icon, faUsers)} className="text-xs" />,
-                                                                                color: t.color
+                                                                                color: t.color || DEFAULT_TEAM_COLOR
                                                                             }))
                                                                         ]}
                                                                         selectedId={worker.teamId || ''}

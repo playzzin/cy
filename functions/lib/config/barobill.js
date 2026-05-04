@@ -12,22 +12,28 @@ exports.BAROBILL_CONFIG = {
     // 테스트 환경 WSDL URL
     TEST_WSDL_URL: 'https://testws.barobill.co.kr/BANKSERVICE.asmx?WSDL',
     TEST_TAX_WSDL_URL: 'https://testws.barobill.co.kr/TI.asmx?WSDL',
+    TEST_KAKAO_WSDL_URL: 'https://testws.barobill.co.kr/KAKAOTALK.asmx?WSDL',
     // 운영 환경 WSDL URL
     PROD_WSDL_URL: 'https://ws.barobill.co.kr/BANKSERVICE.asmx?WSDL',
     PROD_TAX_WSDL_URL: 'https://ws.barobill.co.kr/TI.asmx?WSDL',
+    PROD_KAKAO_WSDL_URL: 'https://ws.barobill.co.kr/KAKAOTALK.asmx?WSDL',
     // 현재 사용할 환경 (true: 테스트, false: 운영)
     IS_TEST: true,
 };
 // 환경에 따른 WSDL URL 반환
 const getWsdlUrl = (service = 'tax') => {
     if (exports.BAROBILL_CONFIG.IS_TEST) {
-        return service === 'tax'
-            ? exports.BAROBILL_CONFIG.TEST_TAX_WSDL_URL
-            : exports.BAROBILL_CONFIG.TEST_WSDL_URL;
+        switch (service) {
+            case 'tax': return exports.BAROBILL_CONFIG.TEST_TAX_WSDL_URL;
+            case 'kakao': return exports.BAROBILL_CONFIG.TEST_KAKAO_WSDL_URL;
+            default: return exports.BAROBILL_CONFIG.TEST_WSDL_URL;
+        }
     }
-    return service === 'tax'
-        ? exports.BAROBILL_CONFIG.PROD_TAX_WSDL_URL
-        : exports.BAROBILL_CONFIG.PROD_WSDL_URL;
+    switch (service) {
+        case 'tax': return exports.BAROBILL_CONFIG.PROD_TAX_WSDL_URL;
+        case 'kakao': return exports.BAROBILL_CONFIG.PROD_KAKAO_WSDL_URL;
+        default: return exports.BAROBILL_CONFIG.PROD_WSDL_URL;
+    }
 };
 exports.getWsdlUrl = getWsdlUrl;
 // 바로빌 인증 정보 (환경 변수에서 가져옴)

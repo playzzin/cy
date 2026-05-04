@@ -4,6 +4,7 @@ import { faMapMarkerAlt, faSearch } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Inventory } from '../../types/materials';
+import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 
 const MaterialInventoryBySitePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -20,7 +21,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
     const loadSites = async () => {
         try {
             const data = await siteService.getSites();
-            setSites(data.filter(s => s.status === 'active'));
+            setSites(filterCheongyeonMaterialSites(data));
         } catch (error) {
             console.error('Failed to load sites:', error);
         }
@@ -35,6 +36,10 @@ const MaterialInventoryBySitePage: React.FC = () => {
     const handleSearch = async () => {
         if (!siteId) {
             alert('현장을 선택하세요.');
+            return;
+        }
+        if (!sites.some((site) => site.id === siteId)) {
+            alert('(주)청연이엔지 소속 현장만 선택할 수 있습니다.');
             return;
         }
 
@@ -161,7 +166,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                         </thead>
                                         <tbody className="divide-y divide-slate-200">
                                             {categoryInventories.map(inv => (
-                                                <tr key={inv.materialId} className="hover:bg-slate-50">
+                                                <tr key={`${inv.materialKey || inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
                                                     <td className="p-3 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
                                                     <td className="p-3 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
                                                     <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>

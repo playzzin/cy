@@ -25,6 +25,7 @@ import { Company, companyService } from '../../services/companyService';
 import { Site, siteService } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
+import { SupportRate, supportRateService } from '../../services/supportRateService';
 import { BANK_CODES } from './team-payment/types';
 import html2canvas from 'html2canvas';
 
@@ -184,6 +185,12 @@ interface SupportManualAdjustment {
 
 type SupportManualAdjustments = Record<string, SupportManualAdjustment>;
 
+interface SupportMonthlyRateOverrides {
+    bulkRate?: number;
+    aggregateRates: Record<string, number>;
+    siteRates: Record<string, number>;
+}
+
 const normalize = (value: string | undefined | null): string => (value ?? '').replace(/\s+/g, '').trim();
 const normalizeName = (value: string | undefined | null): string =>
     (value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
@@ -212,9 +219,12 @@ const formatDayValue = (value: number): string => {
     return fixed % 1 === 0 ? fixed.toFixed(0) : fixed.toFixed(1);
 };
 
+const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
 const SUPPORT_MANUAL_STORAGE_PREFIX = 'support-team-payment-manual-v1';
+const SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX = 'support-team-payment-rate-overrides-v1';
 
 const getManualStorageKey = (yearMonth: string): string => `${SUPPORT_MANUAL_STORAGE_PREFIX}:${yearMonth}`;
+const getRateOverrideStorageKey = (yearMonth: string): string => `${SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX}:${yearMonth}`;
 
 const normalizeManualAdjustment = (value: Partial<SupportManualAdjustment> | undefined): SupportManualAdjustment => ({
     additionalAmount: typeof value?.additionalAmount === 'number' && Number.isFinite(value.additionalAmount)
@@ -249,11 +259,59 @@ const saveManualAdjustments = (yearMonth: string, adjustments: SupportManualAdju
     }
 };
 
+const normalizeRateOverrides = (value: Partial<SupportMonthlyRateOverrides> | undefined): SupportMonthlyRateOverrides => {
+    const normalizeRateMap = (raw: unknown): Record<string, number> => {
+        if (!raw || typeof raw !== 'object') return {};
+        return Object.entries(raw as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, rate]) => {
+            const parsed = toPositiveRate(rate);
+            if (parsed) acc[key] = parsed;
+            return acc;
+        }, {});
+    };
+
+    return {
+        bulkRate: toPositiveRate(value?.bulkRate) ?? undefined,
+        aggregateRates: normalizeRateMap(value?.aggregateRates),
+        siteRates: normalizeRateMap(value?.siteRates)
+    };
+};
+
+const loadRateOverrides = (yearMonth: string): SupportMonthlyRateOverrides => {
+    if (typeof window === 'undefined' || !yearMonth) return normalizeRateOverrides(undefined);
+    try {
+        const raw = window.localStorage.getItem(getRateOverrideStorageKey(yearMonth));
+        if (!raw) return normalizeRateOverrides(undefined);
+        return normalizeRateOverrides(JSON.parse(raw) as Partial<SupportMonthlyRateOverrides>);
+    } catch (error) {
+        console.warn('[SupportTeamPaymentPage] rate override load failed:', error);
+        return normalizeRateOverrides(undefined);
+    }
+};
+
+const saveRateOverrides = (yearMonth: string, overrides: SupportMonthlyRateOverrides): void => {
+    if (typeof window === 'undefined' || !yearMonth) return;
+    try {
+        window.localStorage.setItem(getRateOverrideStorageKey(yearMonth), JSON.stringify(normalizeRateOverrides(overrides)));
+    } catch (error) {
+        console.warn('[SupportTeamPaymentPage] rate override save failed:', error);
+    }
+};
+
 const parseMoneyInput = (value: string): number => {
     const normalized = value.replace(/[^0-9.-]/g, '');
     const parsed = Number(normalized);
     if (!Number.isFinite(parsed)) return 0;
     return Math.max(0, Math.round(parsed));
+};
+
+const toPositiveRate = (value: unknown): number | null => {
+    const parsed = typeof value === 'number'
+        ? value
+        : typeof value === 'string'
+            ? Number(value.replace(/,/g, ''))
+            : NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.round(parsed);
 };
 
 const getMonthRange = (yearMonth: string): { start: string; end: string } => {
@@ -480,6 +538,50 @@ const getAggregateUnitPrice = (aggregate: SupportCompanyAggregate): number => {
     return Math.round(sample ?? 0);
 };
 
+const getSiteUnitPrice = (site: SupportSiteRow): number => {
+    if (site.totalManDay > 0) return Math.round(site.totalAmount / site.totalManDay);
+    return Math.round(site.unitPriceSamples[0] ?? 0);
+};
+
+const applyUnitPriceToSite = (site: SupportSiteRow, unitPrice: number): SupportSiteRow => {
+    const normalizedRate = Math.max(0, Math.round(unitPrice));
+    const workers = site.workers.map((worker) => ({
+        ...worker,
+        unitPrice: normalizedRate,
+        amount: Math.round(worker.manDay * normalizedRate)
+    }));
+    return recalcSiteFromWorkers(site, workers);
+};
+
+const applyUnitPriceToAggregate = (aggregate: SupportCompanyAggregate, unitPrice: number): SupportCompanyAggregate =>
+    recalcAggregateFromSites(
+        aggregate,
+        aggregate.sites.map((site) => applyUnitPriceToSite(site, unitPrice))
+    );
+
+const getMonthlySiteRateKey = (aggregateId: string, siteId: string): string => `${aggregateId}::${siteId}`;
+
+const applyMonthlyRateOverrides = (
+    rows: SupportCompanyAggregate[],
+    overrides: SupportMonthlyRateOverrides
+): SupportCompanyAggregate[] => rows.map((aggregate) => {
+    let nextAggregate = overrides.bulkRate
+        ? applyUnitPriceToAggregate(aggregate, overrides.bulkRate)
+        : aggregate;
+
+    const aggregateRate = overrides.aggregateRates[nextAggregate.aggregateId];
+    if (aggregateRate) {
+        nextAggregate = applyUnitPriceToAggregate(nextAggregate, aggregateRate);
+    }
+
+    const nextSites = nextAggregate.sites.map((site) => {
+        const siteRate = overrides.siteRates[getMonthlySiteRateKey(nextAggregate.aggregateId, site.siteId)];
+        return siteRate ? applyUnitPriceToSite(site, siteRate) : site;
+    });
+
+    return recalcAggregateFromSites(nextAggregate, nextSites);
+});
+
 const getAdjustment = (adjustments: SupportManualAdjustments, aggregateId: string): SupportManualAdjustment =>
     normalizeManualAdjustment(adjustments[aggregateId]);
 
@@ -520,6 +622,8 @@ const SupportTeamPaymentPage: React.FC = () => {
     const [companies, setCompanies] = useState<Company[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const [supportRates, setSupportRates] = useState<SupportRate[]>([]);
+    const [bulkRateInput, setBulkRateInput] = useState<string>(formatNumber(DEFAULT_SUPPORT_UNIT_PRICE));
     const [loading, setLoading] = useState<boolean>(false);
     const [errors, setErrors] = useState<string[]>([]);
     const [detailTarget, setDetailTarget] = useState<DetailTarget>(null);
@@ -529,22 +633,39 @@ const SupportTeamPaymentPage: React.FC = () => {
         month: defaultMonth,
         data: loadManualAdjustments(defaultMonth)
     }));
+    const [monthlyRateOverrideState, setMonthlyRateOverrideState] = useState<{ month: string; data: SupportMonthlyRateOverrides }>(() => ({
+        month: defaultMonth,
+        data: loadRateOverrides(defaultMonth)
+    }));
     
     // 계층형 펼침 상태 관리
     const [expandedAggregates, setExpandedAggregates] = useState<Set<string>>(new Set());
 
     const manualAdjustments = manualAdjustmentState.month === selectedMonth ? manualAdjustmentState.data : {};
+    const monthlyRateOverrides = monthlyRateOverrideState.month === selectedMonth
+        ? monthlyRateOverrideState.data
+        : normalizeRateOverrides(undefined);
 
     useEffect(() => {
+        const rateOverrides = loadRateOverrides(selectedMonth);
         setManualAdjustmentState({
             month: selectedMonth,
             data: loadManualAdjustments(selectedMonth)
         });
+        setMonthlyRateOverrideState({
+            month: selectedMonth,
+            data: rateOverrides
+        });
+        setBulkRateInput(formatNumber(rateOverrides.bulkRate ?? DEFAULT_SUPPORT_UNIT_PRICE));
     }, [selectedMonth]);
 
     useEffect(() => {
         saveManualAdjustments(manualAdjustmentState.month, manualAdjustmentState.data);
     }, [manualAdjustmentState]);
+
+    useEffect(() => {
+        saveRateOverrides(monthlyRateOverrideState.month, monthlyRateOverrideState.data);
+    }, [monthlyRateOverrideState]);
 
     const updateManualAdjustment = useCallback((
         aggregateId: string,
@@ -575,16 +696,21 @@ const SupportTeamPaymentPage: React.FC = () => {
 
     const fetchInitialData = useCallback(async () => {
         try {
-            const [fetchedTeams, fetchedCompanies, fetchedWorkers, fetchedSites] = await Promise.all([
+            const [fetchedTeams, fetchedCompanies, fetchedWorkers, fetchedSites, fetchedSupportRates] = await Promise.all([
                 teamService.getTeams(),
                 companyService.getCompanies(),
                 manpowerService.getWorkers(),
-                siteService.getSites()
+                siteService.getSites(),
+                supportRateService.getAllSiteRates().catch((error) => {
+                    console.error('지원팀 현장 단가를 불러오지 못했습니다.', error);
+                    return [] as SupportRate[];
+                })
             ]);
             setTeams(fetchedTeams);
             setCompanies(fetchedCompanies);
             setWorkers(fetchedWorkers);
             setSites(fetchedSites);
+            setSupportRates(fetchedSupportRates);
         } catch (error) {
             console.error('지원팀 기준 데이터를 불러오지 못했습니다.', error);
             setErrors((prev) => [...prev, '기준 데이터를 불러오지 못했습니다. 관리자에게 문의해주세요.']);
@@ -616,6 +742,30 @@ const SupportTeamPaymentPage: React.FC = () => {
             sites.forEach((site) => {
                 if (site.id) siteById.set(site.id, site);
             });
+
+            const supportRateBySiteId = new Map<string, number>();
+            const supportRateBySiteName = new Map<string, number>();
+            supportRates.forEach((rate) => {
+                const configuredRate = toPositiveRate(rate.defaultRate);
+                if (!configuredRate) return;
+                const siteId = normalize(rate.siteId || rate.id);
+                const siteName = normalizeName(rate.siteName);
+                if (siteId) supportRateBySiteId.set(siteId, configuredRate);
+                if (siteName) supportRateBySiteName.set(siteName, configuredRate);
+            });
+
+            const resolveConfiguredSiteRate = (siteId?: string | null, siteName?: string | null): number | null => {
+                const normalizedSiteId = normalize(siteId);
+                if (normalizedSiteId) {
+                    const direct = supportRateBySiteId.get(normalizedSiteId);
+                    if (direct) return direct;
+                    const site = siteById.get(normalizedSiteId);
+                    const byResolvedName = site ? supportRateBySiteName.get(normalizeName(site.name)) : undefined;
+                    if (byResolvedName) return byResolvedName;
+                }
+                const normalizedSiteName = normalizeName(siteName);
+                return normalizedSiteName ? (supportRateBySiteName.get(normalizedSiteName) ?? null) : null;
+            };
 
             const isCheongyeonCompany = (companyId?: string, companyName?: string): boolean => {
                 const normalizedCompanyId = normalize(companyId);
@@ -900,16 +1050,17 @@ const SupportTeamPaymentPage: React.FC = () => {
                     }
                     if (classifiedEntries.length === 0) return;
 
-                    const unitPrice = typeof reportWorker.unitPrice === 'number' && Number.isFinite(reportWorker.unitPrice)
-                        ? reportWorker.unitPrice
-                        : resolvedTeam?.supportRate ?? 0;
+                    const siteId = report.siteId ?? 'unknown-site';
+                    const siteName = report.siteName ?? '현장 미지정';
+                    const unitPrice = resolveConfiguredSiteRate(report.siteId, report.siteName) ??
+                        toPositiveRate(resolvedTeam?.supportRate) ??
+                        toPositiveRate(reportWorker.unitPrice) ??
+                        DEFAULT_SUPPORT_UNIT_PRICE;
                     const manDay = typeof reportWorker.manDay === 'number' && Number.isFinite(reportWorker.manDay)
                         ? reportWorker.manDay
                         : 0;
                     const amount = Math.round(manDay * unitPrice);
 
-                    const siteId = report.siteId ?? 'unknown-site';
-                    const siteName = report.siteName ?? '현장 미지정';
                     classifiedEntries.forEach((entry) => {
                         const workerRecord: SupportWorkerBreakdown = {
                             date: reportDate,
@@ -1028,7 +1179,7 @@ const SupportTeamPaymentPage: React.FC = () => {
 
             return { aggregates: aggregatesList, errorMessages };
         },
-        [companies, sites, teams]
+        [companies, sites, supportRates, teams]
     );
 
     const fetchSupportData = useCallback(async () => {
@@ -1038,7 +1189,7 @@ const SupportTeamPaymentPage: React.FC = () => {
             const { start, end } = getMonthRange(selectedMonth);
             const reports = await dailyReportService.getReportsByRange(start, end);
             const { aggregates: nextAggregates, errorMessages } = aggregateReports(reports);
-            setAggregates(nextAggregates);
+            setAggregates(applyMonthlyRateOverrides(nextAggregates, loadRateOverrides(selectedMonth)));
             setErrors(errorMessages);
         } catch (error) {
             console.error('지원팀 데이터를 불러오는 중 오류가 발생했습니다.', error);
@@ -1205,6 +1356,73 @@ const SupportTeamPaymentPage: React.FC = () => {
             ...agg,
             sites: agg.sites.map(s => agg.aggregateId === aggregateId && s.siteId === siteId ? { ...s, displayContent: value } : s)
         })));
+    };
+
+    const handleApplyBulkRate = () => {
+        const unitPrice = parseMoneyInput(bulkRateInput);
+        if (unitPrice <= 0) {
+            window.alert('적용할 단가를 입력해주세요.');
+            return;
+        }
+        setBulkRateInput(formatNumber(unitPrice));
+        setMonthlyRateOverrideState(prev => {
+            const baseData = prev.month === selectedMonth ? prev.data : loadRateOverrides(selectedMonth);
+            return {
+                month: selectedMonth,
+                data: normalizeRateOverrides({
+                    ...baseData,
+                    bulkRate: unitPrice
+                })
+            };
+        });
+        setAggregates(prev => prev.map(aggregate => applyUnitPriceToAggregate(aggregate, unitPrice)));
+    };
+
+    const handleApplyAggregateRate = (aggregateId: string, rawValue: string) => {
+        const unitPrice = parseMoneyInput(rawValue);
+        setMonthlyRateOverrideState(prev => {
+            const baseData = prev.month === selectedMonth ? prev.data : loadRateOverrides(selectedMonth);
+            return {
+                month: selectedMonth,
+                data: normalizeRateOverrides({
+                    ...baseData,
+                    aggregateRates: {
+                        ...baseData.aggregateRates,
+                        [aggregateId]: unitPrice
+                    }
+                })
+            };
+        });
+        setAggregates(prev => prev.map(aggregate =>
+            aggregate.aggregateId === aggregateId
+                ? applyUnitPriceToAggregate(aggregate, unitPrice)
+                : aggregate
+        ));
+    };
+
+    const handleApplySiteRate = (aggregateId: string, siteId: string, rawValue: string) => {
+        const unitPrice = parseMoneyInput(rawValue);
+        const siteRateKey = getMonthlySiteRateKey(aggregateId, siteId);
+        setMonthlyRateOverrideState(prev => {
+            const baseData = prev.month === selectedMonth ? prev.data : loadRateOverrides(selectedMonth);
+            return {
+                month: selectedMonth,
+                data: normalizeRateOverrides({
+                    ...baseData,
+                    siteRates: {
+                        ...baseData.siteRates,
+                        [siteRateKey]: unitPrice
+                    }
+                })
+            };
+        });
+        setAggregates(prev => prev.map(aggregate => {
+            if (aggregate.aggregateId !== aggregateId) return aggregate;
+            const nextSites = aggregate.sites.map(site =>
+                site.siteId === siteId ? applyUnitPriceToSite(site, unitPrice) : site
+            );
+            return recalcAggregateFromSites(aggregate, nextSites);
+        }));
     };
 
     const kbRows = useMemo(() => {
@@ -1414,16 +1632,45 @@ const SupportTeamPaymentPage: React.FC = () => {
                 {/* 우측 메인 */}
                 <div className="flex-1 space-y-6">
                     {/* 상단 요약 카드 및 필터 */}
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col lg:flex-row items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                            <FontAwesomeIcon icon={faCalendarAlt} className="text-amber-500" />
-                            <span className="text-sm font-bold text-slate-500">집계 기준월</span>
-                            <input
-                                type="month"
-                                value={selectedMonth}
-                                onChange={(e) => setSelectedMonth(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none transition-all"
-                            />
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                            <div className="flex items-center gap-3">
+                                <FontAwesomeIcon icon={faCalendarAlt} className="text-amber-500" />
+                                <span className="text-sm font-bold text-slate-500">집계 기준월</span>
+                                <input
+                                    type="month"
+                                    value={selectedMonth}
+                                    onChange={(e) => setSelectedMonth(e.target.value)}
+                                    className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black focus:ring-2 focus:ring-amber-500 outline-none transition-all"
+                                />
+                            </div>
+                            <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-bold text-slate-500">월 단가</span>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={bulkRateInput}
+                                    onChange={(event) => setBulkRateInput(event.target.value)}
+                                    onFocus={(event) => event.currentTarget.select()}
+                                    className="h-9 w-32 rounded-lg border border-slate-200 bg-slate-50 px-3 text-right text-sm font-black text-slate-900 outline-none transition focus:border-amber-400 focus:bg-white focus:ring-2 focus:ring-amber-100"
+                                    aria-label="일괄 적용 단가"
+                                />
+                                <span className="text-sm font-bold text-slate-500">원</span>
+                                <button
+                                    type="button"
+                                    onClick={handleApplyBulkRate}
+                                    disabled={loading || aggregates.length === 0}
+                                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                >
+                                    <FontAwesomeIcon icon={faCircleCheck} />
+                                    월 적용
+                                </button>
+                                <span className="text-[11px] font-bold text-slate-400">
+                                    기본 {formatNumber(DEFAULT_SUPPORT_UNIT_PRICE)}원
+                                    {monthlyRateOverrides.bulkRate ? ` · ${selectedMonth} 적용됨` : ''}
+                                </span>
+                            </div>
                         </div>
                         <div className="flex items-center gap-3">
                             <select
@@ -1527,7 +1774,18 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                         </span>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-center font-mono">{formatDayValue(agg.totalManDay)}</td>
-                                                                    <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(getAggregateUnitPrice(agg))}</td>
+                                                                    <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
+                                                                        <input
+                                                                            type="text"
+                                                                            inputMode="numeric"
+                                                                            aria-label={`${agg.companyName} 단가`}
+                                                                            value={formatOptionalMoney(getAggregateUnitPrice(agg))}
+                                                                            onChange={(event) => handleApplyAggregateRate(aggKey, event.target.value)}
+                                                                            onFocus={(event) => event.currentTarget.select()}
+                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-900 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                            placeholder="0"
+                                                                        />
+                                                                    </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(agg.totalAmount)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
                                                                         <input
@@ -1569,7 +1827,18 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                             ㄴ {site.siteName}
                                                                         </td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-center font-mono text-slate-600">{formatDayValue(site.totalManDay)}</td>
-                                                                        <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-500"></td>
+                                                                        <td className="border border-slate-900 px-1 py-1 text-right font-mono text-slate-500" onClick={(event) => event.stopPropagation()}>
+                                                                            <input
+                                                                                type="text"
+                                                                                inputMode="numeric"
+                                                                                aria-label={`${site.siteName} 단가`}
+                                                                                value={formatOptionalMoney(getSiteUnitPrice(site))}
+                                                                                onChange={(event) => handleApplySiteRate(aggKey, site.siteId, event.target.value)}
+                                                                                onFocus={(event) => event.currentTarget.select()}
+                                                                                className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                                placeholder="0"
+                                                                            />
+                                                                        </td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
                                                                         <td className="border border-slate-900 px-2 py-1"></td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>

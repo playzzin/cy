@@ -19,7 +19,7 @@ import {
     ChevronLeft,
     ChevronRight,
     ClipboardCopy,
-    Download,
+    Eye,
     GripVertical,
     MapPin,
     Plus,
@@ -218,6 +218,21 @@ const hexToRgba = (hex: string, opacity: number) => {
     const g = parseInt(normalized.slice(2, 4), 16);
     const b = parseInt(normalized.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+};
+
+const getReadableTextColor = (hex?: string) => {
+    const color = normalizeColor(hex) || DEFAULT_RESOURCE_COLOR;
+    const normalized = color.replace('#', '');
+    const full = normalized.length === 3
+        ? normalized.split('').map((char) => `${char}${char}`).join('')
+        : normalized;
+    const value = parseInt(full, 16);
+    if (!Number.isFinite(value)) return '#0f172a';
+    const r = (value >> 16) & 255;
+    const g = (value >> 8) & 255;
+    const b = value & 255;
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.58 ? '#0f172a' : '#ffffff';
 };
 
 const isInactiveWorker = (worker?: Worker) => {
@@ -1029,6 +1044,133 @@ const ScheduleCard: React.FC<{
     );
 };
 
+const BoardViewScheduleCard: React.FC<{
+    schedule: ScheduleItem;
+    workersById: Map<string, Worker>;
+    workerTeamColorById: Map<string, string>;
+    vehiclesById: Map<string, Vehicle>;
+    vehicleAssignedTeamColorById: Map<string, string>;
+    selectedDestination: boolean;
+    recentlyUpdated: boolean;
+    onSelectDestination: () => void;
+}> = ({
+    schedule,
+    workersById,
+    workerTeamColorById,
+    vehiclesById,
+    vehicleAssignedTeamColorById,
+    selectedDestination,
+    recentlyUpdated,
+    onSelectDestination,
+}) => {
+    const siteColor = normalizeColor(schedule.siteColor) || normalizeColor(schedule.teamColor) || DEFAULT_RESOURCE_COLOR;
+    const scheduleVehicleIds = getScheduleVehicleIds(schedule);
+    const workerRows = schedule.workerIds
+        .map((workerId) => {
+            const worker = workersById.get(workerId);
+            if (!worker) return null;
+            const teamColor = normalizeColor(workerTeamColorById.get(workerId)) || siteColor;
+            return { workerId, worker, teamColor };
+        })
+        .filter((row): row is { workerId: string; worker: Worker; teamColor: string } => Boolean(row))
+        .sort((left, right) => compareKoreanName(left.worker.name, right.worker.name));
+
+    const nameRows: Array<{ id: string; label: string; color: string; kind: 'worker' | 'support' }> = [
+        ...schedule.supportTeams.map((team) => ({
+            id: `support:${team.id || team.name}`,
+            label: team.name,
+            color: normalizeColor(team.color) || siteColor,
+            kind: 'support' as const,
+        })),
+        ...workerRows.map((row) => ({
+            id: `worker:${row.workerId}`,
+            label: row.worker.name,
+            color: row.teamColor,
+            kind: 'worker' as const,
+        })),
+    ];
+
+    return (
+        <article
+            onClick={onSelectDestination}
+            className={`relative overflow-hidden border-2 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+                recentlyUpdated ? 'ring-4 ring-emerald-200' : ''
+            }`}
+            style={{ borderColor: siteColor }}
+        >
+            {selectedDestination ? (
+                <span
+                    className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-white shadow-lg"
+                    title="선택 중인 현장"
+                >
+                    <MapPin size={15} />
+                </span>
+            ) : null}
+
+            <div
+                className="px-2 py-1.5 text-center"
+                style={{
+                    background: `linear-gradient(180deg, ${hexToRgba(siteColor, 0.68)}, ${siteColor})`,
+                    color: getReadableTextColor(siteColor),
+                }}
+            >
+                <h3 className="truncate text-lg font-black leading-tight">{schedule.siteName || '현장 미지정'}</h3>
+            </div>
+
+            <div className="border-b border-slate-300 px-2 py-1.5 text-center">
+                <div className="truncate text-sm font-bold text-slate-900">{schedule.siteAddress || '주소 없음'}</div>
+            </div>
+
+            {nameRows.length > 0 ? (
+                <div className="grid grid-cols-2">
+                    {nameRows.map((row, index) => {
+                        const textColor = getReadableTextColor(row.color);
+                        return (
+                            <div
+                                key={row.id}
+                                className={`min-w-0 border-b border-slate-300 px-2 py-1.5 text-center text-sm font-bold ${
+                                    index % 2 === 0 ? 'border-r border-slate-300' : ''
+                                }`}
+                                style={{
+                                    background: row.kind === 'support'
+                                        ? `linear-gradient(180deg, ${hexToRgba(row.color, 0.85)}, ${row.color})`
+                                        : `linear-gradient(180deg, ${hexToRgba(row.color, 0.34)}, ${hexToRgba(row.color, 0.78)})`,
+                                    color: row.kind === 'support' ? textColor : '#0f172a',
+                                }}
+                                title={row.kind === 'support' ? `${row.label} · 작업자 미정` : row.label}
+                            >
+                                <span className="block truncate">{row.label}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
+
+            {scheduleVehicleIds.length > 0 ? (
+                <div className="divide-y divide-slate-300">
+                    {scheduleVehicleIds.map((vehicleId, index) => {
+                        const vehicle = vehiclesById.get(vehicleId);
+                        const vehicleColor = normalizeColor(vehicleAssignedTeamColorById.get(vehicleId)) || siteColor;
+                        return (
+                            <div
+                                key={vehicleId}
+                                className="flex items-center justify-center gap-1 px-2 py-1.5 text-center text-sm font-black"
+                                style={{
+                                    background: `linear-gradient(180deg, ${hexToRgba(vehicleColor, 0.28)}, ${hexToRgba(vehicleColor, 0.62)})`,
+                                    color: '#0f172a',
+                                }}
+                            >
+                                <Truck size={14} style={{ color: vehicleColor }} />
+                                <span className="truncate">{vehicle?.licensePlate || schedule.vehicleLabels[index] || schedule.vehicleLabel}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+            ) : null}
+        </article>
+    );
+};
+
 const FieldSchedulePlannerPage: React.FC = () => {
     const boardRef = useRef<HTMLDivElement | null>(null);
     const [date, setDate] = useState(getTodayInputValue());
@@ -1052,6 +1194,7 @@ const FieldSchedulePlannerPage: React.FC = () => {
     const [activePayload, setActivePayload] = useState<DragPayload | null>(null);
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
     const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
+    const [boardViewMode, setBoardViewMode] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -2057,28 +2200,6 @@ const FieldSchedulePlannerPage: React.FC = () => {
         setMessage('전날 일정을 가져왔습니다. 확인 후 저장하세요.');
     };
 
-    const handleExportImage = async () => {
-        if (!boardRef.current) return;
-        setMessage('이미지를 생성하는 중입니다.');
-
-        try {
-            const html2canvas = (await import('html2canvas')).default;
-            const canvas = await html2canvas(boardRef.current, {
-                background: '#f8fafc',
-                scale: 2,
-                useCORS: true,
-            } as any);
-            const link = document.createElement('a');
-            link.download = `현장일정_${date}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            setMessage('이미지 저장 파일이 생성되었습니다.');
-        } catch (error) {
-            console.error('[FieldSchedulePlanner] Image export failed', error);
-            setMessage('이미지 저장에 실패했습니다.');
-        }
-    };
-
     const selectedSite = selectedSiteId ? sitesById.get(selectedSiteId) : undefined;
     const selectedSiteColor = selectedSite ? getSiteColor(selectedSite, selectedRoster?.color) : '';
     const selectedResourceCount = selectedWorkerIds.length + selectedSupportTeamIds.length + selectedVehicleIds.length;
@@ -2175,11 +2296,15 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={handleExportImage}
-                                    className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                                    onClick={() => setBoardViewMode((prev) => !prev)}
+                                    className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-bold ${
+                                        boardViewMode
+                                            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                    }`}
                                 >
-                                    <Download size={16} />
-                                    이미지
+                                    <Eye size={16} />
+                                    {boardViewMode ? '편집보기' : '보드보기'}
                                 </button>
                                 <button
                                     type="button"
@@ -2212,7 +2337,8 @@ const FieldSchedulePlannerPage: React.FC = () => {
                         </div>
                     </header>
 
-                    <div className="grid min-h-0 flex-1 grid-cols-[360px_minmax(0,1fr)] overflow-hidden">
+                    <div className={`grid min-h-0 flex-1 overflow-hidden ${boardViewMode ? 'grid-cols-1' : 'grid-cols-[360px_minmax(0,1fr)]'}`}>
+                        {!boardViewMode ? (
                         <aside className="flex min-h-0 flex-col border-r border-slate-200 bg-white">
                             <div className="border-b border-slate-200 p-4">
                                 <div className="relative">
@@ -2383,8 +2509,10 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                 )}
                             </div>
                         </aside>
+                        ) : null}
 
                         <main className="min-w-0 overflow-hidden bg-slate-100">
+                            {!boardViewMode ? (
                             <div className="border-b border-slate-200 bg-white px-5 py-4">
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                                     <div className="min-w-0">
@@ -2446,6 +2574,7 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
+                            ) : null}
 
                             <div
                                 ref={(node) => {
@@ -2453,15 +2582,27 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     boardRef.current = node;
                                 }}
                                 id="field-schedule-board"
-                                className={`h-full overflow-y-auto p-5 transition ${
+                                className={`h-full overflow-y-auto transition ${boardViewMode ? 'p-6' : 'p-5'} ${
                                     isBoardOver ? 'bg-blue-50 ring-2 ring-inset ring-blue-100' : ''
                                 }`}
+                                style={
+                                    boardViewMode
+                                        ? {
+                                            backgroundColor: '#f8fafc',
+                                            backgroundImage:
+                                                'linear-gradient(#e2e8f0 1px, transparent 1px), linear-gradient(90deg, #e2e8f0 1px, transparent 1px)',
+                                            backgroundSize: '33px 33px',
+                                        }
+                                        : undefined
+                                }
                             >
-                                <div className="mb-4 flex items-center justify-between">
+                                <div className={`mb-4 flex items-center justify-between ${boardViewMode ? 'rounded-lg border border-slate-200 bg-white/92 px-4 py-3 shadow-sm' : ''}`}>
                                     <div>
-                                        <h2 className="text-lg font-black text-slate-950">{formatDisplayDate(date)}</h2>
-                                        <p className="mt-1 text-sm font-medium text-slate-500">
-                                            현장 카드 {schedules.length}건 · 같은 날짜의 같은 현장은 하나의 카드에 합쳐집니다.
+                                        <h2 className={`${boardViewMode ? 'text-xl' : 'text-lg'} font-black text-slate-950`}>{formatDisplayDate(date)}</h2>
+                                        <p className="mt-1 text-sm font-bold text-slate-500">
+                                            {boardViewMode
+                                                ? `보드보기 ${schedules.length}개 현장 · 현장/팀 색상과 작업자, 지원팀, 차량을 한눈에 확인합니다.`
+                                                : `현장 카드 ${schedules.length}건 · 같은 날짜의 같은 현장은 하나의 카드에 합쳐집니다.`}
                                         </p>
                                     </div>
                                 </div>
@@ -2472,12 +2613,33 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                     </div>
                                 ) : schedules.length > 0 ? (
                                     <div
-                                        className="grid gap-3"
-                                        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
+                                        className={boardViewMode ? 'grid gap-x-8 gap-y-8' : 'grid gap-3'}
+                                        style={{
+                                            gridTemplateColumns: boardViewMode
+                                                ? 'repeat(auto-fill, minmax(196px, 196px))'
+                                                : 'repeat(auto-fill, minmax(280px, 1fr))',
+                                        }}
                                     >
                                         {schedules.map((schedule) => {
                                             const scheduleKey = makeSiteKey(schedule);
-                                            return (
+                                            return boardViewMode ? (
+                                                <BoardViewScheduleCard
+                                                    key={schedule.id}
+                                                    schedule={schedule}
+                                                    workersById={workersById}
+                                                    workerTeamColorById={workerTeamColorById}
+                                                    vehiclesById={vehiclesById}
+                                                    vehicleAssignedTeamColorById={vehicleAssignedTeamColorById}
+                                                    selectedDestination={Boolean(selectedDestinationScheduleKey && scheduleKey === selectedDestinationScheduleKey)}
+                                                    recentlyUpdated={Boolean(recentlyUpdatedSiteKey && scheduleKey === recentlyUpdatedSiteKey)}
+                                                    onSelectDestination={() => {
+                                                        if (schedule.siteId) {
+                                                            setSelectedSiteId(schedule.siteId);
+                                                            setMessage(`이동 대상: ${schedule.siteName}`);
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
                                                 <ScheduleCard
                                                     key={schedule.id}
                                                     schedule={schedule}

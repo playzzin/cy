@@ -171,7 +171,9 @@ interface DbFilterState {
 
 const INPUT_ROW_COUNT = 80;
 const DB_PAGE_SIZE = 100;
-const buildDefaultLedgerStart = (year: number) => `${year}-01-01`;
+const buildDefaultLedgerStart = (date: Date) => (
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+);
 const WORKBOOK_TABS: Array<{ id: WorkbookTab; label: string }> = [
     { id: 'input', label: '입력폼' },
     { id: 'database', label: 'DB' },
@@ -270,7 +272,9 @@ const areInputRowsEqual = (left: InputRow[], right: InputRow[]) => {
     return true;
 };
 
-const formatDateInput = (date: Date) => date.toISOString().slice(0, 10);
+const formatDateInput = (date: Date) => (
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+);
 
 const formatNumber = (value: number | null | undefined) => {
     if (value === null || value === undefined || !Number.isFinite(value)) return '-';
@@ -388,6 +392,28 @@ const buildPrintColGroup = (columns: PrintColumnSpec[]) => `
 const buildPrintColumnStyles = (columns: PrintColumnSpec[]) => columns
     .map((column) => `.${column.className} { width: ${column.width}; }`)
     .join('\n');
+
+const getPrintTableTheme = (tenantKey: WorkbookLedgerTenant | string) => {
+    if (tenantKey === 'dawon') {
+        return {
+            headerBackground: '#dc2626',
+            headerColor: '#f8fafc',
+            summaryHeaderBackground: '#fee2e2',
+            summaryHeaderColor: '#7f1d1d',
+            totalBackground: '#fff1f2',
+            totalColor: '#7f1d1d'
+        };
+    }
+
+    return {
+        headerBackground: '#4338ca',
+        headerColor: '#f8fafc',
+        summaryHeaderBackground: '#ede9fe',
+        summaryHeaderColor: '#312e81',
+        totalBackground: '#f5f3ff',
+        totalColor: '#312e81'
+    };
+};
 
 const normalizeTransactionType = (value: unknown): WorkbookTransactionType | null => {
     const text = normalizeText(value);
@@ -1215,7 +1241,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const today = useMemo(() => new Date(), []);
     const currentYear = today.getFullYear();
     const todayString = formatDateInput(today);
-    const defaultLedgerStart = buildDefaultLedgerStart(currentYear);
+    const defaultLedgerStart = buildDefaultLedgerStart(today);
 
     const [activeTab, setActiveTab] = useState<WorkbookTab>('input');
     const [loading, setLoading] = useState(false);
@@ -2856,6 +2882,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const ledgerPrintColGroup = buildPrintColGroup(LEDGER_PRINT_COLUMNS);
         const ledgerPrintColumnStyles = buildPrintColumnStyles(LEDGER_PRINT_COLUMNS);
+        const printTheme = getPrintTableTheme(tenantKey);
 
         setPrintingLedger(true);
 
@@ -2898,6 +2925,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                         * {
                             box-sizing: border-box;
+                            -webkit-print-color-adjust: exact !important;
+                            print-color-adjust: exact !important;
                         }
 
                         body {
@@ -2935,16 +2964,24 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                         .print-filter-item {
                             padding: 8px 10px;
-                            border: 1px solid #d7dde7;
+                            border: 1px solid #e5cf87;
                             border-radius: 10px;
-                            background: #f8fafc;
+                            background: #fff8d9;
                             font-size: 12px;
                         }
 
                         .print-filter-item strong {
                             display: inline-block;
                             margin-right: 6px;
-                            color: #334155;
+                            color: #111827;
+                        }
+
+                        .print-table-heading {
+                            padding: 11px 14px;
+                            background: linear-gradient(180deg, #365f91 0%, #27466b 100%);
+                            color: #ffffff;
+                            font-size: 16px;
+                            font-weight: 800;
                         }
 
                         table {
@@ -2968,8 +3005,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         }
 
                         th {
-                            background: #2e75b6;
-                            color: #ffffff;
+                            background: ${printTheme.headerBackground};
+                            color: ${printTheme.headerColor};
                             font-weight: 700;
                             white-space: nowrap;
                         }
@@ -2983,7 +3020,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         }
 
                         .summary-total-row td {
-                            background: #eff6ff;
+                            background: ${printTheme.totalBackground};
+                            color: ${printTheme.totalColor};
                             font-weight: 700;
                         }
                     </style>
@@ -3001,6 +3039,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 </div>
                             `).join('')}
                         </div>
+                        <div class="print-table-heading">${escapeHtml(title)}</div>
                         <table>
                             ${ledgerPrintColGroup}
                             <thead>
@@ -3047,7 +3086,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 Swal.fire('오류', '인쇄 실행 중 오류가 발생했습니다.', 'error');
             }
         }, 150);
-    }, [ledgerFilter, ledgerRows, ledgerTotals]);
+    }, [ledgerFilter, ledgerRows, ledgerTotals, tenantKey]);
 
     const handlePrintSummary = useCallback(() => {
         if (summaryRows.length === 0) {
@@ -3109,6 +3148,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
         const summaryPrintColGroup = buildPrintColGroup(SUMMARY_PRINT_COLUMNS);
         const summaryPrintColumnStyles = buildPrintColumnStyles(SUMMARY_PRINT_COLUMNS);
+        const printTheme = getPrintTableTheme(tenantKey);
 
         setPrintingSummary(true);
 
@@ -3152,6 +3192,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
 
                         * {
                             box-sizing: border-box;
+                            -webkit-print-color-adjust: exact !important;
+                            print-color-adjust: exact !important;
                         }
 
                         body {
@@ -3222,14 +3264,19 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         }
 
                         thead th {
-                            background: #ffd966;
-                            color: #111827;
+                            background: ${printTheme.summaryHeaderBackground};
+                            color: ${printTheme.summaryHeaderColor};
                             font-weight: 700;
                             white-space: nowrap;
                         }
 
-                        .summary-total-row td {
+                        tbody td:first-child {
                             background: #f8fafc;
+                        }
+
+                        .summary-total-row td {
+                            background: ${printTheme.totalBackground};
+                            color: ${printTheme.totalColor};
                             font-weight: 700;
                         }
 
@@ -3308,7 +3355,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 cleanup();
             }
         }, 60000);
-    }, [summaryFilter, summaryRows, summarySettlementLabels, summaryTotals]);
+    }, [summaryFilter, summaryRows, summarySettlementLabels, summaryTotals, tenantKey]);
 
     const linkedDbEntriesByParentId = useMemo(() => {
         const nextMap = new Map<string, WorkbookLedgerEntry[]>();

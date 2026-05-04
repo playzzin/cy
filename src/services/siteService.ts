@@ -1,7 +1,7 @@
 import { siteFirestoreService } from './siteFirestoreService';
 import { SiteZod as Site } from '../types/zod/siteSchema';
 import { db } from '../config/firebase';
-import { doc, updateDoc, arrayUnion, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, Timestamp, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
 
 export type { Site };
 
@@ -92,5 +92,30 @@ export const siteService = {
             totalManDay: increment(amount),
             updatedAt: Timestamp.now()
         });
+    },
+
+    updateSitesColorByResponsibleTeam: async (teamId: string, color: string, teamName?: string): Promise<void> => {
+        const snapshots = await Promise.all([
+            query(collection(db, 'sites'), where('responsibleTeamId', '==', teamId)),
+            ...(teamName ? [query(collection(db, 'sites'), where('responsibleTeamName', '==', teamName))] : [])
+        ].map((siteQuery) => getDocs(siteQuery)));
+
+        const siteRefs = new Map<string, typeof snapshots[number]['docs'][number]['ref']>();
+        snapshots.forEach((snapshot) => {
+            snapshot.docs.forEach((siteDoc) => {
+                siteRefs.set(siteDoc.ref.path, siteDoc.ref);
+            });
+        });
+
+        if (siteRefs.size === 0) return;
+
+        const batch = writeBatch(db);
+        siteRefs.forEach((siteRef) => {
+            batch.update(siteRef, {
+                color,
+                updatedAt: Timestamp.now()
+            });
+        });
+        await batch.commit();
     }
 };

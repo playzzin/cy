@@ -7,6 +7,7 @@ import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Material, InboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
+import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 
 // 임시저장 데이터 타입
 type InboundTempData = {
@@ -177,7 +178,7 @@ const MaterialInboundPage: React.FC = () => {
                 siteService.getSites(),
                 materialService.getUniqueMaterialsForSelection()
             ]);
-            setSites(sitesData.filter((s: any) => s.status === 'active'));
+            setSites(filterCheongyeonMaterialSites(sitesData));
             setMaterials(materialsData);
 
             // [FIX] 만약 이미 quantities에 데이터가 있다면 (임시저장 등),
@@ -215,6 +216,10 @@ const MaterialInboundPage: React.FC = () => {
             alert('현장을 선택하세요.');
             return;
         }
+        if (!sites.some((site) => site.id === siteId)) {
+            alert('(주)청연이엔지 소속 현장만 선택할 수 있습니다.');
+            return;
+        }
 
         const transactions: Array<Omit<InboundTransaction, 'id' | 'createdAt' | 'updatedAt'>> = [];
 
@@ -229,6 +234,7 @@ const MaterialInboundPage: React.FC = () => {
                         siteName: String(resolvedSiteName || '').trim(),
                         vehicleNumber: vehicleNumber || '',
                         materialId: material.id,
+                        materialKey: material.materialKey,
                         category: String(material.category || '').trim(),
                         itemName: String(material.itemName || '').trim(),
                         spec: String(material.spec || '').trim(),

@@ -17,6 +17,8 @@ import SingleSelectPopover, { InputPopover } from '../../components/common/Singl
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { positionService, Position } from '../../services/positionService';
 import { getIcon } from '../../utils/iconMapper';
+import { DEFAULT_TEAM_COLOR, SOLID_COLOR_PALETTE } from '../../constants/solidColorPalette';
+import { useMasterData } from '../../contexts/MasterDataContext';
 
 // 직책별 아이콘 매핑 (positions DB 기반)
 const getPositionIcon = (role: string | undefined, positions: Position[]) => {
@@ -32,6 +34,40 @@ const getPositionIcon = (role: string | undefined, positions: Position[]) => {
 };
 
 const TEAM_TYPE_OPTIONS = ['시공팀', '지원팀', '용역팀'] as const;
+
+const TeamColorPicker: React.FC<{
+    value?: string | null;
+    onChange: (color: string) => void;
+}> = ({ value, onChange }) => {
+    const selectedColor = value || DEFAULT_TEAM_COLOR;
+
+    return (
+        <details className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+            <summary
+                className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded border border-slate-300"
+                style={{ backgroundColor: selectedColor }}
+                title="팀 색상 선택"
+            />
+            <div className="absolute left-0 top-10 z-30 grid w-max grid-cols-10 gap-1.5 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                {SOLID_COLOR_PALETTE.map((color) => (
+                    <button
+                        key={color}
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onChange(color);
+                            e.currentTarget.closest('details')?.removeAttribute('open');
+                        }}
+                        className={`h-6 w-6 rounded-md border transition-transform hover:scale-110 ${selectedColor === color ? 'border-slate-900 ring-2 ring-slate-300' : 'border-white'}`}
+                        style={{ backgroundColor: color }}
+                        title={color}
+                        aria-label={`팀 색상 ${color}`}
+                    />
+                ))}
+            </div>
+        </details>
+    );
+};
 
 const getTeamTypeBadgeClass = (type?: string) => {
     switch (type) {
@@ -66,6 +102,7 @@ interface TeamDatabaseProps {
 }
 
 const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlightedId }) => {
+    const { refreshTeams, refreshSites } = useMasterData();
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
@@ -213,6 +250,14 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         }
     };
 
+    const handleTeamColorSelect = async (id: string, color: string) => {
+        setTeams(prev => prev.map(t => t.id === id ? { ...t, color } : t));
+        setWorkers(prev => prev.map(w => w.teamId === id ? { ...w, color } : w));
+        setSites(prev => prev.map(s => s.responsibleTeamId === id ? { ...s, color } : s));
+        await handleTeamSelectChange(id, { color });
+        await Promise.all([refreshTeams(), refreshSites()]);
+    };
+
     const handleTeamSiteSelect = async (id: string, selectedIds: string[]) => {
         const targetTeam = teams.find(t => t.id === id);
         if (!targetTeam) return;
@@ -224,7 +269,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         const selectedNames = sites.filter(s => selectedIds.includes(s.id!)).map(s => s.name);
 
         setSites(prev => prev.map(s => {
-            if (addedIds.includes(s.id!)) return { ...s, responsibleTeamId: id, responsibleTeamName: targetTeam.name };
+            if (addedIds.includes(s.id!)) return { ...s, responsibleTeamId: id, responsibleTeamName: targetTeam.name, color: targetTeam.color || DEFAULT_TEAM_COLOR };
             if (removedIds.includes(s.id!)) return { ...s, responsibleTeamId: undefined, responsibleTeamName: undefined };
             return s;
         }));
@@ -233,7 +278,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
 
         try {
             if (addedIds.length > 0) {
-                await siteService.updateSitesBatch(addedIds, { responsibleTeamId: id, responsibleTeamName: targetTeam.name });
+                await siteService.updateSitesBatch(addedIds, { responsibleTeamId: id, responsibleTeamName: targetTeam.name, color: targetTeam.color || DEFAULT_TEAM_COLOR });
             }
             if (removedIds.length > 0) {
                 await siteService.updateSitesBatch(removedIds, { responsibleTeamId: null as any, responsibleTeamName: null as any });
@@ -261,7 +306,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         const selectedNames = workers.filter(w => selectedIds.includes(w.id!)).map(w => w.name);
 
         setWorkers(prev => prev.map(w => {
-            if (addedIds.includes(w.id!)) return { ...w, teamId: id, teamName: targetTeam.name };
+            if (addedIds.includes(w.id!)) return { ...w, teamId: id, teamName: targetTeam.name, color: targetTeam.color || DEFAULT_TEAM_COLOR };
             if (removedIds.includes(w.id!)) return { ...w, teamId: undefined, teamName: undefined };
             return w;
         }));
@@ -270,7 +315,7 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
 
         try {
             if (addedIds.length > 0) {
-                await manpowerService.updateWorkersBatch(addedIds, { teamId: id, teamName: targetTeam.name });
+                await manpowerService.updateWorkersBatch(addedIds, { teamId: id, teamName: targetTeam.name, color: targetTeam.color || DEFAULT_TEAM_COLOR });
             }
             if (removedIds.length > 0) {
                 await manpowerService.updateWorkersBatch(removedIds, { teamId: null as any, teamName: null as any });
@@ -610,12 +655,9 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 />
                                                             ) : col.key === 'name' ? (
                                                                 <div className="flex items-center gap-2">
-                                                                    <input
-                                                                        type="color"
-                                                                        value={team.color || '#2563eb'}
-                                                                        onChange={(e) => team.id && handleTeamChange(team.id, 'color', e.target.value)}
-                                                                        onBlur={(e) => team.id && handleTeamBlur(team.id, 'color', e.target.value)}
-                                                                        className="h-8 w-8 rounded border border-slate-300 cursor-pointer"
+                                                                    <TeamColorPicker
+                                                                        value={team.color}
+                                                                        onChange={(color) => team.id && handleTeamColorSelect(team.id, color)}
                                                                     />
                                                                     <input
                                                                         type="text"

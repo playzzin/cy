@@ -31,7 +31,8 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                     "지원 현황판",
                     "지원비 단가 관리",
                     "숙소 관리",
-                    "법인차량 관리"
+                    "법인차량 관리",
+                    "경비내역"
                 ]
             },
             {
@@ -54,12 +55,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
                 icon: "fa-hand-holding-dollar",
-                sub: ["지원비 단가 관리", "인력 교류 정산"]
+                sub: ["지원비 단가 관리", "인력 교류 정산", "경비내역"]
             },
             {
                 text: "시스템 관리",
@@ -126,12 +127,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
                 icon: "fa-hand-holding-dollar",
-                sub: ["지원비 단가 관리", "인력 교류 정산"]
+                sub: ["지원비 단가 관리", "인력 교류 정산", "경비내역"]
             },
             {
                 text: "개발자 도구",
@@ -177,12 +178,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
                 icon: "fa-hand-holding-dollar",
-                sub: ["지원비 단가 관리", "인력 교류 정산"]
+                sub: ["지원비 단가 관리", "인력 교류 정산", "경비내역"]
             }
         ]
     },

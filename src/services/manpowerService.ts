@@ -263,6 +263,19 @@ export const manpowerService = {
         await batch.commit();
     },
 
+    updateWorkersTeamColor: async (teamId: string, color: string) => {
+        const q = query(collection(db, 'workers'), where('teamId', '==', teamId));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) return;
+
+        const batch = writeBatch(db);
+        snapshot.docs.forEach(d => {
+            batch.update(d.ref, { color, updatedAt: Timestamp.now() });
+        });
+        await batch.commit();
+        cachedWorkers = null;
+    },
+
     // Update salary model for all workers in a team
     updateWorkersSalaryModelByTeam: async (teamId: string, salaryModel: string) => {
         const q = query(collection(db, 'workers'), where('teamId', '==', teamId));

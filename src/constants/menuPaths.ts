@@ -71,6 +71,7 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\uc77c\uae09\uc81c \uc6d4\uae09\uc81c \ud1b5\uacc4": "/payroll/statistics",
 
     // \uc790\uc7ac\uad00\ub9ac
+    "\uc790\uc7ac \ud1b5\ud569\uad00\ub9ac": "/materials",
     "\uc790\uc7ac \ub9c8\uc2a4\ud130": "/materials/master",
     "\uc785\uace0 \ub4f1\ub85d": "/materials/inbound",
     "\ucd9c\uace0 \ub4f1\ub85d": "/materials/outbound",
@@ -122,6 +123,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ucc28\ub7c9\uce74\ub4dc \ud1b5\ud569 \uad00\ub9ac": "/support/vehicles",
     "\ubc95\uc778\ucc28\ub7c9 \uad00\ub9ac": "/support/vehicles",
     "\ubc95\uc778\uce74\ub4dc \uad00\ub9ac": "/support/cards",
+    "\uacbd\ube44\ub0b4\uc5ed": "/support/expense-ledger",
+    "\uacbd\ube44 \ub0b4\uc5ed": "/support/expense-ledger",
 
     "\uccad\uc5f0ERP \uc124\uba85\uc11c": "/manual",
     "\ud648\ud398\uc774\uc9c0 \uc0ac\uc6a9\ubc95": "/manual",

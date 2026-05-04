@@ -1,225 +1,200 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
-import { MasterDataProvider } from './contexts/MasterDataContext';
-import DashboardLayout from './components/layout/DashboardLayout';
 import PrivateRoute from './components/auth/PrivateRoute';
-
-import DashboardPage from './pages/DashboardPage';
-import { DashboardExecutiveView } from './components/dashboard/executive/DashboardExecutiveView';
-import DailyReportPage from './pages/report/DailyReportPage';
-import TestSettingsPage from './pages/settings/TestSettingsPage';
-import DailyDispatchPage from './pages/assignment/DailyDispatchPage';
-import FieldSchedulePlannerPage from './pages/assignment/FieldSchedulePlannerPage';
-import TeamAssignmentPage from './pages/assignment/TeamAssignmentPage';
-import SiteAssignmentPage from './pages/assignment/SiteAssignmentPage';
-import SupportAssignmentPage from './pages/assignment/SupportAssignmentPage';
-import PositionManager from './pages/hr/PositionManager';
-import RateChangePage from './pages/hr/RateChangePage';
-import SupportSettingsPage from './pages/support/SupportSettingsPage';
-import SupportStatusPage from './pages/support/SupportStatusPage';
-import WorkerSummaryPage from './pages/manpower/WorkerSummaryPage';
-import VehicleCardIntegratedPage from './pages/support/VehicleCardIntegratedPage';
-import MaterialMasterPage from './pages/materials/MaterialMasterPage';
-import MaterialInboundPage from './pages/materials/MaterialInboundPage';
-import MaterialOutboundPage from './pages/materials/MaterialOutboundPage';
-import MaterialTransactionsPage from './pages/materials/MaterialTransactionsPage';
-import MaterialInventoryPage from './pages/materials/MaterialInventoryPage';
-import MaterialInventoryBySitePage from './pages/materials/MaterialInventoryBySitePage';
-import CompanyDatabase from './pages/database/CompanyDatabase';
-import ManpowerInputPage from './pages/manpower/ManpowerInputPage';
-import WorkerDatabase from './pages/database/WorkerDatabase';
-import TeamDatabase from './pages/database/TeamDatabase';
-import SiteDatabase from './pages/database/SiteDatabase';
-import DailyReportDragDropPage from './pages/report/DailyReportDragDropPage';
-import DailyReportV2Page from './pages/report/DailyReportV2Page';
-import SmartWorkerRegistrationPage from './pages/manpower/SmartWorkerRegistrationPage';
-import SmartTeamRegistrationPage from './pages/manpower/SmartTeamRegistrationPage';
-import SmartCompanyRegistrationPage from './pages/database/SmartCompanyRegistrationPage';
-import SmartSiteRegistrationPage from './pages/manpower/SmartSiteRegistrationPage';
-import SmartDailyReportRegistrationPage from './pages/report/SmartDailyReportRegistrationPage';
-import PayslipPage from './pages/payroll/PayslipPage';
-import TaxAdvanceTeamPayslipPage from './pages/payroll/TaxAdvanceTeamPayslipPage';
-import WagePaymentPage from './pages/payroll/WagePaymentPage';
-import DailyWageDraftPage from './pages/payroll/DailyWageDraftPage';
-import DailyWageStatementPage from './pages/payroll/DailyWageStatementPage';
-import DailyAdvanceWorkbookPage from './pages/payroll/DailyAdvanceWorkbookPage';
-import MonthlyWageDraftPage from './pages/payroll/MonthlyWageDraftPage';
-import SupportTeamPaymentPage from './pages/payroll/SupportTeamPaymentPage';
-import SupportClaimPage from './pages/payroll/SupportClaimPage';
-import PayrollRateManagementPage from './pages/payroll/PayrollRateManagementPage';
-import AdvancePaymentPage from './pages/payroll/AdvancePaymentPage';
-import PayrollStatisticsPage from './pages/payroll/PayrollStatisticsPage';
-import WorkerBulkRegistrationPage from './pages/manpower/WorkerBulkRegistrationPage';
-import SignManagementPage from './pages/payroll/SignManagementPage';
-import SignatureGeneratorPage from './pages/payroll/SignatureGeneratorPage';
-import DelegationLetterPage from './pages/payroll/DelegationLetterPage';
-import DelegationLetterV2Page from './pages/payroll/DelegationLetterV2Page';
-import DelegationBuilderPage from './pages/payroll/DelegationBuilderPage';
-import DelegationLetterV5Page from './pages/payroll/DelegationLetterV5Page';
-import LaborCostStatementGeneratorPage from './pages/payroll/LaborCostStatementGeneratorPage';
-
-import LaborExchangePage from './pages/payroll/LaborExchangePage';
-import TeamSettlementPage from './pages/payroll/TeamSettlementPage';
-import SupportRateManagementPage from './pages/support/SupportRateManagementPage';
-import SupportManagerPage from './pages/support/SupportManagerPage';
-import TeamBasedPaymentDraftPage from './pages/payroll/TeamBasedPaymentDraftPage';
-import TeamBasedPaymentDraftPageV2 from './pages/payroll/TeamBasedPaymentDraftPageV2';
-import EmploymentCertificatePage from './pages/hr/EmploymentCertificatePage';
-import TerminationCertificatePage from './pages/hr/TerminationCertificatePage';
-import DailyReportStatisticsPage from './pages/report/DailyReportStatisticsPage';
-import OfficeManagementPage from './pages/office/OfficeManagementPage';
-
 import { Login } from './components/auth/index';
-import IntegratedDatabase from './pages/database/ManpowerDatabase';
-import ManualPage from './pages/manual';
-import ProfilePage from './pages/profile/ProfilePage';
 
-import StorageManagerPage from './pages/storage/StorageManagerPage';
-import { GoogleDriveManagerPage } from './pages/storage/GoogleDriveManagerPage';
-import SchemaDesignViewer from './pages/structure/SchemaDesignViewer';
-import WhiteboardStatusBoard from './pages/jeonkuk/WhiteboardStatusBoard';
-import IntegratedSupportStatusBoard from './pages/dashboard/IntegratedSupportStatusBoard';
-import TotalPersonnelHistoryPage from './pages/jeonkuk/TotalPersonnelHistoryPage';
-import DataIntegrityPage from './pages/jeonkuk/DataIntegrityPage';
-import StatusManagementPage from './pages/jeonkuk/StatusManagementPage';
-import TestDataGeneratorPage from './pages/jeonkuk/TestDataGeneratorPage';
-import TestDailyReportGeneratorPage from './pages/jeonkuk/TestDailyReportGeneratorPage';
-import DailyReportExcelPage from './pages/report/DailyReportExcelPage';
-import DataSyncStatusPage from './pages/system/DataSyncStatusPage';
+const lazyNamed = <T extends React.ComponentType<any>>(
+  loader: () => Promise<unknown>,
+  exportName: string
+) =>
+  React.lazy(async () => {
+    const module = (await loader()) as Record<string, T>;
+    return { default: module[exportName] };
+  });
 
-import SettingsPage from './pages/SettingsPage';
-import SystemMessagePage from './pages/settings/SystemMessagePage';
-import AISettingsPage from './pages/settings/AISettingsPage';
-import MassDailyReportUploader from './pages/report/MassDailyReportUploader';
-import SystemManagementPage from './pages/system/SystemManagementPage';
-import WorkerMassUploader from './pages/mass-upload/WorkerMassUploader';
-import TeamMassUploader from './pages/mass-upload/TeamMassUploader';
-import SiteMassUploader from './pages/mass-upload/SiteMassUploader';
-import CompanyMassUploader from './pages/mass-upload/CompanyMassUploader';
-import DailyReportMassUploader from './pages/mass-upload/DailyReportMassUploader';
-import IntegratedMassUploader from './pages/mass-upload/IntegratedMassUploader';
-import IntegratedDailyReportUploader from './pages/mass-upload/IntegratedDailyReportUploader';
-import CompanyManagementPage from './pages/company/CompanyManagementPage';
-import CompanyRegistrationPage from './pages/company/CompanyRegistrationPage';
-import SafeExcelGuidePage from './pages/manual/SafeExcelGuidePage';
-import ActivityLogPage from './pages/admin/ActivityLogPage';
-import ComponentManagementPage from './pages/admin/ComponentManagementPage';
-import ComponentGalleryPage from './pages/design-system/ComponentGalleryPage';
-import { MenuManagementPage } from './pages/admin/MenuManagementPage';
-import DataConsolePage from './pages/admin/DataConsolePage';
-import DataBackupPage from './pages/admin/DataBackupPage';
-import StatusGraphPage from './pages/jeonkuk/StatusGraphPage';
-import NationwidePartnersPage from './pages/jeonkuk/NationwidePartnersPage';
-import SalaryModelUpdater from './pages/admin/SalaryModelUpdater';
-import AdminDataIntegrityPage from './pages/admin/AdminDataIntegrityPage';
-import UserManagementPage from './pages/admin/UserManagementPage';
-import AgentPlayground from './pages/developer/AgentPlayground';
-import AgentDashboard from './pages/developer/AgentDashboard';
-import AdvancedMenuManager from './pages/admin/menu/AdvancedMenuManager';
-import RoleMenuAssignmentPage from './pages/admin/RoleMenuAssignmentPage';
-import SystemStatusPage from './pages/admin/SystemStatusPage';
-
-import TeamPersonnelStatusReportPage from './pages/report/TeamPersonnelStatusReportPage';
-import SettlementArchitecturePage from './pages/design/SettlementArchitecturePage';
-
-import FirestoreStructureViewer from './pages/database/FirestoreStructureViewer';
-import PayrollDesignViewer from './pages/structure/PayrollDesignViewer';
-
-import ProjectFileStructureViewer from './pages/admin/ProjectFileStructureViewer';
-import DataRelationshipViewer from './pages/structure/DataRelationshipViewer';
-import RelationshipConsolePage from './pages/admin/RelationshipConsole';
-import ExcelDataGuideViewer from './pages/structure/ExcelDataGuideViewer';
-import AccommodationDesignViewer from './pages/structure/AccommodationDesignViewer';
-
-import LibraryGuideViewer from './pages/structure/LibraryGuideViewer';
-import OrganizationChartPage from './pages/structure/OrganizationChartPage';
-import DesignManagementPage from './pages/design/DesignManagementPage';
-import CheongyeonOrgChartPage from './pages/cheongyeon/CheongyeonOrgChartPage';
-import CheongyeonGreetingPage from './pages/cheongyeon/CheongyeonGreetingPage';
-import CheongyeonDirectionsPage from './pages/cheongyeon/CheongyeonDirectionsPage';
-import CheongyeonHome from './pages/cheongyeon/CheongyeonHome';
-import CheongyeonTechVisionPage from './pages/cheongyeon/CheongyeonTechVisionPage';
-import CheongyeonHistoryPage from './pages/cheongyeon/history';
-import CheongyeonPhilosophyPage from './pages/cheongyeon/CheongyeonPhilosophyPage';
-import NationwideDashboardHome from './pages/jeonkuk/NationwideDashboardHome';
-import CompanyLandingPage from './pages/company/CompanyLandingPage';
-import EstimateManagePage from './pages/estimate/EstimateManagePage';
-import DetailedEstimatePage from './pages/estimate/DetailedEstimatePage';
-import TransactionManagePage from './pages/estimate/TransactionManagePage';
-import EstimateRequestPage from './pages/estimate/EstimateRequestPage';
-import AccountManagementPage from './pages/database/AccountManagementPage';
-import ConstructionCompanyDatabase from './pages/database/ConstructionCompanyDatabase';
-import WorkerDatabaseInput from './pages/database/WorkerDatabaseInput';
-
-import HomepageClientProgressPage from './pages/homepage/HomepageClientProgressPage';
-import HomepageRequestListPage from './pages/homepage/HomepageRequestListPage';
-import { KakaoTestPage } from './pages/kakao/KakaoTestPage';
-import HomepageRequestDetailPage from './pages/homepage/HomepageRequestDetailPage';
-import HomepageRequestCreatePage from './pages/homepage/HomepageRequestCreatePage';
-import TaxInvoicePage from './pages/taxinvoice/TaxInvoicePage';
-import TaxInvoiceLedgerPage from './pages/taxinvoice/TaxInvoiceLedgerPage';
-import TaxInvoiceIssueListPage from './pages/taxinvoice/TaxInvoiceIssueListPage';
-import ReceivablesManagerPage from './pages/taxinvoice/ReceivablesManagerPage';
-
-import ReceivablesDashboardPage from './pages/taxinvoice/ReceivablesDashboardPage';
-import WorkbookLedgerPage from './pages/taxinvoice/WorkbookLedgerPage';
-import PartnerTransactionLedgerPage from './pages/taxinvoice/PartnerTransactionLedgerPage';
-import KakaoNotificationPage from './pages/taxinvoice/KakaoNotificationPage';
-import AccountInquiryPage from './pages/taxinvoice/AccountInquiryPage';
-import { useWorkerTeamIdMigration } from './hooks/useWorkerTeamIdMigration';
-import { menuServiceV11 } from './services/menuServiceV11';
-import { RefineWrapper } from './providers/refine/RefineWrapper';
-import RefineSiteList from './pages/refine/RefineSiteList';
-import { RefineSmartSelectDemo } from './pages/refine/RefineSmartSelectDemo';
-import { ProjectGalleryPage } from './pages/gallery/ProjectGalleryPage';
-import { AiImageGalleryPage } from './pages/gallery/AiImageGalleryPage';
-import SiteManagementPage, { ClosedSiteManagementPage } from './pages/site/SiteManagementPage';
-import RefineWorkerList from './pages/refine/RefineWorkerList';
-import RefineTeamList from './pages/refine/RefineTeamList';
-import RefineCompanyList from './pages/refine/RefineCompanyList';
-import { MemoPage } from './features/smart-memo/pages/MemoPage'; // New Feature Import
-import BarobillKakaoConnectionPage from './pages/admin/settings/BarobillKakaoConnectionPage';
-import KakaoSenderPage from './pages/helper/KakaoSenderPage';
-import TodoPage from './pages/helper/TodoPage';
-import TaxAffairsPage from './pages/tax/TaxAffairsPage';
-import KakaoMessageCenterPage from './pages/kakao/KakaoMessageCenterPage';
-import FreelancerPage from './pages/manpower/FreelancerPage';
-
-// 마이그레이션 실행 래퍼 (앱 시작시 한 번만 실행)
-const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { status, result } = useWorkerTeamIdMigration();
-
-
-  // 마이그레이션 결과 로깅 (콘솔에서만)
-  React.useEffect(() => {
-    if (status === 'done' && result && result.updated > 0) {
-      console.log(`[App] Migration completed: ${result.updated} reports updated`);
-    }
-
-
-
-    // Auto-migrate menu structure for Admin and Prune Duplicates
-    // Menu configuration is loaded from Firestore
-    menuServiceV11.pruneDuplicates()
-      .catch(err => console.error(err));
-
-  }, [status, result]);
-
-  return <>{children}</>;
-};
-
-const DashboardLayoutWrapper = () => (
-  <DashboardLayout>
-    <Outlet />
-  </DashboardLayout>
+const RouteLoadingFallback: React.FC = () => (
+  <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
+    로딩 중...
+  </div>
 );
+
+const ProtectedRouteShell = React.lazy(() => import('./routes/ProtectedRouteShell'));
+const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
+const DashboardExecutiveView = lazyNamed(() => import('./components/dashboard/executive/DashboardExecutiveView'), 'DashboardExecutiveView');
+const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'));
+const TestSettingsPage = React.lazy(() => import('./pages/settings/TestSettingsPage'));
+const DailyDispatchPage = React.lazy(() => import('./pages/assignment/DailyDispatchPage'));
+const FieldSchedulePlannerPage = React.lazy(() => import('./pages/assignment/FieldSchedulePlannerPage'));
+const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
+const SiteAssignmentPage = React.lazy(() => import('./pages/assignment/SiteAssignmentPage'));
+const SupportAssignmentPage = React.lazy(() => import('./pages/assignment/SupportAssignmentPage'));
+const PositionManager = React.lazy(() => import('./pages/hr/PositionManager'));
+const RateChangePage = React.lazy(() => import('./pages/hr/RateChangePage'));
+const SupportSettingsPage = React.lazy(() => import('./pages/support/SupportSettingsPage'));
+const SupportStatusPage = React.lazy(() => import('./pages/support/SupportStatusPage'));
+const WorkerSummaryPage = React.lazy(() => import('./pages/manpower/WorkerSummaryPage'));
+const MaterialManagementPage = React.lazy(() => import('./pages/materials/MaterialManagementPage'));
+const MaterialMasterPage = React.lazy(() => import('./pages/materials/MaterialMasterPage'));
+const MaterialInboundPage = React.lazy(() => import('./pages/materials/MaterialInboundPage'));
+const MaterialOutboundPage = React.lazy(() => import('./pages/materials/MaterialOutboundPage'));
+const MaterialTransactionsPage = React.lazy(() => import('./pages/materials/MaterialTransactionsPage'));
+const MaterialInventoryPage = React.lazy(() => import('./pages/materials/MaterialInventoryPage'));
+const MaterialInventoryBySitePage = React.lazy(() => import('./pages/materials/MaterialInventoryBySitePage'));
+const CompanyDatabase = React.lazy(() => import('./pages/database/CompanyDatabase'));
+const ManpowerInputPage = React.lazy(() => import('./pages/manpower/ManpowerInputPage'));
+const WorkerDatabase = React.lazy(() => import('./pages/database/WorkerDatabase'));
+const TeamDatabase = React.lazy(() => import('./pages/database/TeamDatabase'));
+const SiteDatabase = React.lazy(() => import('./pages/database/SiteDatabase'));
+const DailyReportDragDropPage = React.lazy(() => import('./pages/report/DailyReportDragDropPage'));
+const DailyReportV2Page = React.lazy(() => import('./pages/report/DailyReportV2Page'));
+const SmartWorkerRegistrationPage = React.lazy(() => import('./pages/manpower/SmartWorkerRegistrationPage'));
+const SmartTeamRegistrationPage = React.lazy(() => import('./pages/manpower/SmartTeamRegistrationPage'));
+const SmartCompanyRegistrationPage = React.lazy(() => import('./pages/database/SmartCompanyRegistrationPage'));
+const SmartSiteRegistrationPage = React.lazy(() => import('./pages/manpower/SmartSiteRegistrationPage'));
+const SmartDailyReportRegistrationPage = React.lazy(() => import('./pages/report/SmartDailyReportRegistrationPage'));
+const PayslipPage = React.lazy(() => import('./pages/payroll/PayslipPage'));
+const TaxAdvanceTeamPayslipPage = React.lazy(() => import('./pages/payroll/TaxAdvanceTeamPayslipPage'));
+const WagePaymentPage = React.lazy(() => import('./pages/payroll/WagePaymentPage'));
+const DailyWageDraftPage = React.lazy(() => import('./pages/payroll/DailyWageDraftPage'));
+const DailyWageStatementPage = React.lazy(() => import('./pages/payroll/DailyWageStatementPage'));
+const DailyAdvanceWorkbookPage = React.lazy(() => import('./pages/payroll/DailyAdvanceWorkbookPage'));
+const MonthlyWageDraftPage = React.lazy(() => import('./pages/payroll/MonthlyWageDraftPage'));
+const SupportTeamPaymentPage = React.lazy(() => import('./pages/payroll/SupportTeamPaymentPage'));
+const SupportClaimPage = React.lazy(() => import('./pages/payroll/SupportClaimPage'));
+const PayrollRateManagementPage = React.lazy(() => import('./pages/payroll/PayrollRateManagementPage'));
+const AdvancePaymentPage = React.lazy(() => import('./pages/payroll/AdvancePaymentPage'));
+const PayrollStatisticsPage = React.lazy(() => import('./pages/payroll/PayrollStatisticsPage'));
+const WorkerBulkRegistrationPage = React.lazy(() => import('./pages/manpower/WorkerBulkRegistrationPage'));
+const SignManagementPage = React.lazy(() => import('./pages/payroll/SignManagementPage'));
+const SignatureGeneratorPage = React.lazy(() => import('./pages/payroll/SignatureGeneratorPage'));
+const DelegationLetterPage = React.lazy(() => import('./pages/payroll/DelegationLetterPage'));
+const DelegationLetterV2Page = React.lazy(() => import('./pages/payroll/DelegationLetterV2Page'));
+const DelegationBuilderPage = React.lazy(() => import('./pages/payroll/DelegationBuilderPage'));
+const DelegationLetterV5Page = React.lazy(() => import('./pages/payroll/DelegationLetterV5Page'));
+const LaborCostStatementGeneratorPage = React.lazy(() => import('./pages/payroll/LaborCostStatementGeneratorPage'));
+const LaborExchangePage = React.lazy(() => import('./pages/payroll/LaborExchangePage'));
+const TeamSettlementPage = React.lazy(() => import('./pages/payroll/TeamSettlementPage'));
+const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
+const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
+const ExpenseLedgerPage = React.lazy(() => import('./pages/support/ExpenseLedgerPage'));
+const TeamBasedPaymentDraftPage = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPage'));
+const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPageV2'));
+const EmploymentCertificatePage = React.lazy(() => import('./pages/hr/EmploymentCertificatePage'));
+const TerminationCertificatePage = React.lazy(() => import('./pages/hr/TerminationCertificatePage'));
+const DailyReportStatisticsPage = React.lazy(() => import('./pages/report/DailyReportStatisticsPage'));
+const OfficeManagementPage = React.lazy(() => import('./pages/office/OfficeManagementPage'));
+const IntegratedDatabase = React.lazy(() => import('./pages/database/ManpowerDatabase'));
+const ManualPage = React.lazy(() => import('./pages/manual'));
+const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
+const StorageManagerPage = React.lazy(() => import('./pages/storage/StorageManagerPage'));
+const GoogleDriveManagerPage = lazyNamed(() => import('./pages/storage/GoogleDriveManagerPage'), 'GoogleDriveManagerPage');
+const SchemaDesignViewer = React.lazy(() => import('./pages/structure/SchemaDesignViewer'));
+const WhiteboardStatusBoard = React.lazy(() => import('./pages/jeonkuk/WhiteboardStatusBoard'));
+const IntegratedSupportStatusBoard = React.lazy(() => import('./pages/dashboard/IntegratedSupportStatusBoard'));
+const TotalPersonnelHistoryPage = React.lazy(() => import('./pages/jeonkuk/TotalPersonnelHistoryPage'));
+const DataIntegrityPage = React.lazy(() => import('./pages/jeonkuk/DataIntegrityPage'));
+const StatusManagementPage = React.lazy(() => import('./pages/jeonkuk/StatusManagementPage'));
+const TestDataGeneratorPage = React.lazy(() => import('./pages/jeonkuk/TestDataGeneratorPage'));
+const TestDailyReportGeneratorPage = React.lazy(() => import('./pages/jeonkuk/TestDailyReportGeneratorPage'));
+const DailyReportExcelPage = React.lazy(() => import('./pages/report/DailyReportExcelPage'));
+const DataSyncStatusPage = React.lazy(() => import('./pages/system/DataSyncStatusPage'));
+const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
+const SystemMessagePage = React.lazy(() => import('./pages/settings/SystemMessagePage'));
+const AISettingsPage = React.lazy(() => import('./pages/settings/AISettingsPage'));
+const MassDailyReportUploader = React.lazy(() => import('./pages/report/MassDailyReportUploader'));
+const SystemManagementPage = React.lazy(() => import('./pages/system/SystemManagementPage'));
+const WorkerMassUploader = React.lazy(() => import('./pages/mass-upload/WorkerMassUploader'));
+const TeamMassUploader = React.lazy(() => import('./pages/mass-upload/TeamMassUploader'));
+const SiteMassUploader = React.lazy(() => import('./pages/mass-upload/SiteMassUploader'));
+const CompanyMassUploader = React.lazy(() => import('./pages/mass-upload/CompanyMassUploader'));
+const DailyReportMassUploader = React.lazy(() => import('./pages/mass-upload/DailyReportMassUploader'));
+const IntegratedMassUploader = React.lazy(() => import('./pages/mass-upload/IntegratedMassUploader'));
+const IntegratedDailyReportUploader = React.lazy(() => import('./pages/mass-upload/IntegratedDailyReportUploader'));
+const CompanyManagementPage = React.lazy(() => import('./pages/company/CompanyManagementPage'));
+const CompanyRegistrationPage = React.lazy(() => import('./pages/company/CompanyRegistrationPage'));
+const SafeExcelGuidePage = React.lazy(() => import('./pages/manual/SafeExcelGuidePage'));
+const ActivityLogPage = React.lazy(() => import('./pages/admin/ActivityLogPage'));
+const ComponentManagementPage = React.lazy(() => import('./pages/admin/ComponentManagementPage'));
+const ComponentGalleryPage = React.lazy(() => import('./pages/design-system/ComponentGalleryPage'));
+const MenuManagementPage = lazyNamed(() => import('./pages/admin/MenuManagementPage'), 'MenuManagementPage');
+const DataConsolePage = React.lazy(() => import('./pages/admin/DataConsolePage'));
+const DataBackupPage = React.lazy(() => import('./pages/admin/DataBackupPage'));
+const StatusGraphPage = React.lazy(() => import('./pages/jeonkuk/StatusGraphPage'));
+const NationwidePartnersPage = React.lazy(() => import('./pages/jeonkuk/NationwidePartnersPage'));
+const SalaryModelUpdater = React.lazy(() => import('./pages/admin/SalaryModelUpdater'));
+const AdminDataIntegrityPage = React.lazy(() => import('./pages/admin/AdminDataIntegrityPage'));
+const UserManagementPage = React.lazy(() => import('./pages/admin/UserManagementPage'));
+const AgentPlayground = React.lazy(() => import('./pages/developer/AgentPlayground'));
+const AgentDashboard = React.lazy(() => import('./pages/developer/AgentDashboard'));
+const AdvancedMenuManager = React.lazy(() => import('./pages/admin/menu/AdvancedMenuManager'));
+const RoleMenuAssignmentPage = React.lazy(() => import('./pages/admin/RoleMenuAssignmentPage'));
+const SystemStatusPage = React.lazy(() => import('./pages/admin/SystemStatusPage'));
+const TeamPersonnelStatusReportPage = React.lazy(() => import('./pages/report/TeamPersonnelStatusReportPage'));
+const SettlementArchitecturePage = React.lazy(() => import('./pages/design/SettlementArchitecturePage'));
+const FirestoreStructureViewer = React.lazy(() => import('./pages/database/FirestoreStructureViewer'));
+const ProjectFileStructureViewer = React.lazy(() => import('./pages/admin/ProjectFileStructureViewer'));
+const DataRelationshipViewer = React.lazy(() => import('./pages/structure/DataRelationshipViewer'));
+const RelationshipConsolePage = React.lazy(() => import('./pages/admin/RelationshipConsole'));
+const ExcelDataGuideViewer = React.lazy(() => import('./pages/structure/ExcelDataGuideViewer'));
+const AccommodationDesignViewer = React.lazy(() => import('./pages/structure/AccommodationDesignViewer'));
+const LibraryGuideViewer = React.lazy(() => import('./pages/structure/LibraryGuideViewer'));
+const OrganizationChartPage = React.lazy(() => import('./pages/structure/OrganizationChartPage'));
+const DesignManagementPage = React.lazy(() => import('./pages/design/DesignManagementPage'));
+const CheongyeonOrgChartPage = React.lazy(() => import('./pages/cheongyeon/CheongyeonOrgChartPage'));
+const CheongyeonGreetingPage = React.lazy(() => import('./pages/cheongyeon/CheongyeonGreetingPage'));
+const CheongyeonDirectionsPage = React.lazy(() => import('./pages/cheongyeon/CheongyeonDirectionsPage'));
+const CheongyeonHome = React.lazy(() => import('./pages/cheongyeon/CheongyeonHome'));
+const CheongyeonTechVisionPage = React.lazy(() => import('./pages/cheongyeon/CheongyeonTechVisionPage'));
+const CheongyeonHistoryPage = React.lazy(() => import('./pages/cheongyeon/history'));
+const CheongyeonPhilosophyPage = React.lazy(() => import('./pages/cheongyeon/CheongyeonPhilosophyPage'));
+const NationwideDashboardHome = React.lazy(() => import('./pages/jeonkuk/NationwideDashboardHome'));
+const CompanyLandingPage = React.lazy(() => import('./pages/company/CompanyLandingPage'));
+const EstimateManagePage = React.lazy(() => import('./pages/estimate/EstimateManagePage'));
+const DetailedEstimatePage = React.lazy(() => import('./pages/estimate/DetailedEstimatePage'));
+const TransactionManagePage = React.lazy(() => import('./pages/estimate/TransactionManagePage'));
+const EstimateRequestPage = React.lazy(() => import('./pages/estimate/EstimateRequestPage'));
+const AccountManagementPage = React.lazy(() => import('./pages/database/AccountManagementPage'));
+const ConstructionCompanyDatabase = React.lazy(() => import('./pages/database/ConstructionCompanyDatabase'));
+const WorkerDatabaseInput = React.lazy(() => import('./pages/database/WorkerDatabaseInput'));
+const HomepageClientProgressPage = React.lazy(() => import('./pages/homepage/HomepageClientProgressPage'));
+const HomepageRequestListPage = React.lazy(() => import('./pages/homepage/HomepageRequestListPage'));
+const KakaoTestPage = lazyNamed(() => import('./pages/kakao/KakaoTestPage'), 'KakaoTestPage');
+const HomepageRequestDetailPage = React.lazy(() => import('./pages/homepage/HomepageRequestDetailPage'));
+const HomepageRequestCreatePage = React.lazy(() => import('./pages/homepage/HomepageRequestCreatePage'));
+const TaxInvoicePage = React.lazy(() => import('./pages/taxinvoice/TaxInvoicePage'));
+const TaxInvoiceLedgerPage = React.lazy(() => import('./pages/taxinvoice/TaxInvoiceLedgerPage'));
+const TaxInvoiceIssueListPage = React.lazy(() => import('./pages/taxinvoice/TaxInvoiceIssueListPage'));
+const ReceivablesManagerPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesManagerPage'));
+const ReceivablesDashboardPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesDashboardPage'));
+const WorkbookLedgerPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerPage'));
+const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
+const KakaoNotificationPage = React.lazy(() => import('./pages/taxinvoice/KakaoNotificationPage'));
+const AccountInquiryPage = React.lazy(() => import('./pages/taxinvoice/AccountInquiryPage'));
+const RefineWrapper = lazyNamed(() => import('./providers/refine/RefineWrapper'), 'RefineWrapper');
+const RefineSiteList = React.lazy(() => import('./pages/refine/RefineSiteList'));
+const RefineSmartSelectDemo = lazyNamed(() => import('./pages/refine/RefineSmartSelectDemo'), 'RefineSmartSelectDemo');
+const ProjectGalleryPage = lazyNamed(() => import('./pages/gallery/ProjectGalleryPage'), 'ProjectGalleryPage');
+const AiImageGalleryPage = lazyNamed(() => import('./pages/gallery/AiImageGalleryPage'), 'AiImageGalleryPage');
+const SiteManagementPage = React.lazy(() => import('./pages/site/SiteManagementPage'));
+const ClosedSiteManagementPage = lazyNamed(() => import('./pages/site/SiteManagementPage'), 'ClosedSiteManagementPage');
+const RefineWorkerList = React.lazy(() => import('./pages/refine/RefineWorkerList'));
+const RefineTeamList = React.lazy(() => import('./pages/refine/RefineTeamList'));
+const RefineCompanyList = React.lazy(() => import('./pages/refine/RefineCompanyList'));
+const MemoPage = lazyNamed(() => import('./features/smart-memo/pages/MemoPage'), 'MemoPage');
+const BarobillKakaoConnectionPage = React.lazy(() => import('./pages/admin/settings/BarobillKakaoConnectionPage'));
+const KakaoSenderPage = React.lazy(() => import('./pages/helper/KakaoSenderPage'));
+const TodoPage = React.lazy(() => import('./pages/helper/TodoPage'));
+const TaxAffairsPage = React.lazy(() => import('./pages/tax/TaxAffairsPage'));
+const KakaoMessageCenterPage = React.lazy(() => import('./pages/kakao/KakaoMessageCenterPage'));
+const FreelancerPage = React.lazy(() => import('./pages/manpower/FreelancerPage'));
 
 const App: React.FC = () => {
   return (
     <AuthProvider>
       <Router future={{ v7_relativeSplatPath: true }}>
-        <Routes>
+        <React.Suspense fallback={<RouteLoadingFallback />}>
+          <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />
           <Route path="/login" element={<Login />} />
@@ -229,11 +204,7 @@ const App: React.FC = () => {
           {/* Protected Routes */}
           <Route element={
             <PrivateRoute>
-              <MigrationRunner>
-                <MasterDataProvider>
-                  <DashboardLayoutWrapper />
-                </MasterDataProvider>
-              </MigrationRunner>
+              <ProtectedRouteShell />
             </PrivateRoute>
           }>
 
@@ -414,6 +385,7 @@ const App: React.FC = () => {
             <Route path="/support/accommodation" element={<SupportManagerPage />} />
             <Route path="/support/vehicles" element={<SupportManagerPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
+            <Route path="/support/expense-ledger" element={<ExpenseLedgerPage />} />
 
             <Route path="/hr/certificate" element={<EmploymentCertificatePage />} />
             <Route path="/hr/termination-certificate" element={<TerminationCertificatePage />} />
@@ -421,12 +393,15 @@ const App: React.FC = () => {
             <Route path="/payroll/payslip" element={<PayslipPage />} />
 
             {/* Materials Management */}
-            <Route path="/materials/master" element={<MaterialMasterPage />} />
-            <Route path="/materials/inbound" element={<MaterialInboundPage />} />
-            <Route path="/materials/outbound" element={<MaterialOutboundPage />} />
-            <Route path="/materials/transactions" element={<MaterialTransactionsPage />} />
-            <Route path="/materials/inventory" element={<MaterialInventoryPage />} />
-            <Route path="/materials/inventory-by-site" element={<MaterialInventoryBySitePage />} />
+            <Route path="/materials" element={<MaterialManagementPage />}>
+              <Route index element={<Navigate to="master" replace />} />
+              <Route path="master" element={<MaterialMasterPage />} />
+              <Route path="inbound" element={<MaterialInboundPage />} />
+              <Route path="outbound" element={<MaterialOutboundPage />} />
+              <Route path="transactions" element={<MaterialTransactionsPage />} />
+              <Route path="inventory" element={<MaterialInventoryPage />} />
+              <Route path="inventory-by-site" element={<MaterialInventoryBySitePage />} />
+            </Route>
 
             {/* Company DB */}
             <Route path="/database/company-db" element={<CompanyDatabase />} />
@@ -520,7 +495,8 @@ const App: React.FC = () => {
 
           {/* Catch all - redirect to dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </React.Suspense>
       </Router>
     </AuthProvider>
   );

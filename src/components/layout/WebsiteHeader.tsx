@@ -42,7 +42,8 @@ const WebsiteHeader: React.FC<WebsiteHeaderProps> = ({ currentSiteData, menuPath
                 {/* Logo */}
                 <div
                     className="flex items-center gap-3 cursor-pointer"
-                    onClick={() => navigate('/dashboard')}
+                    onClick={toggleSidebar}
+                    title="메뉴 토글"
                 >
                     <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
                         <FontAwesomeIcon icon={iconMap[currentSiteData.icon] || iconMap['fa-building']} />
@@ -98,15 +99,6 @@ const WebsiteHeader: React.FC<WebsiteHeaderProps> = ({ currentSiteData, menuPath
                             </div>
                         ))}
                     </nav>
-
-                    {/* All Menu Button (Sidebar Trigger) */}
-                    <button
-                        className="w-10 h-10 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center transition-colors"
-                        onClick={toggleSidebar}
-                        title="전체메뉴"
-                    >
-                        <FontAwesomeIcon icon={faBars} className="text-lg" />
-                    </button>
                 </div>
             </div>
 

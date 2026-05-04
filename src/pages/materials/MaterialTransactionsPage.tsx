@@ -17,6 +17,7 @@ import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
 import * as XLSX from 'xlsx';
+import { createSiteIdSet, filterCheongyeonMaterialSites } from './materialSiteFilters';
 
 type Transaction = (InboundTransaction | OutboundTransaction) & { type: 'inbound' | 'outbound' };
 
@@ -83,9 +84,9 @@ const MaterialTransactionsPage: React.FC = () => {
         try {
             const [siteRows, materialRows] = await Promise.all([
                 siteService.getSites(),
-                materialService.getAllMaterials(),
+                materialService.getUniqueMaterialsForSelection(),
             ]);
-            setSites(siteRows.filter((s) => s.status === 'active'));
+            setSites(filterCheongyeonMaterialSites(siteRows));
             setMaterials(materialRows);
         } catch (error) {
             console.error('Failed to load transaction master data:', error);
@@ -126,7 +127,8 @@ const MaterialTransactionsPage: React.FC = () => {
             const labeledInbound = fetchedInbound.map(t => ({ ...t, type: 'inbound' as const }));
             const labeledOutbound = fetchedOutbound.map(t => ({ ...t, type: 'outbound' as const }));
 
-            let all = [...labeledInbound, ...labeledOutbound];
+            const allowedSiteIds = createSiteIdSet(sites);
+            let all = [...labeledInbound, ...labeledOutbound].filter((tx) => allowedSiteIds.has(tx.siteId));
 
             // Client-side filtering for Material Name
             if (materialName) {
@@ -136,11 +138,17 @@ const MaterialTransactionsPage: React.FC = () => {
             // Sort by Date DESC
             all.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
 
-            const materialById = new Map(materials.map((m) => [m.id, m]));
+            const materialById = new Map(
+                materials.flatMap((m) => [
+                    [m.id, m],
+                    ...(m.materialKey ? [[m.materialKey, m] as const] : []),
+                ])
+            );
             const normalized = all.map((t) => {
-                const master = materialById.get(t.materialId);
+                const master = materialById.get(t.materialId) || materialById.get(t.materialKey || '');
                 return {
                     ...t,
+                    materialKey: t.materialKey || master?.materialKey,
                     category: trimText(master?.category) || trimText(t.category),
                     itemName: trimText(master?.itemName) || trimText(t.itemName),
                     spec: trimText(master?.spec) || trimText(t.spec),

@@ -12,6 +12,7 @@ import {
     MaterialInboundZod,
     MaterialOutboundZod
 } from '../types/zod/materialSchema';
+import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
 
 // Helper to generate IDs
 const generateId = (prefix: string = 'mat'): string => {
@@ -19,6 +20,17 @@ const generateId = (prefix: string = 'mat'): string => {
 };
 
 const trimText = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeSpaces = (value: unknown): string => trimText(value).replace(/\s+/g, ' ');
+
+const compactKeyPart = (value: unknown): string => normalizeSpaces(value).replace(/\s+/g, '').toLowerCase();
+
+const normalizeMaterialCategory = (value: unknown): string => {
+    const text = normalizeSpaces(value);
+    if (text.includes('비계')) return '비계';
+    if (text.includes('동바리') || text.includes('서포트')) return '동바리';
+    return text;
+};
 
 const toComparableMillis = (value: unknown): number => {
     if (!value) return 0;
@@ -39,12 +51,14 @@ const toComparableMillis = (value: unknown): number => {
     return 0;
 };
 
-const buildMaterialSelectionKey = (material: Pick<Material, 'category' | 'itemName' | 'spec' | 'unit'>): string => {
-    const category = trimText(material.category).replace(/\s+/g, ' ').toLowerCase();
-    const itemName = trimText(material.itemName).replace(/\s+/g, ' ').toLowerCase();
-    const spec = trimText(material.spec).replace(/\s+/g, ' ').toLowerCase();
-    const unit = trimText(material.unit).replace(/\s+/g, ' ').toLowerCase();
-    return `${category}::${itemName}::${spec}::${unit}`;
+export const buildMaterialBusinessKey = (
+    material: Pick<Material, 'category' | 'itemName' | 'spec'>
+): string => {
+    return [
+        compactKeyPart(normalizeMaterialCategory(material.category)),
+        compactKeyPart(material.itemName),
+        compactKeyPart(material.spec),
+    ].join('::');
 };
 
 const getMaterialQualityScore = (material: Partial<Material>): number => {
@@ -82,23 +96,106 @@ const sortMaterialsForSelection = (rows: Material[]): Material[] => {
     });
 };
 
-const normalizeMaterialSnapshot = async () => {
-    const rows = await materialFirestoreService.getAllMaterials();
-    return new Map(rows.map((m) => [m.id, m]));
+const createCatalogMaterials = (): Material[] => {
+    const rows: Material[] = [];
+    EXCEL_MATERIAL_CATALOG.forEach((group) => {
+        group.specs.forEach((spec) => {
+            const material = {
+                id: '',
+                category: group.category,
+                itemName: group.itemName,
+                spec,
+                unit: group.unit || 'EA',
+                safetyStock: 0,
+                description: 'Excel 기본 자재',
+                isActive: true,
+                isCatalogDefault: true,
+            } as Material;
+            const materialKey = buildMaterialBusinessKey(material);
+            rows.push({
+                ...material,
+                id: `catalog_${rows.length + 1}`,
+                materialKey,
+            });
+        });
+    });
+    return rows;
 };
 
-const normalizeTransactionWithMaster = <T extends { materialId: string; category?: string; itemName?: string; spec?: string; unit?: string }>(
+const normalizeMaterialForSelection = (material: Material): Material => {
+    const normalized = {
+        ...material,
+        category: normalizeMaterialCategory(material.category),
+        itemName: normalizeSpaces(material.itemName),
+        spec: normalizeSpaces(material.spec),
+        unit: normalizeSpaces(material.unit) || 'EA',
+    };
+    return {
+        ...normalized,
+        materialKey: material.materialKey || buildMaterialBusinessKey(normalized),
+    };
+};
+
+const mergeMaterialsForSelection = (rows: Material[]): Material[] => {
+    const deduped = new Map<string, Material>();
+
+    rows.map(normalizeMaterialForSelection).forEach((row) => {
+        const key = row.materialKey || buildMaterialBusinessKey(row);
+        const existing = deduped.get(key);
+        if (!existing) {
+            deduped.set(key, row);
+            return;
+        }
+        if (existing.isCatalogDefault && !row.isCatalogDefault) {
+            deduped.set(key, row);
+            return;
+        }
+        if (existing.isCatalogDefault === row.isCatalogDefault && compareMaterialPreference(row, existing) > 0) {
+            deduped.set(key, row);
+        }
+    });
+
+    return sortMaterialsForSelection(Array.from(deduped.values()));
+};
+
+const normalizeMaterialSnapshot = async () => {
+    const masterRows = await materialFirestoreService.getAllMaterials() as any[];
+    const rows = mergeMaterialsForSelection([
+        ...createCatalogMaterials(),
+        ...masterRows,
+    ]);
+    return new Map(rows.flatMap((m) => {
+        const materialKey = m.materialKey || buildMaterialBusinessKey(m);
+        return [
+            [m.id, m],
+            [materialKey, m],
+        ] as [string, any][];
+    }));
+};
+
+const normalizeTransactionWithMaster = <T extends { materialId: string; materialKey?: string; category?: string; itemName?: string; spec?: string; unit?: string }>(
     row: T,
     materialById: Map<string, any>
 ): T => {
-    const master = materialById.get(row.materialId);
+    const rowKey = row.materialKey || buildMaterialBusinessKey(row as any);
+    const master = materialById.get(row.materialId) || materialById.get(rowKey);
+    const normalized = {
+        category: trimText(row.category) || trimText(master?.category),
+        itemName: trimText(row.itemName) || trimText(master?.itemName),
+        spec: trimText(row.spec) || trimText(master?.spec),
+        unit: trimText(row.unit) || trimText(master?.unit) || 'EA',
+    };
     return {
         ...row,
-        category: trimText(master?.category) || trimText(row.category),
-        itemName: trimText(master?.itemName) || trimText(row.itemName),
-        spec: trimText(master?.spec) || trimText(row.spec),
-        unit: trimText(master?.unit) || trimText(row.unit),
+        ...normalized,
+        materialKey: row.materialKey || buildMaterialBusinessKey(normalized),
     };
+};
+
+const getMaterialFilterKey = (materialId: string | undefined, materialById: Map<string, any>): string | undefined => {
+    if (!materialId) return undefined;
+    const material = materialById.get(materialId);
+    return material ? (material.materialKey || buildMaterialBusinessKey(material)) : undefined;
 };
 
 /**
@@ -115,17 +212,10 @@ export const getAllMaterials = async (): Promise<Material[]> => {
 
 export const getUniqueMaterialsForSelection = async (): Promise<Material[]> => {
     const rows = await getAllMaterials();
-    const deduped = new Map<string, Material>();
-
-    rows.forEach((row) => {
-        const key = buildMaterialSelectionKey(row);
-        const existing = deduped.get(key);
-        if (!existing || compareMaterialPreference(row, existing) > 0) {
-            deduped.set(key, row);
-        }
-    });
-
-    return sortMaterialsForSelection(Array.from(deduped.values()));
+    return mergeMaterialsForSelection([
+        ...createCatalogMaterials(),
+        ...rows,
+    ]);
 };
 
 export const getMaterialById = async (id: string): Promise<Material | null> => {
@@ -137,6 +227,11 @@ export const addMaterial = async (material: Omit<Material, 'id' | 'createdAt' | 
     const now = new Date();
     const data: MaterialZod = {
         ...material as any,
+        materialKey: buildMaterialBusinessKey(material as any),
+        category: normalizeMaterialCategory((material as any).category),
+        itemName: normalizeSpaces((material as any).itemName),
+        spec: normalizeSpaces((material as any).spec),
+        unit: normalizeSpaces((material as any).unit) || 'EA',
         unitPrice: (material as any).unitPrice ?? 0,
         id,
         isActive: true,
@@ -157,6 +252,15 @@ export const updateMaterial = async (
     const data: MaterialZod = {
         ...current,
         ...updates as any,
+        category: normalizeMaterialCategory((updates as any).category ?? current.category),
+        itemName: normalizeSpaces((updates as any).itemName ?? current.itemName),
+        spec: normalizeSpaces((updates as any).spec ?? current.spec),
+        unit: normalizeSpaces((updates as any).unit ?? current.unit) || 'EA',
+        materialKey: buildMaterialBusinessKey({
+            category: (updates as any).category ?? current.category,
+            itemName: (updates as any).itemName ?? current.itemName,
+            spec: (updates as any).spec ?? current.spec,
+        }),
         updatedAt: new Date()
     };
     await materialFirestoreService.saveMaterial(id, data);
@@ -180,6 +284,7 @@ export const addInboundTransaction = async (
     const now = new Date();
     const data: MaterialInboundZod = {
         ...transaction,
+        materialKey: buildMaterialBusinessKey(transaction as any),
         id,
         createdAt: now,
         updatedAt: now
@@ -194,6 +299,7 @@ export const addInboundTransactionsBatch = async (
     const now = new Date();
     const data: MaterialInboundZod[] = transactions.map(t => ({
         ...t,
+        materialKey: buildMaterialBusinessKey(t as any),
         id: generateId('in'),
         createdAt: now,
         updatedAt: now
@@ -206,20 +312,23 @@ export const getInboundTransactions = async (filters?: TransactionFilters): Prom
     const start = filters?.startDate || '1970-01-01';
     const end = filters?.endDate || '9999-12-31';
 
+    const materialById = await normalizeMaterialSnapshot();
+    const materialFilterKey = getMaterialFilterKey(filters?.materialId, materialById);
+
     let rows = await materialFirestoreService.getInboundsByRange(start, end, filters?.siteId);
+    let normalizedRows = rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 
     if (filters?.materialId) {
-        rows = rows.filter(r => r.materialId === filters.materialId);
+        normalizedRows = normalizedRows.filter(r => r.materialId === filters.materialId || r.materialKey === materialFilterKey);
     }
     if (filters?.category) {
-        rows = rows.filter(r => r.category === filters.category);
+        normalizedRows = normalizedRows.filter(r => r.category === filters.category);
     }
     if (filters?.vehicleNumber) {
-        rows = rows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
+        normalizedRows = normalizedRows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
     }
 
-    const materialById = await normalizeMaterialSnapshot();
-    return rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
+    return normalizedRows as any[];
 };
 
 export const updateInboundTransaction = async (
@@ -232,7 +341,12 @@ export const updateInboundTransaction = async (
     const current = snap.find(t => t.id === id);
     if (!current) return;
 
-    await materialFirestoreService.saveInbound(id, { ...current, ...updates as any, updatedAt: new Date() });
+    const next = { ...current, ...updates as any };
+    await materialFirestoreService.saveInbound(id, {
+        ...next,
+        materialKey: buildMaterialBusinessKey(next as any),
+        updatedAt: new Date()
+    });
 };
 
 export const deleteInboundTransaction = async (id: string): Promise<void> => {
@@ -248,6 +362,7 @@ export const addOutboundTransaction = async (
     const now = new Date();
     const data: MaterialOutboundZod = {
         ...transaction,
+        materialKey: buildMaterialBusinessKey(transaction as any),
         id,
         createdAt: now,
         updatedAt: now
@@ -262,6 +377,7 @@ export const addOutboundTransactionsBatch = async (
     const now = new Date();
     const data: MaterialOutboundZod[] = transactions.map(t => ({
         ...t,
+        materialKey: buildMaterialBusinessKey(t as any),
         id: generateId('out'),
         createdAt: now,
         updatedAt: now
@@ -273,20 +389,23 @@ export const getOutboundTransactions = async (filters?: TransactionFilters): Pro
     const start = filters?.startDate || '1970-01-01';
     const end = filters?.endDate || '9999-12-31';
 
+    const materialById = await normalizeMaterialSnapshot();
+    const materialFilterKey = getMaterialFilterKey(filters?.materialId, materialById);
+
     let rows = await materialFirestoreService.getOutboundsByRange(start, end, filters?.siteId);
+    let normalizedRows = rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
 
     if (filters?.materialId) {
-        rows = rows.filter(r => r.materialId === filters.materialId);
+        normalizedRows = normalizedRows.filter(r => r.materialId === filters.materialId || r.materialKey === materialFilterKey);
     }
     if (filters?.category) {
-        rows = rows.filter(r => r.category === filters.category);
+        normalizedRows = normalizedRows.filter(r => r.category === filters.category);
     }
     if (filters?.vehicleNumber) {
-        rows = rows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
+        normalizedRows = normalizedRows.filter(r => r.vehicleNumber?.toLowerCase().includes(filters.vehicleNumber!.toLowerCase()));
     }
 
-    const materialById = await normalizeMaterialSnapshot();
-    return rows.map((row) => normalizeTransactionWithMaster(row, materialById)) as any[];
+    return normalizedRows as any[];
 };
 
 export const updateOutboundTransaction = async (
@@ -296,9 +415,10 @@ export const updateOutboundTransaction = async (
     const current = await materialFirestoreService.getOutbound(id);
     if (!current) return;
 
+    const next = { ...current, ...updates as any };
     await materialFirestoreService.saveOutbound(id, {
-        ...current,
-        ...updates as any,
+        ...next,
+        materialKey: buildMaterialBusinessKey(next as any),
         updatedAt: new Date()
     });
 };
@@ -327,10 +447,11 @@ export const calculateInventory = async (
 
     const allInbounds = allInboundsRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
     const allOutbounds = allOutboundsRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
+    const materialFilterKey = getMaterialFilterKey(materialId, materialById);
 
     // Apply materialId filter if provided
-    let inbounds = materialId ? allInbounds.filter(t => t.materialId === materialId) : allInbounds;
-    let outbounds = materialId ? allOutbounds.filter(t => t.materialId === materialId) : allOutbounds;
+    let inbounds = materialId ? allInbounds.filter(t => t.materialId === materialId || t.materialKey === materialFilterKey) : allInbounds;
+    let outbounds = materialId ? allOutbounds.filter(t => t.materialId === materialId || t.materialKey === materialFilterKey) : allOutbounds;
 
     // Split into opening (before startDate) and current (within range)
     const openingIn = startDate ? inbounds.filter(t => t.transactionDate < startDate) : [];
@@ -343,19 +464,23 @@ export const calculateInventory = async (
 
     // Helper to initialize or get inventory item
     const getInventoryItem = (t: any) => {
-        const key = `${t.materialId}-${t.siteId}`;
+        const materialKey = t.materialKey || buildMaterialBusinessKey(t);
+        const key = `${materialKey}-${t.siteId}`;
+        const master = materialById.get(materialKey) || materialById.get(t.materialId);
         if (!inventoryMap.has(key)) {
             inventoryMap.set(key, {
-                materialId: t.materialId,
+                materialId: materialKey,
+                materialKey,
                 siteId: t.siteId,
                 siteName: t.siteName,
-                category: t.category || '',
-                itemName: t.itemName,
-                spec: t.spec || '',
-                unit: t.unit || '',
+                category: t.category || master?.category || '',
+                itemName: t.itemName || master?.itemName || '',
+                spec: t.spec || master?.spec || '',
+                unit: t.unit || master?.unit || '',
                 totalInbound: 0,
                 totalOutbound: 0,
                 currentStock: 0,
+                safetyStock: master?.safetyStock,
                 status: 'sufficient',
                 updatedAt: Timestamp.now() as any
             });
@@ -426,11 +551,17 @@ export const getMaterialTransactionHistory = async (
     startDate?: string,
     endDate?: string
 ): Promise<{ openingBalance: number; transactions: TransactionHistoryItem[] }> => {
-    const allIn = await materialFirestoreService.getInboundsByRange('1900-01-01', endDate || '2100-01-01', siteId);
-    const allOut = await materialFirestoreService.getOutboundsByRange('1900-01-01', endDate || '2100-01-01', siteId);
+    const [allInRaw, allOutRaw, materialById] = await Promise.all([
+        materialFirestoreService.getInboundsByRange('1900-01-01', endDate || '2100-01-01', siteId),
+        materialFirestoreService.getOutboundsByRange('1900-01-01', endDate || '2100-01-01', siteId),
+        normalizeMaterialSnapshot(),
+    ]);
+    const allIn = allInRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
+    const allOut = allOutRaw.map((row) => normalizeTransactionWithMaster(row, materialById));
+    const materialFilterKey = getMaterialFilterKey(materialId, materialById);
 
-    const siteMatIn = allIn.filter(t => t.materialId === materialId);
-    const siteMatOut = allOut.filter(t => t.materialId === materialId);
+    const siteMatIn = allIn.filter(t => t.materialId === materialId || t.materialKey === materialFilterKey);
+    const siteMatOut = allOut.filter(t => t.materialId === materialId || t.materialKey === materialFilterKey);
 
     let openingBalance = 0;
     if (startDate) {
