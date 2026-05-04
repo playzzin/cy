@@ -3,14 +3,15 @@ import { HotTable } from '@handsontable/react';
 import { registerAllModules } from 'handsontable/registry';
 import 'handsontable/dist/handsontable.full.min.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faSave, faCalendarAlt, faTimes, faMinus, faComment, faExclamationTriangle, faCheckCircle, faSpinner, faClipboardCheck, faEraser, faFloppyDisk, faClipboardList } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faSave, faCalendarAlt, faTimes, faMinus, faComment, faExclamationTriangle, faSpinner, faEraser, faFloppyDisk, faUpload, faImage, faTrash } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
 
-import { geminiService } from '../../services/geminiService';
+import { AnalyzedDailyReport, geminiService, KakaoAnalyzeContext } from '../../services/geminiService';
 import { useAuth } from '../../contexts/AuthContext';
 import Swal from 'sweetalert2';
 
@@ -533,7 +534,11 @@ const DailyReportGridInput: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
     const [isDragging, setIsDragging] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isKakaoModalOpen, setIsKakaoModalOpen] = useState(false);
+    const [isKakaoFileDragging, setIsKakaoFileDragging] = useState(false);
+    const [kakaoText, setKakaoText] = useState('');
+    const [kakaoFile, setKakaoFile] = useState<File | null>(null);
+    const kakaoFileInputRef = useRef<HTMLInputElement>(null);
 
     const normalizeSiteId = useCallback((value: unknown): string => String(value ?? '').trim(), []);
 
@@ -805,6 +810,264 @@ const DailyReportGridInput: React.FC = () => {
         }));
     };
 
+    const normalizeLookupText = useCallback((value?: string | null): string => {
+        return String(value ?? '').replace(/\s+/g, '').trim();
+    }, []);
+
+    const buildKakaoAnalyzeContext = useCallback((): KakaoAnalyzeContext => ({
+        today: date,
+        sites: sites.map(s => s.name).filter(Boolean),
+        teams: teams.map(t => t.name).filter(Boolean),
+        workers: workers.map(w => w.name).filter(Boolean)
+    }), [date, sites, teams, workers]);
+
+    const findSiteByAnalyzedName = useCallback((siteName?: string | null): Site | undefined => {
+        const normalized = normalizeLookupText(siteName);
+        if (!normalized) return undefined;
+        return sites.find(s => normalizeLookupText(s.name) === normalized)
+            || sites.find(s => {
+                const candidate = normalizeLookupText(s.name);
+                return Boolean(candidate) && (candidate.includes(normalized) || normalized.includes(candidate));
+            });
+    }, [normalizeLookupText, sites]);
+
+    const findWorkerByAnalyzedName = useCallback((workerName?: string | null): (Worker & { isDuplicateName?: boolean }) | undefined => {
+        const normalized = normalizeLookupText(workerName);
+        if (!normalized) return undefined;
+        return workerMap.get(normalized) || workers.find(w => normalizeLookupText(w.name) === normalized);
+    }, [normalizeLookupText, workerMap, workers]);
+
+    const getScheduleWorkerIds = useCallback((assignment: DispatchAssignment): string[] => {
+        const directWorkerIds = Array.isArray(assignment.workerIds) ? assignment.workerIds : [];
+        const supportTeams = Array.isArray(assignment.supportTeams) ? assignment.supportTeams : [];
+        const supportTeamIds = new Set(
+            [
+                ...(Array.isArray(assignment.supportTeamIds) ? assignment.supportTeamIds : []),
+                ...supportTeams.map(team => team.id)
+            ]
+                .map(normalizeSiteId)
+                .filter(Boolean)
+        );
+        const supportTeamNames = new Set(
+            supportTeams
+                .map(team => normalizeLookupText(team.name))
+                .filter(Boolean)
+        );
+
+        const supportWorkerIds = workers
+            .filter(worker => {
+                const workerId = normalizeSiteId(worker.id);
+                if (!workerId) return false;
+                if (worker.isActive === false) return false;
+                const status = String(worker.status ?? '');
+                if (status === '퇴사' || status === '퇴사자' || status === 'inactive' || status === '출입금지') return false;
+                const workerTeamId = normalizeSiteId(worker.teamId);
+                const workerTeamName = normalizeLookupText(worker.teamName);
+                return Boolean(
+                    (workerTeamId && supportTeamIds.has(workerTeamId)) ||
+                    (workerTeamName && supportTeamNames.has(workerTeamName))
+                );
+            })
+            .map(worker => normalizeSiteId(worker.id));
+
+        return Array.from(new Set([...directWorkerIds, ...supportWorkerIds].map(normalizeSiteId).filter(Boolean)));
+    }, [normalizeLookupText, normalizeSiteId, workers]);
+
+    const appendAnalyzedReports = useCallback((analyzedReports: AnalyzedDailyReport[]) => {
+        const newLedgers: Ledger[] = [];
+        let totalUnknowns = 0;
+
+        for (const report of analyzedReports) {
+            const reportWorkers = Array.isArray(report.workers)
+                ? report.workers.filter(w => normalizeLookupText(w?.name))
+                : [];
+            if (reportWorkers.length === 0) continue;
+
+            const site = findSiteByAnalyzedName(report.siteName);
+            const siteId = site?.id || '';
+            const rows = createEmptyRows(Math.max(20, reportWorkers.length + 5));
+
+            for (const [idx, analyzedWorker] of reportWorkers.entries()) {
+                const worker = findWorkerByAnalyzedName(analyzedWorker.name);
+                if (!worker) totalUnknowns++;
+
+                const matchedTeam = worker?.teamId ? teams.find(t => t.id === worker.teamId) : undefined;
+                const isSupportTeam = worker?.teamType === '지원팀';
+                const analyzedManDay = Number(analyzedWorker.manDay);
+                const manDay = Number.isFinite(analyzedManDay) && analyzedManDay > 0 ? analyzedManDay : 1;
+                const workerWorkContent = analyzedWorker.workContent || report.workContent || '';
+                const workerTeamName = isSupportTeam
+                    ? '지원'
+                    : (matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || '');
+
+                rows[idx] = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    name: analyzedWorker.name,
+                    manDay,
+                    teamId: worker?.teamId || '',
+                    teamName: workerTeamName,
+                    workerId: worker?.id || '',
+                    unitPrice: worker?.unitPrice || 0,
+                    payType: resolveWorkerSalaryType(worker),
+                    role: analyzedWorker.role || worker?.role || '작업자',
+                    description: workerWorkContent,
+                    workerTeamId: worker?.teamId || '',
+                    workerTeamName
+                };
+            }
+
+            const aggregatedContent = report.workContent
+                || Array.from(new Set(reportWorkers.map(w => w.workContent).filter(Boolean))).join(', ');
+            newLedgers.push({ id: Date.now().toString() + Math.random(), siteId, rows, description: aggregatedContent });
+        }
+
+        if (newLedgers.length > 0) {
+            setLedgers(prev => {
+                if (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(r => !r.name)) return newLedgers;
+                return [...prev, ...newLedgers];
+            });
+        }
+
+        return { ledgerCount: newLedgers.length, totalUnknowns };
+    }, [findSiteByAnalyzedName, findWorkerByAnalyzedName, normalizeLookupText, teams]);
+
+    const appendScheduleAssignments = useCallback((assignments: DispatchAssignment[]) => {
+        const siteById = new Map<string, Site>();
+        sites.forEach(site => {
+            const siteId = normalizeSiteId(site.id);
+            const legacyId = normalizeSiteId(site.legacyId);
+            if (siteId) siteById.set(siteId, site);
+            if (legacyId) siteById.set(legacyId, site);
+        });
+
+        const workerById = new Map<string, Worker>();
+        workers.forEach(worker => {
+            const workerId = normalizeSiteId(worker.id);
+            const legacyId = normalizeSiteId(worker.legacyId);
+            if (workerId) workerById.set(workerId, worker);
+            if (legacyId) workerById.set(legacyId, worker);
+        });
+
+        const teamById = new Map<string, Team>();
+        teams.forEach(team => {
+            const teamId = normalizeSiteId(team.id);
+            const legacyId = normalizeSiteId(team.legacyId);
+            if (teamId) teamById.set(teamId, team);
+            if (legacyId) teamById.set(legacyId, team);
+        });
+
+        const scheduleGroups = new Map<string, {
+            siteId: string;
+            siteName: string;
+            descriptionParts: string[];
+            rows: GridRow[];
+            workerKeys: Set<string>;
+        }>();
+
+        let totalUnknowns = 0;
+        let totalWorkers = 0;
+        let skippedSiteCount = 0;
+        let emptyScheduleCount = 0;
+        let duplicateWorkerCount = 0;
+
+        assignments.forEach((assignment) => {
+            const siteId = normalizeSiteId(assignment.siteId);
+            const matchedSite = (siteId ? siteById.get(siteId) : undefined) || findSiteByAnalyzedName(assignment.siteName);
+            const resolvedSiteId = normalizeSiteId(matchedSite?.id) || siteId;
+            const resolvedSiteName = matchedSite?.name || assignment.siteName || '';
+            const siteKey = resolvedSiteId || normalizeLookupText(resolvedSiteName);
+
+            if (!siteKey) {
+                skippedSiteCount += 1;
+                return;
+            }
+
+            if (!scheduleGroups.has(siteKey)) {
+                scheduleGroups.set(siteKey, {
+                    siteId: resolvedSiteId,
+                    siteName: resolvedSiteName,
+                    descriptionParts: [],
+                    rows: [],
+                    workerKeys: new Set<string>()
+                });
+            }
+
+            const group = scheduleGroups.get(siteKey)!;
+            const note = String(assignment.note || '').trim();
+            if (note && !group.descriptionParts.includes(note)) {
+                group.descriptionParts.push(note);
+            }
+
+            const workerIds = getScheduleWorkerIds(assignment);
+            if (workerIds.length === 0) {
+                emptyScheduleCount += 1;
+                return;
+            }
+
+            workerIds.forEach((workerId) => {
+                const worker = workerById.get(workerId);
+                const workerKey = worker?.id ? `worker:${worker.id}` : `unknown:${workerId}`;
+                if (group.workerKeys.has(workerKey)) {
+                    duplicateWorkerCount += 1;
+                    return;
+                }
+                group.workerKeys.add(workerKey);
+
+                if (!worker) totalUnknowns += 1;
+
+                const workerTeamId = normalizeSiteId(worker?.teamId);
+                const assignmentTeamId = normalizeSiteId(assignment.teamId);
+                const resolvedTeamId = workerTeamId || assignmentTeamId;
+                const matchedTeam = resolvedTeamId ? teamById.get(resolvedTeamId) : undefined;
+                const resolvedTeamName = matchedTeam?.name || worker?.teamName || assignment.teamName || '';
+
+                group.rows.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    teamId: resolvedTeamId,
+                    teamName: resolvedTeamName,
+                    workerId: worker?.id || '',
+                    name: worker?.name || workerId,
+                    manDay: 1.0,
+                    unitPrice: worker?.unitPrice ?? 0,
+                    payType: worker ? resolveWorkerSalaryType(worker) : '',
+                    role: worker?.role || '작업자',
+                    description: note,
+                    workerTeamId: workerTeamId || resolvedTeamId,
+                    workerTeamName: matchedTeam?.name || worker?.teamName || resolvedTeamName
+                });
+                totalWorkers += 1;
+            });
+        });
+
+        const newLedgers = Array.from(scheduleGroups.values()).map((group) => {
+            const rows = [...group.rows];
+            const emptyRowCount = rows.length >= 20 ? 5 : 20 - rows.length;
+            rows.push(...createEmptyRows(emptyRowCount));
+            return {
+                id: Date.now().toString() + Math.random(),
+                siteId: group.siteId,
+                rows,
+                description: group.descriptionParts.join(', ')
+            } satisfies Ledger;
+        });
+
+        if (newLedgers.length > 0) {
+            setLedgers(prev => {
+                if (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(r => !r.name)) return newLedgers;
+                return [...prev, ...newLedgers];
+            });
+        }
+
+        return {
+            ledgerCount: newLedgers.length,
+            totalWorkers,
+            totalUnknowns,
+            skippedSiteCount,
+            emptyScheduleCount,
+            duplicateWorkerCount
+        };
+    }, [findSiteByAnalyzedName, getScheduleWorkerIds, normalizeLookupText, normalizeSiteId, sites, teams, workers]);
+
     const addLedger = useCallback(() => {
         setLedgers(prev => [...prev, { id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
     }, []);
@@ -861,6 +1124,78 @@ const DailyReportGridInput: React.FC = () => {
         } catch (error) { console.error(error); alert('저장 중 오류가 발생했습니다.'); } finally { setLoading(false); }
     };
 
+    const showAnalysisResult = useCallback((ledgerCount: number, totalUnknowns: number) => {
+        if (ledgerCount === 0) {
+            Swal.fire('Info', '인식된 일보 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        let message = `${ledgerCount}개의 장부가 입력되었습니다.`;
+        if (totalUnknowns > 0) {
+            message += `\n⚠️ 식별되지 않은 작업자 ${totalUnknowns}명이 있습니다. 빨간색으로 표시된 항목을 확인해주세요.`;
+            Swal.fire({ title: 'AI 분석 완료 (확인 필요)', text: message, icon: 'warning', confirmButtonText: '확인' });
+            return;
+        }
+        Swal.fire('Success', message, 'success');
+    }, []);
+
+    const showScheduleAnalysisResult = useCallback((result: {
+        ledgerCount: number;
+        totalWorkers: number;
+        totalUnknowns: number;
+        skippedSiteCount: number;
+        emptyScheduleCount: number;
+        duplicateWorkerCount: number;
+    }) => {
+        if (result.ledgerCount === 0) {
+            Swal.fire('Info', '입력할 수 있는 저장 일정이 없습니다.', 'info');
+            return;
+        }
+
+        const details = [
+            `${result.ledgerCount}개의 장부와 ${result.totalWorkers}명의 작업자가 입력되었습니다.`
+        ];
+
+        if (result.totalUnknowns > 0) details.push(`마스터에서 찾지 못한 작업자 ${result.totalUnknowns}명은 확인이 필요합니다.`);
+        if (result.skippedSiteCount > 0) details.push(`현장을 식별하지 못한 일정 ${result.skippedSiteCount}건은 제외했습니다.`);
+        if (result.emptyScheduleCount > 0) details.push(`작업자 없는 일정 ${result.emptyScheduleCount}건은 현장 장부만 생성했습니다.`);
+        if (result.duplicateWorkerCount > 0) details.push(`같은 현장에 중복 배정된 작업자 ${result.duplicateWorkerCount}건은 한 번만 넣었습니다.`);
+
+        const hasWarnings = result.totalUnknowns > 0 || result.skippedSiteCount > 0;
+        Swal.fire({
+            title: hasWarnings ? '일정 분석 완료 (확인 필요)' : '일정 분석 완료',
+            text: details.join('\n'),
+            icon: hasWarnings ? 'warning' : 'success',
+            confirmButtonText: '확인'
+        });
+    }, []);
+
+    const handleScheduleAnalyzeClick = useCallback(async () => {
+        if (fetching) {
+            Swal.fire('Info', '기준 데이터를 불러오는 중입니다. 잠시 후 다시 시도해주세요.', 'info');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const dispatch = await dispatchService.getDispatchByDate(date);
+            const assignments = Array.isArray(dispatch?.assignments) ? dispatch.assignments : [];
+            if (assignments.length === 0) {
+                Swal.fire('Info', `${date}에 저장된 현장 일정이 없습니다.`, 'info');
+                return;
+            }
+
+            const result = appendScheduleAssignments(assignments);
+            showScheduleAnalysisResult(result);
+        } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : '일정 분석에 실패했습니다.';
+            Swal.fire('Error', `일정 분석에 실패했습니다.\n${message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [appendScheduleAssignments, date, fetching, showScheduleAnalysisResult]);
+
     const processKakaoImage = async (file: File) => {
         if (!file.type.startsWith('image/')) {
             Swal.fire('Error', '이미지 파일만 가능합니다.', 'error');
@@ -873,50 +1208,90 @@ const DailyReportGridInput: React.FC = () => {
         }
         setLoading(true);
         try {
-            const analyzedReports = await geminiService.analyzeKakaoImage(file);
-            const newLedgers: Ledger[] = [];
-            let totalUnknowns = 0;
-            for (const report of analyzedReports) {
-                const site = sites.find(s => s.name === report.siteName) || sites.find(s => s.name.includes(report.siteName || '') || (report.siteName || '').includes(s.name));
-                const siteId = site?.id || '';
-                const rows = createEmptyRows(20);
-                for (const [idx, w] of report.workers.entries()) {
-                    const worker = workers.find(wk => wk.name === w.name);
-                    if (!worker) totalUnknowns++;
-                    rows[idx] = {
-                        id: Math.random().toString(36).substr(2, 9),
-                        name: w.name,
-                        manDay: w.manDay || 1,
-                        teamId: worker?.teamId || '',
-                        teamName: worker?.teamType === '지원팀' ? '지원' : (worker ? (teams.find(t => t.id === worker.teamId)?.name || '') : ''),
-                        workerId: worker?.id || '',
-                        unitPrice: worker?.unitPrice || 0,
-                        payType: resolveWorkerSalaryType(worker),
-                        role: w.role || worker?.role || '작업자',
-                        description: w.workContent || '',
-                        workerTeamId: worker?.teamId || '',
-                        workerTeamName: worker?.teamType === '지원팀' ? '지원' : (worker ? (teams.find(t => t.id === worker.teamId)?.name || worker?.teamName || '') : '')
-                    };
-                }
-                const aggregatedContent = Array.from(new Set(report.workers.map(w => w.workContent).filter(Boolean))).join(', ');
-                newLedgers.push({ id: Date.now().toString() + Math.random(), siteId, rows: rows, description: aggregatedContent });
-            }
-            if (newLedgers.length === 0) { Swal.fire('Info', '인식된 데이터가 없습니다.', 'info'); return; }
-            setLedgers(prev => {
-                if (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(r => !r.name)) return newLedgers;
-                return [...prev, ...newLedgers];
-            });
-            let message = `${newLedgers.length}개의 장부가 생성되었습니다.`;
-            if (totalUnknowns > 0) {
-                message += `\n⚠️ 식별되지 않은 작업자 ${totalUnknowns}명이 있습니다. 빨간색으로 표시된 항목을 확인해주세요.`;
-                Swal.fire({ title: 'AI 분석 완료 (확인 필요)', text: message, icon: 'warning', confirmButtonText: '확인' });
-            } else { Swal.fire('Success', message, 'success'); }
+            const analyzedReports = await geminiService.analyzeKakaoImage(file, buildKakaoAnalyzeContext());
+            const result = appendAnalyzedReports(analyzedReports);
+            showAnalysisResult(result.ledgerCount, result.totalUnknowns);
         } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : '이미지 분석에 실패했습니다.';
             Swal.fire('Error', `이미지 분석에 실패했습니다.\n${message}`, 'error');
         } finally { setLoading(false); }
     };
+
+    const processKakaoText = async (text: string) => {
+        const normalizedText = text.trim();
+        if (!normalizedText) {
+            Swal.fire('Info', '분석할 카톡 텍스트를 입력해주세요.', 'info');
+            return;
+        }
+        const apiKey = geminiService.getKey();
+        if (!apiKey) {
+            Swal.fire('Info', 'API 키 설정이 필요합니다. (/settings/ai)', 'info');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const analyzedReports = await geminiService.analyzeKakaoText(normalizedText, buildKakaoAnalyzeContext());
+            const result = appendAnalyzedReports(analyzedReports);
+            showAnalysisResult(result.ledgerCount, result.totalUnknowns);
+        } catch (error) {
+            console.error(error);
+            const message = error instanceof Error ? error.message : '텍스트 분석에 실패했습니다.';
+            Swal.fire('Error', `텍스트 분석에 실패했습니다.\n${message}`, 'error');
+        } finally { setLoading(false); }
+    };
+
+    const formatFileSize = useCallback((bytes: number): string => {
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
+        if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }, []);
+
+    const resetKakaoModal = useCallback(() => {
+        setKakaoText('');
+        setKakaoFile(null);
+        setIsKakaoFileDragging(false);
+        if (kakaoFileInputRef.current) kakaoFileInputRef.current.value = '';
+    }, []);
+
+    const closeKakaoModal = useCallback(() => {
+        setIsKakaoModalOpen(false);
+        resetKakaoModal();
+    }, [resetKakaoModal]);
+
+    const handleKakaoAnalyzeClick = useCallback(() => {
+        setIsKakaoModalOpen(true);
+    }, []);
+
+    const selectKakaoFile = useCallback((file?: File | null) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            Swal.fire('Error', '이미지 파일만 가능합니다.', 'error');
+            return;
+        }
+        setKakaoFile(file);
+    }, []);
+
+    const handleKakaoModalAnalyze = useCallback(async () => {
+        const text = kakaoText.trim();
+        const file = kakaoFile;
+
+        if (!text && !file) {
+            Swal.fire('Info', '카톡 텍스트를 입력하거나 스크린샷을 첨부해주세요.', 'info');
+            return;
+        }
+
+        setIsKakaoModalOpen(false);
+        if (file) {
+            resetKakaoModal();
+            await processKakaoImage(file);
+            return;
+        }
+
+        resetKakaoModal();
+        await processKakaoText(text);
+    }, [kakaoFile, kakaoText, resetKakaoModal]);
 
     const hasWarnings = validationSummary.unknownWorkers > 0 || validationSummary.missingSites > 0;
 
@@ -928,6 +1303,177 @@ const DailyReportGridInput: React.FC = () => {
                         <FontAwesomeIcon icon={faComment} className="text-6xl text-yellow-500 mb-4" />
                         <h2 className="text-3xl font-bold text-slate-800">카톡 이미지 떨어뜨리기</h2>
                         <p className="text-xl text-slate-500 mt-2">AI가 자동으로 일보를 작성합니다!</p>
+                    </div>
+                </div>
+            )}
+
+            {isKakaoModalOpen && (
+                <div
+                    className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+                    onMouseDown={(e) => {
+                        if (e.target === e.currentTarget) closeKakaoModal();
+                    }}
+                    onDragOver={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsKakaoFileDragging(true);
+                    }}
+                    onDragLeave={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const relatedTarget = e.relatedTarget as Node | null;
+                        if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+                            setIsKakaoFileDragging(false);
+                        }
+                    }}
+                    onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setIsKakaoFileDragging(false);
+                        selectKakaoFile(e.dataTransfer.files?.[0]);
+                    }}
+                >
+                    <div
+                        className="w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-black/10"
+                        onMouseDown={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start justify-between border-b border-slate-200 bg-slate-50 px-6 py-5">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-yellow-300 text-slate-900 shadow-sm">
+                                    <FontAwesomeIcon icon={faComment} className="text-lg" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-900">카톡 일보 분석</h2>
+                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
+                                        <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">이미지 우선</span>
+                                        <span className="rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">현장/작업내용/인원 추출</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={closeKakaoModal}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white hover:text-slate-900"
+                                aria-label="닫기"
+                            >
+                                <FontAwesomeIcon icon={faTimes} />
+                            </button>
+                        </div>
+
+                        <div className="grid gap-5 px-6 py-5 md:grid-cols-[1.08fr_0.92fr]">
+                            <div className="flex min-h-[310px] flex-col">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <label htmlFor="kakao-analysis-textarea" className="text-sm font-black text-slate-800">카톡 텍스트</label>
+                                    <span className="text-xs font-semibold text-slate-400">{kakaoText.trim().length.toLocaleString()}자</span>
+                                </div>
+                                <textarea
+                                    id="kakao-analysis-textarea"
+                                    value={kakaoText}
+                                    onChange={(e) => setKakaoText(e.target.value)}
+                                    className="min-h-[282px] flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-800 outline-none transition focus:border-yellow-400 focus:bg-white focus:ring-4 focus:ring-yellow-100"
+                                    placeholder={`현장: 파주
+단종: 탑엔지니어링
+작업내용: 동바리 해체 정리
+인원: 김해용 홍명진 김군희 총 3명`}
+                                />
+                            </div>
+
+                            <div className="flex min-h-[310px] flex-col">
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="text-sm font-black text-slate-800">카톡 스크린샷</span>
+                                    {kakaoFile && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setKakaoFile(null);
+                                                if (kakaoFileInputRef.current) kakaoFileInputRef.current.value = '';
+                                            }}
+                                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold text-red-500 transition hover:bg-red-50"
+                                        >
+                                            <FontAwesomeIcon icon={faTrash} />
+                                            삭제
+                                        </button>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => kakaoFileInputRef.current?.click()}
+                                    onDragOver={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsKakaoFileDragging(true);
+                                    }}
+                                    onDragLeave={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        const relatedTarget = e.relatedTarget as Node | null;
+                                        if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+                                            setIsKakaoFileDragging(false);
+                                        }
+                                    }}
+                                    onDrop={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsKakaoFileDragging(false);
+                                        selectKakaoFile(e.dataTransfer.files?.[0]);
+                                    }}
+                                    className={`flex min-h-[282px] flex-1 flex-col items-center justify-center rounded-lg border-2 border-dashed px-5 text-center transition ${
+                                        isKakaoFileDragging
+                                            ? 'border-yellow-400 bg-yellow-50 ring-4 ring-yellow-100'
+                                            : kakaoFile
+                                                ? 'border-emerald-300 bg-emerald-50'
+                                                : 'border-slate-300 bg-white hover:border-yellow-300 hover:bg-yellow-50/50'
+                                    }`}
+                                >
+                                    <input
+                                        ref={kakaoFileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => selectKakaoFile(e.target.files?.[0])}
+                                    />
+                                    <div className={`mb-4 flex h-16 w-16 items-center justify-center rounded-xl ${
+                                        kakaoFile ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                                    }`}>
+                                        <FontAwesomeIcon icon={kakaoFile ? faImage : faUpload} className="text-2xl" />
+                                    </div>
+                                    {kakaoFile ? (
+                                        <>
+                                            <span className="max-w-full truncate text-sm font-black text-slate-900">{kakaoFile.name}</span>
+                                            <span className="mt-1 text-xs font-semibold text-slate-500">{formatFileSize(kakaoFile.size)}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="text-base font-black text-slate-800">이미지 드롭 또는 선택</span>
+                                            <span className="mt-2 text-xs font-semibold text-slate-500">PNG, JPG, WebP</span>
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="text-xs font-semibold text-slate-500">
+                                {kakaoFile ? '선택된 스크린샷으로 분석합니다.' : kakaoText.trim() ? '입력된 텍스트로 분석합니다.' : '분석할 카톡 내용을 준비하세요.'}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    onClick={closeKakaoModal}
+                                    className="h-10 rounded-lg border border-slate-300 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                                >
+                                    취소
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleKakaoModalAnalyze}
+                                    disabled={!kakaoFile && !kakaoText.trim()}
+                                    className="h-10 rounded-lg bg-slate-900 px-5 text-sm font-black text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500 disabled:shadow-none"
+                                >
+                                    분석해서 입력
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -967,8 +1513,8 @@ const DailyReportGridInput: React.FC = () => {
                         </div>
                     </div>
                     <div className="flex gap-2">
-                        <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 bg-yellow-400 text-slate-900 rounded-lg hover:bg-yellow-500 flex items-center gap-2 shadow-sm transition-colors font-bold"><FontAwesomeIcon icon={faComment} /> 카톡 분석</button>
-                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) processKakaoImage(file); e.target.value = ''; }} />
+                        <button onClick={handleScheduleAnalyzeClick} disabled={loading || fetching} className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm transition-colors font-bold"><FontAwesomeIcon icon={faCalendarAlt} /> 일정 분석</button>
+                        <button onClick={handleKakaoAnalyzeClick} className="px-4 py-2 bg-yellow-400 text-slate-900 rounded-lg hover:bg-yellow-500 flex items-center gap-2 shadow-sm transition-colors font-bold"><FontAwesomeIcon icon={faComment} /> 카톡 분석</button>
                         <button onClick={addLedger} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2 shadow-sm transition-colors"><FontAwesomeIcon icon={faPlus} /> 장부 추가</button>
                         <button onClick={removeLastLedger} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center gap-2 shadow-sm transition-colors"><FontAwesomeIcon icon={faMinus} /> 장부 삭제</button>
                         <button onClick={handleReset} className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center gap-2 shadow-sm transition-colors" title="초기화"><FontAwesomeIcon icon={faEraser} /> 초기화</button>
