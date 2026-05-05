@@ -23,8 +23,6 @@ const A4_HEIGHT_MM = 297;
 
 // Import Fonts globally for the print window or component
 const FontStyles = createGlobalStyle`
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap');
-
     @page {
         size: A4 portrait;
         margin: 10mm;

@@ -467,20 +467,7 @@ const AdvancedMenuManager: React.FC = () => {
                     ? { id: newId, text: '새 그룹', sub: [], icon: 'faFolder' }
                     : template === 'divider'
                         ? { id: newId, text: '-' }
-                        : template === 'estimate-pack'
-                            ? {
-                                id: newId,
-                                text: '견적 관리',
-                                icon: 'fa-file-invoice-dollar',
-                                sub: [
-                                    { id: `${newId}-manage`, text: '견적서 관리', path: '/estimate/manage', icon: 'fa-file-invoice-dollar' },
-                                    { id: `${newId}-new`, text: '견적 등록', path: '/estimate/new', icon: 'fa-file-invoice-dollar' },
-                                    { id: `${newId}-list`, text: '견적 목록', path: '/estimate/list', icon: 'fa-file-invoice-dollar' },
-                                    { id: `${newId}-uxui`, text: 'UX/UI 견적서', path: '/estimate/manage', icon: 'fa-file-invoice-dollar' },
-                                    { id: `${newId}-request`, text: '견적 문의', path: '/estimate/request', icon: 'fa-file-invoice-dollar' }
-                                ]
-                            }
-                            : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
+                        : { id: newId, text: '새 링크', path: '/new-link', icon: 'faLink' };
             }
 
             const dst = findRef(newMenu, overId);

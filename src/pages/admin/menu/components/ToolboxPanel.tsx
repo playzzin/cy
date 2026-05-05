@@ -9,7 +9,6 @@ import {
     faTrash,
     faSearch,
     faFileLines,
-    faFileInvoiceDollar,
     faArrowUpRightFromSquare,
     faEye,
     faEyeSlash
@@ -150,14 +149,6 @@ const ToolboxPanel: React.FC<ToolboxPanelProps> = ({ isOpen, toggle }) => {
                             icon={faFileLines}
                             color="bg-gray-600"
                             payload={{ template: 'divider' }}
-                        />
-                        <DraggableItem
-                            id="new-estimate-pack"
-                            label="견적 관리 세트"
-                            icon={faFileInvoiceDollar}
-                            color="bg-emerald-600"
-                            payload={{ template: 'estimate-pack' }}
-                            path="/estimate/manage"
                         />
                     </div>
 

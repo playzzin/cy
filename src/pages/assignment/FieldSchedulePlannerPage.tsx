@@ -19,6 +19,7 @@ import {
     ChevronLeft,
     ChevronRight,
     ClipboardCopy,
+    ClipboardPaste,
     Eye,
     GripVertical,
     MapPin,
@@ -68,6 +69,11 @@ interface ScheduleSupportTeam {
     id: string;
     name: string;
     color: string;
+}
+
+interface ScheduleClipboard {
+    sourceDate: string;
+    assignments: DispatchAssignment[];
 }
 
 interface TeamRoster {
@@ -120,6 +126,16 @@ const makeScheduleId = () => {
     }
     return `field_schedule_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 };
+
+const cloneDispatchAssignments = (assignments: DispatchAssignment[]): DispatchAssignment[] =>
+    assignments.map((assignment) => ({
+        ...assignment,
+        workerIds: [...(assignment.workerIds || [])],
+        supportTeamIds: assignment.supportTeamIds ? [...assignment.supportTeamIds] : undefined,
+        supportTeams: assignment.supportTeams ? assignment.supportTeams.map((team) => ({ ...team })) : undefined,
+        vehicleIds: [...(assignment.vehicleIds || [])],
+        vehicleLabels: assignment.vehicleLabels ? [...assignment.vehicleLabels] : undefined,
+    }));
 
 const cleanIds = (ids: Array<string | undefined | null>) =>
     Array.from(new Set(ids.filter((id): id is string => Boolean(id))));
@@ -1171,9 +1187,10 @@ const BoardViewScheduleCard: React.FC<{
     );
 };
 
-const FieldSchedulePlannerPage: React.FC = () => {
+export default function FieldSchedulePlannerPage() {
     const boardRef = useRef<HTMLDivElement | null>(null);
     const [date, setDate] = useState(getTodayInputValue());
+    const [copySourceDate, setCopySourceDate] = useState(() => shiftDate(getTodayInputValue(), -1));
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
@@ -1195,6 +1212,8 @@ const FieldSchedulePlannerPage: React.FC = () => {
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
     const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
     const [boardViewMode, setBoardViewMode] = useState(false);
+    const [scheduleClipboard, setScheduleClipboard] = useState<ScheduleClipboard | null>(null);
+    const [copyingSchedule, setCopyingSchedule] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -2179,25 +2198,62 @@ const FieldSchedulePlannerPage: React.FC = () => {
         }
     };
 
-    const handleCopyPreviousDay = async () => {
-        const previousDate = shiftDate(date, -1);
-        const ok = window.confirm(`${previousDate} 일정을 현재 날짜로 가져올까요? 현재 작성 중인 내용은 대체됩니다.`);
-        if (!ok) return;
-
-        const source = await dispatchService.getDispatchByDate(previousDate);
-        if (!source || source.assignments.length === 0) {
-            setMessage('전날 일정이 없습니다.');
+    const handleCopyScheduleFromDate = async () => {
+        if (!copySourceDate) {
+            setMessage('복사할 날짜를 선택해주세요.');
             return;
         }
 
-        const copied = source.assignments.map((assignment, index) => ({
+        setCopyingSchedule(true);
+        setMessage('');
+
+        try {
+            const source = await dispatchService.getDispatchByDate(copySourceDate);
+            const assignments = source?.assignments || [];
+            if (assignments.length === 0) {
+                setScheduleClipboard(null);
+                setMessage(`${copySourceDate} 일정이 없습니다.`);
+                return;
+            }
+
+            setScheduleClipboard({
+                sourceDate: copySourceDate,
+                assignments: cloneDispatchAssignments(assignments),
+            });
+            setMessage(`${copySourceDate} 일정 ${assignments.length}건을 복사했습니다.`);
+        } catch (error) {
+            console.error('[FieldSchedulePlanner] Failed to copy schedule', error);
+            setMessage('일정을 복사하지 못했습니다. 잠시 후 다시 시도해주세요.');
+        } finally {
+            setCopyingSchedule(false);
+        }
+    };
+
+    const handlePasteScheduleClipboard = () => {
+        if (!scheduleClipboard || scheduleClipboard.assignments.length === 0) {
+            setMessage('먼저 복사할 날짜의 일정을 복사해주세요.');
+            return;
+        }
+
+        const ok = window.confirm(
+            `${scheduleClipboard.sourceDate} 일정을 ${date}에 붙여넣을까요? 현재 날짜의 일정은 대체됩니다.`
+        );
+        if (!ok) return;
+
+        const copied = scheduleClipboard.assignments.map((assignment, index) => ({
             ...mapAssignmentToSchedule(assignment, index),
             id: makeScheduleId(),
             date,
             status: 'draft' as ScheduleStatus,
         }));
-        updateSchedules(mergeSchedulesBySite(copied));
-        setMessage('전날 일정을 가져왔습니다. 확인 후 저장하세요.');
+        const nextSchedules = mergeSchedulesBySite(copied);
+        updateSchedules(nextSchedules);
+        setSelectedSiteId(nextSchedules[0]?.siteId || '');
+        setSelectedWorkerIds([]);
+        setSelectedSupportTeamIds([]);
+        setSelectedVehicleIds([]);
+        setDeletedSchedule(null);
+        setMessage(`${scheduleClipboard.sourceDate} 일정을 ${date}에 붙여넣었습니다. 확인 후 저장하세요.`);
     };
 
     const selectedSite = selectedSiteId ? sitesById.get(selectedSiteId) : undefined;
@@ -2286,14 +2342,41 @@ const FieldSchedulePlannerPage: React.FC = () => {
                                 >
                                     오늘
                                 </button>
-                                <button
-                                    type="button"
-                                    onClick={handleCopyPreviousDay}
-                                    className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:bg-slate-50"
-                                >
-                                    <ClipboardCopy size={16} />
-                                    전날 가져오기
-                                </button>
+                                <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-1">
+                                    <span className="px-2 text-xs font-bold text-slate-500">복사일</span>
+                                    <input
+                                        type="date"
+                                        value={copySourceDate}
+                                        onChange={(event) => setCopySourceDate(event.target.value)}
+                                        className="h-9 w-[142px] rounded-md border-0 bg-transparent px-2 text-sm font-bold text-slate-800 outline-none"
+                                        aria-label="복사할 일정 날짜"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={handleCopyScheduleFromDate}
+                                        disabled={copyingSchedule || !copySourceDate}
+                                        className="flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-bold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:text-slate-300"
+                                        title="선택한 날짜 일정 복사"
+                                    >
+                                        <ClipboardCopy size={16} />
+                                        {copyingSchedule ? '복사 중' : '복사'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handlePasteScheduleClipboard}
+                                        disabled={!scheduleClipboard || copyingSchedule || loading}
+                                        className="flex h-9 items-center gap-1.5 rounded-md px-3 text-sm font-bold text-blue-700 hover:bg-white disabled:cursor-not-allowed disabled:text-slate-300"
+                                        title={scheduleClipboard ? `${scheduleClipboard.sourceDate} 일정 붙여넣기` : '복사된 일정 없음'}
+                                    >
+                                        <ClipboardPaste size={16} />
+                                        붙여넣기
+                                    </button>
+                                </div>
+                                {scheduleClipboard ? (
+                                    <span className="flex h-10 items-center rounded-lg bg-blue-50 px-3 text-xs font-bold text-blue-700">
+                                        {scheduleClipboard.sourceDate} 복사됨
+                                    </span>
+                                ) : null}
                                 <button
                                     type="button"
                                     onClick={() => setBoardViewMode((prev) => !prev)}
@@ -2699,6 +2782,4 @@ const FieldSchedulePlannerPage: React.FC = () => {
             </DndContext>
         </div>
     );
-};
-
-export default FieldSchedulePlannerPage;
+}

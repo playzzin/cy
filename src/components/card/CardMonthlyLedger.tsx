@@ -81,15 +81,8 @@ const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, plac
 
 EditableCell.displayName = 'EditableCell';
 
-// ── 카테고리 목록 & 라벨 ──
+// ── 기존 카테고리 거래 합산용 목록 ──
 const CATEGORIES: CardTransactionCategory[] = ['FUEL', 'TOLL', 'MEAL', 'MATERIAL', 'OTHER'];
-const CATEGORY_LABELS: Record<CardTransactionCategory, string> = {
-    FUEL: '주유',
-    TOLL: '통행',
-    MEAL: '식대',
-    MATERIAL: '자재',
-    OTHER: '기타'
-};
 
 type CategoryAmounts = Record<CardTransactionCategory, number>;
 
@@ -345,16 +338,11 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         setCurrentDate(next);
     };
 
-    /** 셀 편집 완료 시 rows state 업데이트 */
-    const handleCellCommit = useCallback((index: number, category: CardTransactionCategory, numValue: number) => {
+    /** 총금액 편집 완료 시 rows state 업데이트 */
+    const handleTotalCommit = useCallback((index: number, numValue: number) => {
         setRows(prev => {
             const newRows = [...prev];
-            const row = { ...newRows[index] };
-            const amounts = { ...row.amounts, [category]: numValue };
-            const total = CATEGORIES.reduce((sum, cat) => sum + (amounts[cat] || 0), 0);
-            row.amounts = amounts;
-            row.total = total;
-            newRows[index] = row;
+            newRows[index] = { ...newRows[index], total: numValue };
             return newRows;
         });
         setIsDirty(true);
@@ -382,13 +370,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             );
             await Promise.all(deleteTasks);
 
-            // 2) 0이 아닌 카테고리에 대해 새 트랜잭션 생성
+            // 2) 카드별 총금액만 새 트랜잭션 생성
             const createTasks: Promise<string>[] = [];
             const monthFirstDay = `${yearMonth}-01`; // 월 1일 기준 날짜
 
             for (const row of rows) {
-                for (const cat of CATEGORIES) {
-                    const amount = row.amounts[cat];
+                const amount = row.total;
                     if (amount > 0) {
                         const label = `${row.card.name}(${row.card.last4})`;
                         createTasks.push(
@@ -397,13 +384,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 cardLabel: label,
                                 date: monthFirstDay,
                                 merchant: '월별대장',
-                                category: cat,
+                                category: 'OTHER',
                                 amount,
                                 memo: row.memo || undefined
                             })
                         );
                     }
-                }
             }
             await Promise.all(createTasks);
 
@@ -418,7 +404,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
     };
 
-    /** 카테고리별 총합 */
+    /** 총금액 합계 */
     const totals = useMemo(() => {
         const result = { ...emptyCategoryAmounts(), total: 0 };
         rows.forEach(r => {
@@ -500,7 +486,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="w-full text-sm min-w-[1750px]">
+                        <table className="w-full text-sm min-w-[1250px]">
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
@@ -508,12 +494,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 팀</th>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 개인</th>
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
-                                    {CATEGORIES.map(cat => (
-                                        <th key={cat} className="px-2 py-4 text-center w-28 border-l border-indigo-500">
-                                            {CATEGORY_LABELS[cat]}
-                                        </th>
-                                    ))}
-                                    <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
+                                    <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
                                     <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
                                 </tr>
                             </thead>
@@ -622,24 +603,16 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                 </div>
                                             </td>
 
-                                            {/* 카테고리별 금액 입력 */}
-                                            {CATEGORIES.map(cat => (
-                                                <EditableCell
-                                                    key={cat}
-                                                    value={row.amounts[cat]}
-                                                    onCommit={(numValue) => handleCellCommit(idx, cat, numValue)}
-                                                    tdClassName="p-1 border-r border-indigo-50/50 bg-white"
-                                                    className={`w-full text-right p-2 focus:outline-none transition rounded-lg text-sm
-                                                        text-slate-700 bg-transparent hover:bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-100
-                                                        ${row.amounts[cat] > 500000 ? 'text-red-500 font-extrabold' : ''}
-                                                    `}
-                                                />
-                                            ))}
-
-                                            {/* 합계 */}
-                                            <td className="px-4 py-3 border-r border-indigo-50 bg-indigo-50/30 group-hover:bg-indigo-50/60 text-right font-extrabold text-indigo-700 font-mono text-base">
-                                                {row.total.toLocaleString()}
-                                            </td>
+                                            {/* 총금액 입력 */}
+                                            <EditableCell
+                                                value={row.total}
+                                                onCommit={(numValue) => handleTotalCommit(idx, numValue)}
+                                                tdClassName="p-1 border-r border-indigo-50/50 bg-indigo-50/30 group-hover:bg-indigo-50/60"
+                                                className={`w-full text-right p-2 focus:outline-none transition rounded-lg text-base font-extrabold font-mono
+                                                    text-indigo-700 bg-transparent hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-100
+                                                    ${row.total > 500000 ? 'text-red-500' : ''}
+                                                `}
+                                            />
 
                                             {/* 메모 */}
                                             <td className="p-1">
@@ -656,7 +629,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                 })}
                                 {rows.length === 0 && (
                                     <tr>
-                                        <td colSpan={CATEGORIES.length + 6} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
                                                 <p>해당 월의 데이터가 없습니다.</p>
@@ -668,11 +641,6 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             <tfoot className="bg-slate-800 text-white font-bold text-sm tracking-wide sticky bottom-0 z-20 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
                                 <tr>
                                     <td colSpan={5} className="p-4 border-r border-slate-600 text-center">합계</td>
-                                    {CATEGORIES.map(cat => (
-                                        <td key={cat} className="p-4 border-r border-slate-600 text-right font-mono">
-                                            {totals[cat].toLocaleString()}
-                                        </td>
-                                    ))}
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                         {totals.total.toLocaleString()}
                                     </td>
@@ -692,7 +660,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                 <div>
                     <h4 className="font-bold text-amber-800 text-sm mb-1">입력 가이드</h4>
                     <p className="text-xs text-amber-700 leading-relaxed">
-                        * 각 셀을 클릭하여 금액을 직접 입력할 수 있습니다.<br />
+                        * 총금액 셀을 클릭하여 카드별 월 사용 금액을 직접 입력할 수 있습니다.<br />
                         * 50만 원을 초과하는 금액은 <strong className="text-rose-600">빨간색 굵은 글씨</strong>로 표시됩니다.<br />
                         * 모든 변경사항은 <strong>[전체 저장]</strong> 버튼을 눌러야 반영됩니다.
                     </p>

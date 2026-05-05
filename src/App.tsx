@@ -34,6 +34,8 @@ const RateChangePage = React.lazy(() => import('./pages/hr/RateChangePage'));
 const SupportSettingsPage = React.lazy(() => import('./pages/support/SupportSettingsPage'));
 const SupportStatusPage = React.lazy(() => import('./pages/support/SupportStatusPage'));
 const WorkerSummaryPage = React.lazy(() => import('./pages/manpower/WorkerSummaryPage'));
+const TeamWorkerDetailPage = React.lazy(() => import('./pages/manpower/TeamWorkerDetailPage'));
+const SiteResponsibleDetailPage = React.lazy(() => import('./pages/manpower/SiteResponsibleDetailPage'));
 const MaterialManagementPage = React.lazy(() => import('./pages/materials/MaterialManagementPage'));
 const MaterialMasterPage = React.lazy(() => import('./pages/materials/MaterialMasterPage'));
 const MaterialInboundPage = React.lazy(() => import('./pages/materials/MaterialInboundPage'));
@@ -78,6 +80,8 @@ const TeamSettlementPage = React.lazy(() => import('./pages/payroll/TeamSettleme
 const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
 const ExpenseLedgerPage = React.lazy(() => import('./pages/support/ExpenseLedgerPage'));
+const ExpenseClaimManagementPage = React.lazy(() => import('./pages/support/ExpenseClaimManagementPage'));
+const TeamResourceDetailPage = React.lazy(() => import('./pages/support/TeamResourceDetailPage'));
 const TeamBasedPaymentDraftPage = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPage'));
 const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPageV2'));
 const EmploymentCertificatePage = React.lazy(() => import('./pages/hr/EmploymentCertificatePage'));
@@ -241,6 +245,9 @@ const App: React.FC = () => {
               <Route path="smart-team-registration" element={<SmartTeamRegistrationPage />} />
               <Route path="smart-site-registration" element={<SmartSiteRegistrationPage />} />
               <Route path="summary" element={<WorkerSummaryPage />} />
+              <Route path="team-worker-detail" element={<TeamWorkerDetailPage />} />
+              <Route path="site-responsible-detail" element={<SiteResponsibleDetailPage />} />
+              <Route path="site-manager-detail" element={<SiteResponsibleDetailPage />} />
               <Route path="freelancer" element={<FreelancerPage />} />
             </Route>
 
@@ -386,6 +393,10 @@ const App: React.FC = () => {
             <Route path="/support/vehicles" element={<SupportManagerPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
             <Route path="/support/expense-ledger" element={<ExpenseLedgerPage />} />
+            <Route path="/support/expense-claims" element={<ExpenseClaimManagementPage />} />
+            <Route path="/support/expense-claim-input" element={<ExpenseClaimManagementPage />} />
+            <Route path="/support/team-resource-detail" element={<TeamResourceDetailPage />} />
+            <Route path="/support/team-resources" element={<TeamResourceDetailPage />} />
 
             <Route path="/hr/certificate" element={<EmploymentCertificatePage />} />
             <Route path="/hr/termination-certificate" element={<TerminationCertificatePage />} />

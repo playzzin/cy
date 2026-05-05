@@ -1,0 +1,246 @@
+.trd-page .tw-toolbar {
+    grid-template-columns: minmax(150px, 190px) minmax(260px, 1fr) minmax(140px, 170px) minmax(150px, 180px);
+}
+
+.trd-page .tw-view-tabs {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.trd-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.trd-detail-menu {
+    display: grid;
+    gap: 8px;
+}
+
+.trd-detail-menu__item {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 66px;
+    padding: 10px;
+    border: 1px solid #e7ecf3;
+    border-radius: 8px;
+    background: #fff;
+    color: #0f172a;
+    text-align: left;
+    transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.trd-detail-menu__item:hover:not(:disabled) {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+}
+
+.trd-detail-menu__item--active {
+    border-color: color-mix(in srgb, var(--team-color, #2563eb) 45%, #dbeafe);
+    background: color-mix(in srgb, var(--team-color, #2563eb) 8%, #ffffff);
+    box-shadow: inset 4px 0 0 var(--team-color, #2563eb), 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.trd-detail-menu__item:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.trd-detail-menu__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.trd-detail-menu__item--active .trd-detail-menu__icon {
+    background: var(--team-color, #2563eb);
+    color: #fff;
+}
+
+.trd-detail-menu__body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.trd-detail-menu__body strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.trd-detail-menu__body small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.trd-detail-menu__meta {
+    color: #334155;
+    font-size: 12px;
+    font-weight: 900;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.trd-detail-menu__item--active .trd-detail-menu__meta {
+    color: var(--team-color, #2563eb);
+}
+
+.trd-summary-list {
+    display: grid;
+    gap: 8px;
+}
+
+.trd-summary-list div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+    padding: 9px 11px;
+    border: 1px solid #e7ecf3;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.trd-summary-list span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.trd-summary-list strong {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 900;
+    text-align: right;
+}
+
+.trd-summary-list__total {
+    border-color: #bfdbfe !important;
+    background: #eff6ff !important;
+}
+
+.trd-summary-list__total span,
+.trd-summary-list__total strong {
+    color: #1d4ed8;
+}
+
+.trd-wide-section {
+    grid-column: span 2;
+    margin-top: 0;
+}
+
+.trd-tab-stack {
+    display: grid;
+    gap: 12px;
+}
+
+.trd-tab-stack .tw-output-section {
+    margin-top: 0;
+}
+
+.trd-ledger-table {
+    min-width: 980px;
+    table-layout: fixed;
+}
+
+.trd-ledger-table th {
+    color: #1f2937;
+    background: #eef2ff;
+}
+
+.trd-ledger-table td {
+    height: 40px;
+}
+
+.trd-ledger-table .tw-truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.trd-source-badge,
+.trd-expense-direction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 0 9px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 11px;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.trd-source-badge--숙소 {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.trd-source-badge--차량 {
+    border-color: #bbf7d0;
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.trd-source-badge--카드 {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #b45309;
+}
+
+.trd-source-badge--경비 {
+    border-color: #fecaca;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.trd-expense-direction {
+    border-color: #d8b4fe;
+    background: #faf5ff;
+    color: #7e22ce;
+}
+
+@media (max-width: 1180px) {
+    .trd-page .tw-toolbar,
+    .trd-stat-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 980px) {
+    .trd-page .tw-toolbar,
+    .trd-page .tw-view-tabs,
+    .trd-stat-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .trd-wide-section {
+        grid-column: auto;
+    }
+}
+
+@media print {
+    .trd-page .tw-view-tabs {
+        display: none !important;
+    }
+}

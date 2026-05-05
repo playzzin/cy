@@ -125,6 +125,15 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\ubc95\uc778\uce74\ub4dc \uad00\ub9ac": "/support/cards",
     "\uacbd\ube44\ub0b4\uc5ed": "/support/expense-ledger",
     "\uacbd\ube44 \ub0b4\uc5ed": "/support/expense-ledger",
+    "후청구 입력": "/support/expense-claims",
+    "후청구 관리": "/support/expense-claims",
+    "경비청구 입력": "/support/expense-claims",
+    "경비 청구 등록": "/support/expense-claims",
+    "팀별 지원 상세": "/support/team-resource-detail",
+    "팀별 지원내역": "/support/team-resource-detail",
+    "팀별 배정 지원": "/support/team-resource-detail",
+    "팀별 숙소 차량 카드 경비": "/support/team-resource-detail",
+    "팀별 숙소/차량/카드/경비": "/support/team-resource-detail",
 
     "\uccad\uc5f0ERP \uc124\uba85\uc11c": "/manual",
     "\ud648\ud398\uc774\uc9c0 \uc0ac\uc6a9\ubc95": "/manual",
@@ -195,6 +204,14 @@ export const MENU_PATHS: { [key: string]: string } = {
     // \uad00\ub9ac\uc790 \uba54\ub274
     "\ud300 \uad00\ub9ac": "/manpower/team-management",
     '\uc791\uc5c5\uc790 \uc694\uc57d': '/manpower/summary',
+    "\ud300\ubcc4 \uc791\uc5c5\uc790 \uc0c1\uc138": "/manpower/team-worker-detail",
+    "\ud300\ubcc4 \uc791\uc5c5\uc790 \uc0c1\uc138\ucd9c\ub825\uc815\ubcf4": "/manpower/team-worker-detail",
+    "\uc791\uc5c5\uc790 \uc0c1\uc138\ucd9c\ub825\uc815\ubcf4": "/manpower/team-worker-detail",
+    "\uc791\uc5c5\uc790 \ucd9c\ub825 \uc0c1\uc138": "/manpower/team-worker-detail",
+    "현장담당별 현장 상세": "/manpower/site-responsible-detail",
+    "현장담당별 현장": "/manpower/site-responsible-detail",
+    "현장별 노임명세서 출력일보": "/manpower/site-responsible-detail",
+    "현장 노임명세서 출력일보": "/manpower/site-responsible-detail",
 
     // \ud14c\uc2a4\ud2b8 \uba54\ub274
     "Smart Excel": "/report/excel",

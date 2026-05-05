@@ -211,10 +211,11 @@ const Header: React.FC<HeaderProps> = ({
                 return {
                     key: `${item.id || item.text || index}`,
                     label: item.text,
-                    path: path,
-                    children: children
+                    path,
+                    children,
                 };
             })
+            .filter((item: CheongyeonNavSection) => !!item.path || item.children.length > 0)
         : [];
 
     const handleTopNavRoute = (path: string) => {
@@ -235,12 +236,16 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <header id="main-header" style={headerStyle} className={isSiteLayerMode ? 'cheongyeon-header' : ''}>
             <div className="header-left-group">
+                <button className="header-btn" id="sidebar-toggle" onClick={toggleSidebar} aria-label="메뉴 토글">
+                    <FontAwesomeIcon icon={faBars} />
+                </button>
+
                 {isSiteLayerMode && (
                     <button
                         type="button"
                         className="cheongyeon-header-logo"
-                        onClick={toggleSidebar}
-                        aria-label="메뉴 토글"
+                        onClick={() => navigate(siteLandingPath)}
+                        aria-label="청연 메인으로 이동"
                     >
                         {logoUrl ? (
                             <img
@@ -257,7 +262,7 @@ const Header: React.FC<HeaderProps> = ({
                     </button>
                 )}
 
-                <div className="mobile-logo-area" onClick={toggleSidebar} style={{ cursor: 'pointer' }} aria-label="메뉴 토글">
+                <div className="mobile-logo-area">
                     {logoUrl ? (
                         <img 
                             src={logoUrl} 
@@ -273,6 +278,8 @@ const Header: React.FC<HeaderProps> = ({
 
             {isSiteLayerMode && (
                 <nav
+                    className="cheongyeon-top-nav"
+                    onMouseEnter={clearTopNavCloseTimer}
                     onMouseLeave={handleTopNavMouseLeave}
                 >
                     {cheongyeonTopNav.map((section) => (

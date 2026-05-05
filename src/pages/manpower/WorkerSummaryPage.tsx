@@ -171,7 +171,7 @@ const SummaryCard = styled.div`
     display: flex;
     flex-direction: column;
     height: 100%;
-    max-height: 800px;
+    max-height: 1120px;
     border: 1px solid #e9ecef;
 `;
 

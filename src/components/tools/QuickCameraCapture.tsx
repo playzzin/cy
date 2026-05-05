@@ -9,6 +9,11 @@ type Rect = {
     height: number;
 };
 
+type Point = {
+    x: number;
+    y: number;
+};
+
 type CaptureHistoryItem = {
     id: string;
     blob: Blob;
@@ -20,20 +25,47 @@ type CaptureHistoryItem = {
 
 type CaptureMode = 'screen' | 'scroll';
 
+type ScrollCaptureRange = {
+    left: number;
+    width: number;
+    topContentY: number;
+    bottomContentY: number;
+    startScrollTop: number;
+    endScrollTop: number;
+};
+
 type ScrollCapturePlan = {
     target: HTMLElement | null;
     captureRect: Rect;
     movingRect: Rect;
     initialScrollTop: number;
+    restoreScrollTop: number;
     maxScrollTop: number;
     scrollStepCss: number;
     canScroll: boolean;
     estimatedSteps: number;
+    range?: ScrollCaptureRange;
+};
+
+type ScrollSelectionAnchor = {
+    point: Point;
+    target: HTMLElement | null;
+    scrollTop: number;
+    contentY: number;
 };
 
 const MIN_SIZE = 12;
 const CAPTURE_EXCLUDE_SELECTOR = '[data-capture-exclude="true"]';
 const CAPTURE_OVERLAY_SELECTOR = '[data-capture-overlay="true"]';
+const SCROLL_CAPTURE_OVERLAP_CSS = 24;
+const MAX_SCROLL_CAPTURE_STEPS = 2000;
+const MAX_SCROLL_CAPTURE_CANVAS_HEIGHT = 30000;
+const MAX_SCROLL_CAPTURE_CANVAS_AREA = 120_000_000;
+const OVERLAP_MATCH_MIN_SOURCE_PX = 12;
+const OVERLAP_MATCH_MAX_SOURCE_PX = 180;
+const OVERLAP_MATCH_SEARCH_RADIUS_SOURCE_PX = 36;
+const OVERLAP_MATCH_SAMPLE_STEP = 4;
+const OVERLAP_MATCH_SCORE_THRESHOLD = 90;
 
 const clampPointToViewport = (x: number, y: number) => {
     const maxX = Math.max(0, window.innerWidth);
@@ -194,6 +226,105 @@ const cropVideoFrameToCanvas = (
     return canvas;
 };
 
+const getSafeScrollCanvasScale = (sourceWidth: number, sourceHeight: number): number => {
+    if (sourceWidth < 1 || sourceHeight < 1) return 1;
+
+    const heightScale = MAX_SCROLL_CAPTURE_CANVAS_HEIGHT / sourceHeight;
+    const areaScale = Math.sqrt(MAX_SCROLL_CAPTURE_CANVAS_AREA / (sourceWidth * sourceHeight));
+    return Math.min(1, heightScale, areaScale);
+};
+
+const getMatchedScrollOverlapSourcePx = (
+    previousCanvas: HTMLCanvasElement,
+    currentCanvas: HTMLCanvasElement,
+    expectedOverlapSourcePx: number
+): number => {
+    const expected = Math.round(Math.max(0, Math.min(
+        expectedOverlapSourcePx,
+        previousCanvas.height,
+        Math.max(0, currentCanvas.height - 1)
+    )));
+
+    if (expected < OVERLAP_MATCH_MIN_SOURCE_PX) {
+        return expected;
+    }
+
+    const width = Math.min(previousCanvas.width, currentCanvas.width);
+    if (width < 8) {
+        return expected;
+    }
+
+    const minCandidate = Math.max(
+        OVERLAP_MATCH_MIN_SOURCE_PX,
+        expected - OVERLAP_MATCH_SEARCH_RADIUS_SOURCE_PX
+    );
+    const maxCandidate = Math.min(
+        OVERLAP_MATCH_MAX_SOURCE_PX,
+        previousCanvas.height,
+        Math.max(0, currentCanvas.height - 1),
+        expected + OVERLAP_MATCH_SEARCH_RADIUS_SOURCE_PX
+    );
+
+    if (maxCandidate < minCandidate) {
+        return expected;
+    }
+
+    const sampleWidth = Math.min(width, 480);
+    const sampleX = Math.max(0, Math.floor((width - sampleWidth) / 2));
+    const previousCtx = previousCanvas.getContext('2d', { willReadFrequently: true });
+    const currentCtx = currentCanvas.getContext('2d', { willReadFrequently: true });
+
+    if (!previousCtx || !currentCtx) {
+        return expected;
+    }
+
+    try {
+        const previousData = previousCtx.getImageData(
+            sampleX,
+            previousCanvas.height - maxCandidate,
+            sampleWidth,
+            maxCandidate
+        ).data;
+        const currentData = currentCtx.getImageData(sampleX, 0, sampleWidth, maxCandidate).data;
+
+        let bestCandidate = expected;
+        let bestRawScore = Number.POSITIVE_INFINITY;
+        let bestAdjustedScore = Number.POSITIVE_INFINITY;
+
+        for (let candidate = minCandidate; candidate <= maxCandidate; candidate += 1) {
+            let total = 0;
+            let samples = 0;
+
+            for (let y = 0; y < candidate; y += OVERLAP_MATCH_SAMPLE_STEP) {
+                const previousRow = maxCandidate - candidate + y;
+                const currentRow = y;
+
+                for (let x = 0; x < sampleWidth; x += OVERLAP_MATCH_SAMPLE_STEP) {
+                    const previousIndex = (previousRow * sampleWidth + x) * 4;
+                    const currentIndex = (currentRow * sampleWidth + x) * 4;
+                    total += Math.abs(previousData[previousIndex] - currentData[currentIndex]);
+                    total += Math.abs(previousData[previousIndex + 1] - currentData[currentIndex + 1]);
+                    total += Math.abs(previousData[previousIndex + 2] - currentData[currentIndex + 2]);
+                    samples += 1;
+                }
+            }
+
+            const rawScore = total / Math.max(1, samples);
+            const adjustedScore = rawScore + Math.abs(candidate - expected) * 0.15;
+
+            if (adjustedScore < bestAdjustedScore) {
+                bestAdjustedScore = adjustedScore;
+                bestRawScore = rawScore;
+                bestCandidate = candidate;
+            }
+        }
+
+        return bestRawScore <= OVERLAP_MATCH_SCORE_THRESHOLD ? bestCandidate : expected;
+    } catch {
+        return expected;
+    }
+};
+
 const isScrollableElement = (el: HTMLElement) => {
     const style = window.getComputedStyle(el);
     const overflowY = style.overflowY;
@@ -350,6 +481,7 @@ const resolveScrollCapturePlan = (rect: Rect, preferredTarget: HTMLElement | nul
         captureRect,
         movingRect,
         initialScrollTop,
+        restoreScrollTop: initialScrollTop,
         maxScrollTop,
         scrollStepCss,
         canScroll,
@@ -365,11 +497,96 @@ const scrollElementTo = (target: HTMLElement, top: number) => {
     target.scrollTop = top;
 };
 
+const getScrollTop = (target: HTMLElement | null): number => {
+    return target?.scrollTop ?? 0;
+};
+
+const getMaxScrollTop = (target: HTMLElement | null): number => {
+    if (!target) return 0;
+    return Math.max(0, target.scrollHeight - target.clientHeight);
+};
+
+const getContentYForViewportPoint = (target: HTMLElement, y: number): number => {
+    const targetRect = getVisibleRectForScrollableTarget(target);
+    const clampedY = Math.min(
+        targetRect.top + targetRect.height,
+        Math.max(targetRect.top, y)
+    );
+
+    return getScrollTop(target) + Math.max(0, clampedY - targetRect.top);
+};
+
+const resolveScrollRangeCapturePlan = (anchor: ScrollSelectionAnchor, endPoint: Point): ScrollCapturePlan => {
+    const target = anchor.target ?? findScrollableTargetFromPoint(endPoint.x, endPoint.y);
+
+    if (!target) {
+        return resolveScrollCapturePlan(buildRect(anchor.point, endPoint), null);
+    }
+
+    const targetRect = getVisibleRectForScrollableTarget(target);
+    const endScrollTop = getScrollTop(target);
+    const startContentY = anchor.target === target
+        ? anchor.contentY
+        : getContentYForViewportPoint(target, anchor.point.y);
+    const endContentY = getContentYForViewportPoint(target, endPoint.y);
+    const topContentY = Math.min(startContentY, endContentY);
+    const bottomContentY = Math.max(startContentY, endContentY);
+    const left = Math.max(0, Math.min(anchor.point.x, endPoint.x));
+    const right = Math.min(window.innerWidth, Math.max(anchor.point.x, endPoint.x));
+    const width = Math.max(0, right - left);
+    const maxScrollTop = getMaxScrollTop(target);
+    const anchorScrollTop = anchor.target === target ? anchor.scrollTop : getScrollTop(target);
+    const initialScrollTop = Math.max(0, Math.min(maxScrollTop, Math.min(anchorScrollTop, endScrollTop, topContentY)));
+    const firstVisibleBottom = Math.min(bottomContentY, initialScrollTop + targetRect.height);
+    const firstTop = targetRect.top + Math.max(0, topContentY - initialScrollTop);
+    const firstHeight = Math.max(1, firstVisibleBottom - topContentY);
+    const captureRect = {
+        left,
+        top: Math.min(targetRect.top + targetRect.height, Math.max(targetRect.top, firstTop)),
+        width,
+        height: Math.min(targetRect.height, firstHeight)
+    };
+    const movingRect = intersectRects(captureRect, targetRect) ?? captureRect;
+    const rangeHeight = bottomContentY - topContentY;
+    const scrollStepCss = Math.max(1, Math.floor(targetRect.height));
+    const canScroll = target.scrollHeight > target.clientHeight + 1 && rangeHeight >= MIN_SIZE;
+    const estimatedSteps = canScroll
+        ? Math.max(1, 1 + Math.ceil(Math.max(0, bottomContentY - (initialScrollTop + targetRect.height)) / scrollStepCss))
+        : 1;
+
+    return {
+        target,
+        captureRect,
+        movingRect,
+        initialScrollTop,
+        restoreScrollTop: endScrollTop,
+        maxScrollTop,
+        scrollStepCss,
+        canScroll,
+        estimatedSteps,
+        range: {
+            left,
+            width,
+            topContentY,
+            bottomContentY,
+            startScrollTop: initialScrollTop,
+            endScrollTop
+        }
+    };
+};
+
 const getStartSelectionMessage = (mode: CaptureMode) => {
     if (mode === 'scroll') {
         return '스크롤되는 내용 영역을 드래그하세요. 저장할 때는 반드시 현재 브라우저 탭을 선택해야 합니다. (ESC 취소)';
     }
     return '화면에서 원하는 영역을 드래그하세요. (ESC 취소)';
+};
+
+const getSelectionPromptMessage = (mode: CaptureMode) => {
+    if (mode === 'scroll') {
+        return '\uc2dc\uc791\uc810\uc744 \ud074\ub9ad\ud55c \ub4a4 \uc2a4\ud06c\ub864\ud558\uace0, \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ud074\ub9ad\ud558\uc138\uc694. \uc800\uc7a5\ud560 \ub54c\ub294 \ud604\uc7ac \ube0c\ub77c\uc6b0\uc800 \ud0ed\uc744 \uc120\ud0dd\ud574\uc57c \ud569\ub2c8\ub2e4. (ESC \ucde8\uc18c)';
+    }
+    return '\ud654\uba74\uc5d0\uc11c \uc6d0\ud558\ub294 \uc601\uc5ed\uc744 \ub4dc\ub798\uadf8\ud558\uc138\uc694. (ESC \ucde8\uc18c)';
 };
 
 const waitForVideoReady = (video: HTMLVideoElement): Promise<void> => {
@@ -417,21 +634,29 @@ const QuickCameraCapture: React.FC = () => {
     const [processingStatusText, setProcessingStatusText] = useState<string>('');
     const [isSuccess, setIsSuccess] = useState<boolean | null>(null);
     const [captureHistory, setCaptureHistory] = useState<CaptureHistoryItem[]>([]);
+    const [scrollAnchorPoint, setScrollAnchorPoint] = useState<Point | null>(null);
 
     const rootRef = useRef<HTMLDivElement>(null);
+    const selectionOverlayRef = useRef<HTMLDivElement>(null);
     const dragStartRef = useRef<{ x: number; y: number } | null>(null);
     const draggingRef = useRef(false);
+    const scrollSelectionAnchorRef = useRef<ScrollSelectionAnchor | null>(null);
     const selectionScrollTargetRef = useRef<HTMLElement | null>(null);
     const hiddenPanelRestoreRef = useRef<(() => void) | null>(null);
     const scrollCapturePlanRef = useRef<ScrollCapturePlan | null>(null);
     const abortProcessingRef = useRef(false);
     const activeStreamRef = useRef<MediaStream | null>(null);
     const activeVideoRef = useRef<HTMLVideoElement | null>(null);
+    const cursorPointRef = useRef<Point | null>(null);
 
     const clearProcessingGuide = useCallback(() => {
         abortProcessingRef.current = false;
         setProcessingStatusText('');
     }, []);
+
+    useEffect(() => {
+        cursorPointRef.current = cursorPoint;
+    }, [cursorPoint]);
 
     const stopActiveCaptureResources = useCallback(() => {
         if (activeVideoRef.current) {
@@ -481,24 +706,28 @@ const QuickCameraCapture: React.FC = () => {
         setIsSelecting(false);
         draggingRef.current = false;
         dragStartRef.current = null;
+        scrollSelectionAnchorRef.current = null;
         selectionScrollTargetRef.current = null;
         scrollCapturePlanRef.current = null;
         restoreHiddenPanel();
         setSelectionRect(null);
         setCursorPoint(null);
+        setScrollAnchorPoint(null);
         clearProcessingGuide();
     };
 
     const startSelection = () => {
         hideHostPanel();
-        setMessage(getStartSelectionMessage(captureMode));
+        setMessage(getSelectionPromptMessage(captureMode));
         setIsSuccess(null);
         draggingRef.current = false;
         dragStartRef.current = null;
+        scrollSelectionAnchorRef.current = null;
         selectionScrollTargetRef.current = null;
         scrollCapturePlanRef.current = null;
         setSelectionRect(null);
         setCursorPoint(null);
+        setScrollAnchorPoint(null);
         clearProcessingGuide();
         setIsSelecting(true);
     };
@@ -517,11 +746,29 @@ const QuickCameraCapture: React.FC = () => {
     }, [restoreHiddenPanel, stopActiveCaptureResources]);
 
     useEffect(() => {
+        if (isSelecting || isProcessing) return;
+
+        const host = rootRef.current?.closest<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR);
+        if (!host || hiddenPanelRestoreRef.current) return;
+
+        if (host.style.pointerEvents === 'none') {
+            host.style.pointerEvents = '';
+        }
+        if (host.style.visibility === 'hidden') {
+            host.style.visibility = '';
+        }
+        if (host.style.opacity === '0') {
+            host.style.opacity = '';
+        }
+    }, [isProcessing, isSelecting]);
+
+    useEffect(() => {
+        scrollSelectionAnchorRef.current = null;
+        setScrollAnchorPoint(null);
         if (captureMode === 'scroll') {
-            setMessage('스크롤 방식은 선택한 영역 기준으로 아래까지 이어붙입니다. 저장할 때는 현재 브라우저 탭을 선택해야 합니다.');
+            setMessage(getSelectionPromptMessage('scroll'));
             return;
         }
-
         scrollCapturePlanRef.current = null;
         setMessage('기본 화면방식은 현재 탭의 실제 화면 픽셀을 기준으로 캡처합니다.');
     }, [captureMode]);
@@ -634,6 +881,12 @@ const QuickCameraCapture: React.FC = () => {
         } catch (error) {
             if (error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'AbortError')) {
                 setMessage('화면 공유 선택이 취소되었습니다.');
+            } else if (error instanceof Error && error.message === 'selection-too-small') {
+                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98 \uad6c\uac04\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+            } else if (error instanceof Error && error.message === 'empty-scroll-range') {
+                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98\ud560 \ud654\uba74 \uad6c\uac04\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uc744 \ub2e4\uc2dc \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+            } else if (error instanceof Error && error.message === 'scroll-range-too-long') {
+                setMessage('\uc120\ud0dd\ud55c \uc2a4\ud06c\ub864 \uad6c\uac04\uc774 \ub108\ubb34 \uae38\uc5b4 \uc911\ub2e8\ud588\uc2b5\ub2c8\ub2e4. \uad6c\uac04\uc744 \ub098\ub220\uc11c \ucea1\ucc98\ud574 \uc8fc\uc138\uc694.');
             } else if (error instanceof Error && error.message === 'unsupported') {
                 setMessage('이 브라우저는 화면 캡처 API를 지원하지 않습니다.');
             } else {
@@ -721,6 +974,164 @@ const QuickCameraCapture: React.FC = () => {
                     : '스크롤 대상이 없어 현재 화면만 캡처하는 중입니다.'
             );
             await waitForCapturedFrame(video);
+
+            if (plan.range && plan.target) {
+                const scrollTarget = plan.target;
+                const range = plan.range;
+                const rangeHeightCss = range.bottomContentY - range.topContentY;
+
+                if (range.width < MIN_SIZE || rangeHeightCss < MIN_SIZE) {
+                    throw new Error('selection-too-small');
+                }
+
+                scrollElementTo(scrollTarget, Math.min(plan.maxScrollTop, Math.max(0, range.startScrollTop)));
+                await waitNextPaint();
+                await waitForCapturedFrame(video);
+
+                const targetRectForScale = getVisibleRectForScrollableTarget(scrollTarget);
+                const scaleProbe = getVideoSourceRect(video, {
+                    left: range.left,
+                    top: targetRectForScale.top,
+                    width: range.width,
+                    height: Math.min(1, Math.max(1, targetRectForScale.height))
+                });
+                const sourceWidth = Math.max(1, scaleProbe.sourceW);
+                const sourceHeight = Math.max(1, Math.round(rangeHeightCss * scaleProbe.scaleY));
+                const outputScale = getSafeScrollCanvasScale(sourceWidth, sourceHeight);
+                const stitchedCanvas = document.createElement('canvas');
+                stitchedCanvas.width = Math.max(1, Math.round(sourceWidth * outputScale));
+                stitchedCanvas.height = Math.max(1, Math.round(sourceHeight * outputScale));
+                const stitchedCtx = stitchedCanvas.getContext('2d');
+                if (!stitchedCtx) {
+                    throw new Error('canvas-context-failed');
+                }
+
+                let capturedUntilContentY = range.topContentY;
+                let currentScrollTop = getScrollTop(scrollTarget);
+                let outputOffsetY = 0;
+                let loopCount = 0;
+                let previousSegmentCanvas: HTMLCanvasElement | null = null;
+                const maxLoopCount = Math.min(
+                    MAX_SCROLL_CAPTURE_STEPS,
+                    Math.max(12, plan.estimatedSteps + 8)
+                );
+
+                while (capturedUntilContentY < range.bottomContentY - 0.5 && loopCount < maxLoopCount) {
+                    ensureNotAborted(track);
+                    loopCount += 1;
+
+                    const targetRect = getVisibleRectForScrollableTarget(scrollTarget);
+                    const visibleTopContentY = currentScrollTop;
+                    const visibleBottomContentY = currentScrollTop + targetRect.height;
+                    const segmentTopContentY = Math.max(
+                        range.topContentY,
+                        visibleTopContentY
+                    );
+                    const segmentBottomContentY = Math.min(range.bottomContentY, visibleBottomContentY);
+                    const segmentHeightCss = segmentBottomContentY - segmentTopContentY;
+
+                    if (segmentHeightCss >= 0.5 && segmentBottomContentY > capturedUntilContentY + 0.2) {
+                        const segmentRect = {
+                            left: range.left,
+                            top: targetRect.top + (segmentTopContentY - currentScrollTop),
+                            width: range.width,
+                            height: segmentHeightCss
+                        };
+                        const segmentCrop = getVideoSourceRect(video, segmentRect);
+                        const segmentCanvas = cropVideoFrameToCanvas(video, segmentCrop);
+                        const expectedOverlapSourcePx = previousSegmentCanvas
+                            ? Math.round(Math.max(0, capturedUntilContentY - segmentTopContentY) * segmentCrop.scaleY)
+                            : 0;
+                        const skipTopSourcePx = previousSegmentCanvas
+                            ? getMatchedScrollOverlapSourcePx(
+                                previousSegmentCanvas,
+                                segmentCanvas,
+                                expectedOverlapSourcePx
+                            )
+                            : 0;
+                        const drawableSourceHeight = Math.max(0, segmentCanvas.height - skipTopSourcePx);
+                        const isLastSegment = segmentBottomContentY >= range.bottomContentY - 0.5;
+                        const remainingHeight = stitchedCanvas.height - outputOffsetY;
+                        const destHeight = isLastSegment
+                            ? remainingHeight
+                            : Math.min(
+                                remainingHeight,
+                                Math.max(1, Math.round(drawableSourceHeight * outputScale))
+                            );
+
+                        if (destHeight > 0 && drawableSourceHeight > 0) {
+                            stitchedCtx.drawImage(
+                                segmentCanvas,
+                                0,
+                                skipTopSourcePx,
+                                segmentCanvas.width,
+                                drawableSourceHeight,
+                                0,
+                                outputOffsetY,
+                                stitchedCanvas.width,
+                                destHeight
+                            );
+                            outputOffsetY += destHeight;
+                        }
+
+                        previousSegmentCanvas = segmentCanvas;
+                        capturedUntilContentY = Math.max(capturedUntilContentY, segmentBottomContentY);
+                        const progressPercent = Math.min(
+                            100,
+                            Math.max(1, Math.round(((capturedUntilContentY - range.topContentY) / rangeHeightCss) * 100))
+                        );
+                        setProcessingStatusText(`\uc2a4\ud06c\ub864 \uad6c\uac04 \ucea1\ucc98 \uc911 ${progressPercent}%`);
+                    }
+
+                    if (capturedUntilContentY >= range.bottomContentY - 0.5) {
+                        break;
+                    }
+
+                    const nextScrollTop = Math.min(
+                        plan.maxScrollTop,
+                        Math.max(currentScrollTop + 1, capturedUntilContentY - SCROLL_CAPTURE_OVERLAP_CSS)
+                    );
+                    if (nextScrollTop <= currentScrollTop + 0.5) {
+                        break;
+                    }
+
+                    scrollElementTo(scrollTarget, nextScrollTop);
+                    await waitNextPaint();
+                    await waitForCapturedFrame(video);
+
+                    const actualScrollTop = getScrollTop(scrollTarget);
+                    if (actualScrollTop <= currentScrollTop + 0.5) {
+                        break;
+                    }
+
+                    currentScrollTop = actualScrollTop;
+                }
+
+                if (capturedUntilContentY < range.bottomContentY - 0.5) {
+                    throw new Error('scroll-range-too-long');
+                }
+
+                if (outputOffsetY <= 0 || stitchedCanvas.width <= 0 || stitchedCanvas.height <= 0) {
+                    throw new Error('empty-scroll-range');
+                }
+
+                const blob = await toPngBlob(stitchedCanvas);
+                pushCaptureHistory(blob, stitchedCanvas.width, stitchedCanvas.height);
+
+                if (await copyBlobToClipboard(blob)) {
+                    setMessage(outputScale < 1
+                        ? `\uad6c\uac04\uc774 \uae38\uc5b4 \uc804\uccb4\uac00 \ub4e4\uc5b4\uac00\ub3c4\ub85d ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.`
+                        : '\uc2dc\uc791\uc810\ubd80\ud130 \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uae4c\uc9c0 \uc774\uc5b4\ubd99\uc5ec \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.');
+                    setIsSuccess(true);
+                } else {
+                    saveBlobAsFile(blob, `capture-scroll-${Date.now()}.png`);
+                    setMessage(outputScale < 1
+                        ? `\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uae34 \uad6c\uac04\uc744 ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.`
+                        : '\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uc2a4\ud06c\ub864 \ucea1\ucc98\ub97c PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.');
+                    setIsSuccess(true);
+                }
+                return;
+            }
 
             const crop = getVideoSourceRect(video, captureRect);
             const firstCanvas = cropVideoFrameToCanvas(video, crop);
@@ -828,6 +1239,10 @@ const QuickCameraCapture: React.FC = () => {
                 setMessage('스크롤 방식은 공유 창에서 반드시 현재 브라우저 탭을 선택해야 합니다.');
             } else if (error instanceof Error && error.message === 'scroll-tab-hidden') {
                 setMessage('스크롤 방식은 현재 탭이 활성화된 상태에서만 저장할 수 있습니다. 현재 탭을 다시 선택해 주세요.');
+            } else if (error instanceof Error && error.message === 'selection-too-small') {
+                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98 \uad6c\uac04\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+            } else if (error instanceof Error && error.message === 'empty-scroll-range') {
+                setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98\ud560 \ud654\uba74 \uad6c\uac04\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uc744 \ub2e4\uc2dc \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
             } else if (error instanceof Error && error.message === 'unsupported') {
                 setMessage('이 브라우저는 화면 캡처 API를 지원하지 않습니다.');
             } else {
@@ -836,7 +1251,7 @@ const QuickCameraCapture: React.FC = () => {
             setIsSuccess(false);
         } finally {
             if (plan.target) {
-                scrollElementTo(plan.target, plan.initialScrollTop);
+                scrollElementTo(plan.target, plan.restoreScrollTop);
             }
             restoreExcludedRoots?.();
             stopActiveCaptureResources();
@@ -881,11 +1296,99 @@ const QuickCameraCapture: React.FC = () => {
         e.preventDefault();
         const start = clampPointToViewport(e.clientX, e.clientY);
         setCursorPoint(start);
+
+        if (captureMode === 'scroll') {
+            const existingAnchor = scrollSelectionAnchorRef.current;
+
+            if (!existingAnchor) {
+                const target = findScrollableTargetFromPoint(start.x, start.y);
+                const scrollTop = getScrollTop(target);
+                scrollSelectionAnchorRef.current = {
+                    point: start,
+                    target,
+                    scrollTop,
+                    contentY: target ? getContentYForViewportPoint(target, start.y) : start.y
+                };
+                selectionScrollTargetRef.current = target;
+                draggingRef.current = false;
+                dragStartRef.current = null;
+                setScrollAnchorPoint(start);
+                setSelectionRect({ left: start.x, top: start.y, width: 0, height: 0 });
+                setMessage('\uc2dc\uc791\uc810\uc744 \uace0\uc815\ud588\uc2b5\ub2c8\ub2e4. \uc6d0\ud558\ub294 \ub9c8\uc9c0\ub9c9 \uc9c0\uc810\uae4c\uc9c0 \uc2a4\ud06c\ub864\ud55c \ub4a4 \ub05d\uc810\uc744 \ud074\ub9ad\ud558\uc138\uc694. (ESC \ucde8\uc18c)');
+                setIsSuccess(null);
+                return;
+            }
+
+            const scrollPlan = resolveScrollRangeCapturePlan(existingAnchor, start);
+            const rect = scrollPlan.captureRect;
+            const rangeHeight = scrollPlan.range
+                ? scrollPlan.range.bottomContentY - scrollPlan.range.topContentY
+                : rect.height;
+
+            scrollSelectionAnchorRef.current = null;
+            selectionScrollTargetRef.current = scrollPlan.target ?? selectionScrollTargetRef.current;
+            scrollCapturePlanRef.current = scrollPlan;
+            draggingRef.current = false;
+            dragStartRef.current = null;
+            setScrollAnchorPoint(null);
+
+            if (rect.width < MIN_SIZE || rangeHeight < MIN_SIZE) {
+                setMessage('\uc601\uc5ed\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+                setIsSuccess(false);
+                setSelectionRect(null);
+                setIsSelecting(false);
+                restoreHiddenPanel();
+                return;
+            }
+
+            setSelectionRect(rect);
+            setIsSelecting(false);
+            void (async () => {
+                await waitNextPaint();
+                await copySelectionToClipboard(rect);
+            })();
+            return;
+        }
+
         dragStartRef.current = start;
         draggingRef.current = true;
         selectionScrollTargetRef.current = findScrollableTargetFromPoint(start.x, start.y);
         setSelectionRect({ left: start.x, top: start.y, width: 0, height: 0 });
     };
+
+    const handleSelectionWheel = useCallback((e: WheelEvent) => {
+        if (!isSelecting || captureMode !== 'scroll') return;
+
+        const anchor = scrollSelectionAnchorRef.current;
+        const target = anchor?.target;
+        if (!anchor || !target || !target.isConnected) return;
+
+        e.preventDefault();
+        const delta = e.deltaMode === 1
+            ? e.deltaY * 32
+            : e.deltaMode === 2
+                ? e.deltaY * Math.max(1, target.clientHeight)
+                : e.deltaY;
+        const nextScrollTop = Math.min(
+            getMaxScrollTop(target),
+            Math.max(0, getScrollTop(target) + delta)
+        );
+
+        scrollElementTo(target, nextScrollTop);
+
+        const end = cursorPointRef.current ?? anchor.point;
+        setSelectionRect(buildRect(anchor.point, end));
+    }, [captureMode, isSelecting]);
+
+    useEffect(() => {
+        const overlay = selectionOverlayRef.current;
+        if (!overlay || !isSelecting || captureMode !== 'scroll') return;
+
+        overlay.addEventListener('wheel', handleSelectionWheel, { passive: false });
+        return () => {
+            overlay.removeEventListener('wheel', handleSelectionWheel);
+        };
+    }, [captureMode, handleSelectionWheel, isSelecting]);
 
     useEffect(() => {
         if (!isSelecting) return;
@@ -904,7 +1407,9 @@ const QuickCameraCapture: React.FC = () => {
     useEffect(() => {
         if (!isSelecting) return;
 
-        const excludedRoots = Array.from(document.querySelectorAll<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR));
+        const hostPanel = rootRef.current?.closest<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR) ?? null;
+        const excludedRoots = Array.from(document.querySelectorAll<HTMLElement>(CAPTURE_EXCLUDE_SELECTOR))
+            .filter((el) => el !== hostPanel);
         const prevInlineStyles = excludedRoots.map((el) => ({
             el,
             opacity: el.style.opacity,
@@ -939,18 +1444,19 @@ const QuickCameraCapture: React.FC = () => {
         const handlePointerMove = (e: PointerEvent) => {
             const point = clampPointToViewport(e.clientX, e.clientY);
             setCursorPoint(point);
+            if (captureMode === 'scroll' && scrollSelectionAnchorRef.current) {
+                setSelectionRect(buildRect(scrollSelectionAnchorRef.current.point, point));
+                return;
+            }
             if (!draggingRef.current || !dragStartRef.current) return;
             setSelectionRect(buildRect(dragStartRef.current, point));
         };
 
         const handlePointerUp = (e: PointerEvent) => {
+            if (captureMode === 'scroll') return;
             if (!draggingRef.current || !dragStartRef.current) return;
             const point = clampPointToViewport(e.clientX, e.clientY);
-            const rawRect = buildRect(dragStartRef.current, point);
-            const scrollPlan = captureMode === 'scroll'
-                ? resolveScrollCapturePlan(rawRect, selectionScrollTargetRef.current)
-                : null;
-            const rect = scrollPlan?.captureRect ?? rawRect;
+            const rect = buildRect(dragStartRef.current, point);
 
             draggingRef.current = false;
             dragStartRef.current = null;
@@ -964,11 +1470,6 @@ const QuickCameraCapture: React.FC = () => {
                 setIsSelecting(false);
                 restoreHiddenPanel();
                 return;
-            }
-
-            if (scrollPlan) {
-                selectionScrollTargetRef.current = scrollPlan.target ?? selectionScrollTargetRef.current;
-                scrollCapturePlanRef.current = scrollPlan;
             }
 
             setSelectionRect(rect);
@@ -1012,6 +1513,19 @@ const QuickCameraCapture: React.FC = () => {
         };
     }, [captureMode, isProcessing]);
 
+    const scrollPreviewEndPoint = captureMode === 'scroll' && scrollAnchorPoint
+        ? cursorPoint && (Math.abs(cursorPoint.x - scrollAnchorPoint.x) > 2 || Math.abs(cursorPoint.y - scrollAnchorPoint.y) > 2)
+            ? cursorPoint
+            : {
+                x: Math.max(0, Math.min(window.innerWidth - 24, scrollAnchorPoint.x + 260)),
+                y: Math.max(0, Math.min(window.innerHeight - 24, scrollAnchorPoint.y + 180))
+            }
+        : null;
+    const scrollFixedPreviewRect = scrollAnchorPoint && scrollPreviewEndPoint
+        ? buildRect(scrollAnchorPoint, scrollPreviewEndPoint)
+        : null;
+    const visibleSelectionRect = scrollFixedPreviewRect ?? selectionRect;
+
     return (
         <>
         <div ref={rootRef} className="h-full rounded-lg border border-white/10 bg-[#101317] p-4 text-slate-100">
@@ -1025,7 +1539,7 @@ const QuickCameraCapture: React.FC = () => {
                     className="inline-flex items-center gap-1 rounded-md border border-white/15 px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10"
                     onClick={() => {
                         resetSelection();
-                        setMessage(getStartSelectionMessage(captureMode));
+                        setMessage(getSelectionPromptMessage(captureMode));
                         setIsSuccess(null);
                     }}
                     disabled={isProcessing}
@@ -1199,19 +1713,50 @@ const QuickCameraCapture: React.FC = () => {
         </div>
         {isSelecting && createPortal(
             <div
+                ref={selectionOverlayRef}
                 data-capture-overlay="true"
                 className="fixed inset-0 z-[99999] cursor-crosshair bg-black/25"
                 style={{ touchAction: 'none' }}
                 onPointerDown={handlePointerDown}
             >
-                {selectionRect && (
+                {captureMode === 'scroll' && scrollAnchorPoint && (
+                    <>
+                        <div
+                            className="pointer-events-none absolute inset-0"
+                            style={{
+                                background: `linear-gradient(90deg, transparent ${Math.max(0, scrollAnchorPoint.x - 1)}px, rgba(16,185,129,0.95) ${Math.max(0, scrollAnchorPoint.x - 1)}px, rgba(16,185,129,0.95) ${scrollAnchorPoint.x + 1}px, transparent ${scrollAnchorPoint.x + 1}px),
+                                    linear-gradient(180deg, transparent ${Math.max(0, scrollAnchorPoint.y - 1)}px, rgba(16,185,129,0.95) ${Math.max(0, scrollAnchorPoint.y - 1)}px, rgba(16,185,129,0.95) ${scrollAnchorPoint.y + 1}px, transparent ${scrollAnchorPoint.y + 1}px)`
+                            }}
+                        />
+                        <div
+                            className="pointer-events-none absolute z-10"
+                            style={{
+                                left: scrollAnchorPoint.x,
+                                top: scrollAnchorPoint.y,
+                                transform: 'translate(-50%, -50%)'
+                            }}
+                        >
+                            <span className="absolute -left-4 -top-4 h-8 w-8 rounded-full border-[3px] border-white bg-emerald-400 shadow-[0_0_0_4px_rgba(0,0,0,0.55)]" />
+                            <span className="absolute -left-[2px] -top-6 h-12 w-1 rounded bg-black" />
+                            <span className="absolute -left-6 -top-[2px] h-1 w-12 rounded bg-black" />
+                            <span className="absolute left-4 top-4 whitespace-nowrap rounded bg-black/80 px-2 py-1 text-[11px] font-semibold text-white">
+                                {'\uc2dc\uc791\uc810 \uace0\uc815'}
+                            </span>
+                        </div>
+                    </>
+                )}
+                {visibleSelectionRect && (
                     <div
-                        className="absolute border-[3px] border-black bg-sky-300/18 shadow-[0_0_0_1px_rgba(255,255,255,0.9)]"
+                        className={`absolute border-[3px] shadow-[0_0_0_1px_rgba(255,255,255,0.9)] ${
+                            scrollFixedPreviewRect
+                                ? 'border-emerald-400 bg-emerald-300/16'
+                                : 'border-black bg-sky-300/18'
+                        }`}
                         style={{
-                            left: selectionRect.left,
-                            top: selectionRect.top,
-                            width: selectionRect.width,
-                            height: selectionRect.height
+                            left: visibleSelectionRect.left,
+                            top: visibleSelectionRect.top,
+                            width: visibleSelectionRect.width,
+                            height: visibleSelectionRect.height
                         }}
                     >
                         <span className="absolute -left-1.5 -top-1.5 h-3 w-3 rounded-full border border-white bg-black" />
@@ -1221,9 +1766,7 @@ const QuickCameraCapture: React.FC = () => {
                     </div>
                 )}
                 <div className="absolute left-1/2 top-6 -translate-x-1/2 rounded-md bg-black/70 px-3 py-1.5 text-xs text-white">
-                    {captureMode === 'scroll'
-                        ? '마우스로 영역을 드래그한 뒤 놓으면 공유 창이 열립니다. 스크롤 방식은 반드시 현재 브라우저 탭을 선택해야 합니다. (ESC 취소)'
-                        : '마우스로 영역을 드래그한 뒤 놓으면 공유 창이 열립니다. 현재 탭 선택을 권장합니다. (ESC 취소)'}
+                    {getSelectionPromptMessage(captureMode)}
                 </div>
                 {cursorPoint && (
                     <div

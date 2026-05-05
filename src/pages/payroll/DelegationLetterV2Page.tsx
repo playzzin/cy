@@ -3,7 +3,7 @@ import html2canvas from 'html2canvas';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faSpinner, faFileAlt, faBuilding, faUsers, faCalendarAlt,
-    faCheckSquare, faSquare, faUserTie, faCopy, faEdit, faListAlt, faPrint
+    faCheckSquare, faSquare, faUserTie, faCopy, faEdit, faListAlt, faPrint, faSignature
 } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
@@ -11,6 +11,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { companyService, Company } from '../../services/companyService';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import SignatureGeneratorPage from './SignatureGeneratorPage';
 
 // --- Types ---
 interface DelegationWorker {
@@ -63,7 +64,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
     // --- State: UI ---
     const printRef = useRef<HTMLDivElement>(null);
-    const [activeTab, setActiveTab] = useState<'filter' | 'document' | 'workers'>('filter');
+    const [activeTab, setActiveTab] = useState<'filter' | 'document' | 'workers' | 'signature'>('filter');
 
     // --- State: Custom Mandatary ---
     const [customMandataryName, setCustomMandataryName] = useState('');
@@ -232,6 +233,24 @@ const DelegationLetterV2Page: React.FC = () => {
             unitPrice: price,
             amount: w.manDays * price
         })));
+    };
+
+    const handleSignatureSaved = (workerId: string, newUrl: string) => {
+        const savedWorkerId = String(workerId ?? '').trim();
+        if (!savedWorkerId) return;
+
+        setAllWorkers(prev => prev.map(worker => {
+            const id = String(worker.id ?? '').trim();
+            const legacyId = String(worker.legacyId ?? '').trim();
+            if (id !== savedWorkerId && legacyId !== savedWorkerId) return worker;
+            return { ...worker, signatureUrl: newUrl };
+        }));
+
+        setDelegationWorkers(prev => prev.map(worker =>
+            worker.workerId === savedWorkerId
+                ? { ...worker, signatureUrl: newUrl }
+                : worker
+        ));
     };
 
     const toggleDelegator = (workerId: string) => {
@@ -713,7 +732,7 @@ const DelegationLetterV2Page: React.FC = () => {
                 </div>
 
                 {/* Tab Navigation */}
-                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-2 flex gap-2">
+                <div className="bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-white/10 p-2 grid grid-cols-2 gap-2">
                     <button
                         onClick={() => setActiveTab('filter')}
                         className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'filter'
@@ -743,6 +762,16 @@ const DelegationLetterV2Page: React.FC = () => {
                     >
                         <FontAwesomeIcon icon={faUsers} className="mr-2" />
                         작업자
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('signature')}
+                        className={`flex-1 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'signature'
+                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5'
+                            }`}
+                    >
+                        <FontAwesomeIcon icon={faSignature} className="mr-2" />
+                        서명
                     </button>
                 </div>
 
@@ -1176,8 +1205,39 @@ const DelegationLetterV2Page: React.FC = () => {
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'signature' && (
+                        <div className="space-y-4 h-full min-h-0 flex flex-col">
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-1.5 h-6 rounded-full bg-indigo-500"></div>
+                                <h3 className="text-white font-semibold">서명 등록</h3>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                                    <p className="text-slate-400 text-xs mb-1">전체 서명</p>
+                                    <p className="text-white font-bold text-lg">
+                                        {allWorkers.filter(worker => worker.signatureUrl).length}명
+                                    </p>
+                                </div>
+                                <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                                    <p className="text-slate-400 text-xs mb-1">현재 명단</p>
+                                    <p className="text-indigo-300 font-bold text-lg">
+                                        {delegationWorkers.filter(worker => worker.signatureUrl).length}/{delegationWorkers.length}명
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="bg-indigo-600/10 rounded-xl p-4 border border-indigo-500/20">
+                                <p className="text-indigo-200 text-sm font-medium">오른쪽 패널에서 서명 등록 페이지를 바로 사용할 수 있습니다.</p>
+                                <p className="text-slate-400 text-xs mt-2">저장된 서명은 위임장 미리보기에 즉시 반영됩니다.</p>
+                            </div>
+                        </div>
+                    )}
                 </div>
 
+                {activeTab !== 'signature' && (
+                    <>
                 {/* Action Buttons */}
                 <div className="flex gap-3">
                     <button
@@ -1220,9 +1280,19 @@ const DelegationLetterV2Page: React.FC = () => {
                         </div>
                     </div>
                 )}
+                    </>
+                )}
             </div>
 
-            {/* --- Right Panel: Preview --- */}
+            {activeTab === 'signature' ? (
+                <div className="flex-1 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 no-print">
+                    <SignatureGeneratorPage
+                        embedded
+                        className="rounded-2xl"
+                        onSignatureSaved={handleSignatureSaved}
+                    />
+                </div>
+            ) : (
             <div className="flex-1 bg-[#efebe2] overflow-auto rounded-2xl p-4 lg:p-8 flex justify-center border border-[#d8d1c3] print-area-wrapper">
                 <div
                     ref={printRef}
@@ -1512,6 +1582,7 @@ const DelegationLetterV2Page: React.FC = () => {
                     )}
                 </div>
             </div>
+            )}
         </div>
     );
 };

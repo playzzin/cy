@@ -4,7 +4,20 @@ import SignatureGeneratorModal from '../../components/signatures/SignatureGenera
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSearch, faSignature, faSpinner, faCheck, faUser } from '@fortawesome/free-solid-svg-icons';
 
-const SignatureGeneratorPage: React.FC = () => {
+interface SignatureGeneratorPageProps {
+    embedded?: boolean;
+    className?: string;
+    onSignatureSaved?: (workerId: string, newUrl: string) => void;
+}
+
+const getWorkerKey = (worker: Worker | null | undefined): string =>
+    String(worker?.id ?? worker?.legacyId ?? '').trim();
+
+const SignatureGeneratorPage: React.FC<SignatureGeneratorPageProps> = ({
+    embedded = false,
+    className = '',
+    onSignatureSaved
+}) => {
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [filteredWorkers, setFilteredWorkers] = useState<Worker[]>([]);
     const [loading, setLoading] = useState(true);
@@ -48,21 +61,26 @@ const SignatureGeneratorPage: React.FC = () => {
     };
 
     const handleSaveComplete = (newUrl: string) => {
+        const savedWorkerId = getWorkerKey(selectedWorker);
+
         // Update the worker's signature URL in local state
         setWorkers(prev =>
             prev.map(w =>
-                w.id === selectedWorker?.id
+                getWorkerKey(w) === savedWorkerId
                     ? { ...w, signatureUrl: newUrl }
                     : w
             )
         );
+        if (savedWorkerId) {
+            onSignatureSaved?.(savedWorkerId, newUrl);
+        }
         setIsModalOpen(false);
         setSelectedWorker(null);
     };
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-screen bg-slate-50">
+            <div className={`flex items-center justify-center bg-slate-50 ${embedded ? 'h-full min-h-[360px]' : 'h-screen'} ${className}`}>
                 <div className="text-center">
                     <FontAwesomeIcon icon={faSpinner} spin className="text-4xl text-indigo-600 mb-4" />
                     <p className="text-slate-500 font-medium">작업자 목록을 불러오는 중...</p>
@@ -72,21 +90,23 @@ const SignatureGeneratorPage: React.FC = () => {
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 p-6">
+        <div className={`${embedded ? 'h-full min-h-0 overflow-hidden flex flex-col bg-slate-50 p-4' : 'min-h-screen bg-slate-50 p-6'} ${className}`}>
             {/* Header */}
-            <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
-                    <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
+            <div className={embedded ? 'mb-4' : 'mb-8'}>
+                <h1 className={`${embedded ? 'text-xl' : 'text-2xl'} font-bold text-slate-800 flex items-center gap-3`}>
+                    <div className={`${embedded ? 'w-9 h-9' : 'w-10 h-10'} bg-indigo-100 rounded-lg flex items-center justify-center`}>
                         <FontAwesomeIcon icon={faSignature} className="text-indigo-600" />
                     </div>
                     서명 등록
                 </h1>
-                <p className="text-slate-500 mt-2">작업자를 선택하여 직접 서명을 그려 등록/수정할 수 있습니다.</p>
+                {!embedded && (
+                    <p className="text-slate-500 mt-2">작업자를 선택하여 직접 서명을 그려 등록/수정할 수 있습니다.</p>
+                )}
             </div>
 
             {/* Search */}
-            <div className="mb-6">
-                <div className="relative max-w-md">
+            <div className={embedded ? 'mb-4' : 'mb-6'}>
+                <div className={`relative ${embedded ? 'max-w-none' : 'max-w-md'}`}>
                     <FontAwesomeIcon icon={faSearch} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                         type="text"
@@ -99,7 +119,7 @@ const SignatureGeneratorPage: React.FC = () => {
             </div>
 
             {/* Stats */}
-            <div className="mb-6 flex gap-4">
+            <div className={`${embedded ? 'mb-4 grid grid-cols-3 gap-2' : 'mb-6 flex gap-4'}`}>
                 <div className="bg-white rounded-xl px-4 py-3 border border-slate-200">
                     <span className="text-slate-500 text-sm">전체 작업자</span>
                     <span className="ml-2 font-bold text-slate-800">{workers.length}명</span>
@@ -119,10 +139,10 @@ const SignatureGeneratorPage: React.FC = () => {
             </div>
 
             {/* Worker Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            <div className={`${embedded ? 'flex-1 min-h-0 overflow-y-auto pr-1 grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3 content-start' : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'}`}>
                 {filteredWorkers.map((worker) => (
                     <div
-                        key={worker.id}
+                        key={getWorkerKey(worker)}
                         onClick={() => handleOpenModal(worker)}
                         className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-lg hover:border-indigo-300 transition-all cursor-pointer group"
                     >
@@ -181,7 +201,7 @@ const SignatureGeneratorPage: React.FC = () => {
                         setIsModalOpen(false);
                         setSelectedWorker(null);
                     }}
-                    workerId={String(selectedWorker.id ?? selectedWorker.legacyId ?? '').trim()}
+                    workerId={getWorkerKey(selectedWorker)}
                     workerName={selectedWorker.name}
                     onSaveComplete={handleSaveComplete}
                 />

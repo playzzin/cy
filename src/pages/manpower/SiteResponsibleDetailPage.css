@@ -1,0 +1,371 @@
+.sr-page .tw-workspace {
+    grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+}
+
+.sr-site-item .tw-worker-item__badges {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.sr-site-status {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+    border: 1px solid #bbf7d0;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.sr-site-status--완료 {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.sr-site-status--예정 {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #b45309;
+}
+
+.sr-document-panel {
+    margin-top: 0;
+}
+
+.sr-payroll-table {
+    min-width: 860px;
+}
+
+.sr-payroll-table tfoot td {
+    padding: 11px 10px;
+    border-top: 2px solid #cbd5e1;
+    background: #eff6ff;
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.sr-labor-panel {
+    overflow: hidden;
+    padding: 12px;
+    background: #f6f4eb;
+}
+
+.sr-labor-statement-shell {
+    overflow: auto;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f6f4eb;
+    padding: 10px;
+}
+
+.sr-labor-statement-surface {
+    min-width: 1580px;
+    border: 1px solid #111827;
+    background: #fff;
+    padding: 18px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+}
+
+.sr-labor-header {
+    display: grid;
+    grid-template-columns: 350px 1fr 350px;
+    align-items: end;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.sr-labor-title-wrap {
+    text-align: center;
+}
+
+.sr-labor-title {
+    display: inline-block;
+    margin: 0;
+    border: 1px solid #000;
+    background: #fffbeb;
+    padding: 8px 28px;
+    color: #111827;
+    font-size: 28px;
+    font-weight: 900;
+    line-height: 1.1;
+    text-decoration: underline;
+    text-decoration-thickness: 4px;
+    text-underline-offset: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.16);
+}
+
+.sr-labor-meta {
+    width: 350px;
+    border-collapse: collapse;
+    border: 1px solid #000;
+    background: #fffbeb;
+    color: #111827;
+    font-size: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.14);
+}
+
+.sr-labor-meta th,
+.sr-labor-meta td {
+    border: 1px solid #000;
+    padding: 5px 7px;
+    text-align: center;
+    vertical-align: middle;
+}
+
+.sr-labor-meta th {
+    width: 58px;
+    background: #fef3c7;
+    font-weight: 900;
+}
+
+.sr-labor-table {
+    width: 100%;
+    min-width: 1540px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    border: 1px solid #000;
+    background: #fff;
+    color: #0f172a;
+}
+
+.sr-labor-table th,
+.sr-labor-table td {
+    border: 1px solid #000;
+    padding: 0;
+    vertical-align: middle;
+}
+
+.sr-labor-table th {
+    height: 32px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+
+.sr-labor-table th small,
+.sr-labor-table th span {
+    display: block;
+}
+
+.sr-labor-table th small {
+    margin-top: 2px;
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.sr-labor-fixed-header,
+.sr-labor-summary-header {
+    background: #fffacd;
+    color: #000;
+}
+
+.sr-labor-day-primary {
+    background: #008080;
+    color: #fff;
+}
+
+.sr-labor-day-secondary {
+    background: #a52a2a;
+    color: #fff;
+}
+
+.sr-labor-col-no {
+    width: 45px;
+}
+
+.sr-labor-col-name {
+    width: 100px;
+}
+
+.sr-labor-col-ssn {
+    width: 150px;
+}
+
+.sr-labor-col-address {
+    width: 240px;
+}
+
+.sr-labor-col-day {
+    width: 38px;
+}
+
+.sr-labor-col-total {
+    width: 74px;
+}
+
+.sr-labor-col-rate {
+    width: 86px;
+}
+
+.sr-labor-col-amount {
+    width: 112px;
+}
+
+.sr-labor-col-bank {
+    width: 190px;
+}
+
+.sr-labor-index-cell,
+.sr-labor-day-cell,
+.sr-labor-total-cell,
+.sr-labor-money-cell {
+    height: 30px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.sr-labor-index-cell,
+.sr-labor-total-cell {
+    background: #fffacd;
+    color: #000;
+    font-weight: 900;
+}
+
+.sr-labor-money-cell {
+    padding: 0 8px;
+    text-align: right;
+}
+
+.sr-labor-name-cell,
+.sr-labor-worker-cell,
+.sr-labor-address-cell,
+.sr-labor-bank-cell {
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.sr-labor-name-cell {
+    text-align: center;
+    font-weight: 900;
+}
+
+.sr-labor-name-cell strong,
+.sr-labor-name-cell span,
+.sr-labor-worker-cell strong,
+.sr-labor-worker-cell span {
+    display: block;
+}
+
+.sr-labor-name-cell span,
+.sr-labor-worker-cell span {
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.sr-labor-worker-cell {
+    padding: 0 6px;
+    text-align: center;
+    font-weight: 700;
+}
+
+.sr-labor-address-cell {
+    padding: 0 8px;
+    color: #1f2937;
+    font-weight: 700;
+    word-break: keep-all;
+}
+
+.sr-labor-bank-cell {
+    padding: 6px;
+    background: #fff;
+}
+
+.sr-labor-pay-type {
+    margin-bottom: 5px;
+    border-bottom: 1px solid #000;
+    padding-bottom: 4px;
+    text-align: center;
+    color: #1d4ed8;
+    font-size: 11px;
+    font-weight: 900;
+}
+
+.sr-labor-bank-lines {
+    display: grid;
+    grid-template-columns: 54px 62px 1fr;
+    min-height: 28px;
+    overflow: hidden;
+    border: 1px solid #000;
+    border-radius: 4px;
+    background: rgba(248, 250, 252, 0.7);
+}
+
+.sr-labor-bank-lines span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 0 4px;
+    border-right: 1px solid #000;
+    color: #0f172a;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.2;
+    word-break: break-all;
+}
+
+.sr-labor-bank-lines span:last-child {
+    border-right: 0;
+}
+
+.sr-labor-empty {
+    height: 96px;
+    background: #fff;
+    color: #64748b;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.sr-labor-footer-label,
+.sr-labor-footer-day,
+.sr-labor-footer-total,
+.sr-labor-footer-money,
+.sr-labor-footer-blank {
+    height: 30px;
+    background: #fca5a5;
+    color: #7f1d1d;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 900;
+}
+
+.sr-labor-footer-label {
+    font-size: 13px;
+}
+
+.sr-labor-footer-money {
+    padding: 0 8px;
+    text-align: right;
+    font-size: 13px;
+}
+
+@media (max-width: 980px) {
+    .sr-page .tw-workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .sr-labor-header {
+        grid-template-columns: 1fr;
+    }
+
+    .sr-labor-header__spacer {
+        display: none;
+    }
+
+    .sr-labor-meta {
+        justify-self: center;
+    }
+}
