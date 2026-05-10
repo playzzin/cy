@@ -6,7 +6,7 @@ import {
     faUserGroup, faHandHoldingDollar, faTruckFront, faHelmetSafety, faSitemap, faBookOpen,
     faList, faClockRotateLeft, faMoneyBillWave, faChartSimple, faBook, faCrown, faGears, faUserShield,
     faNoteSticky, faStickyNote, faBriefcase,
-    faBuildingUser
+    faBuildingUser, faCompassDrafting
 } from '@fortawesome/free-solid-svg-icons';
 
 export const iconMap: { [key: string]: any } = {
@@ -53,24 +53,36 @@ export const iconMap: { [key: string]: any } = {
     'fa-note-sticky': faNoteSticky,
     'fa-sticky-note': faStickyNote,
     'fa-briefcase': faBriefcase,
-    'fa-building-user': faBuildingUser
+    'fa-building-user': faBuildingUser,
+    'fa-compass-drafting': faCompassDrafting
+};
+
+const toFontAwesomeExportName = (iconName: string): string => {
+    const trimmed = iconName.trim();
+    if (!trimmed) return '';
+
+    if (!trimmed.includes('-')) return trimmed;
+
+    return trimmed
+        .split('-')
+        .map((part, index) => {
+            if (index === 0) return part;
+            return part.charAt(0).toUpperCase() + part.slice(1);
+        })
+        .join('');
 };
 
 // Helper: Safely resolve icon from string (kebab-case or camelCase)
 export const resolveIcon = (iconName: string | undefined, fallback: any = faChartPie): any => {
-    if (!iconName) return fallback;
+    const normalizedIconName = typeof iconName === 'string' ? iconName.trim() : '';
+    if (!normalizedIconName) return fallback;
 
     // 1. Try iconMap (preferred for kebab-case)
-    if (iconMap[iconName]) return iconMap[iconName];
+    if (iconMap[normalizedIconName]) return iconMap[normalizedIconName];
 
-    // 2. Try raw FontAwesome import (camelCase)
-    // We assume the consumer passes the 'AllIcons' namespace if needed, 
-    // but since we can't import * inside a function easily without passing it,
-    // let's assume the caller handles the AllIcons lookup if this fails? 
-    // OR we export a lookup that includes basic icons. 
-    // Actually, Sidebar imports AllIcons. better to keep this pure or import AllIcons here?
-    // Importing * as AllIcons here is safe.
-    return (AllIcons as any)[iconName] || fallback;
+    // 2. Try raw FontAwesome import. Stored menus may use either faUserTie or fa-user-tie.
+    const exportName = toFontAwesomeExportName(normalizedIconName);
+    return (AllIcons as any)[exportName] || fallback;
 };
 
 

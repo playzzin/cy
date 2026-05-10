@@ -20,6 +20,16 @@ import { resolveReportPayType, resolveWorkerPayType, syncPayTypeFields } from '.
 
 export type { DailyReport, DailyReportWorker };
 
+type SiteSnapshot = {
+    siteType?: string;
+    paymentType?: string;
+};
+
+type SiteSnapshotResolver = (report: {
+    siteId?: unknown;
+    siteName?: unknown;
+}) => Promise<SiteSnapshot>;
+
 export interface DailyReportWorkerRow {
     reportId: string;
     date: string;
@@ -46,6 +56,92 @@ export interface DailyReportWorkerRow {
     workerTeamName?: string | undefined;
     workerTeamId?: string | undefined;
 }
+
+const toSnapshotText = (value: unknown): string | undefined => {
+    const text = String(value ?? '').trim();
+    return text || undefined;
+};
+
+const createSiteSnapshotResolver = (): SiteSnapshotResolver => {
+    let sitesPromise: Promise<Array<{
+        id?: string | null;
+        legacyId?: string | null;
+        name?: string | null;
+        siteType?: string | null;
+        paymentMethod?: string | null;
+    }>> | null = null;
+
+    return async (report) => {
+        const reportSiteId = toSnapshotText(report.siteId);
+        const reportSiteName = toSnapshotText(report.siteName);
+        if (!reportSiteId && !reportSiteName) return {};
+
+        if (!sitesPromise) {
+            const { siteService } = await import('./siteService');
+            sitesPromise = siteService.getSites();
+        }
+
+        const sites = await sitesPromise;
+        const matchedSite = sites.find((site) => {
+            const id = toSnapshotText(site.id);
+            const legacyId = toSnapshotText(site.legacyId);
+            return !!reportSiteId && (id === reportSiteId || legacyId === reportSiteId);
+        }) ?? sites.find((site) => {
+            const name = toSnapshotText(site.name);
+            return !!reportSiteName && name === reportSiteName;
+        });
+
+        return {
+            siteType: toSnapshotText(matchedSite?.siteType),
+            paymentType: toSnapshotText(matchedSite?.paymentMethod),
+        };
+    };
+};
+
+const enrichReportWithSiteSnapshot = async <T extends Partial<DailyReportInput> & {
+    siteId?: unknown;
+    siteName?: unknown;
+    workers?: any[];
+}>(
+    report: T,
+    resolveSiteSnapshot: SiteSnapshotResolver = createSiteSnapshotResolver()
+): Promise<T> => {
+    const existingSiteType = toSnapshotText(report.siteType);
+    const existingPaymentType = toSnapshotText(report.paymentType);
+    const needsSiteSnapshot = !existingSiteType || !existingPaymentType;
+    const snapshot = needsSiteSnapshot ? await resolveSiteSnapshot(report) : {};
+    const siteType = existingSiteType || snapshot.siteType;
+    const paymentType = existingPaymentType || snapshot.paymentType;
+
+    const workers = Array.isArray(report.workers)
+        ? report.workers.map((worker) => {
+            const workerSiteType = toSnapshotText(worker.siteType) || siteType;
+            const workerPaymentType = toSnapshotText(worker.paymentType) || paymentType;
+
+            return {
+                ...worker,
+                ...(workerSiteType ? { siteType: workerSiteType } : {}),
+                ...(workerPaymentType ? { paymentType: workerPaymentType } : {}),
+            };
+        })
+        : report.workers;
+
+    return {
+        ...report,
+        ...(siteType ? { siteType } : {}),
+        ...(paymentType ? { paymentType } : {}),
+        ...(Array.isArray(workers) ? { workers } : {}),
+    };
+};
+
+const enrichReportsWithSiteSnapshots = async <T extends Partial<DailyReportInput> & {
+    siteId?: unknown;
+    siteName?: unknown;
+    workers?: any[];
+}>(reports: T[]): Promise<T[]> => {
+    const resolveSiteSnapshot = createSiteSnapshotResolver();
+    return Promise.all(reports.map(report => enrichReportWithSiteSnapshot(report, resolveSiteSnapshot)));
+};
 
 const normalizeReport = (report: Partial<DailyReport> & { date: string; teamId: string; siteId: string }): DailyReport => ({
     ...report,
@@ -92,7 +188,8 @@ const cleanWorker = (worker: any): DailyReportWorker => {
 
 export const dailyReportService = {
     addReport: async (report: DailyReportInput): Promise<string> => {
-        const normalized = normalizeReport(report as any);
+        const enriched = await enrichReportWithSiteSnapshot(report as any);
+        const normalized = normalizeReport(enriched as any);
         const docId = await dailyReportFirestoreService.addReport(normalized as any);
         await dailyReportService._updateStats(normalized, 1);
         return docId;
@@ -122,7 +219,8 @@ export const dailyReportService = {
     },
 
     addReportsBatch: async (reports: DailyReportInput[]): Promise<void> => {
-        const normalized = reports.map(report => normalizeReport(report as any));
+        const enriched = await enrichReportsWithSiteSnapshots(reports as any[]);
+        const normalized = enriched.map(report => normalizeReport(report as any));
         await dailyReportFirestoreService.saveReportsBatch(normalized as any[]);
         for (const report of normalized) {
             await dailyReportService._updateStats(report, 1);
@@ -191,6 +289,15 @@ export const dailyReportService = {
             siteId: params.siteId,
         };
 
+        const hasDateRange = !!normalized.startDate && !!normalized.endDate;
+        if (hasDateRange) {
+            const ranged = await dailyReportFirestoreService.getReportsByRange({
+                startDate: normalized.startDate,
+                endDate: normalized.endDate,
+            });
+            return filterReportsByParams(ranged as DailyReport[], normalized);
+        }
+
         const all = await dailyReportService.getAllReports();
         return filterReportsByParams(all, normalized);
     },
@@ -245,30 +352,9 @@ export const dailyReportService = {
         siteId?: string;
     } = {}): Promise<DailyReportWorkerRow[]> => {
         const reports = await dailyReportService.getReports(params);
-        const { siteService } = await import('./siteService');
-        const sites = await siteService.getSites();
-        const siteMap = new Map<string, (typeof sites)[number]>();
-        const siteNameMap = new Map<string, (typeof sites)[number]>();
-
-        sites.forEach((site) => {
-            const id = String(site.id ?? '').trim();
-            const legacyId = String(site.legacyId ?? '').trim();
-            const name = String(site.name ?? '').trim();
-
-            if (id) siteMap.set(id, site);
-            if (legacyId) siteMap.set(legacyId, site);
-            if (name && !siteNameMap.has(name)) siteNameMap.set(name, site);
-        });
-
         const rows: DailyReportWorkerRow[] = [];
-        reports.forEach(report => {
-            const site = report.siteId
-                ? siteMap.get(String(report.siteId).trim())
-                : undefined;
-            const resolvedSite = site ?? siteNameMap.get(String(report.siteName ?? '').trim());
-            const fallbackSiteType = resolvedSite?.siteType || '';
-            const fallbackPaymentType = resolvedSite?.paymentMethod || '';
 
+        reports.forEach(report => {
             report.workers.forEach(worker => {
                 const unitPrice = worker.unitPrice || 0;
                 const resolvedPayType = resolveReportPayType(worker) || undefined;
@@ -279,8 +365,8 @@ export const dailyReportService = {
                     teamName: report.teamName,
                     siteId: report.siteId,
                     siteName: report.siteName,
-                    responsibleTeamId: report.responsibleTeamId ?? resolvedSite?.responsibleTeamId,
-                    responsibleTeamName: report.responsibleTeamName ?? resolvedSite?.responsibleTeamName,
+                    responsibleTeamId: report.responsibleTeamId ?? report.teamId,
+                    responsibleTeamName: report.responsibleTeamName ?? report.teamName,
                     workerId: worker.workerId,
                     workerName: worker.name,
                     role: worker.role,
@@ -291,8 +377,9 @@ export const dailyReportService = {
                     payType: resolvedPayType,
                     salaryModel: resolvedPayType,
                     workContent: worker.workContent,
-                    siteType: worker.siteType || report.siteType || fallbackSiteType || '',
-                    paymentType: worker.paymentType || report.paymentType || fallbackPaymentType || '',
+                    // Read only saved snapshot values. Master-data fallback belongs to write paths.
+                    siteType: toSnapshotText(worker.siteType) || toSnapshotText(report.siteType) || '',
+                    paymentType: toSnapshotText(worker.paymentType) || toSnapshotText(report.paymentType) || '',
                     createdAt: report.createdAt,
                     workerTeamName: worker.workerTeamName,
                     workerTeamId: worker.teamId,
@@ -510,6 +597,11 @@ export const dailyReportService = {
                 const updatedWorkers = report.workers
                     .filter(worker => worker.workerId !== workerId)
                     .map(cleanWorker);
+                if (updatedWorkers.length === 0) {
+                    await dailyReportService.deleteReport(reportId);
+                    return;
+                }
+
                 const totalManDay = updatedWorkers.reduce((sum, worker) => sum + ((worker.manDay || 0) as number), 0);
                 const totalAmount = updatedWorkers.reduce((sum, worker) => sum + (((worker.manDay || 0) as number) * ((worker.unitPrice || 0) as number)), 0);
 
@@ -532,7 +624,15 @@ export const dailyReportService = {
         siteName: string;
         workers: DailyReportWorker[];
     }) => {
-        await dailyReportFirestoreService.upsertReportWorkersBatch(params);
+        const siteSnapshot = await createSiteSnapshotResolver()({
+            siteId: params.siteId,
+            siteName: params.siteName,
+        });
+        await dailyReportFirestoreService.upsertReportWorkersBatch({
+            ...params,
+            siteType: siteSnapshot.siteType,
+            paymentType: siteSnapshot.paymentType,
+        });
 
         const tempReport: DailyReport = normalizeReport({
             date: params.date,
@@ -540,6 +640,8 @@ export const dailyReportService = {
             teamName: params.teamName,
             siteId: params.siteId,
             siteName: params.siteName,
+            siteType: siteSnapshot.siteType,
+            paymentType: siteSnapshot.paymentType,
             workers: params.workers,
             totalManDay: params.workers.reduce((sum, worker) => sum + (worker.manDay || 0), 0),
             totalAmount: params.workers.reduce((sum, worker) => sum + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0),

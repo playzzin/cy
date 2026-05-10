@@ -5,6 +5,13 @@ export const sanitizeTypedDateInput = (value: string): string => {
         .slice(0, 10);
 };
 
+export const formatTypedDateInput = (value: string): string => {
+    const digits = value.replace(/\D/g, '').slice(0, 8);
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+};
+
 export const normalizeTypedDateInput = (value: string): string | null => {
     const sanitized = sanitizeTypedDateInput(value.trim());
     if (!sanitized) return null;

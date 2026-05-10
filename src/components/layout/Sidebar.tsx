@@ -36,7 +36,8 @@ import {
     faMoneyBillWave,
     faChartSimple,
     faBook,
-    faUpRightFromSquare
+    faUpRightFromSquare,
+    faCircle
 } from '@fortawesome/free-solid-svg-icons';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
@@ -47,8 +48,7 @@ import { rolePermissionService } from '../../services/rolePermissionService';
 import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
 
-import * as AllIcons from '@fortawesome/free-solid-svg-icons';
-import { iconMap, resolveIcon } from '../../constants/iconMap';
+import { resolveIcon } from '../../constants/iconMap';
 
 interface SidebarProps {
     currentSite: string;
@@ -85,6 +85,56 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
     // Add mappings for parent menus if needed, or handle logic to show parent if any child is visible
 };
 
+const DEFAULT_SUBMENU_ICON = 'fa-circle';
+
+const getMenuDisplayText = (text: string): string => {
+    return text === '일보목록v2' ? '일보목록' : text;
+};
+
+const inferMenuIconName = (text: string, path?: string, explicitIcon?: string): string => {
+    const icon = typeof explicitIcon === 'string' ? explicitIcon.trim() : '';
+    if (icon) return icon;
+
+    const normalizedPath = typeof path === 'string' ? path.split('?')[0] : '';
+    if (normalizedPath.startsWith('/payroll/taxinvoice')) return 'fa-file-invoice-dollar';
+    if (normalizedPath.startsWith('/payroll')) return 'fa-money-bill-wave';
+    if (normalizedPath.startsWith('/reports') || normalizedPath.startsWith('/report')) return 'fa-clipboard-list';
+    if (normalizedPath.startsWith('/database')) return 'fa-database';
+    if (normalizedPath.startsWith('/materials')) return 'fa-boxes-stacked';
+    if (normalizedPath.startsWith('/support/vehicles')) return 'fa-truck-front';
+    if (normalizedPath.startsWith('/support/cards')) return 'fa-credit-card';
+    if (normalizedPath.startsWith('/support')) return 'fa-hand-holding-dollar';
+    if (normalizedPath.startsWith('/assignment')) return 'fa-list-check';
+    if (normalizedPath.startsWith('/manpower')) return 'fa-users';
+    if (normalizedPath.startsWith('/hr')) return 'fa-user-tag';
+    if (normalizedPath.startsWith('/settings') || normalizedPath.startsWith('/admin')) return 'fa-gears';
+    if (normalizedPath.startsWith('/storage')) return 'fa-hard-drive';
+    if (normalizedPath.startsWith('/gallery')) return 'fa-photo-film';
+    if (normalizedPath.startsWith('/company')) return 'fa-building';
+    if (normalizedPath.startsWith('/site')) return 'fa-helmet-safety';
+    if (normalizedPath.startsWith('/estimate') || normalizedPath.startsWith('/transaction')) return 'fa-file-contract';
+    if (normalizedPath.startsWith('/cheongyeon')) return 'fa-building';
+    if (normalizedPath === '/memos') return 'fa-sticky-note';
+    if (normalizedPath === '/todo') return 'fa-list-check';
+
+    const compactText = text.replace(/\s+/g, '');
+    if (/급여|일급|월급|지급|정산|가불|세금|계좌|명세/.test(compactText)) return 'fa-money-bill-wave';
+    if (/일보|출력|통계|보고/.test(compactText)) return 'fa-clipboard-list';
+    if (/DB|데이터|조회|콘솔/.test(compactText)) return 'fa-database';
+    if (/자재|입고|출고|재고/.test(compactText)) return 'fa-boxes-stacked';
+    if (/차량/.test(compactText)) return 'fa-truck-front';
+    if (/카드/.test(compactText)) return 'fa-credit-card';
+    if (/지원|경비/.test(compactText)) return 'fa-hand-holding-dollar';
+    if (/현장|배정/.test(compactText)) return 'fa-helmet-safety';
+    if (/작업자|근로자|인력|팀/.test(compactText)) return 'fa-users';
+    if (/설정|관리|권한|메뉴/.test(compactText)) return 'fa-gears';
+    if (/서명|위임/.test(compactText)) return 'fa-pen-nib';
+    if (/회사|업체|사무실/.test(compactText)) return 'fa-building';
+    if (/이미지|갤러리|프로젝트/.test(compactText)) return 'fa-photo-film';
+
+    return DEFAULT_SUBMENU_ICON;
+};
+
 const Sidebar: React.FC<SidebarProps> = ({
     currentSite,
     currentSiteData,
@@ -108,6 +158,11 @@ const Sidebar: React.FC<SidebarProps> = ({
     const { currentUser } = useAuth();
     const [userRole, setUserRole] = useState<string>('user');
     const [permissions, setPermissions] = useState<any>(null);
+    const safeCurrentSiteData = currentSiteData || {
+        name: '청연ENG ERP',
+        icon: 'fa-shield-halved',
+        menu: []
+    };
 
     useEffect(() => {
         let userUnsubscribe: () => void;
@@ -213,7 +268,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     // Filter menu items based on permissions
-    const filteredMenu = currentSiteData.menu.map((item: MenuItem) => {
+    const filteredMenu = safeCurrentSiteData.menu.map((item: MenuItem) => {
         // Check if parent has sub-items
         if (item.sub) {
             // Filter sub-items
@@ -295,7 +350,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     // Cheongyeon Style Check
     const isCheongyeon = currentSite === 'test';
     const sidebarStyle = isCheongyeon ? { backgroundColor: '#0f172a', color: '#e2e8f0' } : {};
-    const logoStyle = isCheongyeon ? { color: '#ffffff' } : {};
 
     const [logoType, setLogoType] = useState<'image' | 'video'>('image');
 
@@ -321,25 +375,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     loop 
                                     muted 
                                     playsInline
-                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', borderRadius: '4px' }}
+                                    style={{ height: '32px', width: 'auto', marginRight: '0', borderRadius: '4px' }}
                                 />
                             ) : (
                                 <img 
                                     src={logoUrl} 
                                     alt="Logo" 
-                                    style={{ height: '32px', width: 'auto', marginRight: isSidebarCollapsed ? '0' : '10px', objectFit: 'contain' }}
+                                    style={{ height: '32px', width: 'auto', marginRight: '0', objectFit: 'contain' }}
                                 />
                             )
                         ) : (
                             <FontAwesomeIcon
-                                icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
+                                icon={resolveIcon(safeCurrentSiteData.icon, faShieldHalved)}
                                 id="sidebar-logo-icon"
-                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: isSidebarCollapsed ? '0' : '10px' }}
+                                style={{ color: '#1abc9c', fontSize: '24px', marginRight: '0' }}
                             />
                         )}
-                        <span id="sidebar-logo-text" className="logo-text" style={{ ...logoStyle, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
-                            {currentSiteData.name}
-                        </span>
                     </div>
                     {/* PC 전용: 접기 버튼 (펼쳐진 상태일 때만 표시) */}
                     {!isMobile && !isSidebarCollapsed && toggleSidebar && (
@@ -347,11 +398,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                             className="sidebar-pc-toggle-btn"
                             onClick={toggleSidebar}
                             title="메뉴 접기"
+                            aria-label="메뉴 접기"
                         >
                             <FontAwesomeIcon icon={faChevronLeft} />
                         </button>
                     )}
-                    <button id="mobile-close-btn" onClick={closeAll} style={isCheongyeon ? { color: 'white' } : {}}>
+                    <button id="mobile-close-btn" onClick={closeAll} aria-label="메뉴 닫기" title="메뉴 닫기" style={isCheongyeon ? { color: 'white' } : {}}>
                         <FontAwesomeIcon icon={faXmark} />
                     </button>
                 </div>
@@ -396,7 +448,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                     toggleSubmenu(itemId);
                                                 }
                                             }}
-                                            data-tooltip={item.text}
+                                            data-tooltip={getMenuDisplayText(item.text)}
                                             style={effectiveTextStyle}
                                         >
                                             <FontAwesomeIcon
@@ -404,7 +456,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 className="menu-icon"
                                                 style={{ color: effectiveIconColor }}
                                             />
-                                            <span className="menu-text">{item.text}</span>
+                                            <span className="menu-text">{getMenuDisplayText(item.text)}</span>
                                             <FontAwesomeIcon
                                                 icon={faChevronRight}
                                                 className={`arrow-icon ${isExpanded ? 'rotated' : ''}`}
@@ -424,7 +476,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 handleMenuItemClick(item);
                                             }}
                                             onMouseEnter={() => isSidebarCollapsed && setHoveredMenuItem(null)}
-                                            data-tooltip={item.text}
+                                            data-tooltip={getMenuDisplayText(item.text)}
                                             style={isActiveCheck(item.path || menuPaths[item.text]) ? { color: activeColor, fontWeight: 'bold' } : {}}
                                         >
                                             <FontAwesomeIcon
@@ -434,7 +486,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                     color: isActiveCheck(item.path || menuPaths[item.text]) ? activeColor : (item.iconColor || undefined)
                                                 }}
                                             />
-                                            <span className="menu-text">{item.text}</span>
+                                            <span className="menu-text">{getMenuDisplayText(item.text)}</span>
                                             {!isSidebarCollapsed && (
                                                 <button
                                                     className="menu-open-new-btn"
@@ -445,6 +497,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                         if (path) window.open(path, '_blank');
                                                     }}
                                                     title="새 창에서 열기"
+                                                    aria-label={`${getMenuDisplayText(item.text)} 새 창에서 열기`}
                                                 >
                                                     <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
                                                 </button>
@@ -481,6 +534,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                                                 if (isLeaf) {
                                                     const isSubActive = isActiveCheck(linkPath);
+                                                    const linkDisplayText = getMenuDisplayText(linkText);
                                                     return (
                                                         <li key={subUniqueKey} className="submenu-leaf-item">
                                                             <a
@@ -505,7 +559,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                     fontWeight: isSubActive ? 'bold' : 'normal'
                                                                 }}
                                                             >
-                                                                <span>{linkText}</span>
+                                                                <span>{linkDisplayText}</span>
                                                                 {!isSidebarCollapsed && (
                                                                     <button
                                                                         className="submenu-open-new-btn"
@@ -515,6 +569,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                             if (linkPath) window.open(linkPath, '_blank');
                                                                         }}
                                                                         title="새 창에서 열기"
+                                                                        aria-label={`${linkDisplayText} 새 창에서 열기`}
                                                                     >
                                                                         <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
                                                                     </button>
@@ -547,7 +602,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                         }}
                                                                     />
                                                                     <span style={isNestedActive ? { color: nestedActiveColor } : {}}>
-                                                                        {menuItem.text}
+                                                                        {getMenuDisplayText(menuItem.text)}
                                                                     </span>
                                                                 </div>
                                                                 <FontAwesomeIcon
@@ -583,7 +638,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                             className={isSubActive ? 'active' : ''}
                                                                                             style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
                                                                                         >
-                                                                                            <span>{nestedItem}</span>
+                                                                                            <span>{getMenuDisplayText(nestedItem)}</span>
                                                                                             {!isSidebarCollapsed && (
                                                                                                 <button
                                                                                                     className="submenu-open-new-btn"
@@ -593,6 +648,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                                         if (path) window.open(path, '_blank');
                                                                                                     }}
                                                                                                     title="새 창에서 열기"
+                                                                                                    aria-label={`${getMenuDisplayText(nestedItem)} 새 창에서 열기`}
                                                                                                 >
                                                                                                     <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
                                                                                                 </button>
@@ -626,7 +682,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                             className={isSubActive ? 'active' : ''}
                                                                                             style={isSubActive ? { color: nestedDeepActiveColor, fontWeight: 'bold' } : {}}
                                                                                         >
-                                                                                            <span>{nestedObj.text}</span>
+                                                                                            <span>{getMenuDisplayText(nestedObj.text)}</span>
                                                                                             {!isSidebarCollapsed && (
                                                                                                 <button
                                                                                                     className="submenu-open-new-btn"
@@ -637,6 +693,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                                                         if (path) window.open(path, '_blank');
                                                                                                     }}
                                                                                                     title="새 창에서 열기"
+                                                                                                    aria-label={`${getMenuDisplayText(nestedObj.text)} 새 창에서 열기`}
                                                                                                 >
                                                                                                     <FontAwesomeIcon icon={faUpRightFromSquare} size="xs" />
                                                                                                 </button>
@@ -684,9 +741,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 icon={resolveIcon(hoveredMenuItem.icon, faChartPie)}
                                 style={{ color: hoveredMenuItem.activeColor || hoveredMenuItem.iconColor || '#1abc9c' }}
                             />
-                            {hoveredMenuItem.text}
+                            {getMenuDisplayText(hoveredMenuItem.text)}
                         </span>
-                        <button className="submenu-close-btn" onClick={() => setHoveredMenuItem(null)}>
+                        <button className="submenu-close-btn" onClick={() => setHoveredMenuItem(null)} aria-label="하위 메뉴 닫기" title="하위 메뉴 닫기">
                             <FontAwesomeIcon icon={faXmark} />
                         </button>
                     </div>
@@ -695,7 +752,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             let isLeaf = false;
                             let itemText = '';
                             let itemPath = '';
-                            let itemIcon = '';
+                            let itemIcon = DEFAULT_SUBMENU_ICON;
                             let itemActiveColor = '#1abc9c';
                             let itemIconColor = undefined;
 
@@ -703,19 +760,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 isLeaf = true;
                                 itemText = subItem;
                                 itemPath = menuPaths[subItem];
+                                itemIcon = inferMenuIconName(itemText, itemPath);
                             } else {
                                 const mi = subItem as MenuItem;
                                 itemActiveColor = mi.activeColor || '#1abc9c';
                                 itemIconColor = mi.iconColor;
+                                const miPath = mi.path || menuPaths[mi.text];
+                                itemIcon = inferMenuIconName(mi.text, miPath, mi.icon);
                                 if (!mi.sub || mi.sub.length === 0) {
                                     isLeaf = true;
                                     itemText = mi.text;
-                                    itemPath = mi.path || menuPaths[mi.text];
-                                    itemIcon = mi.icon || '';
+                                    itemPath = miPath;
                                 } else {
                                     isLeaf = false;
                                     itemText = mi.text;
-                                    itemIcon = mi.icon || '';
                                 }
                             }
 
@@ -728,7 +786,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                         style={{
                                             cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
                                             color: isSubActive ? itemActiveColor : undefined,
-                                            fontWeight: isSubActive ? 'bold' : 'normal'
+                                            fontWeight: isSubActive ? 'bold' : 'normal',
+                                            justifyContent: 'flex-start',
+                                            gap: '8px'
                                         }}
                                         onClick={(e) => {
                                             e.stopPropagation();
@@ -740,13 +800,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                                             setHoveredMenuItem(null);
                                         }}
                                     >
-                                        {itemIcon && (
-                                            <FontAwesomeIcon
-                                                icon={resolveIcon(itemIcon, faChartPie)}
-                                                style={{ marginRight: '8px', fontSize: '10px', width: '12px', color: itemIconColor }}
-                                            />
-                                        )}
-                                        <span>{itemText}</span>
+                                        <FontAwesomeIcon
+                                            icon={resolveIcon(itemIcon, faCircle)}
+                                            style={{
+                                                fontSize: itemIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
+                                                width: '12px',
+                                                flexShrink: 0,
+                                                color: isSubActive ? itemActiveColor : itemIconColor
+                                            }}
+                                        />
+                                        <span>{getMenuDisplayText(itemText)}</span>
                                     </button>
                                 );
                             } else {
@@ -754,28 +817,38 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 return (
                                     <div key={idx}>
                                         <div className="submenu-item nested-header" style={{ userSelect: 'none' }}>
-                                            <span style={{ color: itemActiveColor }}>
+                                            <span style={{ color: itemActiveColor, display: 'flex', alignItems: 'center', gap: '8px' }}>
                                                 <FontAwesomeIcon
-                                                    icon={resolveIcon(menuItem.icon || 'faCircle', faChartPie)}
-                                                    style={{ marginRight: '8px', fontSize: '10px', color: itemIconColor }}
+                                                    icon={resolveIcon(itemIcon, faCircle)}
+                                                    style={{
+                                                        fontSize: itemIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
+                                                        width: '12px',
+                                                        flexShrink: 0,
+                                                        color: itemIconColor
+                                                    }}
                                                 />
-                                                {menuItem.text}
+                                                {getMenuDisplayText(menuItem.text)}
                                             </span>
                                         </div>
                                         {menuItem.sub?.map((nested: string | MenuItem, nIdx: number) => {
                                             let deepText = '';
                                             let deepPath = '';
                                             let deepPermission = '';
+                                            let deepIcon = DEFAULT_SUBMENU_ICON;
+                                            let deepIconColor = undefined;
                                             let deepActiveColor = '#1abc9c';
 
                                             if (typeof nested === 'string') {
                                                 deepText = nested;
                                                 deepPath = menuPaths[nested];
                                                 deepPermission = nested;
+                                                deepIcon = inferMenuIconName(deepText, deepPath);
                                             } else {
                                                 deepText = nested.text;
                                                 deepPath = nested.path || menuPaths[nested.text];
                                                 deepPermission = nested.text;
+                                                deepIcon = inferMenuIconName(nested.text, deepPath, nested.icon);
+                                                deepIconColor = nested.iconColor;
                                                 deepActiveColor = nested.activeColor || '#1abc9c';
                                             }
 
@@ -790,7 +863,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                     style={{
                                                         cursor: 'pointer', userSelect: 'none', textAlign: 'left', width: '100%',
                                                         color: isNestedActive ? deepActiveColor : undefined,
-                                                        fontWeight: isNestedActive ? 'bold' : 'normal'
+                                                        fontWeight: isNestedActive ? 'bold' : 'normal',
+                                                        justifyContent: 'flex-start',
+                                                        gap: '8px'
                                                     }}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -804,7 +879,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                         setHoveredMenuItem(null);
                                                     }}
                                                 >
-                                                    <span>{deepText}</span>
+                                                    <FontAwesomeIcon
+                                                        icon={resolveIcon(deepIcon, faCircle)}
+                                                        style={{
+                                                            fontSize: deepIcon === DEFAULT_SUBMENU_ICON ? '7px' : '10px',
+                                                            width: '12px',
+                                                            flexShrink: 0,
+                                                            color: isNestedActive ? deepActiveColor : deepIconColor
+                                                        }}
+                                                    />
+                                                    <span>{getMenuDisplayText(deepText)}</span>
                                                 </button>
                                             );
                                         })}

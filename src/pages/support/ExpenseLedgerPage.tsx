@@ -8,6 +8,7 @@ import {
   formatCurrency,
   getSummaryTotal,
   hexToRgba,
+  normalizeColor,
   useExpenseLedgerData
 } from './hooks/useExpenseLedgerData';
 import type { BillingScope, LedgerSummary } from './hooks/useExpenseLedgerData';
@@ -128,6 +129,16 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
             const id = String(team.id ?? team.legacyId ?? '');
             if (!id) return null;
             const isSelected = selectedTeamId === id;
+            const teamColor = normalizeColor(team.color);
+            const tabStyle: React.CSSProperties = {
+              borderTopColor: teamColor,
+              borderTopWidth: '3px',
+              borderLeftColor: isSelected ? hexToRgba(teamColor, 0.35) : 'transparent',
+              borderRightColor: isSelected ? hexToRgba(teamColor, 0.35) : 'transparent',
+              borderBottomColor: isSelected ? '#fff' : 'transparent',
+              backgroundColor: isSelected ? hexToRgba(teamColor, 0.08) : undefined,
+              boxShadow: isSelected ? `0 -2px 8px ${hexToRgba(teamColor, 0.14)}` : undefined
+            };
 
             return (
               <button
@@ -139,9 +150,12 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
                     ? 'relative z-10 -mb-[9px] border-slate-300 border-b-white bg-white text-slate-900 shadow-[0_-2px_4px_rgba(0,0,0,0.05)]'
                     : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
                 }`}
-                style={isSelected ? { borderTopColor: team.color || '#3b82f6', borderTopWidth: '3px' } : undefined}
+                style={tabStyle}
               >
-                {team.name}
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full shadow-sm" style={{ backgroundColor: teamColor }} />
+                  <span>{team.name}</span>
+                </span>
               </button>
             );
           })}

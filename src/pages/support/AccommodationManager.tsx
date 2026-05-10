@@ -7,6 +7,7 @@ import { accommodationService } from '../../services/accommodationService';
 import { Accommodation, UtilityRecord } from '../../types/accommodation';
 import AccommodationForm from '../../components/accommodation/AccommodationForm';
 import AccommodationQuickAssignmentModal from '../../components/accommodation/QuickAssignmentModal';
+import AccommodationBillingManager from '../../components/accommodation/AccommodationBillingManager';
 import UtilityLedger from '../../components/accommodation/UtilityLedger';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
@@ -36,6 +37,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const [quickAssignItem, setQuickAssignItem] = useState<Accommodation | null>(null);
     const [filterStatus, setFilterStatus] = useState<'active' | 'inactive'>('active');
     const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
+    const [showBillingPanel, setShowBillingPanel] = useState(false);
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
@@ -1688,10 +1690,26 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                 </div>
                             </div>
                             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                                <h2 className="text-sm font-extrabold text-indigo-900">배정/청구관리 통합 안내</h2>
-                                <p className="text-xs text-indigo-700 mt-1 leading-relaxed">
-                                    현황판에서 숙소 행/카드를 클릭하거나 `배정/청구관리` 버튼을 누르면, 배정 등록과 청구대상(팀/개인) 설정을 한 화면에서 함께 관리합니다.
-                                </p>
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                                    <div>
+                                        <h2 className="text-lg font-extrabold text-slate-900">숙소 청구관리</h2>
+                                        <p className="text-sm text-slate-500 font-medium mt-1">
+                                            현황판에서 배정/청구대상을 정리한 뒤 월별 숙소 청구서를 생성/수정/확정하세요.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowBillingPanel((prev) => !prev)}
+                                        className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                                    >
+                                        {showBillingPanel ? '청구관리 접기' : '청구관리 열기'}
+                                    </button>
+                                </div>
+                                {showBillingPanel && (
+                                    <div className="mt-4 pt-4 border-t border-slate-200">
+                                        <AccommodationBillingManager />
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : (

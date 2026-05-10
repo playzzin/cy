@@ -1,6 +1,14 @@
 .tw-page {
     min-height: calc(100vh - 120px);
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
     color: #111827;
+}
+
+.tw-page,
+.tw-page * {
+    box-sizing: border-box;
 }
 
 .tw-page__header {
@@ -88,6 +96,60 @@
     border: 1px solid #dfe5ef;
     border-radius: 8px;
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.tw-alert-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.tw-alert {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.tw-alert--warning {
+    border-color: #fed7aa;
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.tw-alert div {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tw-alert strong {
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.tw-alert span {
+    color: inherit;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.tw-alert button {
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    background: #fff;
+    color: inherit;
+    font-size: 12px;
+    font-weight: 900;
 }
 
 .tw-control {
@@ -200,6 +262,11 @@
     color: #0f172a;
     font-size: 20px;
     font-weight: 900;
+}
+
+.tw-mobile-switch,
+.tw-mobile-back {
+    display: none;
 }
 
 .tw-workspace {
@@ -496,6 +563,11 @@
 
 .tw-empty-state {
     padding: 24px 10px;
+}
+
+.tw-empty-state--error,
+.tw-table-empty--error {
+    color: #b91c1c;
 }
 
 .tw-empty-detail {
@@ -819,12 +891,26 @@
     border: 1px solid #e0e7f1;
     border-radius: 8px;
     background: #f8fafc;
-    overflow-x: auto;
+    overflow-x: hidden;
 }
 
 .tw-payslip-template-wrap > div {
-    min-width: 780px;
+    min-width: 0;
+    width: 100%;
     margin-bottom: 0;
+}
+
+.tw-payslip-template-wrap .xl\:grid-cols-2 {
+    grid-template-columns: 1fr !important;
+}
+
+.tw-payslip-template-wrap table {
+    table-layout: fixed;
+}
+
+.tw-payslip-template-wrap th,
+.tw-payslip-template-wrap td {
+    overflow-wrap: anywhere;
 }
 
 .tw-document-title {
@@ -980,6 +1066,66 @@
     font-weight: 900;
 }
 
+.tw-output-card-list {
+    display: none;
+}
+
+.tw-output-card {
+    padding: 12px;
+    border: 1px solid #e0e7f1;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.tw-output-card__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.tw-output-card__header strong {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.tw-output-card__header span {
+    color: #1d4ed8;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+.tw-output-card dl {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+}
+
+.tw-output-card dl div {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid #eef2f7;
+}
+
+.tw-output-card dt {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 900;
+}
+
+.tw-output-card dd {
+    margin: 3px 0 0;
+    color: #111827;
+    font-size: 12px;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
 .tw-output-table-wrap {
     max-height: 340px;
     overflow: auto;
@@ -1028,7 +1174,7 @@
 }
 
 .tw-daily-v2-table {
-    min-width: 920px;
+    min-width: 0;
     table-layout: fixed;
     font-size: 12px;
 }
@@ -1135,6 +1281,128 @@
     .tw-output-table-wrap {
         max-height: none;
         min-height: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .tw-page {
+        min-height: auto;
+    }
+
+    .tw-page__header {
+        gap: 12px;
+    }
+
+    .tw-header-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .tw-icon-button,
+    .tw-primary-button {
+        width: 100%;
+    }
+
+    .tw-alert {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .tw-alert button {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .tw-mobile-switch {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 12px;
+        padding: 5px;
+        border: 1px solid #dfe5ef;
+        border-radius: 8px;
+        background: #f8fafc;
+    }
+
+    .tw-mobile-switch__button {
+        height: 38px;
+        border-radius: 7px;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 900;
+    }
+
+    .tw-mobile-switch__button--active {
+        background: #fff;
+        color: #1d4ed8;
+        box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+    }
+
+    .tw-mobile-switch__button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+    .tw-workspace {
+        display: block;
+    }
+
+    .tw-workspace--list .tw-detail-panel,
+    .tw-workspace--detail .tw-worker-panel {
+        display: none;
+    }
+
+    .tw-worker-panel,
+    .tw-detail-panel {
+        min-height: 0;
+    }
+
+    .tw-detail-panel {
+        padding: 12px;
+    }
+
+    .tw-mobile-back {
+        width: 100%;
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 12px;
+        border: 1px solid #d8dee8;
+        border-radius: 8px;
+        background: #fff;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 900;
+    }
+
+    .tw-output-table-wrap--v2 {
+        display: none;
+    }
+
+    .tw-output-card-list {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .tw-payslip-template-wrap {
+        padding: 8px;
+    }
+
+    .tw-payslip-template-wrap .grid-cols-4,
+    .tw-payslip-template-wrap .grid-cols-3 {
+        grid-template-columns: 1fr !important;
+    }
+
+    .tw-payslip-template-wrap table {
+        font-size: 11px;
+    }
+
+    .tw-payslip-template-wrap th,
+    .tw-payslip-template-wrap td {
+        padding-left: 6px !important;
+        padding-right: 6px !important;
     }
 }
 

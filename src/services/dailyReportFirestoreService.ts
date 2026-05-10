@@ -45,6 +45,16 @@ const normalizeWorker = (worker: Partial<DailyReportWorkerInputZod>): DailyRepor
     workerTeamName: worker.workerTeamName,
 });
 
+const withSiteSnapshot = (
+    worker: DailyReportWorkerZod,
+    siteType?: string | null,
+    paymentType?: string | null
+): DailyReportWorkerZod => ({
+    ...worker,
+    siteType: worker.siteType ?? siteType ?? undefined,
+    paymentType: worker.paymentType ?? paymentType ?? undefined,
+});
+
 const normalizeReport = (
     report: Partial<DailyReportInputZod> & Pick<DailyReportInputZod, 'date' | 'teamId' | 'siteId'>
 ): DailyReportZod => ({
@@ -172,6 +182,8 @@ export const dailyReportFirestoreService = {
         teamName: string;
         siteId: string;
         siteName: string;
+        siteType?: string;
+        paymentType?: string;
         workers: DailyReportWorkerInputZod[];
     }): Promise<void> {
         const q = query(
@@ -186,15 +198,27 @@ export const dailyReportFirestoreService = {
 
         if (reportDoc) {
             const existingData = normalizeReport(reportDoc.data() as DailyReportInputZod);
+            const nextSiteType = String(params.siteType ?? '').trim() || existingData.siteType;
+            const nextPaymentType = String(params.paymentType ?? '').trim() || existingData.paymentType;
             const updatedWorkers = [...existingData.workers];
 
             params.workers.forEach(newWorker => {
                 const normalizedWorker = normalizeWorker(newWorker);
                 const idx = updatedWorkers.findIndex(worker => worker.workerId === normalizedWorker.workerId);
                 if (idx >= 0) {
-                    updatedWorkers[idx] = { ...updatedWorkers[idx], ...normalizedWorker };
+                    const existingWorker = updatedWorkers[idx];
+                    updatedWorkers[idx] = {
+                        ...existingWorker,
+                        ...normalizedWorker,
+                        siteType: normalizedWorker.siteType ?? existingWorker.siteType ?? nextSiteType,
+                        paymentType: normalizedWorker.paymentType ?? existingWorker.paymentType ?? nextPaymentType,
+                    };
                 } else {
-                    updatedWorkers.push(normalizedWorker);
+                    updatedWorkers.push(withSiteSnapshot(
+                        normalizedWorker,
+                        nextSiteType,
+                        nextPaymentType
+                    ));
                 }
             });
 
@@ -202,6 +226,8 @@ export const dailyReportFirestoreService = {
             const totalAmount = updatedWorkers.reduce((acc, worker) => acc + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
             await this.updateReport(reportDoc.id, {
+                siteType: nextSiteType,
+                paymentType: nextPaymentType,
                 workers: updatedWorkers,
                 totalManDay,
                 totalAmount,
@@ -210,7 +236,11 @@ export const dailyReportFirestoreService = {
             return;
         }
 
-        const normalizedWorkers = params.workers.map(normalizeWorker);
+        const normalizedWorkers = params.workers.map(worker => withSiteSnapshot(
+            normalizeWorker(worker),
+            params.siteType,
+            params.paymentType
+        ));
         const totalManDay = normalizedWorkers.reduce((acc, worker) => acc + (worker.manDay || 0), 0);
         const totalAmount = normalizedWorkers.reduce((acc, worker) => acc + ((worker.manDay || 0) * (worker.unitPrice || 0)), 0);
 
@@ -220,6 +250,8 @@ export const dailyReportFirestoreService = {
             teamName: params.teamName,
             siteId: params.siteId,
             siteName: params.siteName,
+            siteType: params.siteType,
+            paymentType: params.paymentType,
             workers: normalizedWorkers,
             totalManDay,
             totalAmount,

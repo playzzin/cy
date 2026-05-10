@@ -53,6 +53,8 @@ interface InputRow {
     teamName: string;
 }
 
+type InputGridChange = [number, keyof InputRow | string | number, unknown, unknown];
+
 interface LedgerFilter {
     startDate: string;
     endDate: string;
@@ -171,6 +173,8 @@ interface DbFilterState {
 
 const INPUT_ROW_COUNT = 80;
 const DB_PAGE_SIZE = 100;
+const INPUT_GRID_DERIVED_SOURCE = 'workbook-input-derived';
+const INPUT_GRID_MOUSE_COMMIT_SOURCE = 'workbook-input-mouse-commit';
 const buildDefaultLedgerStart = (date: Date) => (
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
 );
@@ -222,6 +226,8 @@ const emptyInputRow = (): InputRow => ({
     teamName: ''
 });
 
+const createEmptyInputRows = () => Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow);
+
 const emptyDbFilter = (): DbFilterState => ({
     transactionType: '',
     date: '',
@@ -238,8 +244,8 @@ const emptyDbFilter = (): DbFilterState => ({
     teamName: ''
 });
 
-const normalizeInputRows = (rows: InputRow[], baseYear: number, selectedTeam: string) =>
-    rows.map((row) => normalizeInputRow(row, baseYear, selectedTeam));
+const normalizeInputRows = (rows: Array<Partial<InputRow> | null | undefined>, baseYear: number, selectedTeam: string) =>
+    rows.map((row) => normalizeInputRowForGrid(row, baseYear, selectedTeam));
 
 const areInputRowsEqual = (left: InputRow[], right: InputRow[]) => {
     if (left === right) return true;
@@ -275,6 +281,49 @@ const areInputRowsEqual = (left: InputRow[], right: InputRow[]) => {
 const formatDateInput = (date: Date) => (
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 );
+
+const formatShortDateInput = (normalizedDate: string) => (
+    `${normalizedDate.slice(2, 4)}-${normalizedDate.slice(5, 7)}-${normalizedDate.slice(8, 10)}`
+);
+
+const expandDateYear = (yearText: string): number => {
+    const year = Number(yearText);
+    if (!Number.isFinite(year)) return NaN;
+    return yearText.length === 2 ? 2000 + year : year;
+};
+
+const formatDateParts = (year: number, month: number, day: number) => (
+    `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+);
+
+const normalizeDateParts = (yearText: string, monthText: string, dayText: string): string => {
+    const yearNumber = expandDateYear(yearText);
+    const monthNumber = Number(monthText);
+    const dayNumber = Number(dayText);
+
+    if (
+        !Number.isFinite(yearNumber) ||
+        !Number.isInteger(monthNumber) ||
+        !Number.isInteger(dayNumber) ||
+        monthNumber < 1 ||
+        monthNumber > 12 ||
+        dayNumber < 1 ||
+        dayNumber > 31
+    ) {
+        return '';
+    }
+
+    const parsed = new Date(yearNumber, monthNumber - 1, dayNumber);
+    if (
+        parsed.getFullYear() !== yearNumber ||
+        parsed.getMonth() !== monthNumber - 1 ||
+        parsed.getDate() !== dayNumber
+    ) {
+        return '';
+    }
+
+    return formatDateParts(yearNumber, monthNumber, dayNumber);
+};
 
 const formatNumber = (value: number | null | undefined) => {
     if (value === null || value === undefined || !Number.isFinite(value)) return '-';
@@ -422,7 +471,7 @@ const normalizeTransactionType = (value: unknown): WorkbookTransactionType | nul
     return null;
 };
 
-const normalizeDate = (value: unknown): string => {
+const normalizeDate = (value: unknown, fallbackYear?: number): string => {
     if (value instanceof Date && !Number.isNaN(value.getTime())) {
         return formatDateInput(value);
     }
@@ -436,23 +485,35 @@ const normalizeDate = (value: unknown): string => {
 
     const trimmed = value.trim();
     if (!trimmed) return '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
 
-    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    const yearFirstMatch = trimmed.match(/^(\d{2}|\d{4})[-.](\d{1,2})[-.](\d{1,2})$/);
+    if (yearFirstMatch) {
+        return normalizeDateParts(yearFirstMatch[1], yearFirstMatch[2], yearFirstMatch[3]);
+    }
+
+    const slashMatch = trimmed.match(/^(\d{1,4})\/(\d{1,2})\/(\d{1,4})$/);
     if (slashMatch) {
-        const [, monthText, dayText, yearText] = slashMatch;
-        const yearNumber = Number(yearText.length === 2 ? `20${yearText}` : yearText);
-        const monthNumber = Number(monthText);
-        const dayNumber = Number(dayText);
-        if (
-            Number.isFinite(yearNumber) &&
-            monthNumber >= 1 &&
-            monthNumber <= 12 &&
-            dayNumber >= 1 &&
-            dayNumber <= 31
-        ) {
-            return `${yearNumber}-${String(monthNumber).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
+        const [, firstText, secondText, thirdText] = slashMatch;
+        const firstNumber = Number(firstText);
+        const thirdNumber = Number(thirdText);
+
+        if (firstText.length === 4 || firstNumber > 12) {
+            return normalizeDateParts(firstText, secondText, thirdText);
         }
+
+        if (thirdText.length === 2 || thirdText.length === 4 || thirdNumber > 31) {
+            return normalizeDateParts(thirdText, firstText, secondText);
+        }
+    }
+
+    const compactMatch = trimmed.match(/^(\d{2}|\d{4})(\d{2})(\d{2})$/);
+    if (compactMatch) {
+        return normalizeDateParts(compactMatch[1], compactMatch[2], compactMatch[3]);
+    }
+
+    const monthDayMatch = trimmed.match(/^(\d{1,2})[-./](\d{1,2})$/);
+    if (monthDayMatch && fallbackYear) {
+        return normalizeDateParts(String(fallbackYear), monthDayMatch[1], monthDayMatch[2]);
     }
 
     const parsed = new Date(trimmed);
@@ -515,6 +576,121 @@ const hasInputContent = (row: InputRow) => {
         toNumberOrNull(row.supplyAmount) !== null ||
         toNumberOrNull(row.paymentAmount) !== null
     );
+};
+
+const coerceInputRow = (row: Partial<InputRow> | null | undefined): InputRow => ({
+    ...emptyInputRow(),
+    ...(row ?? {})
+});
+
+const toInputText = (value: unknown) => {
+    if (value === null || value === undefined) return '';
+    return typeof value === 'string' ? value : String(value);
+};
+
+const normalizeInputDateForGrid = (value: unknown, baseYear: number): string => {
+    const normalizedDate = normalizeDate(value, baseYear);
+    if (normalizedDate) return formatShortDateInput(normalizedDate);
+    return toInputText(value);
+};
+
+const normalizeInputRowForGrid = (
+    row: Partial<InputRow> | null | undefined,
+    baseYear: number,
+    selectedTeam: string
+): InputRow => {
+    const source = coerceInputRow(row);
+    const normalizedDate = normalizeDate(source.date, baseYear);
+    const date = normalizeInputDateForGrid(source.date, baseYear);
+    const supplyAmount = toNumberOrNull(source.supplyAmount);
+    const taxAmount = supplyAmount === null ? null : Math.round(supplyAmount * 0.1);
+    const totalAmount = supplyAmount === null ? null : supplyAmount + (taxAmount ?? 0);
+    const paymentAmount = toNumberOrNull(source.paymentAmount);
+    const manDays = toNumberOrNull(source.manDays);
+    const appliedMonth = normalizedDate
+        ? (toNumberOrNull(source.appliedMonth) ?? getMonthFromDate(normalizedDate))
+        : null;
+    const rowHasContent = hasInputContent({
+        ...source,
+        date,
+        partnerName: toInputText(source.partnerName),
+        siteName: toInputText(source.siteName),
+        description: toInputText(source.description),
+        note: toInputText(source.note),
+        supplyAmount,
+        paymentAmount,
+        manDays
+    });
+
+    return {
+        transactionType: normalizeTransactionType(source.transactionType) ?? '',
+        date,
+        partnerName: toInputText(source.partnerName),
+        siteName: toInputText(source.siteName),
+        description: toInputText(source.description),
+        manDays,
+        supplyAmount,
+        taxAmount,
+        totalAmount,
+        paymentAmount,
+        appliedYear: normalizedDate ? baseYear : null,
+        appliedMonth,
+        note: toInputText(source.note),
+        teamName: rowHasContent ? (toInputText(source.teamName) || selectedTeam) : ''
+    };
+};
+
+const INPUT_GRID_DERIVED_PROPS: Array<keyof InputRow> = [
+    'taxAmount',
+    'totalAmount',
+    'appliedYear',
+    'appliedMonth'
+];
+
+const isEmptyInputGridValue = (value: unknown) => value === null || value === undefined || value === '';
+
+const areInputGridValuesEqual = (left: unknown, right: unknown) => {
+    if (left === right) return true;
+    if (isEmptyInputGridValue(left) && isEmptyInputGridValue(right)) return true;
+    return false;
+};
+
+const applyInputGridDerivedValues = (
+    hotInstance: any,
+    rowIndexes: number[],
+    baseYear: number,
+    selectedTeam: string
+) => {
+    const sourceRows = hotInstance.getSourceData() as InputRow[];
+    const updates: Array<[number, keyof InputRow, unknown]> = [];
+    const uniqueRowIndexes = Array.from(new Set(rowIndexes));
+
+    uniqueRowIndexes.forEach((rowIndex) => {
+        if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= sourceRows.length) return;
+
+        const sourceRow = sourceRows[rowIndex];
+        const normalizedRow = normalizeInputRowForGrid(sourceRow, baseYear, selectedTeam);
+
+        INPUT_GRID_DERIVED_PROPS.forEach((prop) => {
+            if (!areInputGridValuesEqual(sourceRow?.[prop], normalizedRow[prop])) {
+                updates.push([rowIndex, prop, normalizedRow[prop]]);
+            }
+        });
+    });
+
+    if (updates.length === 0) return;
+
+    const applyUpdates = () => {
+        updates.forEach(([rowIndex, prop, value]) => {
+            hotInstance.setSourceDataAtCell(rowIndex, prop, value, INPUT_GRID_DERIVED_SOURCE);
+        });
+    };
+
+    if (typeof hotInstance.batch === 'function') {
+        hotInstance.batch(applyUpdates);
+    } else {
+        applyUpdates();
+    }
 };
 
 const hasLedgerEntryContent = (entry: WorkbookLedgerEntry) => {
@@ -639,15 +815,16 @@ const parseImportedDbEntries = (rows: unknown[][], fallbackTeamName: string, fal
     return { entries, skipped };
 };
 
-const normalizeInputRow = (row: InputRow, baseYear: number, selectedTeam: string): InputRow => {
-    const normalizedDate = normalizeDate(row.date);
-    const supplyAmount = toNumberOrNull(row.supplyAmount);
+const normalizeInputRow = (row: Partial<InputRow> | null | undefined, baseYear: number, selectedTeam: string): InputRow => {
+    const source = coerceInputRow(row);
+    const normalizedDate = normalizeDate(source.date, baseYear);
+    const supplyAmount = toNumberOrNull(source.supplyAmount);
     const taxAmount = supplyAmount === null ? null : Math.round(supplyAmount * 0.1);
     const totalAmount = supplyAmount === null ? null : supplyAmount + (taxAmount ?? 0);
-    const paymentAmount = toNumberOrNull(row.paymentAmount);
-    const manDays = toNumberOrNull(row.manDays);
+    const paymentAmount = toNumberOrNull(source.paymentAmount);
+    const manDays = toNumberOrNull(source.manDays);
     const rowHasContent = hasInputContent({
-        ...row,
+        ...source,
         date: normalizedDate,
         supplyAmount,
         paymentAmount,
@@ -655,20 +832,20 @@ const normalizeInputRow = (row: InputRow, baseYear: number, selectedTeam: string
     });
 
     return {
-        transactionType: row.transactionType,
+        transactionType: normalizeTransactionType(source.transactionType) ?? '',
         date: normalizedDate,
-        partnerName: normalizeText(row.partnerName),
-        siteName: normalizeText(row.siteName),
-        description: normalizeText(row.description),
+        partnerName: normalizeText(source.partnerName),
+        siteName: normalizeText(source.siteName),
+        description: normalizeText(source.description),
         manDays,
         supplyAmount,
         taxAmount,
         totalAmount,
         paymentAmount,
         appliedYear: normalizedDate ? baseYear : null,
-        appliedMonth: normalizedDate ? (toNumberOrNull(row.appliedMonth) ?? getMonthFromDate(normalizedDate)) : null,
-        note: normalizeText(row.note),
-        teamName: rowHasContent ? selectedTeam : ''
+        appliedMonth: normalizedDate ? (toNumberOrNull(source.appliedMonth) ?? getMonthFromDate(normalizedDate)) : null,
+        note: normalizeText(source.note),
+        teamName: rowHasContent ? (normalizeText(source.teamName) || selectedTeam) : ''
     };
 };
 
@@ -1269,7 +1446,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const entriesLoadedRef = useRef(false);
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
-    const [inputRows, setInputRows] = useState<InputRow[]>(() => Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow));
+    const selectedTeamInputRef = useRef<HTMLInputElement | null>(null);
+    const baseYearInputRef = useRef<HTMLInputElement | null>(null);
+    const inputRowsRef = useRef<InputRow[]>([]);
+    const selectedTeamRef = useRef('');
+    const baseYearRef = useRef(currentYear);
+    if (inputRowsRef.current.length === 0) {
+        inputRowsRef.current = createEmptyInputRows();
+    }
 
     const [ledgerDraft, setLedgerDraft] = useState<LedgerFilter>({
         startDate: defaultLedgerStart,
@@ -1402,30 +1586,196 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, []);
 
     useEffect(() => {
-        setInputRows((prevRows) => {
-            const nextRows = normalizeInputRows(prevRows, baseYear, selectedTeam);
-            return areInputRowsEqual(prevRows, nextRows) ? prevRows : nextRows;
-        });
-    }, [baseYear, selectedTeam]);
+        selectedTeamRef.current = selectedTeam;
+    }, [selectedTeam]);
+
+    const applyInputGridDerivedValuesForRows = useCallback((rowIndexes?: number[]) => {
+        const hotInstance = hotRef.current?.hotInstance;
+        if (!hotInstance || hotInstance.isDestroyed) {
+            inputRowsRef.current = normalizeInputRows(
+                inputRowsRef.current,
+                baseYearRef.current,
+                selectedTeamRef.current
+            );
+            return;
+        }
+
+        const sourceRows = hotInstance.getSourceData() as InputRow[];
+        applyInputGridDerivedValues(
+            hotInstance,
+            rowIndexes ?? sourceRows.map((_, rowIndex) => rowIndex),
+            baseYearRef.current,
+            selectedTeamRef.current
+        );
+        inputRowsRef.current = hotInstance.getSourceData() as InputRow[];
+    }, []);
+
+    useEffect(() => {
+        baseYearRef.current = baseYear;
+        applyInputGridDerivedValuesForRows();
+    }, [applyInputGridDerivedValuesForRows, baseYear]);
+
+    const handleSelectedTeamChange = useCallback((value: string) => {
+        selectedTeamRef.current = value;
+    }, []);
+
+    const handleBaseYearChange = useCallback((value: string) => {
+        baseYearInputRef.current && (baseYearInputRef.current.value = value);
+    }, []);
+
+    const commitBaseYearInput = useCallback(() => {
+        const input = baseYearInputRef.current;
+        const value = input?.value.trim() ?? '';
+        const nextYear = Number(value);
+
+        if (!Number.isInteger(nextYear) || nextYear < 2000 || nextYear > 2100) {
+            if (input) input.value = String(baseYearRef.current || currentYear);
+            return;
+        }
+
+        baseYearRef.current = nextYear;
+        setBaseYear(nextYear);
+        if (input) input.value = String(nextYear);
+    }, [currentYear]);
+
+    const syncTopInputRefs = useCallback(() => {
+        selectedTeamRef.current = selectedTeamInputRef.current?.value ?? selectedTeamRef.current;
+        commitBaseYearInput();
+    }, [commitBaseYearInput]);
+
+    const handleInputGridAfterInit = useCallback(function handleInputGridAfterInit(this: any) {
+        const hotInstance = this ?? hotRef.current?.hotInstance;
+        hotInstance?.getFocusManager?.().setRefocusDelay(0);
+    }, []);
+
+    const refocusInputGridEditor = useCallback(() => {
+        const hotInstance = hotRef.current?.hotInstance;
+        if (!hotInstance || hotInstance.isDestroyed) return;
+
+        hotInstance.getFocusManager?.().setRefocusDelay(0);
+        hotInstance.getFocusManager?.().refocusToEditorTextarea?.(0);
+    }, []);
+
+    const handleInputGridSelectionEnd = useCallback(() => {
+        refocusInputGridEditor();
+    }, [refocusInputGridEditor]);
+
+    const handleInputGridBeforeKeyDown = useCallback((event: KeyboardEvent) => {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        if (event.key.length !== 1 && event.key !== 'Process') return;
+        refocusInputGridEditor();
+    }, [refocusInputGridEditor]);
+
+    const handleInputGridModifyFocusedElement = useCallback((_row: number, _column: number, focusedElement: HTMLElement) => {
+        const hotInstance = hotRef.current?.hotInstance;
+        const activeElement = hotInstance?.rootDocument?.activeElement as HTMLElement | null | undefined;
+
+        if (
+            activeElement &&
+            activeElement !== hotInstance?.rootDocument?.body &&
+            !hotInstance?.rootElement?.contains(activeElement) &&
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName)
+        ) {
+            return activeElement;
+        }
+
+        const activeEditor = hotInstance?.getActiveEditor?.();
+        return activeEditor?.TEXTAREA ?? focusedElement;
+    }, []);
 
     const handleInputGridChange = useCallback((changes: unknown, source: string) => {
         if (!Array.isArray(changes) || changes.length === 0) return;
-        if (source === 'loadData' || source === 'updateData') return;
 
         const hotInstance = hotRef.current?.hotInstance;
         if (!hotInstance) return;
 
-        const nextRows = normalizeInputRows(hotInstance.getSourceData() as InputRow[], baseYear, selectedTeam);
+        if (source === 'loadData' || source === 'updateData' || source === INPUT_GRID_DERIVED_SOURCE) {
+            inputRowsRef.current = hotInstance.getSourceData() as InputRow[];
+            return;
+        }
 
-        setInputRows((prevRows) => (areInputRowsEqual(prevRows, nextRows) ? prevRows : nextRows));
-    }, [baseYear, selectedTeam]);
+        const changedRows = (changes as InputGridChange[])
+            .map(([rowIndex]) => rowIndex)
+            .filter((rowIndex) => Number.isInteger(rowIndex) && rowIndex >= 0);
+
+        applyInputGridDerivedValues(
+            hotInstance,
+            changedRows,
+            baseYearRef.current,
+            selectedTeamRef.current
+        );
+        inputRowsRef.current = hotInstance.getSourceData() as InputRow[];
+    }, []);
+
+    const commitActiveInputGridEditor = useCallback(() => {
+        const hotInstance = hotRef.current?.hotInstance;
+        if (!hotInstance || hotInstance.isDestroyed) return;
+
+        const activeEditor = hotInstance.getActiveEditor?.();
+        if (!activeEditor || typeof activeEditor.isOpened !== 'function' || !activeEditor.isOpened()) {
+            inputRowsRef.current = hotInstance.getSourceData() as InputRow[];
+            return;
+        }
+
+        const rowIndex = Number(activeEditor.row);
+        const columnIndex = Number(activeEditor.col);
+        if (!Number.isInteger(rowIndex) || rowIndex < 0 || !Number.isInteger(columnIndex) || columnIndex < 0) {
+            return;
+        }
+
+        const prop = activeEditor.prop ?? hotInstance.colToProp?.(columnIndex);
+        const editorValue = typeof activeEditor.getValue === 'function' ? activeEditor.getValue() : undefined;
+
+        if (prop !== undefined && prop !== null && editorValue !== undefined) {
+            const sourceRows = hotInstance.getSourceData() as InputRow[];
+            const sourceRow = sourceRows[rowIndex] as unknown as Record<string, unknown> | undefined;
+            const currentValue = sourceRow?.[String(prop)];
+
+            if (!areInputGridValuesEqual(currentValue, editorValue)) {
+                hotInstance.setSourceDataAtCell(rowIndex, prop, editorValue, INPUT_GRID_MOUSE_COMMIT_SOURCE);
+            }
+        }
+
+        if (typeof activeEditor.finishEditing === 'function') {
+            activeEditor.finishEditing(false);
+        }
+
+        applyInputGridDerivedValues(
+            hotInstance,
+            [rowIndex],
+            baseYearRef.current,
+            selectedTeamRef.current
+        );
+        inputRowsRef.current = hotInstance.getSourceData() as InputRow[];
+    }, []);
+
+    const handleInputGridBeforeMouseDown = useCallback((event: MouseEvent, coords: { row: number; col: number }) => {
+        if (event.button !== 0) return;
+        if (!coords || coords.row < 0 || coords.col < 0) return;
+        commitActiveInputGridEditor();
+    }, [commitActiveInputGridEditor]);
 
     const handleResetInputGrid = useCallback(() => {
-        setInputRows(Array.from({ length: INPUT_ROW_COUNT }, emptyInputRow));
+        const nextRows = createEmptyInputRows();
+        inputRowsRef.current = nextRows;
+
+        const hotInstance = hotRef.current?.hotInstance;
+        if (hotInstance && !hotInstance.isDestroyed) {
+            hotInstance.loadData(nextRows);
+        }
     }, []);
 
     const handleSaveRows = useCallback(async () => {
-        const normalizedRows = inputRows.map((row) => normalizeInputRow(row, baseYear, selectedTeam));
+        syncTopInputRefs();
+        commitActiveInputGridEditor();
+
+        const hotInstance = hotRef.current?.hotInstance;
+        const sourceRows = hotInstance && !hotInstance.isDestroyed
+            ? (hotInstance.getSourceData() as InputRow[])
+            : inputRowsRef.current;
+        inputRowsRef.current = sourceRows;
+
+        const normalizedRows = sourceRows.map((row) => normalizeInputRow(row, baseYearRef.current, selectedTeamRef.current));
         const filledRows = normalizedRows
             .map((row, index) => ({ row, excelRowNumber: index + 7 }))
             .filter(({ row }) => hasInputContent(row));
@@ -1454,11 +1804,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 return;
             }
 
-            const supplyAmount = row.supplyAmount ?? 0;
+            const supplyAmount = toNumberOrNull(row.supplyAmount) ?? 0;
             const taxAmount = row.taxAmount ?? 0;
             const totalAmount = row.totalAmount ?? 0;
-            const paymentAmount = row.paymentAmount ?? 0;
-            const appliedMonth = row.appliedMonth ?? getMonthFromDate(row.date);
+            const paymentAmount = toNumberOrNull(row.paymentAmount) ?? 0;
+            const appliedMonth = toNumberOrNull(row.appliedMonth) ?? getMonthFromDate(row.date);
 
             if (totalAmount === 0 && paymentAmount <= 0) {
                 validationErrors.push(`${excelRowNumber}행: 합계 또는 입금금액 중 하나는 입력되어야 합니다.`);
@@ -1471,11 +1821,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 partnerName: row.partnerName,
                 siteName: row.siteName,
                 description: row.description,
-                manDays: row.manDays,
-                appliedYear: row.appliedYear ?? baseYear,
+                manDays: toNumberOrNull(row.manDays),
+                appliedYear: row.appliedYear ?? baseYearRef.current,
                 appliedMonth,
                 note: row.note,
-                teamName: row.teamName || selectedTeam,
+                teamName: row.teamName || selectedTeamRef.current,
                 createdBy: currentUser?.uid ?? ''
             };
 
@@ -1549,7 +1899,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setSaving(false);
         }
-    }, [baseYear, currentUser?.uid, handleResetInputGrid, inputRows, refreshPageData, selectedTeam]);
+    }, [commitActiveInputGridEditor, currentUser?.uid, handleResetInputGrid, refreshPageData, syncTopInputRefs]);
 
     const handleOpenDbUpload = useCallback(() => {
         dbUploadInputRef.current?.click();
@@ -1579,7 +1929,12 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                 defval: ''
             }) as unknown[][];
 
-            const { entries: importedEntries, skipped } = parseImportedDbEntries(rows, selectedTeam, baseYear);
+            syncTopInputRefs();
+            const { entries: importedEntries, skipped } = parseImportedDbEntries(
+                rows,
+                selectedTeamRef.current,
+                baseYearRef.current
+            );
 
             if (importedEntries.length === 0) {
                 Swal.fire('안내', '가져올 수 있는 DB 행이 없습니다.', 'info');
@@ -1615,7 +1970,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setUploadingDb(false);
         }
-    }, [baseYear, currentUser?.uid, refreshPageData, selectedTeam]);
+    }, [currentUser?.uid, refreshPageData, syncTopInputRefs]);
 
     const handleDownloadDb = useCallback(async () => {
         if (entries.length === 0) {
@@ -3683,9 +4038,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         });
     }, [selectableSummaryRowIds]);
 
+    const inputDataSchema = useMemo(() => emptyInputRow(), []);
+
     const inputColumns = useMemo<any[]>(() => [
         { data: 'transactionType', type: 'dropdown', source: ['매입', '매출'], width: 88 },
-        { data: 'date', type: 'date', dateFormat: 'YYYY-MM-DD', correctFormat: true, width: 118 },
+        { data: 'date', type: 'date', dateFormat: 'YY-MM-DD', correctFormat: true, width: 98 },
         { data: 'partnerName', type: 'autocomplete', source: partnerNames, strict: false, width: 190 },
         { data: 'siteName', type: 'autocomplete', source: siteNames, strict: false, width: 210 },
         { data: 'description', type: 'text', width: 240 },
@@ -3697,7 +4054,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         { data: 'appliedYear', type: 'numeric', numericFormat: { pattern: '0' }, readOnly: true, width: 88 },
         { data: 'appliedMonth', type: 'numeric', numericFormat: { pattern: '0' }, width: 78 },
         { data: 'note', type: 'text', width: 170 },
-        { data: 'teamName', type: 'text', readOnly: true, width: 112 }
+        { data: 'teamName', type: 'text', width: 112 }
     ], [partnerNames, siteNames]);
 
     const inputColHeaders = useMemo(() => ([
@@ -3722,7 +4079,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         if ([5, 6, 7, 8, 9, 10, 11].includes(column)) {
             cellProperties.className = 'htRight';
         }
-        if ([7, 8, 10, 13].includes(column)) {
+        if ([7, 8, 10].includes(column)) {
             cellProperties.readOnly = true;
             cellProperties.className = `${cellProperties.className ?? ''} workbook-readonly-cell`.trim();
         }
@@ -3740,10 +4097,11 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <th className="sheet-label-yellow">팀 명</th>
                         <td className="sheet-value" colSpan={2}>
                             <input
-                                list="workbook-team-options"
-                                value={selectedTeam}
-                                onChange={(event) => setSelectedTeam(event.target.value)}
+                                ref={selectedTeamInputRef}
+                                defaultValue={selectedTeam}
+                                onChange={(event) => handleSelectedTeamChange(event.target.value)}
                                 placeholder="팀명 입력 또는 선택"
+                                autoComplete="off"
                             />
                         </td>
                         <td className="sheet-spacer" colSpan={6} />
@@ -3774,11 +4132,13 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <th className="sheet-label-yellow">기준연도</th>
                         <td className="sheet-value" colSpan={2}>
                             <input
+                                ref={baseYearInputRef}
                                 type="number"
                                 min={2000}
                                 max={2100}
-                                value={baseYear}
-                                onChange={(event) => setBaseYear(Number(event.target.value) || currentYear)}
+                                defaultValue={baseYear}
+                                onChange={(event) => handleBaseYearChange(event.target.value)}
+                                onBlur={commitBaseYearInput}
                             />
                         </td>
                         <td className="sheet-spacer" colSpan={11} />
@@ -3789,7 +4149,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             <div className="input-grid-shell workbook-input-grid">
                 <HotTable
                     ref={hotRef}
-                    data={inputRows}
+                    data={inputRowsRef.current}
+                    dataSchema={inputDataSchema}
                     columns={inputColumns}
                     colHeaders={inputColHeaders}
                     rowHeaders={true}
@@ -3800,8 +4161,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     contextMenu={true}
                     minSpareRows={8}
                     licenseKey="non-commercial-and-evaluation"
+                    afterInit={handleInputGridAfterInit}
                     afterChange={handleInputGridChange}
+                    afterSelectionEnd={handleInputGridSelectionEnd}
+                    beforeKeyDown={handleInputGridBeforeKeyDown}
+                    beforeOnCellMouseDown={handleInputGridBeforeMouseDown}
+                    modifyFocusedElement={handleInputGridModifyFocusedElement}
                     copyPaste={true}
+                    imeFastEdit={true}
                     outsideClickDeselects={false}
                     className="excel-handsontable"
                     cells={inputCells}
@@ -3809,7 +4176,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             </div>
 
             <p className="workbook-help-text">
-                입력폼에서 공급가액을 넣으면 부가세와 합계가 자동 계산되고, 적용연도와 팀명은 상단 값으로 자동 반영됩니다.
+                입력폼에서 공급가액을 넣으면 부가세와 합계가 자동 계산됩니다. 행의 팀명이 비어 있으면 저장할 때 상단 팀명을 사용합니다.
             </p>
         </section>
     );

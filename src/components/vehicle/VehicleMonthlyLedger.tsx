@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from '
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faGasPump, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { vehicleService } from '../../services/vehicleService';
-import { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
+import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
 import { Team } from '../../services/teamService';
+import { Worker, manpowerService } from '../../services/manpowerService';
 import { iconMap } from '../../constants/iconMap';
 
 // ── 독립 EditableCell 컴포넌트 ──
@@ -90,8 +91,72 @@ const emptyExpenseAmounts = (): ExpenseAmounts => ({
     OTHER: 0
 });
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const parseYmdDate = (value?: string | null): Date | null => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+    return date;
+};
+
+const formatYmdDate = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+const addDays = (date: Date, days: number): Date => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+};
+
+const inclusiveDays = (start: Date, end: Date): number => {
+    if (end.getTime() < start.getTime()) return 0;
+    return Math.floor((end.getTime() - start.getTime()) / ONE_DAY_MS) + 1;
+};
+
+const minDate = (...dates: Date[]): Date => dates.reduce((min, date) => date.getTime() < min.getTime() ? date : min);
+const maxDate = (...dates: Date[]): Date => dates.reduce((max, date) => date.getTime() > max.getTime() ? date : max);
+
+interface VehicleLedgerSegment {
+    id: string;
+    assigneeId?: string;
+    assigneeType?: VehicleAssigneeType;
+    assigneeName?: string;
+    teamId?: string;
+    teamName?: string;
+    startDate: string;
+    endDate: string;
+    overlapDays: number;
+}
+
+const allocateFixedCostByDays = (fixedCost: number, segments: VehicleLedgerSegment[]): number[] => {
+    if (fixedCost <= 0 || segments.length === 0) return segments.map(() => 0);
+    const totalDays = segments.reduce((sum, segment) => sum + Math.max(0, segment.overlapDays), 0);
+    if (totalDays <= 0) return segments.map(() => 0);
+
+    let allocated = 0;
+    return segments.map((segment, index) => {
+        if (index === segments.length - 1) {
+            return fixedCost - allocated;
+        }
+        const share = Math.round(fixedCost * (segment.overlapDays / totalDays));
+        allocated += share;
+        return share;
+    });
+};
+
 interface VehicleLedgerRow {
+    id: string;
     vehicle: Vehicle;
+    segment: VehicleLedgerSegment;
     rentFee: number;
     leaseFee: number;
     amounts: ExpenseAmounts;
@@ -103,6 +168,7 @@ interface VehicleLedgerRow {
 interface VehicleMonthlyLedgerProps {
     vehicles: Vehicle[];
     teams?: Team[];
+    teamFilterId?: string;
     loadingVehicles: boolean;
     onOpenExpenseLog: (vehicle: Vehicle) => void;
 }
@@ -110,6 +176,7 @@ interface VehicleMonthlyLedgerProps {
 export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     vehicles,
     teams = [],
+    teamFilterId = '',
     loadingVehicles,
     onOpenExpenseLog
 }) => {
@@ -121,7 +188,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
 
     const [rows, setRows] = useState<VehicleLedgerRow[]>([]);
-    const [assignments, setAssignments] = useState<VehicleAssignmentRecord[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
     const originalExpensesRef = useRef<VehicleExpenseRecord[]>([]);
 
     const normalizeKey = (value: unknown): string => String(value ?? '').trim();
@@ -144,11 +211,184 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         return map;
     }, [teams]);
 
+    const workerByAnyId = useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            if (worker.id) map.set(String(worker.id), worker);
+            if (worker.legacyId) map.set(String(worker.legacyId), worker);
+        });
+        return map;
+    }, [workers]);
+
+    const workerByName = useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            const name = normalizeKey(worker.name);
+            if (name && !map.has(name)) map.set(name, worker);
+        });
+        return map;
+    }, [workers]);
+
+    useEffect(() => {
+        let mounted = true;
+        manpowerService.getWorkers()
+            .then((data) => {
+                if (mounted) setWorkers(data);
+            })
+            .catch((error) => {
+                console.error('Failed to load workers:', error);
+            });
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
     useEffect(() => {
         const y = currentDate.getFullYear();
         const m = String(currentDate.getMonth() + 1).padStart(2, '0');
         setYearMonth(`${y}-${m}`);
     }, [currentDate]);
+
+    const monthRange = useMemo(() => {
+        const [y, m] = yearMonth.split('-').map(Number);
+        if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
+        return {
+            monthStart: new Date(y, m - 1, 1),
+            monthEnd: new Date(y, m, 0),
+            daysInMonth: new Date(y, m, 0).getDate()
+        };
+    }, [yearMonth]);
+
+    const resolveAssigneeTeam = useCallback((assignment: Pick<VehicleAssignmentRecord, 'assigneeId' | 'assigneeName' | 'assigneeType'>) => {
+        if (assignment.assigneeType === 'TEAM') {
+            const team = assignment.assigneeId
+                ? teamByAnyId.get(String(assignment.assigneeId))
+                : teamByName.get(normalizeKey(assignment.assigneeName));
+            return {
+                teamId: normalizeKey(team?.id ?? assignment.assigneeId),
+                teamName: normalizeKey(team?.name ?? assignment.assigneeName)
+            };
+        }
+
+        const worker = assignment.assigneeId
+            ? workerByAnyId.get(String(assignment.assigneeId))
+            : workerByName.get(normalizeKey(assignment.assigneeName));
+        return {
+            teamId: normalizeKey(worker?.teamId),
+            teamName: normalizeKey(worker?.teamName)
+        };
+    }, [teamByAnyId, teamByName, workerByAnyId, workerByName]);
+
+    const buildSegmentsForVehicle = useCallback((
+        vehicle: Vehicle,
+        assignmentList: VehicleAssignmentRecord[]
+    ): VehicleLedgerSegment[] => {
+        if (!monthRange) return [];
+
+        const vehicleId = normalizeKey(vehicle.id);
+        const activeAssignments = assignmentList
+            .filter((assignment) => normalizeKey(assignment.vehicleId) === vehicleId)
+            .map((assignment) => ({
+                assignment,
+                startDate: parseYmdDate(assignment.startDate),
+                endDate: parseYmdDate(assignment.endDate)
+            }))
+            .filter((entry) => {
+                if (!entry.startDate) return false;
+                if (entry.startDate.getTime() > monthRange.monthEnd.getTime()) return false;
+                if (entry.endDate && entry.endDate.getTime() < monthRange.monthStart.getTime()) return false;
+                return true;
+            })
+            .sort((a, b) => {
+                const startDiff = (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0);
+                if (startDiff !== 0) return startDiff;
+                return String(a.assignment.id ?? '').localeCompare(String(b.assignment.id ?? ''));
+            });
+
+        const rows = activeAssignments.flatMap((entry, index): VehicleLedgerSegment[] => {
+            const nextStartDate = activeAssignments[index + 1]?.startDate ?? null;
+            const explicitEndDate = entry.endDate ?? monthRange.monthEnd;
+            const handoffEndDate = nextStartDate ? addDays(nextStartDate, -1) : monthRange.monthEnd;
+            const segmentStart = maxDate(entry.startDate ?? monthRange.monthStart, monthRange.monthStart);
+            const segmentEnd = minDate(explicitEndDate, handoffEndDate, monthRange.monthEnd);
+            const overlapDays = inclusiveDays(segmentStart, segmentEnd);
+            if (overlapDays <= 0) return [];
+
+            const team = resolveAssigneeTeam(entry.assignment);
+            return [{
+                id: normalizeKey(entry.assignment.id) || `${vehicle.id}:${index}`,
+                assigneeId: normalizeKey(entry.assignment.assigneeId),
+                assigneeType: entry.assignment.assigneeType,
+                assigneeName: normalizeKey(entry.assignment.assigneeName),
+                teamId: team.teamId,
+                teamName: team.teamName,
+                startDate: formatYmdDate(segmentStart),
+                endDate: formatYmdDate(segmentEnd),
+                overlapDays
+            }];
+        });
+
+        if (rows.length > 0) return rows;
+
+        if (vehicle.currentAssigneeName && vehicle.currentAssigneeType) {
+            const fallbackAssignment = {
+                assigneeId: vehicle.currentAssigneeId || '',
+                assigneeType: vehicle.currentAssigneeType,
+                assigneeName: vehicle.currentAssigneeName
+            };
+            const team = resolveAssigneeTeam(fallbackAssignment);
+            return [{
+                id: `current-${vehicle.id}`,
+                assigneeId: normalizeKey(vehicle.currentAssigneeId),
+                assigneeType: vehicle.currentAssigneeType,
+                assigneeName: normalizeKey(vehicle.currentAssigneeName),
+                teamId: team.teamId,
+                teamName: team.teamName,
+                startDate: formatYmdDate(monthRange.monthStart),
+                endDate: formatYmdDate(monthRange.monthEnd),
+                overlapDays: monthRange.daysInMonth
+            }];
+        }
+
+        return [{
+            id: `unassigned-${vehicle.id}`,
+            startDate: formatYmdDate(monthRange.monthStart),
+            endDate: formatYmdDate(monthRange.monthEnd),
+            overlapDays: monthRange.daysInMonth
+        }];
+    }, [monthRange, resolveAssigneeTeam]);
+
+    const rowMatchesTeamFilter = useCallback((row: VehicleLedgerRow, filterId: string): boolean => {
+        const selectedId = normalizeKey(filterId);
+        if (!selectedId) return true;
+
+        const selectedTeam = teamByAnyId.get(selectedId);
+        const selectedIds = new Set(
+            [selectedId, selectedTeam?.id, selectedTeam?.legacyId]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+        const selectedNames = new Set(
+            [selectedTeam?.name]
+                .map((value) => normalizeKey(value))
+                .filter(Boolean)
+        );
+
+        const candidateIds = [
+            row.segment.teamId,
+            row.segment.assigneeType === 'TEAM' ? row.segment.assigneeId : ''
+        ].map((value) => normalizeKey(value)).filter(Boolean);
+
+        const candidateNames = [
+            row.segment.teamName,
+            row.segment.assigneeType === 'TEAM' ? row.segment.assigneeName : ''
+        ].map((value) => normalizeKey(value)).filter(Boolean);
+
+        return (
+            candidateIds.some((id) => selectedIds.has(id)) ||
+            candidateNames.some((name) => selectedNames.has(name))
+        );
+    }, [teamByAnyId]);
 
     const loadData = useCallback(async () => {
         if (!yearMonth) return;
@@ -159,49 +399,71 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                 vehicleService.listAllVehicleAssignments().catch(() => [] as VehicleAssignmentRecord[])
             ]);
             originalExpensesRef.current = expenses;
-            setAssignments(assignmentList);
 
-            const amountsMap = new Map<string, ExpenseAmounts>();
-            const noteMap = new Map<string, string>();
-
-            expenses.forEach(e => {
-                const key = String(e.vehicleId);
-                const prev = amountsMap.get(key) ?? emptyExpenseAmounts();
-                if (EXPENSE_TYPES.includes(e.type)) {
-                    prev[e.type] = (prev[e.type] ?? 0) + e.amount;
-                }
-                amountsMap.set(key, prev);
-                if (e.note) noteMap.set(key, e.note);
-            });
-
-            const newRows: VehicleLedgerRow[] = vehicles.map(v => {
+            const newRows: VehicleLedgerRow[] = vehicles.flatMap(v => {
                 const fixed = v.contract?.monthlyFee ?? 0;
-                const rentFee = v.type === 'RENT' ? fixed : 0;
-                const leaseFee = v.type === 'LEASE' ? fixed : 0;
+                const segments = buildSegmentsForVehicle(v, assignmentList);
+                const fixedShares = allocateFixedCostByDays(fixed, segments);
 
-                const amounts = amountsMap.get(String(v.id)) ?? emptyExpenseAmounts();
-                const variableTotal = EXPENSE_TYPES.reduce((sum, type) => sum + (amounts[type] || 0), 0);
+                return segments.map((segment, segmentIndex) => {
+                    const fixedShare = fixedShares[segmentIndex] ?? 0;
+                    const rentFee = v.type === 'RENT' ? fixedShare : 0;
+                    const leaseFee = v.type === 'LEASE' ? fixedShare : 0;
 
-                return {
-                    vehicle: v,
-                    rentFee,
-                    leaseFee,
-                    amounts,
-                    variableTotal,
-                    total: rentFee + leaseFee + variableTotal,
-                    note: noteMap.get(String(v.id)) || ''
-                };
+                    return {
+                        id: `${v.id}:${segment.id}`,
+                        vehicle: v,
+                        segment,
+                        rentFee,
+                        leaseFee,
+                        amounts: emptyExpenseAmounts(),
+                        variableTotal: 0,
+                        total: rentFee + leaseFee,
+                        note: ''
+                    };
+                });
             });
+
+            expenses.forEach((expense) => {
+                const vehicleRows = newRows.filter((row) => normalizeKey(row.vehicle.id) === normalizeKey(expense.vehicleId));
+                if (vehicleRows.length === 0 || !EXPENSE_TYPES.includes(expense.type)) return;
+
+                const expenseDate = parseYmdDate(expense.date);
+                const targetRow = expenseDate
+                    ? vehicleRows.find((row) => {
+                        const start = parseYmdDate(row.segment.startDate);
+                        const end = parseYmdDate(row.segment.endDate);
+                        return start && end && expenseDate.getTime() >= start.getTime() && expenseDate.getTime() <= end.getTime();
+                    })
+                    : undefined;
+                const row = targetRow ?? vehicleRows[0];
+                row.amounts = {
+                    ...row.amounts,
+                    [expense.type]: (row.amounts[expense.type] ?? 0) + expense.amount
+                };
+                if (expense.note) row.note = expense.note;
+            });
+
+            newRows.forEach((row) => {
+                row.variableTotal = EXPENSE_TYPES.reduce((sum, type) => sum + (row.amounts[type] || 0), 0);
+                row.total = row.rentFee + row.leaseFee + row.variableTotal;
+            });
+
+            const visibleRows = teamFilterId
+                ? newRows.filter((row) => rowMatchesTeamFilter(row, teamFilterId))
+                : newRows;
 
             // 렌트(RENT) 위쪽, 리스(LEASE) 아래쪽, 그 다음 자가(OWNED)
             const typeOrder = (t: string) => (t === 'RENT' ? 0 : t === 'LEASE' ? 1 : 2);
-            newRows.sort((a, b) => {
+            visibleRows.sort((a, b) => {
                 const pa = typeOrder(a.vehicle.type || '');
                 const pb = typeOrder(b.vehicle.type || '');
                 if (pa !== pb) return pa - pb;
-                return String(a.vehicle.licensePlate).localeCompare(String(b.vehicle.licensePlate), 'ko-KR');
+                const plateCmp = String(a.vehicle.licensePlate).localeCompare(String(b.vehicle.licensePlate), 'ko-KR');
+                if (plateCmp !== 0) return plateCmp;
+                return String(a.segment.startDate).localeCompare(String(b.segment.startDate));
             });
-            setRows(newRows);
+            setRows(visibleRows);
             setIsDirty(false);
         } catch (e) {
             console.error(e);
@@ -209,79 +471,52 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         } finally {
             setLoading(false);
         }
-    }, [yearMonth, vehicles]);
+    }, [yearMonth, vehicles, monthRange, buildSegmentsForVehicle, teamFilterId, rowMatchesTeamFilter]);
 
-    const monthRange = useMemo(() => {
-        const [y, m] = yearMonth.split('-').map(Number);
-        if (!Number.isFinite(y) || !Number.isFinite(m)) return null;
-        return {
-            monthStart: new Date(y, m - 1, 1),
-            monthEnd: new Date(y, m, 0)
-        };
-    }, [yearMonth]);
-
-    const isAssignmentActiveInMonth = (assignment: VehicleAssignmentRecord): boolean => {
-        if (!monthRange) return false;
-        const start = assignment.startDate ? new Date(assignment.startDate) : null;
-        const end = assignment.endDate ? new Date(assignment.endDate) : null;
-        if (start && !Number.isNaN(start.getTime()) && start > monthRange.monthEnd) return false;
-        if (end && !Number.isNaN(end.getTime()) && end < monthRange.monthStart) return false;
-        return true;
-    };
-
-    const resolveTeamBadge = (assignment: VehicleAssignmentRecord) => {
-        const team = assignment.assigneeId
-            ? teamByAnyId.get(String(assignment.assigneeId))
-            : teamByName.get(normalizeKey(assignment.assigneeName));
-        const name = normalizeKey(team?.name) || normalizeKey(assignment.assigneeName);
+    const resolveSegmentTeamBadge = (segment: VehicleLedgerSegment) => {
+        const team = segment.teamId
+            ? teamByAnyId.get(String(segment.teamId))
+            : teamByName.get(normalizeKey(segment.teamName));
+        const name = normalizeKey(team?.name) || normalizeKey(segment.teamName) || (
+            segment.assigneeType === 'TEAM' ? normalizeKey(segment.assigneeName) : ''
+        );
         if (!name) return null;
         return {
-            key: `team:${normalizeKey(team?.id ?? assignment.assigneeId ?? name)}`,
+            key: `team:${normalizeKey(team?.id ?? segment.teamId ?? segment.assigneeId ?? name)}`,
             name,
             color: team?.color || '#94a3b8',
             icon: team?.icon || team?.iconKey || null
         };
     };
 
-    const getAssignmentSummary = (vehicle: Vehicle) => {
-        const vehicleId = normalizeKey(vehicle.id);
-        const activeAssignments = assignments.filter((assignment) =>
-            normalizeKey(assignment.vehicleId) === vehicleId && isAssignmentActiveInMonth(assignment)
-        );
-
-        const fallbackAssignments: VehicleAssignmentRecord[] = activeAssignments.length > 0 ? activeAssignments : (
-            vehicle.currentAssigneeName && vehicle.currentAssigneeType ? [{
-                id: `current-${vehicle.id}`,
-                vehicleId: vehicle.id,
-                vehiclePlate: vehicle.licensePlate,
-                assigneeId: vehicle.currentAssigneeId || '',
-                assigneeType: vehicle.currentAssigneeType,
-                assigneeName: vehicle.currentAssigneeName,
-                startDate: ''
-            }] : []
-        );
-
-        const teamMap = new Map<string, NonNullable<ReturnType<typeof resolveTeamBadge>>>();
+    const getAssignmentSummary = (row: VehicleLedgerRow) => {
+        const teamMap = new Map<string, NonNullable<ReturnType<typeof resolveSegmentTeamBadge>>>();
         const workerMap = new Map<string, string>();
+        const segment = row.segment;
 
-        fallbackAssignments.forEach((assignment) => {
-            if (assignment.assigneeType === 'TEAM') {
-                const badge = resolveTeamBadge(assignment);
-                if (badge) teamMap.set(badge.key, badge);
-                return;
-            }
-            const workerName = normalizeKey(assignment.assigneeName);
+        if (segment.assigneeType === 'TEAM') {
+            const badge = resolveSegmentTeamBadge(segment);
+            if (badge) teamMap.set(badge.key, badge);
+        } else if (segment.assigneeType === 'WORKER') {
+            const badge = resolveSegmentTeamBadge(segment);
+            if (badge) teamMap.set(badge.key, badge);
+            const workerName = normalizeKey(segment.assigneeName);
             if (workerName) workerMap.set(workerName, workerName);
-        });
+        }
 
         const assignedTeams = Array.from(teamMap.values());
         const assignedWorkers = Array.from(workerMap.values());
+        const periodLabel = segment.startDate === segment.endDate
+            ? segment.startDate
+            : `${segment.startDate} ~ ${segment.endDate}`;
         return {
             assignedTeams,
             assignedWorkers,
             billingTeams: assignedTeams,
             billingWorkers: assignedWorkers,
-            primaryColor: assignedTeams[0]?.color || '#94a3b8'
+            primaryColor: assignedTeams[0]?.color || '#94a3b8',
+            periodLabel,
+            overlapDays: segment.overlapDays
         };
     };
 
@@ -337,8 +572,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
             // 2. 신규 데이터 생성
             const createTasks: Promise<string>[] = [];
-            const monthFirstDay = `${yearMonth}-01`;
-
             for (const row of rows) {
                 for (const type of EXPENSE_TYPES) {
                     const amount = row.amounts[type];
@@ -347,7 +580,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             vehicleService.addExpense({
                                 vehicleId: row.vehicle.id,
                                 vehiclePlate: row.vehicle.licensePlate,
-                                date: monthFirstDay,
+                                date: row.segment.startDate || `${yearMonth}-01`,
                                 type,
                                 amount,
                                 payer: 'COMPANY',
@@ -480,11 +713,11 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
                                 {rows.map((row, idx) => {
-                                    const assignmentSummary = getAssignmentSummary(row.vehicle);
+                                    const assignmentSummary = getAssignmentSummary(row);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
 
                                     return (
-                                    <tr key={row.vehicle.id} className="group hover:bg-blue-50/40 transition-colors">
+                                    <tr key={row.id} className="group hover:bg-blue-50/40 transition-colors">
                                         <td
                                             className="px-4 py-3 border-r border-indigo-50 bg-white"
                                             style={assignmentSummary.primaryColor ? {
@@ -495,15 +728,20 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             {assignmentSummary.assignedTeams.length > 0 ? (
                                                 <div className="flex flex-col gap-1.5">
                                                     {assignmentSummary.assignedTeams.map((team) => (
-                                                        <div key={`assigned-${team.key}`} className="flex items-center gap-2 min-w-0">
+                                                        <div key={`assigned-${team.key}`} className="flex items-start gap-2 min-w-0">
                                                             <span
-                                                                className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
+                                                                className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 mt-0.5"
                                                                 style={{ backgroundColor: team.color }}
                                                             >
                                                                 <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
                                                             </span>
-                                                            <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
-                                                                {team.name}
+                                                            <span className="min-w-0">
+                                                                <span className="block font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
+                                                                    {team.name}
+                                                                </span>
+                                                                <span className="block text-[10px] font-semibold text-slate-400">
+                                                                    {assignmentSummary.periodLabel} · {assignmentSummary.overlapDays}일
+                                                                </span>
                                                             </span>
                                                         </div>
                                                     ))}
@@ -517,12 +755,17 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             {visibleAssignedWorkers.length > 0 ? (
                                                 <div className="space-y-1">
                                                     {visibleAssignedWorkers.map((workerName, workerIdx) => (
-                                                        <div key={`assigned-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
-                                                            <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-emerald-500">
+                                                        <div key={`assigned-worker-${workerName}-${workerIdx}`} className="flex items-start gap-2 min-w-0">
+                                                            <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-emerald-500 mt-0.5">
                                                                 <FontAwesomeIcon icon={faUser} />
                                                             </span>
-                                                            <span className="font-bold text-slate-700 text-xs leading-tight truncate max-w-[145px]" title={workerName}>
-                                                                {workerName}
+                                                            <span className="min-w-0">
+                                                                <span className="block font-bold text-slate-700 text-xs leading-tight truncate max-w-[145px]" title={workerName}>
+                                                                    {workerName}
+                                                                </span>
+                                                                <span className="block text-[10px] font-semibold text-slate-400">
+                                                                    {assignmentSummary.periodLabel} · {assignmentSummary.overlapDays}일
+                                                                </span>
                                                             </span>
                                                         </div>
                                                     ))}
@@ -576,6 +819,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                         <td className="px-4 py-3 font-bold text-slate-700 group-hover:text-indigo-700 bg-white">
                                             {row.vehicle.licensePlate}
                                             <div className="text-[10px] text-slate-400 font-normal mt-0.5">{row.vehicle.type}</div>
+                                            <div className="text-[10px] text-indigo-400 font-semibold mt-0.5">{assignmentSummary.periodLabel}</div>
                                         </td>
                                         <td className="px-4 py-3 border-l border-indigo-50 text-slate-600 bg-white">{row.vehicle.model}</td>
 

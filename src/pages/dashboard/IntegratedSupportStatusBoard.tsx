@@ -66,6 +66,20 @@ const getCompanyColor = (companyName: string, index: number) => {
     return COMPANY_COLORS[colorKeys[colorIndex]];
 };
 
+const normalizeTeamNameKey = (value?: string | null): string => {
+    return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase();
+};
+
+const resolveTeamNameFromSiteName = (siteName: string | undefined, teamNameMap: Map<string, string>): string | undefined => {
+    const matches = Array.from(String(siteName ?? '').matchAll(/\(([^)]+)\)/g));
+    for (let i = matches.length - 1; i >= 0; i--) {
+        const candidate = String(matches[i][1] ?? '').trim();
+        const matchedTeamName = teamNameMap.get(normalizeTeamNameKey(candidate));
+        if (matchedTeamName) return matchedTeamName;
+    }
+    return undefined;
+};
+
 const IntegratedSupportStatusBoard: React.FC = () => {
     const [viewMode, setViewMode] = useState<ViewMode>('inbound');
     const [year, setYear] = useState(new Date().getFullYear());
@@ -148,8 +162,16 @@ const IntegratedSupportStatusBoard: React.FC = () => {
             const siteMap = new Map(sites.map(s => [s.id, s]));
             const teamMap = new Map(teams.map(t => [t.id, t]));
             const companyMap = new Map(companies.map(c => [c.id, c]));
+            const teamNameMap = new Map<string, string>();
+            teams.forEach(team => {
+                const nameKey = normalizeTeamNameKey(team.name);
+                if (nameKey && !teamNameMap.has(nameKey)) {
+                    teamNameMap.set(nameKey, team.name);
+                }
+            });
 
             const siteStatsMap = new Map<string, SupportSiteStats>();
+            const siteResponsibleTeamPriorities = new Map<string, number>();
 
             reports.forEach(report => {
                 const site = siteMap.get(report.siteId);
@@ -172,6 +194,12 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                 }
 
                 if (isTarget) {
+                    const reportResponsibleTeamName = String(report.responsibleTeamName ?? '').trim();
+                    const inferredResponsibleTeamName = resolveTeamNameFromSiteName(site.name, teamNameMap);
+                    const siteResponsibleTeamName = String(site.responsibleTeamName ?? '').trim();
+                    const responsibleTeamName = reportResponsibleTeamName || inferredResponsibleTeamName || siteResponsibleTeamName || undefined;
+                    const responsibleTeamPriority = reportResponsibleTeamName ? 2 : inferredResponsibleTeamName ? 1 : siteResponsibleTeamName ? 0 : -1;
+
                     // 1. Get or Create Site Stats
                     let siteStat = siteStatsMap.get(report.siteId);
                     if (!siteStat) {
@@ -179,11 +207,15 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                             siteId: report.siteId,
                             name: site.name,
                             siteCompanyId: site.companyId, // 현장 소속 회사
-                            responsibleTeamName: site.responsibleTeamName,
+                            responsibleTeamName,
                             manDay: 0,
                             teams: []
                         };
                         siteStatsMap.set(report.siteId, siteStat);
+                        siteResponsibleTeamPriorities.set(report.siteId, responsibleTeamPriority);
+                    } else if (responsibleTeamName && responsibleTeamPriority > (siteResponsibleTeamPriorities.get(report.siteId) ?? -1)) {
+                        siteStat.responsibleTeamName = responsibleTeamName;
+                        siteResponsibleTeamPriorities.set(report.siteId, responsibleTeamPriority);
                     }
 
                     // 2. Get or Create Team Stats within Site

@@ -39,14 +39,14 @@ export const materialFirestoreService = {
         return snap.exists() ? snap.data() : null;
     },
 
-    getAllMaterials: async () => {
+    getAllMaterials: async (options?: { includeInactive?: boolean }) => {
         const ref = collection(db, MASTER_COLLECTION).withConverter(createConverter(MaterialSchema));
         // Note: Firestore does not support 'field does not exist' query combined with '== true'.
         // Fetch all and filter in memory to ensure data with missing 'isActive' field is included.
         const snap = await getDocs(ref);
-        return snap.docs
-            .map(d => d.data())
-            .filter(m => m.isActive !== false); // Only exclude if explicitly false
+        const rows = snap.docs.map(d => d.data());
+        if (options?.includeInactive) return rows;
+        return rows.filter(m => m.isActive !== false); // Only exclude if explicitly false
     },
 
     saveMaterial: async (id: string, data: MaterialZod) => {

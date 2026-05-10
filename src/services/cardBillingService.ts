@@ -2,6 +2,7 @@ import { cardFirestoreService } from './cardFirestoreService';
 import { CardBillingDocument, CardBillingIssuedToType } from '../types/cardBilling';
 import { Card, cardService } from './cardService';
 import { Timestamp } from '../types/timestamp';
+import { manpowerService } from './manpowerService';
 
 /**
  * CardBillingService - Firestore 통합 버전
@@ -32,8 +33,22 @@ export const cardBillingService = {
 
         const variableCost = lineItems.reduce((acc, it) => acc + (it.amount || 0), 0);
 
-        const assignedTeamId = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeId : undefined;
-        const assignedTeamName = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeName : undefined;
+        let assignedTeamId = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeId : undefined;
+        let assignedTeamName = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeName : undefined;
+
+        if (card.currentAssigneeType === 'WORKER' && card.currentAssigneeId) {
+            try {
+                const workers = await manpowerService.getWorkers();
+                const worker = workers.find((w) => (
+                    String(w.id ?? '') === String(card.currentAssigneeId) ||
+                    String(w.legacyId ?? '') === String(card.currentAssigneeId)
+                ));
+                assignedTeamId = worker?.teamId || assignedTeamId;
+                assignedTeamName = worker?.teamName || assignedTeamName;
+            } catch (error) {
+                console.warn('Failed to resolve card assignee team for billing:', error);
+            }
+        }
 
         const issuedToType: CardBillingIssuedToType | undefined =
             card.currentAssigneeType === 'TEAM'
@@ -81,8 +96,7 @@ export const cardBillingService = {
     },
 
     deleteBilling: async (id: string): Promise<void> => {
-        // cardFirestoreService에 deleteBilling이 누락되었다면 여기서 docRef.delete() 호출 혹은 추가
-        await cardFirestoreService.saveBilling({ id, status: 'DRAFT' } as any); // 임시 (실제 삭제 로직 구현 권장)
+        await cardFirestoreService.deleteBilling(id);
     },
 
     getBillingsByMonth: async (yearMonth: string): Promise<CardBillingDocument[]> => {

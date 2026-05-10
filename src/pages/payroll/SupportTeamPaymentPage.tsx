@@ -18,7 +18,9 @@ import { saveAs } from 'file-saver';
 import {
     generateLaborStatementExcel,
     MAX_DAY_COLUMNS,
-    DAY_LABELS_FIRST
+    DAY_LABELS_FIRST,
+    DAY_LABELS_SECOND,
+    SupportLaborStatementExcelBlock
 } from '../../utils/excel/SupportPaymentExcelGenerator';
 import { Team, teamService } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
@@ -187,6 +189,7 @@ type SupportManualAdjustments = Record<string, SupportManualAdjustment>;
 
 interface SupportMonthlyRateOverrides {
     bulkRate?: number;
+    teamRates: Record<string, number>;
     aggregateRates: Record<string, number>;
     siteRates: Record<string, number>;
 }
@@ -271,6 +274,7 @@ const normalizeRateOverrides = (value: Partial<SupportMonthlyRateOverrides> | un
 
     return {
         bulkRate: toPositiveRate(value?.bulkRate) ?? undefined,
+        teamRates: normalizeRateMap(value?.teamRates),
         aggregateRates: normalizeRateMap(value?.aggregateRates),
         siteRates: normalizeRateMap(value?.siteRates)
     };
@@ -436,6 +440,35 @@ const getSettlementMergeKey = (aggregate: SupportCompanyAggregate): string => [
         'unknown-settlement'
 ].join('::');
 
+const MERGED_AGGREGATE_PREFIX = 'merged::';
+
+const getMergedAggregateId = (mergeKey: string): string => `${MERGED_AGGREGATE_PREFIX}${mergeKey}`;
+
+const isMergedAggregateId = (aggregateId: string): boolean => aggregateId.startsWith(MERGED_AGGREGATE_PREFIX);
+
+const getAggregateEditMatchKey = (aggregate: SupportCompanyAggregate): string =>
+    isMergedAggregateId(aggregate.aggregateId)
+        ? aggregate.aggregateId.slice(MERGED_AGGREGATE_PREFIX.length)
+        : getSettlementMergeKey(aggregate);
+
+const matchesAggregateEditTarget = (
+    candidate: SupportCompanyAggregate,
+    target: SupportCompanyAggregate
+): boolean => (
+    candidate.aggregateId === target.aggregateId ||
+    (isMergedAggregateId(target.aggregateId) && getSettlementMergeKey(candidate) === getAggregateEditMatchKey(target))
+);
+
+const getAggregateEditTargetIds = (
+    rows: SupportCompanyAggregate[],
+    target: SupportCompanyAggregate
+): string[] => {
+    const ids = rows
+        .filter((aggregate) => matchesAggregateEditTarget(aggregate, target))
+        .map((aggregate) => aggregate.aggregateId);
+    return ids.length > 0 ? ids : [target.aggregateId];
+};
+
 const mergeSitesByIdentity = (sites: SupportSiteRow[]): SupportSiteRow[] => {
     const siteMap = new Map<string, SupportSiteRow>();
 
@@ -500,7 +533,7 @@ const mergeAggregatesBySettlementTeam = (rows: SupportCompanyAggregate[]): Suppo
 
             const merged = recalcAggregateFromSites({
                 ...base,
-                aggregateId: `merged::${key}`,
+                aggregateId: getMergedAggregateId(key),
                 viewTeamId: viewTeamIds[0] ?? '',
                 viewTeamName: summarizeNames(viewTeamNames, '기준팀 복수'),
                 sourceTeamIds,
@@ -561,6 +594,29 @@ const applyUnitPriceToAggregate = (aggregate: SupportCompanyAggregate, unitPrice
 
 const getMonthlySiteRateKey = (aggregateId: string, siteId: string): string => `${aggregateId}::${siteId}`;
 
+const getAggregateOverrideRate = (
+    aggregate: SupportCompanyAggregate,
+    overrides: SupportMonthlyRateOverrides
+): number | undefined => {
+    const mergedAggregateId = getMergedAggregateId(getSettlementMergeKey(aggregate));
+    const teamRateKey = getAggregateEditMatchKey(aggregate);
+    return overrides.aggregateRates[aggregate.aggregateId] ??
+        overrides.aggregateRates[mergedAggregateId] ??
+        overrides.teamRates[teamRateKey];
+};
+
+const getSiteOverrideRate = (
+    aggregate: SupportCompanyAggregate,
+    site: SupportSiteRow,
+    overrides: SupportMonthlyRateOverrides
+): number | undefined => {
+    const mergedAggregateId = getMergedAggregateId(getSettlementMergeKey(aggregate));
+    const teamRateKey = getAggregateEditMatchKey(aggregate);
+    return overrides.siteRates[getMonthlySiteRateKey(aggregate.aggregateId, site.siteId)] ??
+        overrides.siteRates[getMonthlySiteRateKey(mergedAggregateId, site.siteId)] ??
+        overrides.siteRates[getMonthlySiteRateKey(teamRateKey, site.siteId)];
+};
+
 const applyMonthlyRateOverrides = (
     rows: SupportCompanyAggregate[],
     overrides: SupportMonthlyRateOverrides
@@ -569,13 +625,13 @@ const applyMonthlyRateOverrides = (
         ? applyUnitPriceToAggregate(aggregate, overrides.bulkRate)
         : aggregate;
 
-    const aggregateRate = overrides.aggregateRates[nextAggregate.aggregateId];
+    const aggregateRate = getAggregateOverrideRate(nextAggregate, overrides);
     if (aggregateRate) {
         nextAggregate = applyUnitPriceToAggregate(nextAggregate, aggregateRate);
     }
 
     const nextSites = nextAggregate.sites.map((site) => {
-        const siteRate = overrides.siteRates[getMonthlySiteRateKey(nextAggregate.aggregateId, site.siteId)];
+        const siteRate = getSiteOverrideRate(nextAggregate, site, overrides);
         return siteRate ? applyUnitPriceToSite(site, siteRate) : site;
     });
 
@@ -609,6 +665,72 @@ const getTeamCellClass = (direction: SupportDirection): string => {
     return 'bg-lime-300 text-slate-950';
 };
 
+const sanitizeFileNamePart = (value: string): string =>
+    (value || '미지정').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+
+const buildLaborStatementExcelBlock = (preview: SitePreviewBlock): SupportLaborStatementExcelBlock => ({
+    sheetName: `${preview.site.siteName}_${preview.aggregate.companyName}`,
+    siteName: preview.site.siteName,
+    settlementName: preview.aggregate.companyName,
+    direction: preview.aggregate.direction,
+    rows: preview.rows.map(row => ({
+        workerId: row.workerId,
+        workerName: row.workerName,
+        idNumber: row.idNumber,
+        contact: row.contact,
+        address: row.address,
+        days: row.days,
+        totalManDay: row.totalManDay,
+        unitPrice: row.unitPrice,
+        totalAmount: row.totalAmount
+    }))
+});
+
+const getLaborStatementFileName = (preview: SitePreviewBlock, yearMonth: string): string => [
+    '노무내역서',
+    yearMonth,
+    preview.aggregate.direction,
+    preview.site.siteName,
+    preview.aggregate.companyName
+].map(sanitizeFileNamePart).join('_') + '.xlsx';
+
+const getLaborStatementImageFileName = (preview: SitePreviewBlock, yearMonth: string): string => [
+    '노무내역서',
+    yearMonth,
+    preview.aggregate.direction,
+    preview.site.siteName,
+    preview.aggregate.companyName
+].map(sanitizeFileNamePart).join('_') + '.png';
+
+const getSupportDetailImageFileName = (
+    aggregate: SupportCompanyAggregate,
+    site: SupportSiteRow,
+    yearMonth: string
+): string => [
+    '지원팀상세',
+    yearMonth,
+    aggregate.direction,
+    site.siteName,
+    aggregate.companyName
+].map(sanitizeFileNamePart).join('_') + '.png';
+
+const waitForDocumentFonts = async (): Promise<void> => {
+    try {
+        const fontSet = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
+        if (fontSet?.ready) await fontSet.ready;
+    } catch (error) {
+        console.warn('[SupportTeamPaymentPage] font readiness check failed:', error);
+    }
+};
+
+const getCaptureScale = (width: number, height: number): number => {
+    const baseScale = Math.max(2, window.devicePixelRatio || 1);
+    const maxCanvasArea = 18000000;
+    const area = Math.max(1, width * height);
+    if (area * baseScale * baseScale <= maxCanvasArea) return baseScale;
+    return Math.max(1, Math.sqrt(maxCanvasArea / area));
+};
+
 const SupportTeamPaymentPage: React.FC = () => {
     const today = new Date();
     const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
@@ -629,6 +751,7 @@ const SupportTeamPaymentPage: React.FC = () => {
     const [detailTarget, setDetailTarget] = useState<DetailTarget>(null);
     const [showLaborPreview, setShowLaborPreview] = useState<boolean>(false);
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false);
+    const [capturingKey, setCapturingKey] = useState<string | null>(null);
     const [manualAdjustmentState, setManualAdjustmentState] = useState<{ month: string; data: SupportManualAdjustments }>(() => ({
         month: defaultMonth,
         data: loadManualAdjustments(defaultMonth)
@@ -1378,46 +1501,57 @@ const SupportTeamPaymentPage: React.FC = () => {
         setAggregates(prev => prev.map(aggregate => applyUnitPriceToAggregate(aggregate, unitPrice)));
     };
 
-    const handleApplyAggregateRate = (aggregateId: string, rawValue: string) => {
+    const handleApplyAggregateRate = (targetAggregate: SupportCompanyAggregate, rawValue: string) => {
         const unitPrice = parseMoneyInput(rawValue);
+        const teamRateKey = getAggregateEditMatchKey(targetAggregate);
+        const targetAggregateIds = getAggregateEditTargetIds(aggregates, targetAggregate);
         setMonthlyRateOverrideState(prev => {
             const baseData = prev.month === selectedMonth ? prev.data : loadRateOverrides(selectedMonth);
+            const nextTeamRates = {
+                ...baseData.teamRates,
+                [teamRateKey]: unitPrice
+            };
+            const nextAggregateRates = { ...baseData.aggregateRates };
+            targetAggregateIds.forEach((aggregateId) => {
+                nextAggregateRates[aggregateId] = unitPrice;
+            });
             return {
                 month: selectedMonth,
                 data: normalizeRateOverrides({
                     ...baseData,
-                    aggregateRates: {
-                        ...baseData.aggregateRates,
-                        [aggregateId]: unitPrice
-                    }
+                    teamRates: nextTeamRates,
+                    aggregateRates: nextAggregateRates
                 })
             };
         });
         setAggregates(prev => prev.map(aggregate =>
-            aggregate.aggregateId === aggregateId
+            matchesAggregateEditTarget(aggregate, targetAggregate)
                 ? applyUnitPriceToAggregate(aggregate, unitPrice)
                 : aggregate
         ));
     };
 
-    const handleApplySiteRate = (aggregateId: string, siteId: string, rawValue: string) => {
+    const handleApplySiteRate = (targetAggregate: SupportCompanyAggregate, siteId: string, rawValue: string) => {
         const unitPrice = parseMoneyInput(rawValue);
-        const siteRateKey = getMonthlySiteRateKey(aggregateId, siteId);
+        const teamRateKey = getAggregateEditMatchKey(targetAggregate);
+        const targetAggregateIds = getAggregateEditTargetIds(aggregates, targetAggregate);
         setMonthlyRateOverrideState(prev => {
             const baseData = prev.month === selectedMonth ? prev.data : loadRateOverrides(selectedMonth);
+            const nextSiteRates = { ...baseData.siteRates };
+            nextSiteRates[getMonthlySiteRateKey(teamRateKey, siteId)] = unitPrice;
+            targetAggregateIds.forEach((aggregateId) => {
+                nextSiteRates[getMonthlySiteRateKey(aggregateId, siteId)] = unitPrice;
+            });
             return {
                 month: selectedMonth,
                 data: normalizeRateOverrides({
                     ...baseData,
-                    siteRates: {
-                        ...baseData.siteRates,
-                        [siteRateKey]: unitPrice
-                    }
+                    siteRates: nextSiteRates
                 })
             };
         });
         setAggregates(prev => prev.map(aggregate => {
-            if (aggregate.aggregateId !== aggregateId) return aggregate;
+            if (!matchesAggregateEditTarget(aggregate, targetAggregate)) return aggregate;
             const nextSites = aggregate.sites.map(site =>
                 site.siteId === siteId ? applyUnitPriceToSite(site, unitPrice) : site
             );
@@ -1437,28 +1571,73 @@ const SupportTeamPaymentPage: React.FC = () => {
     }, [displayAggregates, manualAdjustments, selectedMonth]);
 
     const previewRefs = useRef<Record<string, HTMLDivElement | null>>({});
-    const capturePreview = useCallback(async (key: string) => {
+    const capturePreview = useCallback(async (key: string, fileName: string) => {
         const node = previewRefs.current[key];
-        if (!node) return;
-        const canvas = await html2canvas(node, { scale: 2 } as any);
-        const blob: Blob | null = await new Promise(r => canvas.toBlob(r, 'image/png'));
-        if (!blob) return window.alert('캡처 실패');
-        if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
-            try {
-                await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-                return window.alert('클립보드 복사 완료');
-            } catch (e) { console.error(e); }
+        if (!node) {
+            window.alert('이미지로 저장할 미리보기 영역을 찾지 못했습니다.');
+            return;
         }
-        saveAs(blob, `노무내역서_${key}.png`);
+
+        try {
+            setCapturingKey(key);
+            await waitForDocumentFonts();
+            const rect = node.getBoundingClientRect();
+            const width = Math.ceil(node.scrollWidth || rect.width);
+            const height = Math.ceil(node.scrollHeight || rect.height);
+            if (width <= 0 || height <= 0) {
+                window.alert('이미지로 저장할 영역의 크기를 확인하지 못했습니다.');
+                return;
+            }
+
+            const canvas = await html2canvas(node, {
+                backgroundColor: '#ffffff',
+                scale: getCaptureScale(width, height),
+                useCORS: true,
+                allowTaint: false,
+                logging: false,
+                width,
+                height,
+                windowWidth: Math.max(document.documentElement.clientWidth, width),
+                windowHeight: Math.max(document.documentElement.clientHeight, height),
+                scrollX: 0,
+                scrollY: -window.scrollY,
+                onclone: (clonedDocument: Document) => {
+                    clonedDocument.querySelectorAll('[data-capture-ignore="true"]').forEach((element) => {
+                        (element as HTMLElement).style.display = 'none';
+                    });
+                }
+            } as any);
+
+            const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            if (!blob) {
+                window.alert('이미지 파일 생성에 실패했습니다.');
+                return;
+            }
+            saveAs(blob, fileName);
+        } catch (error) {
+            console.error('이미지 저장 실패:', error);
+            window.alert('이미지 저장 중 문제가 발생했습니다. 다시 시도해주세요.');
+        } finally {
+            setCapturingKey(null);
+        }
     }, []);
 
     const handleDownloadLabor = async () => {
-        if (displayAggregates.length === 0) return window.alert('데이터 없음');
-        const exportAggs = displayAggregates.map(agg => ({
-            ...agg,
-            companyName: `${agg.direction}_${agg.viewTeamName}_${agg.companyName}`
-        }));
-        await generateLaborStatementExcel(exportAggs as any, selectedMonth);
+        if (sitePreviews.length === 0) return window.alert('데이터 없음');
+        await generateLaborStatementExcel(
+            sitePreviews.map(buildLaborStatementExcelBlock),
+            selectedMonth,
+            { fileName: `노무내역서_${selectedMonth}_전체.xlsx` }
+        );
+    };
+
+    const handleDownloadSingleLabor = async (preview: SitePreviewBlock) => {
+        if (preview.rows.length === 0) return window.alert('데이터 없음');
+        await generateLaborStatementExcel(
+            [buildLaborStatementExcelBlock(preview)],
+            selectedMonth,
+            { fileName: getLaborStatementFileName(preview, selectedMonth) }
+        );
     };
 
     const handleDownloadKB = () => {
@@ -1780,7 +1959,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                             inputMode="numeric"
                                                                             aria-label={`${agg.companyName} 단가`}
                                                                             value={formatOptionalMoney(getAggregateUnitPrice(agg))}
-                                                                            onChange={(event) => handleApplyAggregateRate(aggKey, event.target.value)}
+                                                                            onChange={(event) => handleApplyAggregateRate(agg, event.target.value)}
                                                                             onFocus={(event) => event.currentTarget.select()}
                                                                             className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-900 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
                                                                             placeholder="0"
@@ -1833,7 +2012,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                                 inputMode="numeric"
                                                                                 aria-label={`${site.siteName} 단가`}
                                                                                 value={formatOptionalMoney(getSiteUnitPrice(site))}
-                                                                                onChange={(event) => handleApplySiteRate(aggKey, site.siteId, event.target.value)}
+                                                                                onChange={(event) => handleApplySiteRate(agg, site.siteId, event.target.value)}
                                                                                 onFocus={(event) => event.currentTarget.select()}
                                                                                 className="h-7 w-full bg-transparent px-1 text-right font-mono text-slate-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
                                                                                 placeholder="0"
@@ -1906,30 +2085,54 @@ const SupportTeamPaymentPage: React.FC = () => {
                     aggregate={detailTarget.aggregate} 
                     site={detailTarget.site} 
                     onClose={() => setDetailTarget(null)} 
+                    yearMonth={selectedMonth}
                     capturePreview={capturePreview}
+                    capturingKey={capturingKey}
                     previewRefs={previewRefs}
                 />
             )}
 
             {showLaborPreview && (
                 <Modal title="노무내역서 미리보기" onClose={() => setShowLaborPreview(false)} widthClass="max-w-7xl">
-                    <div className="sticky top-0 bg-white z-10 px-6 py-4 border-b flex items-center justify-between">
-                        <p className="text-sm text-slate-500 font-bold">총 {sitePreviews.length}건의 내역서가 집계되었습니다.</p>
+                    <div className="sticky top-0 bg-white z-10 px-6 py-4 border-b flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <p className="text-sm text-slate-700 font-black">총 {sitePreviews.length}건의 내역서가 집계되었습니다.</p>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500">엑셀 저장은 아래 미리보기와 같은 표 구조로 생성됩니다.</p>
+                        </div>
                         <ActionButton variant="solid-green" onClick={handleDownloadLabor}>
                             <FontAwesomeIcon icon={faFileExcel} /> 전체 엑셀 저장
                         </ActionButton>
                     </div>
-                    <div className="p-6 space-y-20">
+                    <div className="p-6 space-y-16">
                         {sitePreviews.map(p => {
                             const key = `${p.aggregate.aggregateId}-${p.site.siteId}`;
                             return (
-                                <div key={key} className="relative group">
-                                    <div className="absolute -top-10 right-0 opacity-0 group-hover:opacity-100 transition-all flex gap-2">
-                                        <button onClick={() => capturePreview(key)} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-xl hover:bg-indigo-700">
-                                            <FontAwesomeIcon icon={faCamera} className="mr-2" /> 이미지로 저장
-                                        </button>
+                                <div key={key} className="space-y-3">
+                                    <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm md:flex-row md:items-center md:justify-between">
+                                        <div>
+                                            <div className="text-sm font-black text-slate-800">{p.site.siteName}</div>
+                                            <div className="mt-0.5 text-xs font-bold text-slate-500">{p.aggregate.direction} · {p.aggregate.companyName}</div>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                disabled={capturingKey === key}
+                                                onClick={() => capturePreview(key, getLaborStatementImageFileName(p, selectedMonth))}
+                                                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                            >
+                                                <FontAwesomeIcon icon={capturingKey === key ? faSpinner : faCamera} spin={capturingKey === key} />
+                                                {capturingKey === key ? '저장 중' : '이미지 저장'}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleDownloadSingleLabor(p)}
+                                                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-emerald-700"
+                                            >
+                                                <FontAwesomeIcon icon={faFileExcel} /> 엑셀 저장
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div ref={el => { if (el) previewRefs.current[key] = el; }}>
+                                    <div ref={el => { if (el) previewRefs.current[key] = el; else delete previewRefs.current[key]; }}>
                                         <LaborStatementPreview aggregate={p.aggregate} site={p.site} rows={p.rows} yearMonth={selectedMonth} />
                                     </div>
                                 </div>
@@ -1988,14 +2191,20 @@ const DetailModal: React.FC<{
     aggregate: SupportCompanyAggregate;
     site: SupportSiteRow;
     onClose: () => void;
-    capturePreview: (key: string) => void;
+    yearMonth: string;
+    capturePreview: (key: string, fileName: string) => Promise<void>;
+    capturingKey: string | null;
     previewRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
-}> = ({ aggregate, site, onClose, capturePreview, previewRefs }) => {
+}> = ({ aggregate, site, onClose, yearMonth, capturePreview, capturingKey, previewRefs }) => {
     const key = `${aggregate.aggregateId}-${site.siteId}`;
+    const detailCaptureKey = `${key}-detail`;
     return (
         <Modal title={`${site.siteName} 상세 내역 및 미리보기`} onClose={onClose} widthClass="max-w-6xl">
             <div className="flex-1 overflow-auto bg-slate-50">
-                <div className="p-6 space-y-6">
+                <div
+                    className="p-6 space-y-6"
+                    ref={el => { if (el) previewRefs.current[detailCaptureKey] = el; else delete previewRefs.current[detailCaptureKey]; }}
+                >
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">분류</div>
@@ -2025,9 +2234,15 @@ const DetailModal: React.FC<{
                                 <h4 className="text-sm font-black text-slate-800">투입 인원 명단 ({site.workers.length}명)</h4>
                                 <p className="mt-1 text-[11px] font-semibold text-slate-500">{aggregate.settlementRule}</p>
                             </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => capturePreview(key)} className="bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md hover:bg-amber-600">
-                                    <FontAwesomeIcon icon={faCamera} className="mr-2" /> 이미지 캡처
+                            <div className="flex gap-2" data-capture-ignore="true">
+                                <button
+                                    type="button"
+                                    disabled={capturingKey === detailCaptureKey}
+                                    onClick={() => capturePreview(detailCaptureKey, getSupportDetailImageFileName(aggregate, site, yearMonth))}
+                                    className="bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-md hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <FontAwesomeIcon icon={capturingKey === detailCaptureKey ? faSpinner : faCamera} spin={capturingKey === detailCaptureKey} className="mr-2" />
+                                    {capturingKey === detailCaptureKey ? '저장 중' : '이미지 캡처'}
                                 </button>
                             </div>
                         </div>
@@ -2107,8 +2322,7 @@ const LaborStatementPreview: React.FC<{
                     </tr>
                     <tr className="bg-slate-100 text-slate-800 font-black">
                         <th className="border-2 border-slate-800 p-1.5">전화번호</th>
-                        {[16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map(d => <th key={d} className="border-2 border-slate-800 w-6 bg-rose-50 text-rose-700">{d}</th>)}
-                        <th className="border-2 border-slate-800 w-6 bg-rose-50 text-rose-700">31</th>
+                        {DAY_LABELS_SECOND.map(d => <th key={d} className="border-2 border-slate-800 w-6 bg-rose-50 text-rose-700">{d}</th>)}
                         <th className="border-2 border-slate-800 p-1.5">총액</th>
                     </tr>
                 </thead>
@@ -2127,7 +2341,7 @@ const LaborStatementPreview: React.FC<{
                             </tr>
                             <tr className="font-bold">
                                 <td className="border-2 border-slate-800 text-center font-mono text-slate-500">{r.contact || '-'}</td>
-                                {[16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].map(d => <td key={d} className="border-2 border-slate-800 text-center bg-rose-50/30">{formatDayValue(r.days[d - 1])}</td>)}
+                                {DAY_LABELS_SECOND.map(d => <td key={d} className="border-2 border-slate-800 text-center bg-rose-50/30">{formatDayValue(r.days[d - 1])}</td>)}
                                 <td className="border-2 border-slate-800 text-right px-2 font-mono text-indigo-700 bg-emerald-50">{formatNumber(r.totalAmount)}</td>
                             </tr>
                         </React.Fragment>
@@ -2141,7 +2355,7 @@ const LaborStatementPreview: React.FC<{
                     </tr>
                     <tr className="bg-slate-200 font-black text-xs">
                         <td colSpan={4} className="border-2 border-slate-800 text-center py-2">총 액</td>
-                        {[16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31].map(d => <td key={d} className="border-2 border-slate-800 text-center">{formatDayValue(dayTotals[d - 1])}</td>)}
+                        {DAY_LABELS_SECOND.map(d => <td key={d} className="border-2 border-slate-800 text-center">{formatDayValue(dayTotals[d - 1])}</td>)}
                         <td className="border-2 border-slate-800 text-right px-2 font-mono text-indigo-800 bg-emerald-100">{formatNumber(totalAmount)}</td>
                     </tr>
                 </tbody>

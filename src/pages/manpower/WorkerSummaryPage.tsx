@@ -76,9 +76,28 @@ const SearchBox = styled.div`
     }
 `;
 
+const TeamFilterWrapper = styled.div<{ $color: string }>`
+    position: relative;
+
+    &::before {
+        content: '';
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: ${props => props.$color};
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        transform: translateY(-50%);
+        z-index: 1;
+        pointer-events: none;
+    }
+`;
+
 const TeamFilter = styled.select`
     width: 100%;
-    padding: 10px;
+    padding: 10px 10px 10px 34px;
     border: 1px solid #dee2e6;
     border-radius: 8px;
     font-size: 14px;
@@ -106,19 +125,20 @@ const WorkerList = styled.div`
     }
 `;
 
-const WorkerItem = styled.div<{ $selected: boolean }>`
+const WorkerItem = styled.div<{ $selected: boolean; $teamColor: string; $teamTint: string }>`
     display: flex;
     align-items: center;
     padding: 12px 15px;
     margin-bottom: 8px;
-    background: ${props => props.$selected ? '#e7f5ff' : 'white'};
-    border: 1px solid ${props => props.$selected ? '#74c0fc' : '#e9ecef'};
+    background: ${props => props.$selected ? props.$teamTint : 'white'};
+    border: 1px solid ${props => props.$selected ? props.$teamColor : '#e9ecef'};
+    border-left: 5px solid ${props => props.$teamColor};
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
 
     &:hover {
-        background: ${props => props.$selected ? '#e7f5ff' : '#f8f9fa'};
+        background: ${props => props.$selected ? props.$teamTint : '#f8f9fa'};
         transform: translateY(-1px);
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
@@ -154,6 +174,18 @@ const WorkerName = styled.span`
 const WorkerDetail = styled.span`
     font-size: 12px;
     color: #868e96;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+`;
+
+const TeamColorDot = styled.span<{ $color: string }>`
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: ${props => props.$color};
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    flex: 0 0 auto;
 `;
 
 const MainContent = styled.div`
@@ -285,10 +317,51 @@ const copyHtmlToClipboard = async (html: string) => {
 };
 
 const normalizeText = (value?: string | null) => String(value ?? '').trim().toLowerCase();
+const DEFAULT_TEAM_COLOR = '#94a3b8';
+
+const normalizeHexColor = (value?: string | null, fallback = DEFAULT_TEAM_COLOR) => {
+    const raw = String(value ?? '').trim();
+    return /^#[0-9a-f]{6}$/i.test(raw) ? raw : fallback;
+};
+
+const hexToRgba = (hex: string, alpha: number) => {
+    const normalized = normalizeHexColor(hex).replace('#', '');
+    const numeric = parseInt(normalized, 16);
+    return `rgba(${(numeric >> 16) & 255}, ${(numeric >> 8) & 255}, ${numeric & 255}, ${alpha})`;
+};
 
 const isCheongyeonCompanyName = (value?: string | null) => {
     const normalized = normalizeText(value).replace(/\s+/g, '');
     return normalized.includes('청연');
+};
+
+const getTeamKey = (team: Team) => String(team.id ?? team.legacyId ?? team.name ?? '').trim();
+
+const workerMatchesTeam = (worker: Worker, team?: Team | null, fallbackTeamId = '') => {
+    const workerTeamId = String(worker.teamId ?? '').trim();
+    const workerId = String(worker.id ?? '').trim();
+    const teamIds = new Set(
+        [fallbackTeamId, team?.id, team?.legacyId]
+            .map((value) => String(value ?? '').trim())
+            .filter((value) => value.length > 0)
+    );
+    const memberIds = new Set(
+        (team?.memberIds ?? [])
+            .map((value) => String(value ?? '').trim())
+            .filter((value) => value.length > 0)
+    );
+    const teamName = normalizeText(team?.name);
+
+    return (
+        (workerTeamId.length > 0 && teamIds.has(workerTeamId)) ||
+        (workerId.length > 0 && memberIds.has(workerId)) ||
+        (teamName.length > 0 && normalizeText(worker.teamName) === teamName)
+    );
+};
+
+const isActiveWorker = (worker: Worker) => {
+    const status = normalizeText(worker.status);
+    return worker.isActive !== false && status !== '퇴사' && status !== 'inactive' && status !== '출입금지';
 };
 
 const WorkerSummaryPage: React.FC = () => {
@@ -316,7 +389,7 @@ const WorkerSummaryPage: React.FC = () => {
                 ]);
 
                 // Active workers only
-                const activeWorkers = allWorkers.filter(w => w.status !== '퇴사' && w.status !== 'inactive' && w.status !== '출입금지');
+                const activeWorkers = allWorkers.filter(isActiveWorker);
 
                 const cheongyeonCompanies = allCompanies.filter((company) => isCheongyeonCompanyName(company.name));
                 const cheongyeonCompanyIds = new Set(
@@ -344,7 +417,7 @@ const WorkerSummaryPage: React.FC = () => {
                 setTeams(allowedTeams);
                 setSelectedTeam((prev) => {
                     if (!prev) return '';
-                    return allowedTeams.some((team) => String(team.id ?? '') === prev) ? prev : '';
+                    return allowedTeams.some((team) => getTeamKey(team) === prev) ? prev : '';
                 });
 
                 // Default select first team if available
@@ -362,25 +435,47 @@ const WorkerSummaryPage: React.FC = () => {
         loadData();
     }, []);
 
+    const teamMemberCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+
+        teams.forEach((team) => {
+            const key = getTeamKey(team);
+            if (!key) return;
+            counts.set(key, workers.filter((worker) => workerMatchesTeam(worker, team, key)).length);
+        });
+
+        return counts;
+    }, [teams, workers]);
+
+    const workerTeamMetaById = useMemo(() => {
+        const meta = new Map<string, { name: string; color: string; tint: string }>();
+
+        workers.forEach((worker) => {
+            if (!worker.id) return;
+            const matchedTeam = teams.find((team) => workerMatchesTeam(worker, team, getTeamKey(team)));
+            const color = normalizeHexColor(matchedTeam?.color || worker.color);
+            meta.set(worker.id, {
+                name: matchedTeam?.name || worker.teamName || '미배정',
+                color,
+                tint: hexToRgba(color, 0.1)
+            });
+        });
+
+        return meta;
+    }, [teams, workers]);
+
+    const selectedTeamRecord = useMemo(
+        () => teams.find((team) => getTeamKey(team) === selectedTeam),
+        [teams, selectedTeam]
+    );
+    const selectedTeamColor = normalizeHexColor(selectedTeamRecord?.color, DEFAULT_TEAM_COLOR);
+
     // Filter Logic
     const filteredWorkers = useMemo(() => {
         let result = workers;
 
         if (selectedTeam) {
-            const targetTeam = teams.find(t => t.id === selectedTeam);
-            const teamIdCandidates = new Set(
-                [
-                    String(selectedTeam),
-                    String(targetTeam?.id ?? ''),
-                    String(targetTeam?.legacyId ?? '')
-                ].map((value) => value.trim()).filter((value) => value.length > 0)
-            );
-            const targetTeamName = normalizeText(targetTeam?.name);
-
-            result = result.filter(w =>
-                teamIdCandidates.has(String(w.teamId ?? '').trim()) ||
-                (targetTeamName.length > 0 && normalizeText(w.teamName) === targetTeamName)
-            );
+            result = result.filter(w => workerMatchesTeam(w, selectedTeamRecord, selectedTeam));
         }
 
         if (searchQuery) {
@@ -591,8 +686,6 @@ const WorkerSummaryPage: React.FC = () => {
         }
     };
 
-    const activeTeamName = teams.find(t => t.id === selectedTeam)?.name || '전체';
-
     if (loading) return <LoadingOverlay>데이터 로딩 중...</LoadingOverlay>;
 
     return (
@@ -603,17 +696,25 @@ const WorkerSummaryPage: React.FC = () => {
                         <FontAwesomeIcon icon={faFilter} size="sm" />
                         작업자 필터
                     </Title>
-                    <TeamFilter
-                        value={selectedTeam}
-                        onChange={(e) => setSelectedTeam(e.target.value)}
-                    >
-                        <option value="">전체 팀 보기</option>
-                        {teams.map(team => (
-                            <option key={team.id} value={team.id}>
-                                {team.name} ({team.memberCount || 0}명)
-                            </option>
-                        ))}
-                    </TeamFilter>
+                    <TeamFilterWrapper $color={selectedTeamColor}>
+                        <TeamFilter
+                            value={selectedTeam}
+                            onChange={(e) => setSelectedTeam(e.target.value)}
+                        >
+                            <option value="">전체 팀 보기 ({workers.length}명)</option>
+                            {teams.map(team => {
+                                const teamKey = getTeamKey(team);
+                                const teamColor = normalizeHexColor(team.color);
+                                const memberCount = teamMemberCounts.get(teamKey) ?? 0;
+
+                                return (
+                                    <option key={teamKey} value={teamKey} style={{ color: teamColor }}>
+                                        ● {team.name} ({memberCount}명)
+                                    </option>
+                                );
+                            })}
+                        </TeamFilter>
+                    </TeamFilterWrapper>
                 </SidebarHeader>
 
                 <div style={{ padding: '0 20px' }}>
@@ -641,23 +742,33 @@ const WorkerSummaryPage: React.FC = () => {
                             검색 결과가 없습니다.
                         </div>
                     ) : (
-                        filteredWorkers.map(worker => (
-                            <WorkerItem
-                                key={worker.id}
-                                $selected={selectedWorkerIds.has(worker.id!)}
-                                onClick={() => toggleSelection(worker.id!)}
-                            >
-                                <Checkbox $checked={selectedWorkerIds.has(worker.id!)}>
-                                    {selectedWorkerIds.has(worker.id!) && <FontAwesomeIcon icon={faCheckSquare} size="xs" />}
-                                </Checkbox>
-                                <WorkerInfo>
-                                    <WorkerName>{worker.name}</WorkerName>
-                                    <WorkerDetail>
-                                        {worker.teamName || '미배정'} | {worker.idNumber ? worker.idNumber.substring(0, 6) : '------'}
-                                    </WorkerDetail>
-                                </WorkerInfo>
-                            </WorkerItem>
-                        ))
+                        filteredWorkers.map(worker => {
+                            const teamMeta = worker.id ? workerTeamMetaById.get(worker.id) : undefined;
+                            const teamColor = teamMeta?.color ?? normalizeHexColor(worker.color);
+                            const teamTint = teamMeta?.tint ?? hexToRgba(teamColor, 0.1);
+                            const teamName = teamMeta?.name || worker.teamName || '미배정';
+
+                            return (
+                                <WorkerItem
+                                    key={worker.id}
+                                    $selected={selectedWorkerIds.has(worker.id!)}
+                                    $teamColor={teamColor}
+                                    $teamTint={teamTint}
+                                    onClick={() => toggleSelection(worker.id!)}
+                                >
+                                    <Checkbox $checked={selectedWorkerIds.has(worker.id!)}>
+                                        {selectedWorkerIds.has(worker.id!) && <FontAwesomeIcon icon={faCheckSquare} size="xs" />}
+                                    </Checkbox>
+                                    <WorkerInfo>
+                                        <WorkerName>{worker.name}</WorkerName>
+                                        <WorkerDetail>
+                                            <TeamColorDot $color={teamColor} />
+                                            <span>{teamName} | {worker.idNumber ? worker.idNumber.substring(0, 6) : '------'}</span>
+                                        </WorkerDetail>
+                                    </WorkerInfo>
+                                </WorkerItem>
+                            );
+                        })
                     )}
                 </WorkerList>
             </Sidebar>

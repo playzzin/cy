@@ -562,8 +562,8 @@ const TotalPersonnelHistoryInner: React.FC = () => {
                     }
                     // 2024-05-22 Separate Labor/Invoice based on siteType & paymentType
                     const site = siteById.get(String(report.siteId ?? '').trim());
-                    const siteType = report.siteType ?? rw.siteType ?? site?.siteType;
-                    const paymentType = report.paymentType ?? rw.paymentType ?? site?.paymentMethod;
+                    const siteType = rw.siteType ?? report.siteType ?? site?.siteType;
+                    const paymentType = rw.paymentType ?? report.paymentType ?? site?.paymentMethod;
                     const isInvoice = classifyInvoiceBySiteContext({
                         paymentType,
                         siteType,

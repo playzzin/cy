@@ -21,7 +21,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "출력 관리",
                 icon: "fa-clipboard-list",
-                sub: ["일보작성", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
+                sub: ["일보작성", "보드입력", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
             },
             {
                 text: "지원 관리",
@@ -55,7 +55,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
@@ -127,7 +127,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
@@ -159,7 +159,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -178,7 +178,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
             },
             {
                 text: "지원 관리",
@@ -193,7 +193,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -207,7 +207,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -221,7 +221,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -235,7 +235,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -249,7 +249,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -263,7 +263,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -277,7 +277,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",

@@ -65,7 +65,6 @@ const MaterialTransactionsPage: React.FC = () => {
 
     useEffect(() => {
         loadMasterData();
-        handleSearch();
     }, []);
 
     // Lock main content scroll
@@ -86,8 +85,10 @@ const MaterialTransactionsPage: React.FC = () => {
                 siteService.getSites(),
                 materialService.getUniqueMaterialsForSelection(),
             ]);
-            setSites(filterCheongyeonMaterialSites(siteRows));
+            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows);
+            setSites(cheongyeonSites);
             setMaterials(materialRows);
+            await handleSearch(cheongyeonSites, materialRows);
         } catch (error) {
             console.error('Failed to load transaction master data:', error);
         }
@@ -98,7 +99,7 @@ const MaterialTransactionsPage: React.FC = () => {
         return normalizeSearchText(site.name).includes(normalizeSearchText(siteKeyword));
     });
 
-    const handleSearch = async () => {
+    const handleSearch = async (siteRows: Site[] = sites, materialRows: Material[] = materials) => {
         if (!isValidDateText(startDate) || !isValidDateText(endDate)) {
             alert('날짜는 YYYY-MM-DD 형식으로 입력해 주세요.');
             return;
@@ -127,7 +128,7 @@ const MaterialTransactionsPage: React.FC = () => {
             const labeledInbound = fetchedInbound.map(t => ({ ...t, type: 'inbound' as const }));
             const labeledOutbound = fetchedOutbound.map(t => ({ ...t, type: 'outbound' as const }));
 
-            const allowedSiteIds = createSiteIdSet(sites);
+            const allowedSiteIds = createSiteIdSet(siteRows);
             let all = [...labeledInbound, ...labeledOutbound].filter((tx) => allowedSiteIds.has(tx.siteId));
 
             // Client-side filtering for Material Name
@@ -139,7 +140,7 @@ const MaterialTransactionsPage: React.FC = () => {
             all.sort((a, b) => new Date(b.transactionDate).getTime() - new Date(a.transactionDate).getTime());
 
             const materialById = new Map(
-                materials.flatMap((m) => [
+                materialRows.flatMap((m) => [
                     [m.id, m],
                     ...(m.materialKey ? [[m.materialKey, m] as const] : []),
                 ])
@@ -350,7 +351,7 @@ const MaterialTransactionsPage: React.FC = () => {
                     </div>
                     <div className="md:col-span-1 flex gap-2">
                         <button
-                            onClick={handleSearch}
+                            onClick={() => handleSearch()}
                             className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-2 shadow-sm shadow-indigo-200"
                         >
                             <FontAwesomeIcon icon={faSearch} />

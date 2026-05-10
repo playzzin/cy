@@ -284,7 +284,7 @@ const resolveSiteContext = (report: DailyReport, siteMaps: ReturnType<typeof bui
         site,
         siteId: site?.id ? String(site.id) : rawSiteId,
         siteName: site?.name ? String(site.name) : (rawSiteName || '현장 미지정'),
-        siteType: normalizeSiteType(site?.siteType ?? report.siteType)
+        siteType: normalizeSiteType(report.siteType ?? site?.siteType)
     };
 };
 

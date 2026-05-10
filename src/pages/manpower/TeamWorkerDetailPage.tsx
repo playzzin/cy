@@ -39,6 +39,7 @@ import './TeamWorkerDetailPage.css';
 
 type StatusFilter = 'all' | 'active' | 'inactive';
 type DetailView = 'profile' | 'payslip' | 'dailyReport';
+type MobileView = 'list' | 'detail';
 
 const EMPTY_TEXT = '-';
 
@@ -259,9 +260,12 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [detailView, setDetailView] = useState<DetailView>('profile');
+    const [mobileView, setMobileView] = useState<MobileView>('list');
     const [showSensitive, setShowSensitive] = useState(false);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
+    const [masterError, setMasterError] = useState('');
+    const [outputError, setOutputError] = useState('');
     const [idCardUrl, setIdCardUrl] = useState<string>('');
     const [idCardLoading, setIdCardLoading] = useState(false);
     const [idCardError, setIdCardError] = useState('');
@@ -274,6 +278,7 @@ const TeamWorkerDetailPage: React.FC = () => {
 
         const loadMaster = async () => {
             setLoadingMaster(true);
+            setMasterError('');
             try {
                 const [nextTeams, nextWorkers] = await Promise.all([
                     teamService.getTeams(),
@@ -296,6 +301,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                 );
             } catch (error) {
                 console.error(error);
+                if (mounted) setMasterError('팀/작업자 데이터를 불러오지 못했습니다.');
                 toast.error('팀/작업자 데이터를 불러오지 못했습니다.');
             } finally {
                 if (mounted) setLoadingMaster(false);
@@ -313,13 +319,20 @@ const TeamWorkerDetailPage: React.FC = () => {
 
         const loadOutputRows = async () => {
             setLoadingOutput(true);
+            setOutputError('');
             try {
                 const rows = await dailyReportService.getWorkerRows({ startDate, endDate });
-                if (mounted) setOutputRows(rows);
+                if (mounted) {
+                    setOutputRows(rows);
+                    setOutputError('');
+                }
             } catch (error) {
                 console.error(error);
                 toast.error('출력 상세 데이터를 불러오지 못했습니다.');
-                if (mounted) setOutputRows([]);
+                if (mounted) {
+                    setOutputRows([]);
+                    setOutputError('출력 상세 데이터를 불러오지 못했습니다.');
+                }
             } finally {
                 if (mounted) setLoadingOutput(false);
             }
@@ -375,6 +388,7 @@ const TeamWorkerDetailPage: React.FC = () => {
     useEffect(() => {
         if (filteredWorkers.length === 0) {
             setSelectedWorkerId('');
+            setMobileView('list');
             return;
         }
 
@@ -638,12 +652,14 @@ const TeamWorkerDetailPage: React.FC = () => {
     const handleRefresh = async () => {
         setLoadingMaster(true);
         setLoadingOutput(true);
-        try {
-            const [nextTeams, nextWorkers, rows] = await Promise.all([
-                teamService.getTeams(),
-                manpowerService.getWorkers(true),
-                dailyReportService.getWorkerRows({ startDate, endDate }),
-            ]);
+        setMasterError('');
+        setOutputError('');
+        let hasError = false;
+
+        const refreshMaster = Promise.all([
+            teamService.getTeams(),
+            manpowerService.getWorkers(true),
+        ]).then(([nextTeams, nextWorkers]) => {
             const cheongyeonTeams = nextTeams
                 .filter(team => isCheongyeonTeam(team, nextWorkers))
                 .sort((left, right) =>
@@ -656,8 +672,32 @@ const TeamWorkerDetailPage: React.FC = () => {
                     : String(cheongyeonTeams[0]?.id ?? '')
             );
             setWorkers(nextWorkers);
-            setOutputRows(rows);
-            toast.success('최신 데이터로 새로고침했습니다.');
+            setMasterError('');
+        }).catch((error) => {
+            console.error(error);
+            hasError = true;
+            setMasterError('팀/작업자 데이터를 새로고침하지 못했습니다.');
+        });
+
+        const refreshOutput = dailyReportService.getWorkerRows({ startDate, endDate })
+            .then((rows) => {
+                setOutputRows(rows);
+                setOutputError('');
+            })
+            .catch((error) => {
+                console.error(error);
+                hasError = true;
+                setOutputRows([]);
+                setOutputError('출력 상세 데이터를 새로고침하지 못했습니다.');
+            });
+
+        try {
+            await Promise.all([refreshMaster, refreshOutput]);
+            if (!hasError) {
+                toast.success('최신 데이터로 새로고침했습니다.');
+            } else {
+                toast.error('새로고침 중 일부 데이터를 불러오지 못했습니다.');
+            }
         } catch (error) {
             console.error(error);
             toast.error('새로고침 중 오류가 발생했습니다.');
@@ -678,6 +718,12 @@ const TeamWorkerDetailPage: React.FC = () => {
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
         setIsTeamPickerOpen(false);
+        setMobileView('list');
+    };
+
+    const handleWorkerSelect = (workerId: string) => {
+        setSelectedWorkerId(workerId);
+        setMobileView('detail');
     };
 
     const handleCsvDownload = () => {
@@ -787,6 +833,35 @@ const TeamWorkerDetailPage: React.FC = () => {
                 </label>
             </section>
 
+            {(masterError || outputError) && (
+                <section className="tw-alert-stack" aria-live="polite">
+                    {masterError && (
+                        <div className="tw-alert tw-alert--error">
+                            <AlertCircle size={18} />
+                            <div>
+                                <strong>팀/작업자 로드 실패</strong>
+                                <span>{masterError}</span>
+                            </div>
+                            <button type="button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput}>
+                                다시 시도
+                            </button>
+                        </div>
+                    )}
+                    {outputError && (
+                        <div className="tw-alert tw-alert--warning">
+                            <AlertCircle size={18} />
+                            <div>
+                                <strong>출력 상세 로드 실패</strong>
+                                <span>{outputError}</span>
+                            </div>
+                            <button type="button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput}>
+                                다시 시도
+                            </button>
+                        </div>
+                    )}
+                </section>
+            )}
+
             <section className="tw-kpi-grid" aria-label="팀 요약">
                 <div className="tw-kpi">
                     <Users size={20} />
@@ -810,7 +885,25 @@ const TeamWorkerDetailPage: React.FC = () => {
                 </div>
             </section>
 
-            <main className="tw-workspace">
+            <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
+                <button
+                    type="button"
+                    className={mobileView === 'list' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
+                    onClick={() => setMobileView('list')}
+                >
+                    목록
+                </button>
+                <button
+                    type="button"
+                    className={mobileView === 'detail' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
+                    onClick={() => setMobileView('detail')}
+                    disabled={!selectedWorker}
+                >
+                    상세
+                </button>
+            </div>
+
+            <main className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div>
@@ -841,6 +934,8 @@ const TeamWorkerDetailPage: React.FC = () => {
                             </button>
                             {loadingMaster ? (
                                 <div className="tw-empty-state">팀 데이터를 불러오는 중입니다.</div>
+                            ) : masterError ? (
+                                <div className="tw-empty-state tw-empty-state--error">{masterError}</div>
                             ) : teams.length === 0 ? (
                                 <div className="tw-empty-state">청연이엔지 소속팀이 없습니다.</div>
                             ) : isTeamPickerOpen && (
@@ -853,6 +948,8 @@ const TeamWorkerDetailPage: React.FC = () => {
                         <div className="tw-list-block-title tw-list-block-title--workers">작업자 목록</div>
                         {loadingMaster ? (
                             <div className="tw-empty-state">작업자 데이터를 불러오는 중입니다.</div>
+                        ) : masterError ? (
+                            <div className="tw-empty-state tw-empty-state--error">작업자 목록을 표시할 수 없습니다.</div>
                         ) : filteredWorkers.length === 0 ? (
                             <div className="tw-empty-state">조건에 맞는 작업자가 없습니다.</div>
                         ) : (
@@ -872,7 +969,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                         key={workerId || worker.name}
                                         type="button"
                                         className={selected ? 'tw-worker-item tw-worker-item--active' : 'tw-worker-item'}
-                                        onClick={() => setSelectedWorkerId(workerId)}
+                                        onClick={() => handleWorkerSelect(workerId)}
                                     >
                                         <span className="tw-avatar" style={{ background: workerTeamColor }}>{String(worker.name ?? '?').slice(0, 1)}</span>
                                         <span className="tw-worker-item__main">
@@ -899,6 +996,14 @@ const TeamWorkerDetailPage: React.FC = () => {
                         </div>
                     ) : (
                         <>
+                            <button
+                                type="button"
+                                className="tw-mobile-back"
+                                onClick={() => setMobileView('list')}
+                            >
+                                작업자 목록으로
+                            </button>
+
                             <div className="tw-worker-hero">
                                 <div className="tw-worker-hero__avatar" style={{ background: selectedWorkerTeamColor }}>{String(selectedWorker.name ?? '?').slice(0, 1)}</div>
                                 <div className="tw-worker-hero__content">
@@ -1069,6 +1174,58 @@ const TeamWorkerDetailPage: React.FC = () => {
                                     <span>{startDate} ~ {endDate}</span>
                                 </div>
 
+                                <div className="tw-output-card-list">
+                                    {loadingOutput ? (
+                                        <div className="tw-empty-state">출력 상세를 불러오는 중입니다.</div>
+                                    ) : outputError ? (
+                                        <div className="tw-empty-state tw-empty-state--error">{outputError}</div>
+                                    ) : workerOutputRows.length === 0 ? (
+                                        <div className="tw-empty-state">선택한 기간의 출력 내역이 없습니다.</div>
+                                    ) : (
+                                        workerOutputRows.map(row => {
+                                            const displayWorkerTeamName = row.workerTeamName
+                                                || (row.workerTeamId ? teamById.get(String(row.workerTeamId))?.name : '')
+                                                || getTeamLabel(selectedWorker, teamById);
+                                            const payTypeLabel = resolveReportPayType(row) || EMPTY_TEXT;
+
+                                            return (
+                                                <article className="tw-output-card" key={`card-${row.reportId}-${row.workerId}-${row.date}-${row.siteId}`}>
+                                                    <div className="tw-output-card__header">
+                                                        <strong>{row.date || EMPTY_TEXT}</strong>
+                                                        <span>{formatCurrency(getReportRowAmount(row))}</span>
+                                                    </div>
+                                                    <dl>
+                                                        <div>
+                                                            <dt>현장</dt>
+                                                            <dd>{row.siteName || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>현장소속팀</dt>
+                                                            <dd>{getResponsibleTeamLabel(row)}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>소속팀</dt>
+                                                            <dd>{displayWorkerTeamName || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>급여방식</dt>
+                                                            <dd>{payTypeLabel}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>공수</dt>
+                                                            <dd>{formatManDay(row.manDay)}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>단가</dt>
+                                                            <dd>{formatCurrency(row.unitPrice)}</dd>
+                                                        </div>
+                                                    </dl>
+                                                </article>
+                                            );
+                                        })
+                                    )}
+                                </div>
+
                                 <div className="tw-output-table-wrap tw-output-table-wrap--v2">
                                     <table className="tw-output-table tw-daily-v2-table">
                                         <thead>
@@ -1088,6 +1245,10 @@ const TeamWorkerDetailPage: React.FC = () => {
                                             {loadingOutput ? (
                                                 <tr>
                                                     <td colSpan={9} className="tw-table-empty">출력 상세를 불러오는 중입니다.</td>
+                                                </tr>
+                                            ) : outputError ? (
+                                                <tr>
+                                                    <td colSpan={9} className="tw-table-empty tw-table-empty--error">{outputError}</td>
                                                 </tr>
                                             ) : workerOutputRows.length === 0 ? (
                                                 <tr>

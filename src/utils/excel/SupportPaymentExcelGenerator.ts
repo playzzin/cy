@@ -1,385 +1,358 @@
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 
-// --- Interfaces (Mirrored from Page, or imported if shared) ---
-// Ideally these should be in a shared types file, but for now defining here to be safe and independent.
-interface Worker {
-    workerId: string;
-    workerName: string;
-    role?: string;
-    manDay: number;
-    unitPrice: number;
-    amount: number;
-    date: string;
-    idNumber?: string;
-    contact?: string;
-    address?: string;
-    siteAddress?: string;
-    days?: number[];
-    totalManDay?: number;
-    totalAmount?: number;
-    displayContent?: string;
-    siteName?: string;
-}
-
-interface Site {
-    siteId: string;
-    siteName: string;
-    totalManDay: number;
-    totalAmount: number;
-    displayContent: string;
-    workers: Worker[];
-}
-
-interface CompanyAggregate {
-    companyId: string;
-    companyName: string;
-    bankName: string;
-    accountNumber: string;
-    accountHolder: string;
-    totalAmount: number;
-    errors: Record<string, boolean>;
-    sites: Site[];
-}
-
 export const MAX_DAY_COLUMNS = 31;
 export const DAY_LABELS_FIRST = Array.from({ length: 15 }, (_, i) => i + 1);
 export const DAY_LABELS_SECOND = Array.from({ length: 16 }, (_, i) => i + 16);
 
+export interface SupportLaborStatementExcelRow {
+    workerId?: string;
+    workerName: string;
+    idNumber?: string;
+    contact?: string;
+    address?: string;
+    days: number[];
+    totalManDay: number;
+    unitPrice: number;
+    totalAmount: number;
+}
+
+export interface SupportLaborStatementExcelBlock {
+    sheetName?: string;
+    siteName: string;
+    settlementName: string;
+    direction: string;
+    rows: SupportLaborStatementExcelRow[];
+}
+
+interface GenerateLaborStatementExcelOptions {
+    fileName?: string;
+}
+
+const COLUMN = {
+    no: 1,
+    name: 2,
+    identity: 3,
+    address: 4,
+    dayStart: 5,
+    attendance: 21,
+    amount: 22
+};
+
 export const generateLaborStatementExcel = async (
-    data: CompanyAggregate[],
-    month: string
+    statements: SupportLaborStatementExcelBlock[],
+    yearMonth: string,
+    options: GenerateLaborStatementExcelOptions = {}
 ) => {
     const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Smart Construction';
+    workbook.created = new Date();
 
-    // Loop through each Company Aggregate and create a sheet
-    for (const company of data) {
-        // Sanitize sheet name (Excel limits: 31 chars, no special chars)
-        const safeSheetName = (company.companyName || 'Unknown')
-            .replace(/[\\/?*[\]]/g, '_')
-            .substring(0, 30);
+    statements.forEach((statement, statementIndex) => {
+        const worksheet = workbook.addWorksheet(resolveUniqueSheetName(workbook, statement, statementIndex));
+        buildStatementWorksheet(worksheet, statement, yearMonth);
+    });
 
-        // Handle duplicate sheet names if any (simple append)
-        let sheetName = safeSheetName;
-        let counter = 1;
-        while (workbook.getWorksheet(sheetName)) {
-            sheetName = `${safeSheetName.substring(0, 28)}(${counter})`;
-            counter++;
-        }
-
-        const worksheet = workbook.addWorksheet(sheetName);
-
-        // --- Column Setup ---
-        const dayStartColumn = 4;
-        const firstHalfColumns = DAY_LABELS_FIRST.length;
-        const secondHalfColumns = DAY_LABELS_SECOND.length;
-        const secondHalfStartColumn = dayStartColumn + firstHalfColumns;
-        const grossColumn = secondHalfStartColumn + secondHalfColumns;
-        const manDayColumn = grossColumn + 1;
-        const unitPriceColumn = manDayColumn + 1;
-        const displayColumn = unitPriceColumn + 1;
-        const grossColumnLetter = getExcelColumnLetter(grossColumn);
-        const manDayColumnLetter = getExcelColumnLetter(manDayColumn);
-        const unitPriceColumnLetter = getExcelColumnLetter(unitPriceColumn);
-        const displayColumnLetter = getExcelColumnLetter(displayColumn);
-
-        worksheet.columns = [
-            { width: 16 }, // 성명
-            { width: 20 }, // 주민/전화
-            { width: 30 }, // 주소
-            ...Array.from({ length: MAX_DAY_COLUMNS }, () => ({ width: 4.2 })), // 1~31일
-            { width: 12 }, // 노무비총
-            { width: 9 }, // 출역일수
-            { width: 12 }, // 노무단가
-            { width: 18 } // 표시내용
-        ];
-
-        // Calculate last column letter (e.g., AL)
-        // 1(A)+1(B)+1(C) + 31(Days) = 34 columns. 
-        // 34 + 4 (Summary) = 38 columns?
-        // Let's re-verify the indices from the original code.
-        // Original: spacerIndex = 4 + 15 = 19 (T?) ... this logic was a bit complex.
-        // Let's stick to the visual layout: 3 Fixed + 15 Days + 1 Spacer + 16 Days + 4 Summary
-
-        // Let's count strictly:
-        // Col 1: A (Name)
-        // Col 2: B (ID/Phone)
-        // Col 3: C (Address)
-        // Col 4-18: Days 1-15 (15 cols)
-        // Col 19: Spacer (Empty)
-        // Col 20-35: Days 16-31 (16 cols)
-        // Col 36: Total ManDay
-        // Col 37: Unit Price
-        // Col 38: Total Amount
-        // Col 39: Note
-
-        // Total cols = 3 + 15 + 1 + 16 + 4 = 39.
-        // ExcelJS uses 1-based indexing.
-
-        // Freeze panes
-        worksheet.views = [{ state: 'frozen', ySplit: 4 }];
-
-        // --- Header Rows ---
-        const lastColumnLetter = getExcelColumnLetter(displayColumn);
-
-        // Row 1: Title
-        worksheet.mergeCells(`A1:${lastColumnLetter}1`);
-        worksheet.getCell('A1').value = `노무내역서 (${company.companyName} / ${month})`;
-        worksheet.getCell('A1').font = { size: 18, bold: true };
-        worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-        worksheet.getRow(1).height = 32;
-
-        // Row 2: Metadata
-        worksheet.mergeCells(`A2:C2`);
-        worksheet.getCell('A2').value = `지급월: ${month}`;
-        worksheet.mergeCells(`D2:${lastColumnLetter}2`);
-        worksheet.getCell('D2').value = `생성일: ${new Date().toISOString().slice(0, 10)}`;
-        worksheet.getRow(2).font = { bold: true };
-
-        // Row 3, 4: Headers
-        const headerRow1 = worksheet.getRow(3);
-        const headerRow2 = worksheet.getRow(4);
-        headerRow1.height = 18;
-        headerRow2.height = 18;
-
-        // A: Name
-        headerRow1.getCell(1).value = '성명';
-        headerRow1.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-        worksheet.mergeCells('A3:A4');
-
-        // B: ID / Contact
-        headerRow1.getCell(2).value = '주민등록번호';
-        worksheet.mergeCells('B3:B3');
-        headerRow2.getCell(2).value = '전화번호';
-
-        // C: Address
-        headerRow1.getCell(3).value = '주소';
-        worksheet.mergeCells('C3:C4');
-
-        // Days 1-15
-        DAY_LABELS_FIRST.forEach((day, idx) => {
-            const cellIndex = dayStartColumn + idx;
-            headerRow1.getCell(cellIndex).value = day;
-            headerRow1.getCell(cellIndex).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0070C0' } }; // Blue
-            headerRow1.getCell(cellIndex).font = { color: { argb: 'FFFFFFFF' }, bold: true };
-            headerRow1.getCell(cellIndex).alignment = { horizontal: 'center', vertical: 'middle' };
-            headerRow1.getCell(cellIndex).border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-        });
-
-        // Days 16-31
-        DAY_LABELS_SECOND.forEach((day, idx) => {
-            const cellIndex = secondHalfStartColumn + idx;
-            headerRow2.getCell(cellIndex).value = day <= MAX_DAY_COLUMNS ? day : '';
-            headerRow2.getCell(cellIndex).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFC00000' } }; // Red
-            headerRow2.getCell(cellIndex).font = { color: { argb: 'FFFFFFFF' }, bold: true };
-            headerRow2.getCell(cellIndex).alignment = { horizontal: 'center', vertical: 'middle' };
-            headerRow2.getCell(cellIndex).border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-        });
-
-        // Summary Headers
-        headerRow1.getCell(grossColumn).value = '노무비총';
-        headerRow1.getCell(grossColumn).alignment = { horizontal: 'center', vertical: 'middle' };
-        headerRow1.getCell(grossColumn).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-        headerRow1.getCell(grossColumn).font = { bold: true };
-        headerRow1.getCell(grossColumn).border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-        worksheet.mergeCells(`${getExcelColumnLetter(grossColumn)}3:${getExcelColumnLetter(grossColumn)}4`);
-
-        const summaryLabels = ['출역일수', '노무단가', '표시내용'];
-        summaryLabels.forEach((label, idx) => {
-            const col = manDayColumn + idx;
-            worksheet.mergeCells(`${getExcelColumnLetter(col)}3:${getExcelColumnLetter(col)}4`);
-            const cell = worksheet.getCell(3, col);
-            cell.value = label;
-            cell.alignment = { horizontal: 'center', vertical: 'middle' };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Light Yellow
-            cell.font = { bold: true };
-            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-        });
-
-        // --- Data Rows ---
-        const workers = company.sites.flatMap((s: Site) => s.workers);
-
-        let currentExcelRow = 5;
-        let companyTotalManDay = 0;
-        let companyTotalAmount = 0;
-        const companyDayTotals = new Array(32).fill(0); // Index 0 unused
-
-        workers.forEach((row) => {
-            const workerDayTotals = row.days?.reduce((acc, value) => acc + (value || 0), 0) ?? 0;
-            const workerTotalManDay = typeof row.totalManDay === 'number' ? row.totalManDay : workerDayTotals;
-            const workerTotalAmount =
-                typeof row.totalAmount === 'number'
-                    ? row.totalAmount
-                    : Math.round(workerTotalManDay * (row.unitPrice || 0));
-
-            companyTotalManDay += workerTotalManDay;
-            companyTotalAmount += workerTotalAmount;
-
-            if (row.days) {
-                row.days.forEach((val, dIdx) => {
-                    companyDayTotals[dIdx + 1] += val || 0;
-                });
-            }
-
-            const firstRow = worksheet.getRow(currentExcelRow);
-            const secondRow = worksheet.getRow(currentExcelRow + 1);
-            firstRow.height = 18;
-            secondRow.height = 18;
-
-            // Name
-            worksheet.mergeCells(`A${currentExcelRow}:A${currentExcelRow + 1}`);
-            const nameCell = firstRow.getCell(1);
-            nameCell.value = row.siteName ? `${row.workerName}\n(${row.siteName})` : row.workerName;
-            nameCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-            applyThinBorder(nameCell);
-
-            // ID & Contact
-            const idCell = firstRow.getCell(2);
-            idCell.value = maskIdNumber(row.idNumber) || '-';
-            idCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            applyThinBorder(idCell);
-
-            const contactCell = secondRow.getCell(2);
-            contactCell.value = row.contact?.trim() || '-';
-            contactCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            applyThinBorder(contactCell);
-
-            // Address
-            worksheet.mergeCells(`C${currentExcelRow}:C${currentExcelRow + 1}`);
-            const addressCell = firstRow.getCell(3);
-            const addressLines = [row.address, row.siteAddress].filter(Boolean);
-            addressCell.value = addressLines.length > 0 ? addressLines.join('\n') : '-';
-            addressCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-            applyThinBorder(addressCell);
-
-            // Day values 1~15
-            DAY_LABELS_FIRST.forEach((day, idx) => {
-                const colIndex = dayStartColumn + idx;
-                const cell = firstRow.getCell(colIndex);
-                const dayValue = row.days?.[day - 1];
-                cell.value = dayValue ? formatDayValue(dayValue) : '';
-                cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5F1FF' } };
-                applyThinBorder(cell);
-            });
-
-            // Day values 16~31
-            DAY_LABELS_SECOND.forEach((day, idx) => {
-                if (day > MAX_DAY_COLUMNS) return;
-                const colIndex = secondHalfStartColumn + idx;
-                const cell = secondRow.getCell(colIndex);
-                const dayValue = row.days?.[day - 1];
-                cell.value = dayValue ? formatDayValue(dayValue) : '';
-                cell.alignment = { horizontal: 'center', vertical: 'middle' };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDECEC' } };
-                applyThinBorder(cell);
-            });
-
-            // 노무비총
-            worksheet.mergeCells(`${grossColumnLetter}${currentExcelRow}:${grossColumnLetter}${currentExcelRow + 1}`);
-            const grossCell = firstRow.getCell(grossColumn);
-            grossCell.value = workerTotalAmount;
-            grossCell.numFmt = '#,##0';
-            grossCell.alignment = { horizontal: 'right', vertical: 'middle' };
-            grossCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-            applyThinBorder(grossCell);
-
-            // 출역일수
-            worksheet.mergeCells(`${manDayColumnLetter}${currentExcelRow}:${manDayColumnLetter}${currentExcelRow + 1}`);
-            const manDayCell = firstRow.getCell(manDayColumn);
-            manDayCell.value = workerTotalManDay;
-            manDayCell.numFmt = '0.0';
-            manDayCell.alignment = { horizontal: 'center', vertical: 'middle' };
-            applyThinBorder(manDayCell);
-
-            // 노무단가
-            worksheet.mergeCells(`${unitPriceColumnLetter}${currentExcelRow}:${unitPriceColumnLetter}${currentExcelRow + 1}`);
-            const unitPriceCell = firstRow.getCell(unitPriceColumn);
-            unitPriceCell.value = row.unitPrice || 0;
-            unitPriceCell.numFmt = '#,##0';
-            unitPriceCell.alignment = { horizontal: 'right', vertical: 'middle' };
-            applyThinBorder(unitPriceCell);
-
-            // 표시내용
-            worksheet.mergeCells(`${displayColumnLetter}${currentExcelRow}:${displayColumnLetter}${currentExcelRow + 1}`);
-            const displayCell = firstRow.getCell(displayColumn);
-            displayCell.value = row.displayContent || '';
-            displayCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-            applyThinBorder(displayCell);
-
-            currentExcelRow += 2;
-        });
-
-        // --- Company Total Row ---
-        const summaryRow = worksheet.getRow(currentExcelRow);
-        worksheet.mergeCells(`A${currentExcelRow}:C${currentExcelRow}`);
-        summaryRow.getCell(1).value = `[${company.companyName}] 합계`;
-        summaryRow.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
-        summaryRow.getCell(1).font = { bold: true };
-
-        // Day Totals (1-15)
-        DAY_LABELS_FIRST.forEach((day, idx) => {
-            const colIndex = dayStartColumn + idx;
-            const val = companyDayTotals[day];
-            summaryRow.getCell(colIndex).value = val > 0 ? formatDayValue(val) : '';
-            summaryRow.getCell(colIndex).alignment = { horizontal: 'center', vertical: 'middle' };
-        });
-
-        // Day Totals (16-31)
-        DAY_LABELS_SECOND.forEach((day, idx) => {
-            const colIndex = secondHalfStartColumn + idx;
-            const val = companyDayTotals[day];
-            if (day <= MAX_DAY_COLUMNS) {
-                summaryRow.getCell(colIndex).value = val > 0 ? formatDayValue(val) : '';
-            }
-            summaryRow.getCell(colIndex).alignment = { horizontal: 'center', vertical: 'middle' };
-        });
-
-        summaryRow.getCell(grossColumn).value = companyTotalAmount;
-        summaryRow.getCell(grossColumn).numFmt = '#,##0';
-        summaryRow.getCell(grossColumn).alignment = { horizontal: 'right', vertical: 'middle' };
-
-        summaryRow.getCell(manDayColumn).value = companyTotalManDay;
-        summaryRow.getCell(manDayColumn).alignment = { horizontal: 'center', vertical: 'middle' };
-
-        // Styling
-        summaryRow.eachCell((cell) => {
-            cell.font = { bold: true };
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEEEEE' } };
-            cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' }, bottom: { style: 'thin' } };
-        });
-        // --- Remove AutoFilter if set ---
-        worksheet.autoFilter = undefined;
-    }
-
-    // Write and Save
     const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `노무내역서_${month}_(협력사별).xlsx`);
+    saveAs(new Blob([buffer]), options.fileName ?? `노무내역서_${yearMonth}.xlsx`);
 };
 
-// --- Helpers ---
-const formatDayValue = (val: number) => {
-    if (val === 1) return '1.0';
-    if (val === 0.5) return '0.5';
-    return val.toString();
-};
-
-const maskIdNumber = (id: string | undefined) => {
-    if (!id) return '';
-    return id.substring(0, 8) + '******';
-};
-
-const applyThinBorder = (cell: ExcelJS.Cell) => {
-    cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        right: { style: 'thin' },
-        bottom: { style: 'thin' }
+const buildStatementWorksheet = (
+    worksheet: ExcelJS.Worksheet,
+    statement: SupportLaborStatementExcelBlock,
+    yearMonth: string
+) => {
+    worksheet.columns = [
+        { width: 6 },
+        { width: 14 },
+        { width: 16 },
+        { width: 28 },
+        ...Array.from({ length: DAY_LABELS_SECOND.length }, () => ({ width: 4.5 })),
+        { width: 9 },
+        { width: 13 }
+    ];
+    worksheet.views = [{ state: 'frozen', ySplit: 4 }];
+    worksheet.pageSetup = {
+        orientation: 'landscape',
+        fitToPage: true,
+        fitToWidth: 1,
+        fitToHeight: 0,
+        paperSize: 9,
+        horizontalCentered: true,
+        margins: {
+            left: 0.25,
+            right: 0.25,
+            top: 0.35,
+            bottom: 0.35,
+            header: 0.15,
+            footer: 0.15
+        }
     };
+
+    const lastColumnLetter = getExcelColumnLetter(COLUMN.amount);
+    const monthNumber = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+
+    worksheet.mergeCells(`A1:${lastColumnLetter}1`);
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = `노 무 비 지 급 명 세 서 (${monthNumber}월분)`;
+    titleCell.font = { size: 18, bold: true };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    titleCell.border = { bottom: { style: 'medium', color: { argb: 'FFF59E0B' } } };
+    worksheet.getRow(1).height = 34;
+
+    worksheet.mergeCells('A2:D2');
+    worksheet.getCell('A2').value = `현장명: ${statement.siteName || '-'}`;
+    worksheet.mergeCells('E2:Q2');
+    worksheet.getCell('E2').value = `정산 주체: ${statement.settlementName || '-'}`;
+    worksheet.mergeCells('R2:V2');
+    worksheet.getCell('R2').value = `※ ${statement.direction} 기준 집계`;
+    ['A2', 'E2', 'R2'].forEach((address) => {
+        const cell = worksheet.getCell(address);
+        cell.font = { bold: true, color: address === 'R2' ? { argb: 'FFD97706' } : { argb: 'FF334155' } };
+        cell.alignment = { horizontal: address === 'R2' ? 'right' : 'left', vertical: 'middle' };
+    });
+    worksheet.getRow(2).height = 22;
+
+    writeHeader(worksheet);
+
+    let currentRow = 5;
+    statement.rows.forEach((row, index) => {
+        writeWorkerRows(worksheet, currentRow, row, index + 1);
+        currentRow += 2;
+    });
+
+    writeTotalRows(worksheet, currentRow, statement.rows, statement.settlementName);
+};
+
+const writeHeader = (worksheet: ExcelJS.Worksheet) => {
+    const top = worksheet.getRow(3);
+    const bottom = worksheet.getRow(4);
+    top.height = 20;
+    bottom.height = 20;
+
+    worksheet.mergeCells('A3:A4');
+    worksheet.mergeCells('B3:B4');
+    worksheet.mergeCells('D3:D4');
+    worksheet.mergeCells('U3:U4');
+
+    top.getCell(COLUMN.no).value = 'NO';
+    top.getCell(COLUMN.name).value = '성명';
+    top.getCell(COLUMN.identity).value = '주민번호';
+    bottom.getCell(COLUMN.identity).value = '전화번호';
+    top.getCell(COLUMN.address).value = '주 소';
+
+    DAY_LABELS_FIRST.forEach((day, idx) => {
+        const cell = top.getCell(COLUMN.dayStart + idx);
+        cell.value = String(day).padStart(2, '0');
+        cell.fill = solidFill('FFE0F2FE');
+        cell.font = { bold: true, color: { argb: 'FF0369A1' } };
+    });
+
+    const spacerCell = top.getCell(COLUMN.dayStart + DAY_LABELS_FIRST.length);
+    spacerCell.value = 'X';
+    spacerCell.fill = solidFill('FFF8FAFC');
+    spacerCell.font = { bold: true, color: { argb: 'FF64748B' } };
+
+    DAY_LABELS_SECOND.forEach((day, idx) => {
+        const cell = bottom.getCell(COLUMN.dayStart + idx);
+        cell.value = day;
+        cell.fill = solidFill('FFFFF1F2');
+        cell.font = { bold: true, color: { argb: 'FFBE123C' } };
+    });
+
+    top.getCell(COLUMN.attendance).value = '출역';
+    top.getCell(COLUMN.amount).value = '단가';
+    bottom.getCell(COLUMN.amount).value = '총액';
+
+    for (let row = 3; row <= 4; row++) {
+        for (let col = 1; col <= COLUMN.amount; col++) {
+            const cell = worksheet.getCell(row, col);
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.font = { ...cell.font, bold: true };
+            cell.border = mediumBorder();
+        }
+    }
+};
+
+const writeWorkerRows = (
+    worksheet: ExcelJS.Worksheet,
+    rowNumber: number,
+    row: SupportLaborStatementExcelRow,
+    sequence: number
+) => {
+    worksheet.getRow(rowNumber).height = 19;
+    worksheet.getRow(rowNumber + 1).height = 19;
+
+    worksheet.mergeCells(`A${rowNumber}:A${rowNumber + 1}`);
+    worksheet.mergeCells(`B${rowNumber}:B${rowNumber + 1}`);
+    worksheet.mergeCells(`D${rowNumber}:D${rowNumber + 1}`);
+    worksheet.mergeCells(`U${rowNumber}:U${rowNumber + 1}`);
+
+    worksheet.getCell(rowNumber, COLUMN.no).value = sequence;
+    worksheet.getCell(rowNumber, COLUMN.name).value = row.workerName || '-';
+    worksheet.getCell(rowNumber, COLUMN.identity).value = maskIdNumber(row.idNumber) || '-';
+    worksheet.getCell(rowNumber + 1, COLUMN.identity).value = row.contact || '-';
+    worksheet.getCell(rowNumber, COLUMN.address).value = row.address || '-';
+
+    DAY_LABELS_FIRST.forEach((day, idx) => {
+        const cell = worksheet.getCell(rowNumber, COLUMN.dayStart + idx);
+        cell.value = formatDayValue(row.days[day - 1] ?? 0);
+        cell.fill = solidFill('FFF0F9FF');
+    });
+    worksheet.getCell(rowNumber, COLUMN.dayStart + DAY_LABELS_FIRST.length).fill = solidFill('FFF8FAFC');
+
+    DAY_LABELS_SECOND.forEach((day, idx) => {
+        const cell = worksheet.getCell(rowNumber + 1, COLUMN.dayStart + idx);
+        cell.value = formatDayValue(row.days[day - 1] ?? 0);
+        cell.fill = solidFill('FFFFF7F7');
+    });
+
+    const attendanceCell = worksheet.getCell(rowNumber, COLUMN.attendance);
+    attendanceCell.value = roundOneDecimal(row.totalManDay);
+    attendanceCell.numFmt = '0.0';
+    attendanceCell.fill = solidFill('FFF8FAFC');
+
+    const unitPriceCell = worksheet.getCell(rowNumber, COLUMN.amount);
+    unitPriceCell.value = row.unitPrice || 0;
+    unitPriceCell.numFmt = '#,##0';
+
+    const amountCell = worksheet.getCell(rowNumber + 1, COLUMN.amount);
+    amountCell.value = row.totalAmount || 0;
+    amountCell.numFmt = '#,##0';
+    amountCell.font = { bold: true, color: { argb: 'FF4338CA' } };
+    amountCell.fill = solidFill('FFECFDF5');
+
+    for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
+        for (let col = 1; col <= COLUMN.amount; col++) {
+            const cell = worksheet.getCell(rowIdx, col);
+            cell.border = mediumBorder();
+            cell.alignment = getBodyAlignment(col);
+        }
+    }
+};
+
+const writeTotalRows = (
+    worksheet: ExcelJS.Worksheet,
+    rowNumber: number,
+    rows: SupportLaborStatementExcelRow[],
+    settlementName: string
+) => {
+    const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
+    rows.forEach((row) => {
+        row.days.forEach((value, index) => {
+            dayTotals[index] += value || 0;
+        });
+    });
+
+    const totalManDay = rows.reduce((acc, row) => acc + row.totalManDay, 0);
+    const totalAmount = rows.reduce((acc, row) => acc + row.totalAmount, 0);
+    const avgPrice = totalManDay > 0 ? Math.round(totalAmount / totalManDay) : 0;
+
+    worksheet.getRow(rowNumber).height = 20;
+    worksheet.getRow(rowNumber + 1).height = 20;
+    worksheet.mergeCells(`A${rowNumber}:D${rowNumber}`);
+    worksheet.mergeCells(`A${rowNumber + 1}:D${rowNumber + 1}`);
+    worksheet.mergeCells(`U${rowNumber}:U${rowNumber + 1}`);
+
+    worksheet.getCell(rowNumber, 1).value = '합 계';
+    worksheet.getCell(rowNumber + 1, 1).value = '총 액';
+    if (!rows.length) worksheet.getCell(rowNumber + 1, 1).value = `${settlementName || '정산 주체'} 데이터 없음`;
+
+    DAY_LABELS_FIRST.forEach((day, idx) => {
+        const cell = worksheet.getCell(rowNumber, COLUMN.dayStart + idx);
+        cell.value = formatDayValue(dayTotals[day - 1]);
+    });
+
+    DAY_LABELS_SECOND.forEach((day, idx) => {
+        const cell = worksheet.getCell(rowNumber + 1, COLUMN.dayStart + idx);
+        cell.value = formatDayValue(dayTotals[day - 1]);
+    });
+
+    const totalManDayCell = worksheet.getCell(rowNumber, COLUMN.attendance);
+    totalManDayCell.value = roundOneDecimal(totalManDay);
+    totalManDayCell.numFmt = '0.0';
+
+    const avgPriceCell = worksheet.getCell(rowNumber, COLUMN.amount);
+    avgPriceCell.value = avgPrice;
+    avgPriceCell.numFmt = '#,##0';
+
+    const totalAmountCell = worksheet.getCell(rowNumber + 1, COLUMN.amount);
+    totalAmountCell.value = totalAmount;
+    totalAmountCell.numFmt = '#,##0';
+    totalAmountCell.font = { bold: true, color: { argb: 'FF3730A3' } };
+    totalAmountCell.fill = solidFill('FFD1FAE5');
+
+    for (let rowIdx = rowNumber; rowIdx <= rowNumber + 1; rowIdx++) {
+        for (let col = 1; col <= COLUMN.amount; col++) {
+            const cell = worksheet.getCell(rowIdx, col);
+            cell.font = { ...cell.font, bold: true };
+            cell.fill = cell.fill || solidFill('FFE2E8F0');
+            cell.border = mediumBorder();
+            cell.alignment = getBodyAlignment(col);
+        }
+    }
+};
+
+const resolveUniqueSheetName = (
+    workbook: ExcelJS.Workbook,
+    statement: SupportLaborStatementExcelBlock,
+    index: number
+): string => {
+    const baseName = sanitizeSheetName(
+        statement.sheetName || `${statement.siteName}_${statement.settlementName}` || `노무내역서_${index + 1}`
+    );
+    let sheetName = baseName;
+    let counter = 1;
+    while (workbook.getWorksheet(sheetName)) {
+        const suffix = `(${counter})`;
+        sheetName = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+        counter++;
+    }
+    return sheetName;
+};
+
+const sanitizeSheetName = (value: string): string => {
+    const sanitized = value.replace(/[\\/?*[\]:]/g, '_').trim();
+    return (sanitized || '노무내역서').slice(0, 31);
+};
+
+const formatDayValue = (value: number): string => {
+    if (!value) return '';
+    const rounded = roundOneDecimal(value);
+    return rounded % 1 === 0 ? rounded.toFixed(1) : String(rounded);
+};
+
+const roundOneDecimal = (value: number): number => Math.round((value || 0) * 10) / 10;
+
+const maskIdNumber = (value?: string): string => {
+    if (!value) return '';
+    const digits = value.replace(/[^0-9]/g, '');
+    if (digits.length < 7) return value;
+    return `${digits.slice(0, 6)}-${digits.slice(6, 7)}******`;
+};
+
+const solidFill = (argb: string): ExcelJS.Fill => ({
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb }
+});
+
+const mediumBorder = (): Partial<ExcelJS.Borders> => ({
+    top: { style: 'medium' },
+    left: { style: 'medium' },
+    right: { style: 'medium' },
+    bottom: { style: 'medium' }
+});
+
+const getBodyAlignment = (column: number): Partial<ExcelJS.Alignment> => {
+    if (column === COLUMN.address) return { horizontal: 'left', vertical: 'middle', wrapText: true };
+    if (column === COLUMN.amount) return { horizontal: 'right', vertical: 'middle' };
+    return { horizontal: 'center', vertical: 'middle', wrapText: true };
 };
 
 const getExcelColumnLetter = (colIndex: number) => {
-    let temp, letter = '';
+    let temp;
+    let letter = '';
     while (colIndex > 0) {
         temp = (colIndex - 1) % 26;
         letter = String.fromCharCode(temp + 65) + letter;

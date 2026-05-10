@@ -43,6 +43,7 @@ const MaterialOutboundPage = React.lazy(() => import('./pages/materials/Material
 const MaterialTransactionsPage = React.lazy(() => import('./pages/materials/MaterialTransactionsPage'));
 const MaterialInventoryPage = React.lazy(() => import('./pages/materials/MaterialInventoryPage'));
 const MaterialInventoryBySitePage = React.lazy(() => import('./pages/materials/MaterialInventoryBySitePage'));
+const FieldGoodsProgramPage = React.lazy(() => import('./pages/materials/FieldGoodsProgramPage'));
 const CompanyDatabase = React.lazy(() => import('./pages/database/CompanyDatabase'));
 const ManpowerInputPage = React.lazy(() => import('./pages/manpower/ManpowerInputPage'));
 const WorkerDatabase = React.lazy(() => import('./pages/database/WorkerDatabase'));
@@ -156,6 +157,7 @@ const NationwideDashboardHome = React.lazy(() => import('./pages/jeonkuk/Nationw
 const CompanyLandingPage = React.lazy(() => import('./pages/company/CompanyLandingPage'));
 const EstimateManagePage = React.lazy(() => import('./pages/estimate/EstimateManagePage'));
 const DetailedEstimatePage = React.lazy(() => import('./pages/estimate/DetailedEstimatePage'));
+const DrawingAiEstimatePage = React.lazy(() => import('./pages/estimate/DrawingAiEstimatePage'));
 const TransactionManagePage = React.lazy(() => import('./pages/estimate/TransactionManagePage'));
 const EstimateRequestPage = React.lazy(() => import('./pages/estimate/EstimateRequestPage'));
 const AccountManagementPage = React.lazy(() => import('./pages/database/AccountManagementPage'));
@@ -412,6 +414,7 @@ const App: React.FC = () => {
               <Route path="transactions" element={<MaterialTransactionsPage />} />
               <Route path="inventory" element={<MaterialInventoryPage />} />
               <Route path="inventory-by-site" element={<MaterialInventoryBySitePage />} />
+              <Route path="field-goods" element={<FieldGoodsProgramPage />} />
             </Route>
 
             {/* Company DB */}
@@ -486,6 +489,7 @@ const App: React.FC = () => {
             <Route path="/estimate" element={<Navigate to="/estimate/manage" replace />} />
             <Route path="/estimate/manage" element={<EstimateManagePage />} />
             <Route path="/estimate/detail-manage" element={<DetailedEstimatePage />} />
+            <Route path="/estimate/drawing-ai" element={<DrawingAiEstimatePage />} />
             <Route path="/estimate/list" element={<EstimateManagePage />} />
             <Route path="/estimate/new" element={<EstimateManagePage />} />
             <Route path="/transaction/manage" element={<TransactionManagePage />} />

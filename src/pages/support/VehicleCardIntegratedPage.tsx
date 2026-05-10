@@ -18,7 +18,7 @@ import {
 import { Vehicle } from '../../types/vehicle';
 import { Card } from '../../types/card';
 import { Team, teamService } from '../../services/teamService';
-import { Company, companyService } from '../../services/companyService';
+import { companyService } from '../../services/companyService';
 import { Worker, manpowerService } from '../../services/manpowerService';
 import { vehicleService } from '../../services/vehicleService';
 import { cardService } from '../../services/cardService';
@@ -33,6 +33,7 @@ import { CardAssignmentManager } from '../../components/card/CardAssignmentManag
 import { CardBillingManager } from '../../components/card/CardBillingManager';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { CardRegistrySheet } from '../../components/card/CardRegistrySheet';
+import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 
 type AssetTab = 'vehicle' | 'card';
 type VehicleViewTab = 'ledger' | 'sheet' | 'billing';
@@ -47,20 +48,6 @@ const matchesKeyword = (keyword: string, values: Array<string | null | undefined
 };
 
 const formatCurrency = (value: number): string => `${Math.round(value).toLocaleString('ko-KR')}원`;
-
-const buildSelectableTeams = (teamList: Team[], companyList: Company[]): Team[] => {
-    const cheongyeonCompanies = companyList.filter((company) => String(company.name ?? '').includes('청연'));
-    const cheongyeonCompanyIds = new Set(cheongyeonCompanies.map((company) => String(company.id ?? '')).filter(Boolean));
-    const cheongyeonCompanyNames = new Set(cheongyeonCompanies.map((company) => String(company.name ?? '')).filter(Boolean));
-
-    return teamList
-        .filter((team) => {
-            const companyId = String(team.companyId ?? '');
-            const companyName = String(team.companyName ?? '');
-            return cheongyeonCompanyIds.has(companyId) || cheongyeonCompanyNames.has(companyName);
-        })
-        .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko'));
-};
 
 const isWithinDays = (dateText?: string | null, days = 30): boolean => {
     if (!dateText) return false;
@@ -130,7 +117,7 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
             setCards(cardList);
             setTeams(sortedTeams);
             setWorkers(workerList);
-            setSelectableTeams(buildSelectableTeams(sortedTeams, companyList));
+            setSelectableTeams(buildCheongyeonEngTeams(sortedTeams, companyList));
         } catch (error) {
             console.error(error);
             setLoadError(error instanceof Error ? error.message : '차량/카드 데이터를 불러오지 못했습니다.');
@@ -235,6 +222,20 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
             ])
         );
     }, [teamFilteredVehicles, vehicleSearchText]);
+
+    const searchFilteredVehicles = useMemo(() => {
+        const keyword = normalizeSearchText(vehicleSearchText);
+        return vehicles.filter((vehicle) =>
+            matchesKeyword(keyword, [
+                vehicle.licensePlate,
+                vehicle.model,
+                vehicle.currentAssigneeName,
+                vehicle.contract?.financeCompany?.name,
+                vehicle.insurance?.company,
+                vehicle.memo
+            ])
+        );
+    }, [vehicles, vehicleSearchText]);
 
     const visibleCards = useMemo(() => {
         const keyword = normalizeSearchText(cardSearchText);
@@ -517,7 +518,9 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
 
                 {activeAssetTab === 'vehicle' && vehicleViewTab === 'ledger' && (
                     <VehicleMonthlyLedger
-                        vehicles={visibleVehicles}
+                        vehicles={searchFilteredVehicles}
+                        teams={teams}
+                        teamFilterId={selectedTeamId}
                         loadingVehicles={loadingMaster}
                         onOpenExpenseLog={(vehicle) => setExpenseVehicle(vehicle)}
                     />

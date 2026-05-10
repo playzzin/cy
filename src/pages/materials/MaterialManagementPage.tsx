@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowDown,
@@ -50,6 +50,14 @@ const materialTabs = [
 ];
 
 const MaterialManagementPage: React.FC = () => {
+    const location = useLocation();
+    const normalizedPath = location.pathname.replace(/\/+$/, '');
+    const isFieldGoodsPage = normalizedPath === '/materials/field-goods';
+
+    if (isFieldGoodsPage) {
+        return <Outlet />;
+    }
+
     return (
         <div className="min-h-full bg-slate-50/50">
             <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">

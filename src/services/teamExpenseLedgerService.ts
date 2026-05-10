@@ -45,7 +45,7 @@ const stripUndefined = <T extends Record<string, unknown>>(value: T): Record<str
 
 const normalizeCategory = (value: unknown): TeamExpenseClaim['category'] => {
   const raw = String(value ?? '').trim();
-  if (['meal', 'parking', 'fuel', 'toll', 'material', 'tool', 'etc'].includes(raw)) {
+  if (['meal', 'parking', 'fuel', 'toll', 'material', 'tool', 'deposit', 'marking', 'etc'].includes(raw)) {
     return raw as TeamExpenseClaim['category'];
   }
   return 'etc';

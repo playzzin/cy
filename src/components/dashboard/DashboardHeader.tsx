@@ -2,6 +2,7 @@ import React from 'react';
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faExchangeAlt } from '@fortawesome/free-solid-svg-icons';
+import { AppInstallButton } from './AppInstallButton';
 
 interface DashboardHeaderProps {
     user: any;
@@ -24,12 +25,22 @@ const ContentHelper = styled.div`
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    gap: 24px;
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+    }
 `;
 
 const LogoSection = styled.div`
     display: flex;
     align-items: center;
     gap: 24px;
+
+    @media (max-width: 768px) {
+        align-items: flex-start;
+        gap: 16px;
+    }
 `;
 
 const LogoWrapper = styled.div`
@@ -88,6 +99,12 @@ const InfoSection = styled.div`
     flex-direction: column;
     align-items: flex-end;
     gap: 16px;
+
+    @media (max-width: 768px) {
+        width: 100%;
+        text-align: left;
+        align-items: flex-start;
+    }
 `;
 
 const DateText = styled.p`
@@ -115,6 +132,17 @@ const ToggleButton = styled.button`
 
     &:hover {
         background: rgba(255, 255, 255, 0.2);
+    }
+`;
+
+const ActionGroup = styled.div`
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+
+    @media (max-width: 768px) {
+        justify-content: flex-start;
     }
 `;
 
@@ -165,10 +193,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                         </WelcomeText>
                     </div>
 
-                    <ToggleButton onClick={onToggleView}>
-                        <FontAwesomeIcon icon={faExchangeAlt} />
-                        {viewMode === 'executive' ? '현장 소장 모드로 전환' : '관리자 모드로 전환'}
-                    </ToggleButton>
+                    <ActionGroup>
+                        <AppInstallButton />
+                        <ToggleButton onClick={onToggleView}>
+                            <FontAwesomeIcon icon={faExchangeAlt} />
+                            {viewMode === 'executive' ? '현장 소장 모드로 전환' : '관리자 모드로 전환'}
+                        </ToggleButton>
+                    </ActionGroup>
                 </InfoSection>
             </ContentHelper>
         </HeaderContainer>

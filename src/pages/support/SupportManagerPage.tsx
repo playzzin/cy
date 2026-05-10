@@ -6,13 +6,23 @@ import AccommodationManager from './AccommodationManager';
 import ExpenseLedgerPage from './ExpenseLedgerPage';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBuilding, faCar, faCreditCard, faFileInvoiceDollar, faLifeRing } from '@fortawesome/free-solid-svg-icons';
+import { hexToRgba } from '../../utils/color';
 
 const tabs = [
   { id: 'vehicle', label: '차량 지원', icon: faCar },
   { id: 'card', label: '카드 지원', icon: faCreditCard },
   { id: 'accommodation', label: '숙소 관리', icon: faBuilding },
   { id: 'expense', label: '경비 정산', icon: faFileInvoiceDollar },
-];
+].map((tab) => ({
+  ...tab,
+  color: tab.id === 'vehicle'
+    ? '#2563eb'
+    : tab.id === 'card'
+      ? '#7c3aed'
+      : tab.id === 'accommodation'
+        ? '#059669'
+        : '#d97706'
+}));
 
 type SupportTabId = 'vehicle' | 'card' | 'accommodation' | 'expense';
 
@@ -60,21 +70,27 @@ const SupportManagerPage: React.FC = () => {
             </div>
 
             <div className="bg-slate-100 p-1 rounded-xl inline-flex w-fit">
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => handleTabChange(tab.id as SupportTabId)}
-                  className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2.5
-                    ${activeTab === tab.id
-                      ? 'bg-white text-indigo-600 shadow-sm'
-                      : 'text-slate-500 hover:text-slate-700'
-                    }
-                  `}
-                >
-                  <FontAwesomeIcon icon={tab.icon} className={activeTab === tab.id ? 'text-indigo-600' : 'text-slate-400'} />
-                  {tab.label}
-                </button>
-              ))}
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => handleTabChange(tab.id as SupportTabId)}
+                    className={`flex items-center gap-2.5 rounded-lg border px-5 py-2.5 text-sm font-bold transition-all ${
+                      isActive ? 'bg-white shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
+                    }`}
+                    style={isActive ? {
+                      borderColor: hexToRgba(tab.color, 0.35),
+                      color: tab.color,
+                      boxShadow: `0 4px 12px -8px ${tab.color}`
+                    } : undefined}
+                  >
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tab.color }} />
+                    <FontAwesomeIcon icon={tab.icon} className={isActive ? '' : 'text-slate-400'} />
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

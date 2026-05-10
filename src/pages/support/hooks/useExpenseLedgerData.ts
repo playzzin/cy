@@ -79,15 +79,29 @@ export type ExpensePaymentOption = {
   teamIds: string[];
 };
 
-export const CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = [
+const ALL_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = [
   { value: 'meal', label: '식대' },
   { value: 'parking', label: '주차비' },
   { value: 'fuel', label: '유류비' },
   { value: 'toll', label: '통행료' },
   { value: 'material', label: '자재비' },
   { value: 'tool', label: '공구비' },
+  { value: 'deposit', label: '보증금' },
+  { value: 'marking', label: '마이킹' },
   { value: 'etc', label: '기타' }
 ];
+
+const HIDDEN_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['fuel', 'material', 'tool'];
+const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'etc'];
+const OTHER_CLAIM_ONLY_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking'];
+
+export const CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(
+  (option) => !HIDDEN_CATEGORY_VALUES.includes(option.value) && !OTHER_CLAIM_ONLY_CATEGORY_VALUES.includes(option.value)
+);
+
+export const OTHER_CLAIM_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(
+  (option) => OTHER_CLAIM_CATEGORY_VALUES.includes(option.value)
+);
 
 export const buildDefaultYearMonth = () => {
   const now = new Date();
@@ -183,7 +197,7 @@ export const getSummaryTotal = (row: LedgerSummary) =>
   row.receivable;
 
 export const getCategoryLabel = (category: TeamExpenseClaimCategory) =>
-  CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? '기타';
+  ALL_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? '기타';
 
 export const getStatusLabel = (status: TeamExpenseClaim['status']) => {
   if (status === 'charged') return '청구완료';

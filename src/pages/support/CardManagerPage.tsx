@@ -10,6 +10,7 @@ import { CardStatusBoard } from '../../components/card/CardStatusBoard';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { hexToRgba, normalizeHexColor } from '../../utils/color';
 
 interface CardManagerPageProps {
     embedded?: boolean;
@@ -84,6 +85,12 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
         });
     }, [cards, selectedTeamId, teams]);
 
+    const selectedTeam = React.useMemo(
+        () => teams.find(t => String(t.id) === String(selectedTeamId)) ?? null,
+        [selectedTeamId, teams]
+    );
+    const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+
     // 핸들러 함수들
     const handleRefresh = () => {
         setRefreshKey(prev => prev + 1);
@@ -102,6 +109,28 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const openAssignCard = (card: Card) => {
         setAssignmentInitialCardId(String(card.id));
         setIsAssignmentModalOpen(true);
+    };
+
+    const handleDeleteCard = async (card: Card) => {
+        const label = card.name || card.maskedNumber || '선택한 카드';
+        const ok = window.confirm(`${label} 카드를 삭제하시겠습니까?\n사용/청구 이력 보존을 위해 카드 상태는 폐쇄로 변경됩니다.`);
+        if (!ok) return;
+
+        try {
+            await cardService.deleteCard(card.id);
+            if (editingCard?.id === card.id) {
+                setIsCardFormOpen(false);
+                setEditingCard(null);
+            }
+            if (assignmentInitialCardId === String(card.id)) {
+                setAssignmentInitialCardId(null);
+                setIsAssignmentModalOpen(false);
+            }
+            handleRefresh();
+        } catch (error) {
+            console.error('Failed to delete card', error);
+            window.alert('카드 삭제 중 오류가 발생했습니다.');
+        }
     };
 
     const closeCardForm = () => {
@@ -165,16 +194,33 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                     </button>
                 </div>
 
-                <div className="flex items-center gap-3 px-2">
+                <div
+                    className="flex items-center gap-3 rounded-xl px-2 py-1"
+                    style={selectedTeam ? {
+                        backgroundColor: hexToRgba(selectedTeamColor, 0.07),
+                        boxShadow: `inset 4px 0 0 ${selectedTeamColor}`
+                    } : undefined}
+                >
                     <span className="text-sm font-bold text-slate-500">팀별 필터:</span>
+                    {selectedTeam && (
+                        <span
+                            className="h-3 w-3 rounded-full border border-white shadow-sm"
+                            style={{ backgroundColor: selectedTeamColor }}
+                        />
+                    )}
                     <select
                         value={selectedTeamId}
                         onChange={(e) => setSelectedTeamId(e.target.value)}
                         className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-48 p-2 outline-none"
+                        style={selectedTeam ? {
+                            borderColor: hexToRgba(selectedTeamColor, 0.35),
+                            backgroundColor: hexToRgba(selectedTeamColor, 0.05),
+                            color: selectedTeamColor
+                        } : undefined}
                     >
                         <option value="">전체 팀 보기</option>
                         {teams.map(team => (
-                            <option key={team.id} value={team.id}>{team.name}</option>
+                            <option key={team.id} value={team.id} style={{ color: normalizeHexColor(team.color) }}>{team.name}</option>
                         ))}
                     </select>
                 </div>
@@ -200,6 +246,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                             onOpenBilling={() => {
                                 setShowBillingPanel(true);
                             }}
+                            onDelete={handleDeleteCard}
                         />
 
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">

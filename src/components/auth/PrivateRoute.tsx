@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface PrivateRouteProps {
@@ -8,13 +8,19 @@ interface PrivateRouteProps {
 
 const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
     const { currentUser, loading } = useAuth();
+    const location = useLocation();
 
     if (loading) {
-        return <div>Loading...</div>; // Or a proper loading component
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm font-semibold text-slate-500">
+                인증 상태를 확인하는 중입니다...
+            </div>
+        );
     }
 
     if (!currentUser) {
-        return <Navigate to="/login" />;
+        const from = `${location.pathname}${location.search}${location.hash}`;
+        return <Navigate to="/login" replace state={{ from, skipIntro: true }} />;
     }
 
     return <>{children}</>;

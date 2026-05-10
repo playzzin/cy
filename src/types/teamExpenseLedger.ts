@@ -1,4 +1,13 @@
-export type TeamExpenseClaimCategory = 'meal' | 'parking' | 'fuel' | 'toll' | 'material' | 'tool' | 'etc';
+export type TeamExpenseClaimCategory =
+  | 'meal'
+  | 'parking'
+  | 'fuel'
+  | 'toll'
+  | 'material'
+  | 'tool'
+  | 'deposit'
+  | 'marking'
+  | 'etc';
 export type TeamExpenseClaimStatus = 'draft' | 'charged' | 'settled';
 export type TeamExpenseClaimType = 'teamCharge' | 'otherExpense';
 

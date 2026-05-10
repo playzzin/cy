@@ -206,6 +206,20 @@ const POSTING_FIELDS: AdvancePaymentField[] = [
     'gloves'
 ];
 
+const getRelatedId = (row: any, relationKey: string, flatKey: string): string => {
+    const relation = row?.[relationKey];
+    if (relation?.legacyId) return String(relation.legacyId);
+    if (relation?.id) return String(relation.id);
+    if (row?.[flatKey]) return String(row[flatKey]);
+    return '';
+};
+
+const getLineItemBillingDocumentId = (row: any): string => {
+    if (row?.billingDocument?.id) return String(row.billingDocument.id);
+    if (row?.billingDocumentId) return String(row.billingDocumentId);
+    return '';
+};
+
 export const accommodationBillingService = {
     buildBillingDocumentId: (params: {
         teamId: string;
@@ -246,23 +260,21 @@ export const accommodationBillingService = {
             // ?꾪? 議고쉶??寃쎌슦 ?붾쭔 留욎쑝硫??듦낵
             if (isAllTeams) return true;
 
-            const dcTeamId = d?.team?.id ? String(d.team.id) : '';
+            const dcTeamId = d?.team?.id ? String(d.team.id) : (d?.teamId ? String(d.teamId) : '');
             const dcTeamLegacyId = d?.team?.legacyId ? String(d.team.legacyId) : '';
             if (params.teamId && (dcTeamLegacyId === params.teamId || dcTeamId === params.teamId)) return true;
             return teamUuid ? dcTeamId === teamUuid : false;
         });
 
         return filteredDocs.map((d: any) => {
-            const teamId = d?.team?.legacyId ? String(d.team.legacyId) : (d?.team?.id ? String(d.team.id) : String(d?.teamId ?? ''));
-            const issuedToWorkerId = d?.issuedToWorker?.legacyId
-                ? String(d.issuedToWorker.legacyId)
-                : (d?.issuedToWorker?.id ? String(d.issuedToWorker.id) : String(d?.issuedToWorkerId ?? ''));
+            const teamId = getRelatedId(d, 'team', 'teamId');
+            const issuedToWorkerId = getRelatedId(d, 'issuedToWorker', 'issuedToWorkerId');
 
             const rawIssuedToType = d?.issuedToType ? String(d.issuedToType) : 'worker';
-            const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
+            const issuedToType = rawIssuedToType;
 
             const lineItems = items
-                .filter((li: any) => String(li?.billingDocument?.id ?? '') === String(d?.id ?? ''))
+                .filter((li: any) => getLineItemBillingDocumentId(li) === String(d?.id ?? ''))
                 .map((li: any) => {
                     return {
                         id: String(li?.id ?? ''),
@@ -339,7 +351,7 @@ export const accommodationBillingService = {
 
         const listItemsRes = await listAllAccommodationBillingLineItems();
         const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
-        const toDelete = existingItems.filter((li: any) => String(li?.billingDocument?.id ?? '') === String(docData.id));
+        const toDelete = existingItems.filter((li: any) => getLineItemBillingDocumentId(li) === String(docData.id));
         await Promise.all(
             toDelete.map(async (li: any) => {
                 const liId = li?.id ? String(li.id) : '';
@@ -391,17 +403,15 @@ export const accommodationBillingService = {
         const billing: AccommodationBillingDocument = {
             id: String(row?.id ?? ''),
             yearMonth: String(row?.yearMonth ?? ''),
-            teamId: row?.team?.legacyId ? String(row.team.legacyId) : (row?.team?.id ? String(row.team.id) : ''),
+            teamId: getRelatedId(row, 'team', 'teamId'),
             teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
             issuedToType: issuedToType as any,
-            issuedToWorkerId: row?.issuedToWorker?.legacyId
-                ? String(row.issuedToWorker.legacyId)
-                : (row?.issuedToWorker?.id ? String(row.issuedToWorker.id) : ''),
+            issuedToWorkerId: getRelatedId(row, 'issuedToWorker', 'issuedToWorkerId'),
             issuedToWorkerName: row?.issuedToWorkerName ? String(row.issuedToWorkerName) : (row?.issuedToWorker?.name ? String(row.issuedToWorker.name) : ''),
             status: (row?.status ? String(row.status) : 'draft') as any,
             memo: row?.memo ? String(row.memo) : undefined,
             lineItems: items
-                .filter((li: any) => String(li?.billingDocument?.id ?? '') === String(billingId))
+                .filter((li: any) => getLineItemBillingDocumentId(li) === String(billingId))
                 .map((li: any) => {
                     return {
                         id: String(li?.id ?? ''),

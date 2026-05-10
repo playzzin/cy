@@ -15,6 +15,8 @@ interface TeamFormProps {
 }
 
 const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, companies, onSave, onCancel }) => {
+    const EXTERNAL_TEAM_COMPANY_NAME = '외부팀';
+    const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
     const [currentTeam, setCurrentTeam] = useState<Partial<Team>>(initialData || {
         type: '시공팀',
         bankName: '',
@@ -44,6 +46,10 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
     const isConstructorTeam = teamType === '시공팀';
     const isSupportTeam = teamType === '지원팀';
     const canCreatePartnerInline = isSupportTeam || teamType === '용역팀';
+    const isExternalSupportTeamCompany =
+        isSupportTeam &&
+        String(currentTeam.companyId ?? '').trim().length === 0 &&
+        String(currentTeam.companyName ?? '').trim() === EXTERNAL_TEAM_COMPANY_NAME;
 
     const constructorCompanyOptions = useMemo(() => {
         const constructorCompanies = companyOptions.filter((c) => c.type === '시공사');
@@ -65,18 +71,24 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
     useEffect(() => {
         setCurrentTeam((prev) => {
             const currentCompanyId = String(prev.companyId ?? '').trim();
+            const currentCompanyName = String(prev.companyName ?? '').trim();
             const isValid = selectableCompanies.some((c) => String(c.id ?? '') === currentCompanyId);
+            if (isSupportTeam && !isValid) {
+                if (!currentCompanyId && currentCompanyName === EXTERNAL_TEAM_COMPANY_NAME) return prev;
+                return { ...prev, companyId: '', companyName: EXTERNAL_TEAM_COMPANY_NAME };
+            }
             if (isValid) return prev;
 
             const nextCompanyId = String(selectableCompanies[0]?.id ?? '').trim();
             if (currentCompanyId === nextCompanyId) return prev;
-            return { ...prev, companyId: nextCompanyId };
+            const nextCompany = selectableCompanies.find((c) => String(c.id ?? '') === nextCompanyId);
+            return { ...prev, companyId: nextCompanyId, companyName: nextCompany?.name ?? '' };
         });
 
         if (!canCreatePartnerInline && showInlinePartnerForm) {
             setShowInlinePartnerForm(false);
         }
-    }, [canCreatePartnerInline, selectableCompanies, showInlinePartnerForm]);
+    }, [canCreatePartnerInline, isSupportTeam, selectableCompanies, showInlinePartnerForm]);
 
     const handleInlinePartnerSave = async () => {
         const trimmedName = partnerDraft.name.trim();
@@ -155,8 +167,8 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
 
             if (isSupportTeam) {
                 const isAllowedPartner = partnerCompanies.some((c) => String(c.id ?? '') === selectedCompanyId);
-                if (!selectedCompany || !isAllowedPartner) {
-                    alert('지원팀은 협력사를 소속 회사로 선택해주세요.');
+                if (!isExternalSupportTeamCompany && (!selectedCompany || !isAllowedPartner)) {
+                    alert('지원팀은 외부팀 또는 협력사를 소속으로 선택해주세요.');
                     return;
                 }
             }
@@ -173,7 +185,7 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                 ...currentTeam,
                 name: trimmedName,
                 leaderName: leader ? leader.name : '',
-                companyName: company ? company.name : ''
+                companyName: isExternalSupportTeamCompany ? EXTERNAL_TEAM_COMPANY_NAME : (company ? company.name : '')
             };
 
             if (currentTeam.id) {
@@ -260,6 +272,13 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                                                 if (nextType === '지원팀') next.defaultSalaryModel = '지원팀';
                                                 if (nextType === '용역팀') next.defaultSalaryModel = '용역팀';
                                             }
+                                            if (nextType === '지원팀') {
+                                                next.companyId = '';
+                                                next.companyName = EXTERNAL_TEAM_COMPANY_NAME;
+                                            } else if (String(prev.companyName ?? '').trim() === EXTERNAL_TEAM_COMPANY_NAME) {
+                                                next.companyId = '';
+                                                next.companyName = '';
+                                            }
                                             return next;
                                         });
                                     }}
@@ -275,15 +294,21 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                             </div>
                             <div className="col-span-12 md:col-span-4 p-2 border-t md:border-t-0">
                                 <select
-                                    value={currentTeam.companyId || ''}
+                                    value={isExternalSupportTeamCompany ? EXTERNAL_TEAM_COMPANY_VALUE : (currentTeam.companyId || '')}
                                     onChange={(e) => {
                                         const next = e.target.value;
+                                        if (next === EXTERNAL_TEAM_COMPANY_VALUE && isSupportTeam) {
+                                            setShowInlinePartnerForm(false);
+                                            setCurrentTeam({ ...currentTeam, companyId: '', companyName: EXTERNAL_TEAM_COMPANY_NAME });
+                                            return;
+                                        }
                                         if (next === CREATE_PARTNER_VALUE && canCreatePartnerInline) {
                                             setShowInlinePartnerForm(true);
                                             return;
                                         }
                                         setShowInlinePartnerForm(false);
-                                        setCurrentTeam({ ...currentTeam, companyId: next });
+                                        const selectedCompany = companyOptions.find((company) => company.id === next);
+                                        setCurrentTeam({ ...currentTeam, companyId: next, companyName: selectedCompany?.name ?? '' });
                                     }}
                                     className="w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
                                 >
@@ -291,9 +316,10 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                                         {isConstructorTeam
                                             ? '청연 소속 시공사 선택'
                                             : isSupportTeam
-                                                ? '협력사 선택'
+                                                ? '외부팀 또는 협력사 선택'
                                                 : '소속 회사 선택'}
                                     </option>
+                                    {isSupportTeam && <option value={EXTERNAL_TEAM_COMPANY_VALUE}>외부팀</option>}
                                     {selectableCompanies.map(c => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
                                     ))}
@@ -307,7 +333,7 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                                     )}
                                     {isSupportTeam && (
                                         <div className="text-[12px] text-slate-500">
-                                            지원팀은 협력사만 선택됩니다. 신규 협력사는 아래에서 바로 등록할 수 있습니다.
+                                            지원팀은 기본 소속이 외부팀입니다. 필요하면 협력사를 선택하거나 아래에서 바로 등록할 수 있습니다.
                                         </div>
                                     )}
                                     {isSupportTeam && partnerCompanies.length === 0 && !showInlinePartnerForm && (

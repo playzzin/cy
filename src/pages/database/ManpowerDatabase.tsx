@@ -66,9 +66,63 @@ interface IssueStats {
     ghostWorkers: Worker[]; // Active but no work in 30 days
     retiredWorkers: Worker[];
     closedTeams: Team[];
+    reportMissingSites: DailyReportIntegrityIssue[];
+    reportMissingTeams: DailyReportIntegrityIssue[];
+    reportMissingWorkers: DailyReportIntegrityIssue[];
+    reportEmptyWorkers: DailyReportIntegrityIssue[];
+    reportMissingSiteSnapshots: DailyReportIntegrityIssue[];
 }
 
+interface DailyReportIntegrityIssue {
+    id: string;
+    reportId?: string;
+    date?: string;
+    siteId?: string;
+    siteName?: string;
+    teamId?: string;
+    teamName?: string;
+    workerId?: string;
+    workerName?: string;
+    detail: string;
+}
+
+const DAILY_REPORT_ISSUE_KEYS: Array<keyof IssueStats> = [
+    'reportMissingSites',
+    'reportMissingTeams',
+    'reportMissingWorkers',
+    'reportEmptyWorkers',
+    'reportMissingSiteSnapshots'
+];
+
+const toText = (value: unknown): string => String(value ?? '').trim();
+
+const collectEntityIds = <T extends { id?: string | null; legacyId?: string | null }>(items: T[]): Set<string> =>
+    new Set(items.flatMap(item => [toText(item.id), toText(item.legacyId)]).filter(Boolean));
+
+const collectEntityNames = <T extends { name?: string | null }>(items: T[]): Set<string> =>
+    new Set(items.map(item => toText(item.name)).filter(Boolean));
+
+const isDailyReportIssueKey = (issueKey: keyof IssueStats | null): issueKey is typeof DAILY_REPORT_ISSUE_KEYS[number] =>
+    !!issueKey && DAILY_REPORT_ISSUE_KEYS.includes(issueKey);
+
+const isTeamBackedReportWorker = (worker: DailyReport['workers'][number], teamIds: Set<string>): boolean => {
+    const workerId = toText(worker.workerId);
+    const teamId = toText(worker.teamId);
+    if (workerId && teamIds.has(workerId)) return true;
+
+    const marker = [
+        worker.role,
+        worker.payType,
+        worker.salaryModel,
+        worker.workerTeamName
+    ].map(toText).join(' ');
+    const isSupportTeamRow = marker.includes('지원팀') || marker.includes('용역팀') || marker.includes('팀정산') || marker.includes('팀급');
+
+    return isSupportTeamRow && !!teamId && teamIds.has(teamId);
+};
+
 function IntegratedDatabase() {
+    const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports'>('overview');
 
@@ -94,7 +148,12 @@ function IntegratedDatabase() {
         duplicateWorkers: [],
         ghostWorkers: [],
         retiredWorkers: [],
-        closedTeams: []
+        closedTeams: [],
+        reportMissingSites: [],
+        reportMissingTeams: [],
+        reportMissingWorkers: [],
+        reportEmptyWorkers: [],
+        reportMissingSiteSnapshots: []
     });
 
     const [expandedIssue, setExpandedIssue] = useState<keyof IssueStats | null>(null);
@@ -111,18 +170,18 @@ function IntegratedDatabase() {
             const startDateStr = startDate.toISOString().split('T')[0];
             const endDateStr = endDate.toISOString().split('T')[0];
 
-            // Parallel Fetch: Replaced getAllReports with getDBStats
-            const [workersData, teamsData, sitesData, companiesData, reportStats, recentReports] = await Promise.all([
+            const [workersData, teamsData, sitesData, companiesData, reportStats, recentReports, allReports] = await Promise.all([
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
                 siteService.getSites(),
                 companyService.getCompanies(),
                 dailyReportService.getDBStats(), // Optimized: Count only
-                dailyReportService.getReports({ startDate: startDateStr, endDate: endDateStr })
+                dailyReportService.getReports({ startDate: startDateStr, endDate: endDateStr }),
+                dailyReportService.getAllReports()
             ]);
 
             calculateStats(workersData, teamsData, sitesData, companiesData, reportStats);
-            calculateIssues(workersData, teamsData, sitesData, companiesData, recentReports);
+            calculateIssues(workersData, teamsData, sitesData, companiesData, recentReports, allReports);
         } catch (error) {
             console.error('Failed to load stats:', error);
         } finally {
@@ -174,7 +233,14 @@ function IntegratedDatabase() {
         });
     };
 
-    const calculateIssues = (workers: Worker[], teams: Team[], sites: Site[], companies: Company[], recentReports: DailyReport[]) => {
+    const calculateIssues = (
+        workers: Worker[],
+        teams: Team[],
+        sites: Site[],
+        companies: Company[],
+        recentReports: DailyReport[],
+        allReports: DailyReport[]
+    ) => {
         const newIssues: IssueStats = {
             unassignedWorkers: [],
             noIdCardWorkers: [],
@@ -186,11 +252,21 @@ function IntegratedDatabase() {
             duplicateWorkers: [],
             ghostWorkers: [],
             retiredWorkers: workers.filter(w => w.status === '퇴사'),
-            closedTeams: teams.filter(t => t.status === 'closed' || t.status === 'waiting')
+            closedTeams: teams.filter(t => t.status === 'closed' || t.status === 'waiting'),
+            reportMissingSites: [],
+            reportMissingTeams: [],
+            reportMissingWorkers: [],
+            reportEmptyWorkers: [],
+            reportMissingSiteSnapshots: []
         };
 
         // Helper sets
         const activeTeamLeaderIds = new Set(teams.map(t => t.leaderId).filter(Boolean));
+        const workerIds = collectEntityIds(workers);
+        const teamIds = collectEntityIds(teams);
+        const teamNames = collectEntityNames(teams);
+        const siteIds = collectEntityIds(sites);
+        const siteNames = collectEntityNames(sites);
         const recentWorkerIds = new Set<string>();
         recentReports.forEach(r => {
             r.workers.forEach(w => {
@@ -259,7 +335,102 @@ function IntegratedDatabase() {
             if (!isAlreadyAdded && list.length > 1) newIssues.duplicateWorkers.push({ list, label: `연락처 중복: ${key}` });
         });
 
+        allReports.forEach((report, reportIndex) => {
+            const reportKey = report.id || report.legacyId || `${report.date}-${report.siteId}-${report.teamId}-${reportIndex}`;
+            const reportSiteId = toText(report.siteId);
+            const reportSiteName = toText(report.siteName);
+            const reportTeamIds = [toText(report.teamId), toText(report.responsibleTeamId)].filter(Boolean);
+            const reportTeamNames = [toText(report.teamName), toText(report.responsibleTeamName)].filter(Boolean);
+            const reportTeamId = reportTeamIds[0] || '';
+            const reportTeamName = reportTeamNames[0] || '';
+            const baseIssue = {
+                reportId: report.id || report.legacyId,
+                date: report.date,
+                siteId: reportSiteId,
+                siteName: reportSiteName,
+                teamId: reportTeamId,
+                teamName: reportTeamName
+            };
+
+            const hasLinkedSite = (!!reportSiteId && siteIds.has(reportSiteId)) || (!!reportSiteName && siteNames.has(reportSiteName));
+            if (!hasLinkedSite) {
+                newIssues.reportMissingSites.push({
+                    id: `${reportKey}-site`,
+                    ...baseIssue,
+                    detail: reportSiteId || reportSiteName ? '현장 DB와 매칭되지 않음' : '현장 정보 없음'
+                });
+            }
+
+            const hasLinkedTeam = reportTeamIds.some(id => teamIds.has(id)) || reportTeamNames.some(name => teamNames.has(name));
+            if (!hasLinkedTeam) {
+                newIssues.reportMissingTeams.push({
+                    id: `${reportKey}-team`,
+                    ...baseIssue,
+                    detail: reportTeamId || reportTeamName ? '팀 DB와 매칭되지 않음' : '팀 정보 없음'
+                });
+            }
+
+            const reportWorkers = Array.isArray(report.workers) ? report.workers : [];
+            if (reportWorkers.length === 0) {
+                newIssues.reportEmptyWorkers.push({
+                    id: `${reportKey}-empty-workers`,
+                    ...baseIssue,
+                    detail: '작업자 행이 없는 출력일보'
+                });
+
+                const missingHeaderSnapshot = [
+                    !toText(report.siteType) ? '구분' : '',
+                    !toText(report.paymentType) ? '결제방식' : ''
+                ].filter(Boolean);
+
+                if (missingHeaderSnapshot.length > 0) {
+                    newIssues.reportMissingSiteSnapshots.push({
+                        id: `${reportKey}-header-site-snapshot`,
+                        ...baseIssue,
+                        detail: `일보 헤더 ${missingHeaderSnapshot.join(', ')} 미저장`
+                    });
+                }
+            }
+
+            reportWorkers.forEach((worker, workerIndex) => {
+                const workerId = toText(worker.workerId);
+                const isLinkedWorker = !!workerId && workerIds.has(workerId);
+                const isLinkedTeamRow = isTeamBackedReportWorker(worker, teamIds);
+
+                if (!isLinkedWorker && !isLinkedTeamRow) {
+                    newIssues.reportMissingWorkers.push({
+                        id: `${reportKey}-worker-${workerIndex}`,
+                        ...baseIssue,
+                        workerId,
+                        workerName: toText(worker.name),
+                        detail: workerId ? '작업자 DB와 매칭되지 않음' : '작업자 ID 없음'
+                    });
+                }
+
+                const missingSnapshot = [
+                    !toText(worker.siteType || report.siteType) ? '구분' : '',
+                    !toText(worker.paymentType || report.paymentType) ? '결제방식' : ''
+                ].filter(Boolean);
+
+                if (missingSnapshot.length > 0) {
+                    newIssues.reportMissingSiteSnapshots.push({
+                        id: `${reportKey}-site-snapshot-${workerIndex}`,
+                        ...baseIssue,
+                        workerId,
+                        workerName: toText(worker.name),
+                        detail: `${missingSnapshot.join(', ')} 미저장`
+                    });
+                }
+            });
+        });
+
         setIssues(newIssues);
+    };
+
+    const openDailyReportFromIssue = (issue: DailyReportIntegrityIssue) => {
+        const params = new URLSearchParams({ tab: 'list-v2' });
+        if (issue.date) params.set('date', issue.date);
+        navigate(`/reports/daily?${params.toString()}`);
     };
 
     const toggleIssue = (issueKey: keyof IssueStats) => {
@@ -493,6 +664,20 @@ function IntegratedDatabase() {
                                     {renderIssueCard('closedTeams', '폐업/대기 팀', issues.closedTeams.length, faStoreSlash, 'text-slate-500', '팀')}
                                 </div>
 
+                                <div className="mt-6">
+                                    <div className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-700">
+                                        <FontAwesomeIcon icon={faCalendar} className="text-indigo-500" />
+                                        출력일보 무결성
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
+                                        {renderIssueCard('reportMissingSites', '일보 현장 미연결', issues.reportMissingSites.length, faBuilding, 'text-rose-500', '건')}
+                                        {renderIssueCard('reportMissingTeams', '일보 팀 미연결', issues.reportMissingTeams.length, faUsers, 'text-orange-500', '건')}
+                                        {renderIssueCard('reportMissingWorkers', '일보 작업자 미연결', issues.reportMissingWorkers.length, faUserSlash, 'text-amber-600', '줄')}
+                                        {renderIssueCard('reportEmptyWorkers', '빈 일보', issues.reportEmptyWorkers.length, faChartBar, 'text-slate-500', '건')}
+                                        {renderIssueCard('reportMissingSiteSnapshots', '구분/결제 누락', issues.reportMissingSiteSnapshots.length, faExclamationTriangle, 'text-purple-600', '줄')}
+                                    </div>
+                                </div>
+
                                 {/* Accordion Detail View */}
                                 {expandedIssue && (
                                     <div className="mt-4 bg-white rounded-xl border border-slate-200 shadow-sm animate-fade-in-down">
@@ -509,6 +694,11 @@ function IntegratedDatabase() {
                                                 {expandedIssue === 'ghostWorkers' && '최근 30일간 작업 기록이 없는 재직자 (유령 작업자)'}
                                                 {expandedIssue === 'retiredWorkers' && '퇴사자 목록 (히스토리)'}
                                                 {expandedIssue === 'closedTeams' && '폐업 또는 대기 상태인 팀 목록'}
+                                                {expandedIssue === 'reportMissingSites' && '출력일보 현장 연결 누락'}
+                                                {expandedIssue === 'reportMissingTeams' && '출력일보 팀 연결 누락'}
+                                                {expandedIssue === 'reportMissingWorkers' && '출력일보 작업자 연결 누락'}
+                                                {expandedIssue === 'reportEmptyWorkers' && '작업자 행이 없는 출력일보'}
+                                                {expandedIssue === 'reportMissingSiteSnapshots' && '출력일보 구분/결제방식 저장 누락'}
                                             </h4>
                                             <button onClick={() => setExpandedIssue(null)} className="text-slate-400 hover:text-slate-600">
                                                 닫기
@@ -596,6 +786,30 @@ function IntegratedDatabase() {
                                                                     </div>
                                                                 ))}
                                                             </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {/* Daily Report Integrity Lists */}
+                                            {isDailyReportIssueKey(expandedIssue) && (
+                                                <div className="space-y-2">
+                                                    {(issues[expandedIssue] as DailyReportIntegrityIssue[]).map((issue) => (
+                                                        <div key={issue.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
+                                                            <div className="min-w-0">
+                                                                <div className="font-bold text-slate-800 truncate">
+                                                                    {issue.date || '날짜 없음'} · {issue.siteName || issue.siteId || '현장 없음'}
+                                                                </div>
+                                                                <div className="text-xs text-slate-500 truncate">
+                                                                    {[issue.teamName || issue.teamId, issue.workerName || issue.workerId, issue.detail].filter(Boolean).join(' · ')}
+                                                                </div>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => openDailyReportFromIssue(issue)}
+                                                                className="shrink-0 text-xs text-indigo-600 hover:underline"
+                                                            >
+                                                                일보 확인
+                                                            </button>
                                                         </div>
                                                     ))}
                                                 </div>

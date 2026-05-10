@@ -3,6 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { faSave, faTimes, faWonSign, faBolt, faFire, faTint, faWifi, faBroom, faBuilding, faMapMarkerAlt, faFileContract, faPlus } from '@fortawesome/free-solid-svg-icons';
 import { Accommodation, CostProfile, Contract } from '../../types/accommodation';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 type CostMode = 'variable' | 'fixed' | 'included';
 
@@ -244,6 +245,17 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
 
     // StatusBadge component removed from here and will be placed outside
 
+    const updateContractDate = (field: 'startDate' | 'endDate', value: string) => {
+        setContract((prev) => ({ ...prev, [field]: formatTypedDateInput(value) }));
+    };
+
+    const normalizeContractDate = (field: 'startDate' | 'endDate') => {
+        setContract((prev) => {
+            const normalized = normalizeTypedDateInput(String(prev[field] ?? ''));
+            return normalized ? { ...prev, [field]: normalized } : prev;
+        });
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const normalizedContract = normalizeContractForForm(contract);
@@ -418,18 +430,26 @@ const AccommodationForm: React.FC<AccommodationFormProps> = ({ initialData, onSu
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">계약 시작일</label>
                                             <input
-                                                type="date"
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={10}
+                                                placeholder="YYYY-MM-DD"
                                                 value={contract.startDate}
-                                                onChange={(e) => setContract({ ...contract, startDate: e.target.value })}
+                                                onChange={(e) => updateContractDate('startDate', e.target.value)}
+                                                onBlur={() => normalizeContractDate('startDate')}
                                                 className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-600 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none"
                                             />
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1.5 ml-1">계약 종료일</label>
                                             <input
-                                                type="date"
+                                                type="text"
+                                                inputMode="numeric"
+                                                maxLength={10}
+                                                placeholder="YYYY-MM-DD"
                                                 value={contract.endDate}
-                                                onChange={(e) => setContract({ ...contract, endDate: e.target.value })}
+                                                onChange={(e) => updateContractDate('endDate', e.target.value)}
+                                                onBlur={() => normalizeContractDate('endDate')}
                                                 className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-600 focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none"
                                             />
                                         </div>

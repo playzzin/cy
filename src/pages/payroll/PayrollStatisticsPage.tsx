@@ -482,6 +482,10 @@ const PayrollStatisticsPage: React.FC = () => {
           const teamName = resolveTeamName(teamId, report.teamName || '');
           const manDay = toNumber(rw.manDay);
           const amount = manDay * toNumber(rw.unitPrice ?? worker?.unitPrice ?? 0);
+          const site = siteMap.get(report.siteId);
+          const paymentMethod = String(
+            (rw as any).paymentType ?? (report as any).paymentType ?? site?.paymentMethod ?? ''
+          ).trim();
 
           const key = `${month}__${rw.workerId}__${teamId || '-'}`;
           const prev = agg.get(key) ?? {
@@ -497,8 +501,8 @@ const PayrollStatisticsPage: React.FC = () => {
               date: report.date,
               siteId: report.siteId,
               siteName: report.siteName || '',
-              clientCompanyId: (siteMap.get(report.siteId)?.clientCompanyId || '').trim(),
-              isLabor: (siteMap.get(report.siteId)?.paymentMethod || '').trim() === '노무',
+              clientCompanyId: (site?.clientCompanyId || '').trim(),
+              isLabor: paymentMethod === '노무',
               manDay,
               unitPrice: toNumber(rw.unitPrice),
               amount

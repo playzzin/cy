@@ -8,8 +8,12 @@ export const MaterialSchema = z.object({
     category: z.string().optional(),
     spec: z.string().optional(),
     unit: z.string().optional(),
+    safetyStock: z.number().optional(),
+    description: z.string().optional(),
     unitPrice: z.number().default(0),
     isActive: z.boolean().default(true),
+    isCatalogDefault: z.boolean().optional(),
+    hiddenCatalogDefault: z.boolean().optional(),
     createdAt: z.any().optional(),
     updatedAt: z.any().optional(),
 });

@@ -10,6 +10,7 @@ import { Accommodation } from '../../types/accommodation';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { toast } from '../../utils/swal';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 type AssignMode = 'team' | 'worker';
 
@@ -60,6 +61,14 @@ const AccommodationAssignmentManager: React.FC = () => {
 
     const [workerSearch, setWorkerSearch] = useState('');
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
+
+    const handleStartDateChange = (value: string) => {
+        setStartDate(formatTypedDateInput(value));
+    };
+
+    const normalizeStartDate = () => {
+        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+    };
 
     useEffect(() => {
         const load = async () => {
@@ -309,13 +318,14 @@ const AccommodationAssignmentManager: React.FC = () => {
 
         const endDate = window.prompt('퇴실일(YYYY-MM-DD)을 입력하세요.', today) ?? '';
         if (!endDate.trim()) return;
+        const normalizedEndDate = normalizeTypedDateInput(endDate) ?? endDate.trim();
 
-        const ok = window.confirm(`퇴실 처리하시겠습니까?\n\n작업자: ${assignment.workerName ?? assignment.workerId}\n숙소: ${assignment.accommodationName ?? assignment.accommodationId}\n퇴실일: ${endDate}`);
+        const ok = window.confirm(`퇴실 처리하시겠습니까?\n\n작업자: ${assignment.workerName ?? assignment.workerId}\n숙소: ${assignment.accommodationName ?? assignment.accommodationId}\n퇴실일: ${normalizedEndDate}`);
         if (!ok) return;
 
         setSaving(true);
         try {
-            await accommodationAssignmentService.endAssignment(assignment.id, endDate);
+            await accommodationAssignmentService.endAssignment(assignment.id, normalizedEndDate);
             await reloadAssignments();
             toast.success('퇴실 처리되었습니다.');
         } catch (e) {
@@ -454,9 +464,13 @@ const AccommodationAssignmentManager: React.FC = () => {
                                 <label className="block text-xs font-bold text-slate-500 mb-2">입실일</label>
                                 <div className="relative">
                                     <input
-                                        type="date"
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        placeholder="YYYY-MM-DD"
                                         value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
+                                        onChange={(e) => handleStartDateChange(e.target.value)}
+                                        onBlur={normalizeStartDate}
                                         className="w-full p-3 pl-4 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all font-medium text-slate-700"
                                     />
                                     {/* <div className="absolute right-4 top-3.5 text-slate-400 pointer-events-none">

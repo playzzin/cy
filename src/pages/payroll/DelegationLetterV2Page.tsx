@@ -705,9 +705,13 @@ const DelegationLetterV2Page: React.FC = () => {
                         width: 100%;
                         height: 100%;
                     }
-                    .delegation-footer-date {
-                        margin-top: auto !important;
-                        padding-top: 6mm !important;
+                    .delegation-document-date {
+                        flex: 0 0 auto;
+                        margin: 0 0 3mm;
+                        text-align: center;
+                        font-size: 12px;
+                        font-weight: 700;
+                        letter-spacing: 0.2em;
                     }
                     .delegation-letter-page img {
                         max-width: 100% !important;
@@ -1031,7 +1035,7 @@ const DelegationLetterV2Page: React.FC = () => {
                             <div className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
                                 <label className="block text-sm font-medium text-slate-300 mb-2">
                                     <FontAwesomeIcon icon={faCalendarAlt} className="mr-2 text-purple-400" />
-                                    작성날자
+                                    작성날짜
                                 </label>
                                 <input
                                     type="date"
@@ -1383,6 +1387,15 @@ const DelegationLetterV2Page: React.FC = () => {
                             display: inline-block;
                         }
 
+                        .delegation-document-date {
+                            flex: 0 0 auto;
+                            margin: 0 0 3mm;
+                            text-align: center;
+                            font-size: 12px;
+                            font-weight: 700;
+                            letter-spacing: 0.2em;
+                        }
+
                         .delegation-letter-body {
                             flex: 1 1 auto;
                             min-height: 0;
@@ -1416,11 +1429,6 @@ const DelegationLetterV2Page: React.FC = () => {
                             height: 100%;
                         }
 
-                        .delegation-footer-date {
-                            margin-top: auto;
-                            padding-top: 6mm;
-                        }
-
                         @media print {
                             .delegation-letter-page {
                                 margin: 0 auto;
@@ -1447,7 +1455,7 @@ const DelegationLetterV2Page: React.FC = () => {
                                                         <tr>
                                                             <th>현장명</th>
                                                             <td className="font-semibold tracking-wide">{selectedSiteName}</td>
-                                                            <th>귀속월</th>
+                                                            <th>귀속년월</th>
                                                             <td className="text-center font-semibold tracking-wider">20{yearLabel}년 {monthLabel}월</td>
                                                         </tr>
                                                     </tbody>
@@ -1465,20 +1473,20 @@ const DelegationLetterV2Page: React.FC = () => {
                                                                     <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] tracking-normal">(인)</span>
                                                                 </td>
                                                                 <th className="border-r border-black bg-[#f3f2ef] p-1.5 w-24 text-center font-bold">주민등록번호</th>
-                                                                <td className="p-1.5 text-center tracking-wider">{mandataryInfo?.idNumber}</td>
+                                                                <td className="p-1.5 text-center font-bold tracking-wider text-[13px]">{mandataryInfo?.idNumber}</td>
                                                             </tr>
                                                             <tr className="border-b border-black">
                                                                 <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center">전화번호</th>
-                                                                <td className="border-r border-black p-1.5 text-center">{mandataryInfo?.contact || ''}</td>
+                                                                <td className="border-r border-black p-1.5 text-center font-bold text-[13px]">{mandataryInfo?.contact || ''}</td>
                                                                 <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center">은행/계좌번호</th>
-                                                                <td className="p-1.5 text-center font-bold text-[10px]">
+                                                                <td className="p-1.5 text-center font-bold text-[13px] leading-tight break-all">
                                                                     {mandataryInfo ? `${mandataryInfo.bankName} ${mandataryInfo.accountNumber}` : ''}
                                                                     {mandataryInfo?.accountHolder && ` (예금주: ${mandataryInfo.accountHolder})`}
                                                                 </td>
                                                             </tr>
                                                             <tr>
                                                                 <th className="border-r border-black bg-[#f3f2ef] p-1.5 text-center leading-tight">주 소</th>
-                                                                <td colSpan={3} className="p-1.5 text-[10px] leading-relaxed break-all">
+                                                                <td colSpan={3} className="p-1.5 text-[13px] leading-relaxed break-all font-bold">
                                                                     {mandataryInfo?.address}
                                                                 </td>
                                                             </tr>
@@ -1490,13 +1498,15 @@ const DelegationLetterV2Page: React.FC = () => {
                                                 <div className="delegation-body-paragraph !mb-[3mm] !text-[11px] whitespace-pre-line">
                                                     {delegationText.trim() || DEFAULT_DELEGATION_BODY_TEXT}
                                                 </div>
+                                                <div className="delegation-document-date">
+                                                    {formatDate(documentDate)}
+                                                </div>
                                             </>
                                         )}
 
                                         <div className="text-[11px] font-bold text-gray-700 mb-1.5 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <span className="delegation-section-title !mb-0">위임인</span>
-                                                <span className="text-gray-500 font-normal">(노무비를 지급받을 자)</span>
+                                                <span className="delegation-section-title !mb-0">위임인 (노무비를 지급받을 자)</span>
                                             </div>
                                             {pagedDelegators.length > 1 && (
                                                 <span className="text-[10px] text-gray-400 font-normal">Page {pageIndex + 1} / {pagedDelegators.length}</span>
@@ -1520,11 +1530,11 @@ const DelegationLetterV2Page: React.FC = () => {
                                                     pageGlobalWorkerIdx += 1;
                                                     return (
                                                         <tr key={`print-${worker.workerId}`} className="border-b border-black">
-                                                            <td className="border-r border-black p-1 text-center text-gray-400 font-medium">{pageGlobalWorkerIdx}</td>
+                                                            <td className="border-r border-black p-1 text-center font-bold text-black">{pageGlobalWorkerIdx}</td>
                                                             <td className="border-r border-black p-1 font-bold tracking-[0.08em] text-center text-[10px]">{worker.workerName}</td>
                                                             <td className="border-r border-black p-1 text-center font-medium tracking-wider text-[10.5px]">{worker.idNumber}</td>
                                                             {showManDays && <td className="border-r border-black p-1 text-center text-gray-600 font-medium">{worker.manDays.toFixed(1)}</td>}
-                                                            <td className="border-r border-black p-1 text-[9px] leading-snug break-all text-gray-700">
+                                                            <td className="border-r border-black p-1 text-[9px] leading-snug break-all font-bold text-black">
                                                                 <div className="line-clamp-2">{worker.address || ''}</div>
                                                             </td>
                                                             <td className="border-r border-black p-1 px-1 text-right font-bold text-[10px] tracking-wide">
@@ -1559,12 +1569,6 @@ const DelegationLetterV2Page: React.FC = () => {
                                             )}
                                         </table>
                                     </div>
-
-                                    {isLastPage && (
-                                        <div className="delegation-footer-date text-center">
-                                            <span className="font-bold text-[13px] tracking-[0.2em]">{formatDate(documentDate)}</span>
-                                        </div>
-                                    )}
                                 </div>
                                 {!isLastPage && <div className="h-[20px] w-full print-gap no-print" />}
                             </React.Fragment>

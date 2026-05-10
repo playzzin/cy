@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { storageService } from '../../services/storageService';
 
@@ -10,15 +10,40 @@ const INTRO_FADE_DURATION_MS = 1400;
 const INTRO_MAX_WAIT_MS = 9000;
 
 type LoginIntroPhase = 'splash' | 'intro' | 'login';
+type LoginLocationState = {
+  from?: string | {
+    pathname?: string;
+    search?: string;
+    hash?: string;
+  };
+  skipIntro?: boolean;
+};
+
+const normalizeReturnPath = (path: string) => (
+  path.startsWith('/') && !path.startsWith('//') ? path : '/dashboard'
+);
 
 const Login: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const locationState = location.state as LoginLocationState | null;
+  const returnPath = useMemo(() => {
+    const from = locationState?.from;
+    if (typeof from === 'string') return normalizeReturnPath(from);
+    if (from && typeof from === 'object') {
+      return normalizeReturnPath(`${from.pathname || '/dashboard'}${from.search || ''}${from.hash || ''}`);
+    }
+    return '/dashboard';
+  }, [locationState]);
+  const shouldSkipIntro = Boolean(locationState?.skipIntro);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [introLoading, setIntroLoading] = useState(false);
   const [introVideoUrl, setIntroVideoUrl] = useState('');
-  const [introPhase, setIntroPhase] = useState<LoginIntroPhase>('splash');
+  const [introPhase, setIntroPhase] = useState<LoginIntroPhase>(() => shouldSkipIntro ? 'login' : 'splash');
   const [isIntroFading, setIsIntroFading] = useState(false);
   const [showAudioRetry, setShowAudioRetry] = useState(false);
   const [isIntroEntering, setIsIntroEntering] = useState(false);
@@ -27,13 +52,18 @@ const Login: React.FC = () => {
   const introMaxWaitTimerRef = useRef<number | null>(null);
   const introVideoRef = useRef<HTMLVideoElement | null>(null);
   const { currentUser, loading: authLoading, login, loginWithGoogle } = useAuth();
-  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (shouldSkipIntro) {
+      setIntroPhase('login');
+    }
+  }, [shouldSkipIntro]);
 
   useEffect(() => {
     if (!authLoading && currentUser) {
-      navigate('/dashboard', { replace: true });
+      navigate(returnPath, { replace: true });
     }
-  }, [authLoading, currentUser, navigate]);
+  }, [authLoading, currentUser, navigate, returnPath]);
 
   useEffect(() => {
     return () => {
@@ -124,7 +154,7 @@ const Login: React.FC = () => {
       setError('');
       setLoading(true);
       await login(email, password);
-      navigate('/dashboard', { replace: true });
+      navigate(returnPath, { replace: true });
     } catch (err) {
       setError('로그인에 실패했습니다. 이메일과 비밀번호를 확인해주세요.');
       console.error(err);
@@ -138,7 +168,7 @@ const Login: React.FC = () => {
       setError('');
       setLoading(true);
       await loginWithGoogle();
-      navigate('/dashboard', { replace: true });
+      navigate(returnPath, { replace: true });
     } catch (err) {
       setError('Google 로그인에 실패했습니다.');
       console.error(err);
@@ -152,7 +182,7 @@ const Login: React.FC = () => {
       {introPhase !== 'login' && (
         <div
           className={[
-            'absolute inset-0 z-40 flex items-center justify-center px-6 transition-opacity duration-700 ease-out',
+            'absolute inset-0 z-40 flex items-center justify-center px-4 transition-opacity duration-700 ease-out sm:px-6',
             introPhase === 'splash' ? 'opacity-100' : 'pointer-events-none opacity-0',
           ].join(' ')}
         >
@@ -163,20 +193,21 @@ const Login: React.FC = () => {
             type="button"
             onClick={handleIntroStart}
             disabled={introLoading}
-            className="relative z-10 flex flex-col items-center gap-6 rounded-[36px] border border-slate-700/70 bg-slate-950/45 px-10 py-12 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-transform duration-500 hover:scale-[1.02] disabled:cursor-wait disabled:opacity-80"
+            className="relative z-10 flex w-full max-w-xl flex-col items-center gap-5 rounded-[28px] border border-slate-700/70 bg-slate-950/45 px-6 py-9 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-transform duration-500 hover:scale-[1.02] disabled:cursor-wait disabled:opacity-80 sm:gap-6 sm:rounded-[36px] sm:px-10 sm:py-12"
+            style={{ maxWidth: 'min(36rem, calc(100vw - 2rem))' }}
           >
-            <div className="relative flex h-44 w-44 items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_30%_25%,_rgba(255,255,255,0.92),_rgba(203,213,225,0.8)_18%,_rgba(71,85,105,0.92)_42%,_rgba(15,23,42,0.98)_76%)] shadow-[inset_0_2px_12px_rgba(255,255,255,0.3),0_20px_45px_rgba(56,189,248,0.18)]">
+            <div className="relative flex h-32 w-32 items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_30%_25%,_rgba(255,255,255,0.92),_rgba(203,213,225,0.8)_18%,_rgba(71,85,105,0.92)_42%,_rgba(15,23,42,0.98)_76%)] shadow-[inset_0_2px_12px_rgba(255,255,255,0.3),0_20px_45px_rgba(56,189,248,0.18)] sm:h-44 sm:w-44">
               <div className="absolute inset-2 rounded-full border border-white/10" />
               <div className="absolute inset-5 rounded-full bg-[conic-gradient(from_210deg,_rgba(255,255,255,0.8),_rgba(100,116,139,0.08),_rgba(255,255,255,0.75),_rgba(15,23,42,0.5),_rgba(255,255,255,0.8))] opacity-90" />
-              <div className="relative bg-[linear-gradient(180deg,_#ffffff_0%,_#d5dee9_20%,_#6b7280_48%,_#f8fafc_72%,_#4b5563_100%)] bg-clip-text text-[4.7rem] font-black tracking-[-0.14em] text-transparent [text-shadow:0_2px_18px_rgba(255,255,255,0.25)]">
+              <div className="relative bg-[linear-gradient(180deg,_#ffffff_0%,_#d5dee9_20%,_#6b7280_48%,_#f8fafc_72%,_#4b5563_100%)] bg-clip-text text-[3.4rem] font-black tracking-[-0.14em] text-transparent [text-shadow:0_2px_18px_rgba(255,255,255,0.25)] sm:text-[4.7rem]">
                 CY
               </div>
             </div>
 
-            <div className="text-center">
-              <p className="text-xs font-semibold tracking-[0.38em] text-slate-300/70">CHEONGYEON ENG INTRO</p>
-              <h1 className="mt-3 text-3xl font-black tracking-[0.18em] text-slate-100">CLICK THE CY LOGO</h1>
-              <p className="mt-4 text-sm leading-relaxed text-slate-400">
+            <div className="max-w-md text-center">
+              <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-300/70 sm:text-xs sm:tracking-[0.38em]">CHEONGYEON ENG INTRO</p>
+              <h1 className="mt-3 break-words text-2xl font-black tracking-[0.12em] text-slate-100 sm:text-3xl sm:tracking-[0.18em]">CLICK THE CY LOGO</h1>
+              <p className="mt-4 text-xs leading-relaxed text-slate-400 sm:text-sm">
                 메탈릭 CY 로고를 클릭하면 스토리지의 INTRO_1.MP4가 재생된 뒤 로그인 화면이 나타납니다.
               </p>
             </div>
@@ -247,9 +278,12 @@ const Login: React.FC = () => {
           introPhase === 'login' ? 'translate-y-0 scale-100 opacity-100' : 'pointer-events-none translate-y-6 scale-[0.985] opacity-0',
         ].join(' ')}
       >
-        <div className="w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-800/90 bg-slate-900/90 shadow-2xl shadow-black/30 backdrop-blur">
-          <div className="grid grid-cols-1 lg:grid-cols-2">
-            <section className="hidden flex-col justify-between border-r border-slate-800 p-10 lg:flex">
+        <div
+          className="w-full min-w-0 overflow-hidden rounded-3xl border border-slate-800/90 bg-slate-900/90 shadow-2xl shadow-black/30 backdrop-blur"
+          style={{ maxWidth: 'min(64rem, calc(100vw - 2rem))' }}
+        >
+          <div className="grid min-w-0 grid-cols-1 lg:grid-cols-2">
+            <section className="hidden min-w-0 flex-col justify-between border-r border-slate-800 p-10 lg:flex">
               <div>
                 <p className="text-xs font-semibold tracking-[0.22em] text-cyan-300/80">CHEONGYEON ENG</p>
                 <h1 className="mt-4 text-4xl font-black leading-tight text-slate-100">
@@ -273,7 +307,7 @@ const Login: React.FC = () => {
               </div>
             </section>
 
-            <section className="p-6 sm:p-10">
+            <section className="min-w-0 p-6 sm:p-10">
               <div className="mb-7 lg:hidden">
                 <p className="text-xs font-semibold tracking-[0.2em] text-cyan-300/80">CHEONGYEON ENG ERP</p>
                 <h1 className="mt-2 text-2xl font-black text-slate-100">로그인</h1>

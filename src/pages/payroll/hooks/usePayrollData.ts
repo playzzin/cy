@@ -639,7 +639,10 @@ export const usePayrollData = (
           }
           const safeTeamKey = resolvedTeamId || (normalizeTeamName(resolvedTeamName) ? `unresolved:${normalizeTeamName(resolvedTeamName)}` : 'no-team');
           const unitPrice = rw.unitPrice ?? w.unitPrice ?? 0;
-          const isLabor = reportSite?.paymentMethod === '노무';
+          const reportPaymentMethod = String(
+            (rw as any).paymentType ?? (report as any).paymentType ?? reportSite?.paymentMethod ?? ''
+          ).trim();
+          const isLabor = reportPaymentMethod === '노무';
 
           const baseParams = {
             workerId: canonicalWorkerId || String(rw.workerId ?? '').trim(),
@@ -655,7 +658,7 @@ export const usePayrollData = (
             siteName: report.siteName || reportSite?.name || '-',
             siteId: report.siteId,
             clientCompanyId: reportSite?.clientCompanyId || '',
-            paymentMethod: reportSite?.paymentMethod || '-'
+            paymentMethod: reportPaymentMethod || '-'
           };
 
           const resolvedModel = isDaily ? '일급제' : isService ? '용역팀' : '월급제';

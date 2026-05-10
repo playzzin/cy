@@ -55,8 +55,19 @@ interface LaborStatementRow {
     amount: number;
 }
 
+interface SiteListStats {
+    totalManDay: number;
+    totalAmount: number;
+    rowCount: number;
+}
+
 const EMPTY_TEXT = '-';
 const DEFAULT_COLOR = '#2563eb';
+const EMPTY_SITE_LIST_STATS: SiteListStats = {
+    totalManDay: 0,
+    totalAmount: 0,
+    rowCount: 0,
+};
 
 const getCurrentMonth = () => {
     const now = new Date();
@@ -466,15 +477,28 @@ const SiteResponsibleDetailPage: React.FC = () => {
         [selectedResponsibleRows]
     );
 
-    const selectedResponsibleSites = useMemo(() => {
+    const selectedResponsibleAllSites = useMemo(() => {
         if (!selectedResponsibleKey) return [];
-        const query = normalizeText(searchQuery);
 
         return sites
             .filter(site => (
                 siteResponsibleKey(site) === selectedResponsibleKey
                 || selectedResponsibleSiteKeys.has(getSitePrimaryKey(site))
             ))
+            .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
+    }, [selectedResponsibleKey, selectedResponsibleSiteKeys, sites]);
+
+    const selectedResponsibleStatusCounts = useMemo(() => ({
+        all: selectedResponsibleAllSites.length,
+        active: selectedResponsibleAllSites.filter(site => siteStatusMatches(site, 'active')).length,
+        planned: selectedResponsibleAllSites.filter(site => siteStatusMatches(site, 'planned')).length,
+        completed: selectedResponsibleAllSites.filter(site => siteStatusMatches(site, 'completed')).length,
+    }), [selectedResponsibleAllSites]);
+
+    const selectedResponsibleSites = useMemo(() => {
+        const query = normalizeText(searchQuery);
+
+        return selectedResponsibleAllSites
             .filter(site => siteStatusMatches(site, statusFilter))
             .filter(site => {
                 if (!query) return true;
@@ -487,9 +511,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
                     site.clientCompanyName,
                     site.constructorCompanyName,
                 ].join(' ')).includes(query);
-            })
-            .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
-    }, [searchQuery, selectedResponsibleKey, selectedResponsibleSiteKeys, sites, statusFilter]);
+            });
+    }, [searchQuery, selectedResponsibleAllSites, statusFilter]);
 
     useEffect(() => {
         if (selectedResponsibleSites.length === 0) {
@@ -516,6 +539,36 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')))
             : []
     ), [outputRows, selectedSite]);
+
+    const selectedSiteStatsByKey = useMemo(() => {
+        const map = new Map<string, SiteListStats>();
+        const ensureStats = (key: string) => {
+            const current = map.get(key);
+            if (current) return current;
+            const next: SiteListStats = { totalManDay: 0, totalAmount: 0, rowCount: 0 };
+            map.set(key, next);
+            return next;
+        };
+
+        selectedResponsibleSites.forEach(site => {
+            const key = getSitePrimaryKey(site);
+            if (key) ensureStats(key);
+        });
+
+        selectedResponsibleRows.forEach(row => {
+            const rowSiteKey = makeSiteKey(row.siteId, row.siteName);
+            const site = siteByKey.get(rowSiteKey) ?? siteByKey.get(makeSiteKey(null, row.siteName));
+            const key = site ? getSitePrimaryKey(site) : rowSiteKey;
+            if (!key) return;
+
+            const stats = ensureStats(key);
+            stats.rowCount += 1;
+            stats.totalManDay += asNumber(row.manDay);
+            stats.totalAmount += getReportRowAmount(row);
+        });
+
+        return map;
+    }, [selectedResponsibleRows, selectedResponsibleSites, siteByKey]);
 
     const selectedResponsibleStats = useMemo(() => {
         const totalManDay = selectedResponsibleRows.reduce((sum, row) => sum + asNumber(row.manDay), 0);
@@ -738,13 +791,21 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 <label className="tw-control">
                     <span>현장 상태</span>
                     <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as SiteStatusFilter)}>
-                        <option value="active">진행중</option>
-                        <option value="planned">예정</option>
-                        <option value="completed">완료</option>
-                        <option value="all">전체</option>
+                        <option value="active">진행중 ({selectedResponsibleStatusCounts.active})</option>
+                        <option value="planned">예정 ({selectedResponsibleStatusCounts.planned})</option>
+                        <option value="completed">완료 ({selectedResponsibleStatusCounts.completed})</option>
+                        <option value="all">전체 ({selectedResponsibleStatusCounts.all})</option>
                     </select>
                 </label>
             </section>
+
+            <div className="sr-filter-summary" aria-live="polite">
+                <span>전체 {selectedResponsibleStatusCounts.all.toLocaleString('ko-KR')}개</span>
+                <span>진행 {selectedResponsibleStatusCounts.active.toLocaleString('ko-KR')}개</span>
+                <span>예정 {selectedResponsibleStatusCounts.planned.toLocaleString('ko-KR')}개</span>
+                <span>완료 {selectedResponsibleStatusCounts.completed.toLocaleString('ko-KR')}개</span>
+                <strong>현재 표시 {selectedResponsibleSites.length.toLocaleString('ko-KR')}개</strong>
+            </div>
 
             <section className="tw-kpi-grid" aria-label="현장담당 요약">
                 <div className="tw-kpi">
@@ -818,9 +879,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                             selectedResponsibleSites.map(site => {
                                 const siteKey = getSitePrimaryKey(site);
                                 const selected = siteKey === selectedSiteKey;
-                                const rows = outputRows.filter(row => rowMatchesSite(row, site));
-                                const totalManDay = rows.reduce((sum, row) => sum + asNumber(row.manDay), 0);
-                                const totalAmount = rows.reduce((sum, row) => sum + getReportRowAmount(row), 0);
+                                const stats = selectedSiteStatsByKey.get(siteKey) ?? EMPTY_SITE_LIST_STATS;
                                 const color = getTeamColor(teamByKey, site.responsibleTeamId, site.responsibleTeamName, site.color);
 
                                 return (
@@ -836,8 +895,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                             <small>{site.responsibleTeamName || '담당 미지정'} · {asText(site.siteType)}</small>
                                         </span>
                                         <span className="tw-worker-item__badges">
-                                            <small>{formatManDay(totalManDay)}</small>
-                                            <small>{formatCurrency(totalAmount)}</small>
+                                            <small>{formatManDay(stats.totalManDay)}</small>
+                                            <small>{formatCurrency(stats.totalAmount)}</small>
                                         </span>
                                     </button>
                                 );
@@ -957,6 +1016,49 @@ const SiteResponsibleDetailPage: React.FC = () => {
 
                             {detailView === 'payslip' && (
                                 <section className="tw-document-panel sr-document-panel sr-labor-panel">
+                                    <div className="sr-mobile-document-list" aria-label="노무내역서 모바일 요약">
+                                        <div className="sr-mobile-document-list__summary">
+                                            <FileText size={18} />
+                                            <div>
+                                                <strong>{selectedSite.name || EMPTY_TEXT}</strong>
+                                                <span>{startDate} ~ {endDate}</span>
+                                            </div>
+                                        </div>
+
+                                        {loadingOutput ? (
+                                            <div className="tw-empty-state">출력일보 데이터를 불러오는 중입니다.</div>
+                                        ) : laborStatementRows.length === 0 ? (
+                                            <div className="tw-empty-state">선택한 기간의 노무내역서 데이터가 없습니다.</div>
+                                        ) : (
+                                            laborStatementRows.map(row => (
+                                                <article key={row.key} className="sr-mobile-document-card">
+                                                    <div className="sr-mobile-document-card__header">
+                                                        <strong>{row.workerName}</strong>
+                                                        <span>{formatManDay(row.totalManDay)}공수</span>
+                                                    </div>
+                                                    <dl>
+                                                        <div>
+                                                            <dt>소속팀</dt>
+                                                            <dd>{row.teamName || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>단가</dt>
+                                                            <dd>{formatNumber(row.unitPrice)}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>금액</dt>
+                                                            <dd>{formatNumber(row.amount)}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>계좌</dt>
+                                                            <dd>{[row.bankName, row.bankOwner, row.bankAccount].filter(Boolean).join(' / ') || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                    </dl>
+                                                </article>
+                                            ))
+                                        )}
+                                    </div>
+
                                     <div className="sr-labor-statement-shell">
                                         <div className="sr-labor-statement-surface">
                                             <div className="sr-labor-header">
@@ -1115,6 +1217,41 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                     <div className="tw-output-section__header">
                                         <h3><ClipboardList size={18} />출력일보 목록</h3>
                                         <span>{startDate} ~ {endDate}</span>
+                                    </div>
+
+                                    <div className="sr-mobile-daily-list" aria-label="출력일보 모바일 목록">
+                                        {loadingOutput ? (
+                                            <div className="tw-empty-state">출력일보를 불러오는 중입니다.</div>
+                                        ) : selectedSiteRows.length === 0 ? (
+                                            <div className="tw-empty-state">선택한 기간의 출력일보가 없습니다.</div>
+                                        ) : (
+                                            selectedSiteRows.map(row => (
+                                                <article key={`${row.reportId}-${row.workerId}-${row.date}-${row.siteId}-mobile`} className="sr-mobile-daily-card">
+                                                    <div className="sr-mobile-daily-card__header">
+                                                        <strong>{row.workerName || EMPTY_TEXT}</strong>
+                                                        <span>{row.date}</span>
+                                                    </div>
+                                                    <dl>
+                                                        <div>
+                                                            <dt>소속팀</dt>
+                                                            <dd>{row.workerTeamName || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>급여방식</dt>
+                                                            <dd>{resolveReportPayType(row) || EMPTY_TEXT}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>공수</dt>
+                                                            <dd>{formatManDay(row.manDay)}</dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>금액</dt>
+                                                            <dd>{formatCurrency(getReportRowAmount(row))}</dd>
+                                                        </div>
+                                                    </dl>
+                                                </article>
+                                            ))
+                                        )}
                                     </div>
 
                                     <div className="tw-output-table-wrap tw-output-table-wrap--v2">

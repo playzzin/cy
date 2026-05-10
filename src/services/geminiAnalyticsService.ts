@@ -12,7 +12,7 @@
  */
 
 import { dailyReportService, DailyReport } from './dailyReportService';
-import { aiSettingsService } from './aiSettingsService';
+import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 import { manpowerAnalyticsService, SUPPORT_DIRECTIONS, type SupportDirection } from './manpowerAnalyticsService';
 
 // ===========================
@@ -196,10 +196,10 @@ export interface ChatMessage {
 
 const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS = 30_000;
-const GEMINI_ANALYTICS_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-flash'];
+const GEMINI_ANALYTICS_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 const getAnalyticsModelCandidates = (): string[] => {
-    const selectedModel = aiSettingsService.getModels().analyticsModel || 'gemini-2.5-flash';
+    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().analyticsModel, 'gemini-2.5-flash');
     return Array.from(new Set([selectedModel, ...GEMINI_ANALYTICS_FALLBACK_MODELS].filter(Boolean)));
 };
 
@@ -212,7 +212,7 @@ const formatGeminiAnalyticsError = (error: unknown, attemptedModels: string[]): 
     const message = error instanceof Error ? error.message : String(error);
 
     if (/abort|timeout|timed out|시간.*초과/i.test(message)) {
-        return `Gemini 통계 분석 응답이 ${GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다. 네트워크 상태를 확인하거나 /settings/ai에서 통계 모델을 gemini-2.0-flash로 바꾼 뒤 다시 시도해 주세요.`;
+        return `Gemini 통계 분석 응답이 ${GEMINI_ANALYTICS_REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다. 네트워크 상태를 확인하거나 /settings/ai에서 통계 모델을 gemini-2.5-flash-lite로 바꾼 뒤 다시 시도해 주세요.`;
     }
 
     if (/project has been denied access|denied access|permission/i.test(message)) {

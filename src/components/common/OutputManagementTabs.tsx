@@ -6,10 +6,11 @@ import {
     faFileExcel,
     faList,
     faPenToSquare,
+    faTableCells,
     faUsers
 } from '@fortawesome/free-solid-svg-icons';
 
-export type OutputManagementTabKey = 'status' | 'input' | 'list-v2' | 'history';
+export type OutputManagementTabKey = 'status' | 'input' | 'board-input' | 'list-v2' | 'history';
 
 interface OutputManagementTabsProps {
     activeTab: OutputManagementTabKey;
@@ -39,6 +40,9 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
             case 'input':
                 navigate('/reports/daily?tab=input');
                 return;
+            case 'board-input':
+                navigate('/reports/daily?tab=board-input');
+                return;
             case 'list-v2':
                 navigate('/reports/daily?tab=list-v2');
                 return;
@@ -53,7 +57,8 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
     const tabs: Array<{ key: OutputManagementTabKey; label: string; icon: typeof faChartBar }> = [
         { key: 'status', label: '현황판', icon: faChartBar },
         { key: 'input', label: '일보작성', icon: faPenToSquare },
-        { key: 'list-v2', label: '일보목록v2', icon: faList },
+        { key: 'board-input', label: '보드입력', icon: faTableCells },
+        { key: 'list-v2', label: '일보목록', icon: faList },
         { key: 'history', label: '인원전체관리', icon: faUsers }
     ];
 
@@ -73,6 +78,8 @@ const OutputManagementTabs: React.FC<OutputManagementTabsProps> = ({
                                     key={tab.key}
                                     type="button"
                                     onClick={() => handleSelect(tab.key)}
+                                    title={`${tab.label}으로 이동`}
+                                    aria-current={activeTab === tab.key ? 'page' : undefined}
                                     className={`pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${activeTab === tab.key
                                         ? 'border-brand-600 text-brand-600'
                                         : 'border-transparent text-slate-500 hover:text-slate-700'

@@ -114,13 +114,16 @@ const createCatalogMaterials = (): Material[] => {
             const materialKey = buildMaterialBusinessKey(material);
             rows.push({
                 ...material,
-                id: `catalog_${rows.length + 1}`,
+                id: getCatalogDocumentId(materialKey),
                 materialKey,
             });
         });
     });
     return rows;
 };
+
+const getCatalogDocumentId = (materialKey: string): string =>
+    `catalog_${encodeURIComponent(materialKey)}`;
 
 const normalizeMaterialForSelection = (material: Material): Material => {
     const normalized = {
@@ -158,12 +161,54 @@ const mergeMaterialsForSelection = (rows: Material[]): Material[] => {
     return sortMaterialsForSelection(Array.from(deduped.values()));
 };
 
+const createPersistedCatalogMaterial = (material: Material, now: Date): Material => {
+    const normalized = normalizeMaterialForSelection(material);
+    const materialKey = normalized.materialKey || buildMaterialBusinessKey(normalized);
+    const id = getCatalogDocumentId(materialKey);
+
+    return {
+        ...normalized,
+        id,
+        materialKey,
+        unitPrice: normalized.unitPrice ?? 0,
+        safetyStock: normalized.safetyStock ?? 0,
+        isActive: true,
+        isCatalogDefault: true,
+        createdAt: now as any,
+        updatedAt: now as any,
+    };
+};
+
+const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Material[]> => {
+    const existingMaterialKeys = new Set(rows.map((row) => row.materialKey || buildMaterialBusinessKey(row)));
+    const existingIds = new Set(rows.map((row) => row.id).filter(Boolean));
+    const now = new Date();
+    const missingCatalogRows = createCatalogMaterials()
+        .map((row) => createPersistedCatalogMaterial(row, now))
+        .filter((row) => {
+            const materialKey = row.materialKey || buildMaterialBusinessKey(row);
+            return !existingMaterialKeys.has(materialKey) && !existingIds.has(row.id);
+        });
+
+    if (missingCatalogRows.length > 0) {
+        await Promise.all(
+            missingCatalogRows.map((row) => materialFirestoreService.saveMaterial(row.id, row as any))
+        );
+    }
+
+    return missingCatalogRows;
+};
+
+const getSelectableMaterials = async (): Promise<Material[]> => {
+    const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
+    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows);
+    const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false);
+
+    return mergeMaterialsForSelection(rows);
+};
+
 const normalizeMaterialSnapshot = async () => {
-    const masterRows = await materialFirestoreService.getAllMaterials() as any[];
-    const rows = mergeMaterialsForSelection([
-        ...createCatalogMaterials(),
-        ...masterRows,
-    ]);
+    const rows = await getSelectableMaterials();
     return new Map(rows.flatMap((m) => {
         const materialKey = m.materialKey || buildMaterialBusinessKey(m);
         return [
@@ -207,15 +252,13 @@ const getMaterialFilterKey = (materialId: string | undefined, materialById: Map<
 // --- Material Master ---
 
 export const getAllMaterials = async (): Promise<Material[]> => {
-    return await materialFirestoreService.getAllMaterials() as any[];
+    const rows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
+    const persistedCatalogRows = await ensureCatalogMaterialsPersisted(rows);
+    return [...rows, ...persistedCatalogRows].filter((row) => row.isActive !== false) as any[];
 };
 
 export const getUniqueMaterialsForSelection = async (): Promise<Material[]> => {
-    const rows = await getAllMaterials();
-    return mergeMaterialsForSelection([
-        ...createCatalogMaterials(),
-        ...rows,
-    ]);
+    return getSelectableMaterials();
 };
 
 export const getMaterialById = async (id: string): Promise<Material | null> => {
@@ -266,8 +309,30 @@ export const updateMaterial = async (
     await materialFirestoreService.saveMaterial(id, data);
 };
 
-export const deleteMaterial = async (id: string): Promise<void> => {
-    await updateMaterial(id, { isActive: false } as any);
+export const deleteMaterial = async (materialOrId: string | Material): Promise<void> => {
+    const id = typeof materialOrId === 'string' ? materialOrId : materialOrId.id;
+    const current = id ? await materialFirestoreService.getMaterial(id) as any : null;
+
+    if (current) {
+        await updateMaterial(id, { isActive: false } as any);
+        return;
+    }
+
+    if (typeof materialOrId !== 'string') {
+        const now = new Date();
+        const normalized = normalizeMaterialForSelection(materialOrId);
+        const materialKey = normalized.materialKey || buildMaterialBusinessKey(normalized);
+        const fallbackId = materialOrId.id || getCatalogDocumentId(materialKey);
+        await materialFirestoreService.saveMaterial(fallbackId, {
+            ...normalized,
+            id: fallbackId,
+            materialKey,
+            unitPrice: normalized.unitPrice ?? 0,
+            isActive: false,
+            createdAt: now,
+            updatedAt: now,
+        } as any);
+    }
 };
 
 export const getMaterialsByCategory = async (category: string): Promise<Material[]> => {

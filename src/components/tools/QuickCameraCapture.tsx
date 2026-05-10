@@ -61,6 +61,10 @@ const SCROLL_CAPTURE_OVERLAP_CSS = 24;
 const MAX_SCROLL_CAPTURE_STEPS = 2000;
 const MAX_SCROLL_CAPTURE_CANVAS_HEIGHT = 30000;
 const MAX_SCROLL_CAPTURE_CANVAS_AREA = 120_000_000;
+const SCROLL_CAPTURE_WARN_HEIGHT_CSS = 12000;
+const SCROLL_CAPTURE_BLOCK_HEIGHT_CSS = 28000;
+const SCROLL_CAPTURE_WARN_STEPS = 24;
+const SCROLL_CAPTURE_BLOCK_STEPS = 90;
 const OVERLAP_MATCH_MIN_SOURCE_PX = 12;
 const OVERLAP_MATCH_MAX_SOURCE_PX = 180;
 const OVERLAP_MATCH_SEARCH_RADIUS_SOURCE_PX = 36;
@@ -161,6 +165,63 @@ const hideExcludedRoots = () => {
             el.style.opacity = opacity;
             el.style.pointerEvents = pointerEvents;
         });
+    };
+};
+
+const hideFixedAndStickyInterference = (target: HTMLElement | null = null) => {
+    const shouldPreserveTargetChildren = !!target && !isDocumentScrollRoot(target);
+    const candidates = Array.from(document.body.querySelectorAll<HTMLElement>('*'));
+    const prevInlineStyles: Array<{
+        el: HTMLElement;
+        visibility: string;
+        opacity: string;
+        pointerEvents: string;
+    }> = [];
+
+    candidates.forEach((el) => {
+        if (el.closest(CAPTURE_OVERLAY_SELECTOR) || el.closest(CAPTURE_EXCLUDE_SELECTOR)) return;
+        if (shouldPreserveTargetChildren && (target.contains(el) || el.contains(target))) return;
+
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'fixed' && style.position !== 'sticky') return;
+
+        const rect = el.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) return;
+
+        prevInlineStyles.push({
+            el,
+            visibility: el.style.visibility,
+            opacity: el.style.opacity,
+            pointerEvents: el.style.pointerEvents
+        });
+
+        el.style.visibility = 'hidden';
+        el.style.opacity = '0';
+        el.style.pointerEvents = 'none';
+    });
+
+    return {
+        hiddenCount: prevInlineStyles.length,
+        restore: () => {
+            prevInlineStyles.forEach(({ el, visibility, opacity, pointerEvents }) => {
+                el.style.visibility = visibility;
+                el.style.opacity = opacity;
+                el.style.pointerEvents = pointerEvents;
+            });
+        }
+    };
+};
+
+const hideCaptureInterference = (target: HTMLElement | null = null) => {
+    const restoreExcludedRoots = hideExcludedRoots();
+    const fixedAndSticky = hideFixedAndStickyInterference(target);
+
+    return {
+        hiddenCount: fixedAndSticky.hiddenCount,
+        restore: () => {
+            fixedAndSticky.restore();
+            restoreExcludedRoots();
+        }
     };
 };
 
@@ -589,6 +650,52 @@ const getSelectionPromptMessage = (mode: CaptureMode) => {
     return '\ud654\uba74\uc5d0\uc11c \uc6d0\ud558\ub294 \uc601\uc5ed\uc744 \ub4dc\ub798\uadf8\ud558\uc138\uc694. (ESC \ucde8\uc18c)';
 };
 
+const getScrollCapturePlanHeight = (plan: ScrollCapturePlan) => {
+    if (plan.range) {
+        return Math.max(0, plan.range.bottomContentY - plan.range.topContentY);
+    }
+
+    if (!plan.canScroll) {
+        return Math.max(0, plan.captureRect.height);
+    }
+
+    return Math.max(
+        plan.captureRect.height,
+        plan.maxScrollTop - plan.initialScrollTop + plan.movingRect.height
+    );
+};
+
+const getScrollCaptureRisk = (plan: ScrollCapturePlan): {
+    level: 'safe' | 'warn' | 'block';
+    heightCss: number;
+    message: string;
+} => {
+    const heightCss = getScrollCapturePlanHeight(plan);
+    const roundedHeight = Math.round(heightCss).toLocaleString();
+
+    if (heightCss > SCROLL_CAPTURE_BLOCK_HEIGHT_CSS || plan.estimatedSteps > SCROLL_CAPTURE_BLOCK_STEPS) {
+        return {
+            level: 'block',
+            heightCss,
+            message: `선택한 스크롤 구간이 너무 깁니다. 예상 높이 ${roundedHeight}px, 약 ${plan.estimatedSteps}회 캡처가 필요합니다. 구간을 나눠서 캡처해 주세요.`
+        };
+    }
+
+    if (heightCss > SCROLL_CAPTURE_WARN_HEIGHT_CSS || plan.estimatedSteps > SCROLL_CAPTURE_WARN_STEPS) {
+        return {
+            level: 'warn',
+            heightCss,
+            message: `선택한 구간이 깁니다. 예상 높이 ${roundedHeight}px, 약 ${plan.estimatedSteps}회 캡처가 필요해 결과가 축소되거나 이어붙임이 어긋날 수 있습니다. 계속할까요?`
+        };
+    }
+
+    return {
+        level: 'safe',
+        heightCss,
+        message: ''
+    };
+};
+
 const waitForVideoReady = (video: HTMLVideoElement): Promise<void> => {
     return new Promise((resolve, reject) => {
         const cleanup = () => {
@@ -652,6 +759,11 @@ const QuickCameraCapture: React.FC = () => {
     const clearProcessingGuide = useCallback(() => {
         abortProcessingRef.current = false;
         setProcessingStatusText('');
+    }, []);
+
+    const requestProcessingCancel = useCallback(() => {
+        abortProcessingRef.current = true;
+        setProcessingStatusText('스크롤 캡처를 취소하는 중입니다...');
     }, []);
 
     useEffect(() => {
@@ -837,6 +949,7 @@ const QuickCameraCapture: React.FC = () => {
                 surfaceSwitching: 'exclude',
                 monitorTypeSurfaces: 'exclude'
             } as DisplayMediaOptions);
+            activeStreamRef.current = stream;
 
             const [track] = stream.getVideoTracks();
             if (!track) {
@@ -847,7 +960,6 @@ const QuickCameraCapture: React.FC = () => {
             video.srcObject = stream;
             video.muted = true;
             video.playsInline = true;
-            activeStreamRef.current = stream;
             activeVideoRef.current = video;
 
             await waitForVideoReady(video);
@@ -909,18 +1021,37 @@ const QuickCameraCapture: React.FC = () => {
             : resolveScrollCapturePlan(rect, selectionScrollTargetRef.current);
         scrollCapturePlanRef.current = plan;
         const captureRect = plan.captureRect;
+        const risk = getScrollCaptureRisk(plan);
+
+        if (risk.level === 'block') {
+            setMessage(risk.message);
+            setIsSuccess(false);
+            restoreHiddenPanel();
+            return;
+        }
+
+        const shareGuide = [
+            ...(risk.level === 'warn' ? [risk.message.replace(' 계속할까요?', '')] : []),
+            '스크롤 캡처는 공유 창에서 반드시 현재 탭을 선택해야 합니다.',
+            '창 또는 화면 전체를 선택하면 캡처를 즉시 중단합니다.'
+        ].join('\n');
+
+        if (!window.confirm(`${shareGuide}\n\n계속할까요?`)) {
+            setMessage('스크롤 캡처를 시작하지 않았습니다.');
+            setIsSuccess(null);
+            restoreHiddenPanel();
+            return;
+        }
 
         setIsProcessing(true);
-        setProcessingStatusText(
-            plan.canScroll
-                ? '공유 창에서 현재 탭을 선택하면 스크롤 캡처를 시작합니다.'
-                : '스크롤 대상이 작거나 없어서 보이는 영역만 캡처합니다. 현재 탭을 선택해 주세요.'
-        );
-        setMessage('브라우저 공유 창에서 현재 탭을 선택하면 스크롤 전체를 이어붙여 캡처합니다.');
+        setProcessingStatusText('1/4 공유 창에서 현재 탭을 선택해 주세요. 창/화면 전체 선택 시 중단됩니다.');
+        setMessage('공유 창에서 현재 탭을 선택해야 스크롤 캡처가 진행됩니다.');
         setIsSuccess(null);
         abortProcessingRef.current = false;
 
-        let restoreExcludedRoots: (() => void) | null = null;
+        let captureInterferenceRestore: { hiddenCount: number; restore: () => void } | null = null;
+        let hiddenInterferenceCount = 0;
+        let restoreScrollFailed = false;
 
         const ensureNotAborted = (track?: MediaStreamTrack) => {
             if (abortProcessingRef.current) {
@@ -955,6 +1086,11 @@ const QuickCameraCapture: React.FC = () => {
                 throw new Error('no-track');
             }
 
+            setProcessingStatusText('2/4 현재 탭 공유 여부를 확인하는 중입니다.');
+            if (track.getSettings().displaySurface !== 'browser') {
+                throw new Error('scroll-browser-only');
+            }
+
             const video = document.createElement('video');
             video.srcObject = stream;
             video.muted = true;
@@ -965,12 +1101,13 @@ const QuickCameraCapture: React.FC = () => {
             await waitForVideoReady(video);
             await video.play();
 
-            restoreExcludedRoots = hideExcludedRoots();
+            captureInterferenceRestore = hideCaptureInterference(plan.target);
+            hiddenInterferenceCount = captureInterferenceRestore.hiddenCount;
             await waitNextPaint();
             ensureNotAborted(track);
             setProcessingStatusText(
                 plan.canScroll
-                    ? `스크롤 캡처 준비 중 1/${plan.estimatedSteps}`
+                    ? `3/4 스크롤 캡처 준비 중 1/${plan.estimatedSteps}`
                     : '스크롤 대상이 없어 현재 화면만 캡처하는 중입니다.'
             );
             await waitForCapturedFrame(video);
@@ -1080,7 +1217,7 @@ const QuickCameraCapture: React.FC = () => {
                             100,
                             Math.max(1, Math.round(((capturedUntilContentY - range.topContentY) / rangeHeightCss) * 100))
                         );
-                        setProcessingStatusText(`\uc2a4\ud06c\ub864 \uad6c\uac04 \ucea1\ucc98 \uc911 ${progressPercent}%`);
+                        setProcessingStatusText(`3/4 스크롤 구간 캡처 중 ${progressPercent}% · ESC 또는 취소 버튼으로 중단`);
                     }
 
                     if (capturedUntilContentY >= range.bottomContentY - 0.5) {
@@ -1115,19 +1252,23 @@ const QuickCameraCapture: React.FC = () => {
                     throw new Error('empty-scroll-range');
                 }
 
+                setProcessingStatusText('4/4 이미지 병합 중입니다.');
                 const blob = await toPngBlob(stitchedCanvas);
                 pushCaptureHistory(blob, stitchedCanvas.width, stitchedCanvas.height);
+                const interferenceNotice = hiddenInterferenceCount > 0
+                    ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
+                    : '';
 
                 if (await copyBlobToClipboard(blob)) {
                     setMessage(outputScale < 1
-                        ? `\uad6c\uac04\uc774 \uae38\uc5b4 \uc804\uccb4\uac00 \ub4e4\uc5b4\uac00\ub3c4\ub85d ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.`
-                        : '\uc2dc\uc791\uc810\ubd80\ud130 \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uae4c\uc9c0 \uc774\uc5b4\ubd99\uc5ec \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.');
+                        ? `\uad6c\uac04\uc774 \uae38\uc5b4 \uc804\uccb4\uac00 \ub4e4\uc5b4\uac00\ub3c4\ub85d ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`
+                        : `\uc2dc\uc791\uc810\ubd80\ud130 \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uae4c\uc9c0 \uc774\uc5b4\ubd99\uc5ec \ud074\ub9bd\ubcf4\ub4dc\uc5d0 \uc800\uc7a5\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`);
                     setIsSuccess(true);
                 } else {
                     saveBlobAsFile(blob, `capture-scroll-${Date.now()}.png`);
                     setMessage(outputScale < 1
-                        ? `\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uae34 \uad6c\uac04\uc744 ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.`
-                        : '\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uc2a4\ud06c\ub864 \ucea1\ucc98\ub97c PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.');
+                        ? `\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uae34 \uad6c\uac04\uc744 ${Math.round(outputScale * 100)}%\ub85c \ucd95\uc18c\ud574 PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`
+                        : `\ud074\ub9bd\ubcf4\ub4dc API \ubbf8\uc9c0\uc6d0 \ube0c\ub77c\uc6b0\uc800\uc785\ub2c8\ub2e4. \uc2a4\ud06c\ub864 \ucea1\ucc98\ub97c PNG\ub85c \ub2e4\uc6b4\ub85c\ub4dc\ud588\uc2b5\ub2c8\ub2e4.${interferenceNotice}`);
                     setIsSuccess(true);
                 }
                 return;
@@ -1139,12 +1280,15 @@ const QuickCameraCapture: React.FC = () => {
             if (!plan.target || !plan.canScroll) {
                 const singleBlob = await toPngBlob(firstCanvas);
                 pushCaptureHistory(singleBlob, firstCanvas.width, firstCanvas.height);
+                const interferenceNotice = hiddenInterferenceCount > 0
+                    ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
+                    : '';
                 if (await copyBlobToClipboard(singleBlob)) {
-                    setMessage('스크롤 대상이 없어 현재 보이는 영역만 복사했습니다.');
+                    setMessage(`스크롤 대상이 없어 현재 보이는 영역만 복사했습니다.${interferenceNotice}`);
                     setIsSuccess(true);
                 } else {
                     saveBlobAsFile(singleBlob, `capture-${Date.now()}.png`);
-                    setMessage('클립보드 API 미지원 브라우저입니다. PNG 파일로 다운로드했습니다.');
+                    setMessage(`클립보드 API 미지원 브라우저입니다. PNG 파일로 다운로드했습니다.${interferenceNotice}`);
                     setIsSuccess(true);
                 }
                 return;
@@ -1188,9 +1332,10 @@ const QuickCameraCapture: React.FC = () => {
                 });
                 totalHeight += deltaPx;
                 loopCount += 1;
-                setProcessingStatusText(`스크롤 캡처 중 ${Math.min(plan.estimatedSteps, segments.length)}/${plan.estimatedSteps}`);
+                setProcessingStatusText(`3/4 스크롤 캡처 중 ${Math.min(plan.estimatedSteps, segments.length)}/${plan.estimatedSteps} · ESC 또는 취소 버튼으로 중단`);
             }
 
+            setProcessingStatusText('4/4 이미지 병합 중입니다.');
             const stitchedCanvas = document.createElement('canvas');
             stitchedCanvas.width = crop.sourceW;
             stitchedCanvas.height = totalHeight;
@@ -1217,17 +1362,20 @@ const QuickCameraCapture: React.FC = () => {
 
             const blob = await toPngBlob(stitchedCanvas);
             pushCaptureHistory(blob, stitchedCanvas.width, stitchedCanvas.height);
+            const interferenceNotice = hiddenInterferenceCount > 0
+                ? ` 고정 UI ${hiddenInterferenceCount}개를 제외했습니다.`
+                : '';
 
             if (await copyBlobToClipboard(blob)) {
                 setMessage(
                     currentScrollTop < plan.maxScrollTop - 1
-                        ? '스크롤 캡처가 길어서 일부만 이어붙였습니다.'
-                        : '스크롤 영역을 아래까지 이어붙여 클립보드에 저장했습니다.'
+                        ? `스크롤 캡처가 길어서 일부만 이어붙였습니다.${interferenceNotice}`
+                        : `스크롤 영역을 아래까지 이어붙여 클립보드에 저장했습니다.${interferenceNotice}`
                 );
                 setIsSuccess(true);
             } else {
                 saveBlobAsFile(blob, `capture-scroll-${Date.now()}.png`);
-                setMessage('클립보드 API 미지원 브라우저입니다. 스크롤 캡처를 PNG로 다운로드했습니다.');
+                setMessage(`클립보드 API 미지원 브라우저입니다. 스크롤 캡처를 PNG로 다운로드했습니다.${interferenceNotice}`);
                 setIsSuccess(true);
             }
         } catch (error) {
@@ -1243,6 +1391,8 @@ const QuickCameraCapture: React.FC = () => {
                 setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98 \uad6c\uac04\uc774 \ub108\ubb34 \uc791\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uacfc \ub9c8\uc9c0\ub9c9 \uc120\ud0dd\uc810\uc744 \ub354 \ub113\uac8c \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
             } else if (error instanceof Error && error.message === 'empty-scroll-range') {
                 setMessage('\uc2a4\ud06c\ub864 \ucea1\ucc98\ud560 \ud654\uba74 \uad6c\uac04\uc744 \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4. \uc2dc\uc791\uc810\uc744 \ub2e4\uc2dc \uc9c0\uc815\ud574 \uc8fc\uc138\uc694.');
+            } else if (error instanceof Error && error.message === 'scroll-range-too-long') {
+                setMessage('선택한 스크롤 구간을 끝까지 캡처하지 못했습니다. 구간을 나눠서 다시 캡처해 주세요.');
             } else if (error instanceof Error && error.message === 'unsupported') {
                 setMessage('이 브라우저는 화면 캡처 API를 지원하지 않습니다.');
             } else {
@@ -1251,13 +1401,22 @@ const QuickCameraCapture: React.FC = () => {
             setIsSuccess(false);
         } finally {
             if (plan.target) {
-                scrollElementTo(plan.target, plan.restoreScrollTop);
+                try {
+                    scrollElementTo(plan.target, plan.restoreScrollTop);
+                    await waitNextPaint();
+                    restoreScrollFailed = Math.abs(getScrollTop(plan.target) - plan.restoreScrollTop) > 2;
+                } catch {
+                    restoreScrollFailed = true;
+                }
             }
-            restoreExcludedRoots?.();
+            captureInterferenceRestore?.restore();
             stopActiveCaptureResources();
             restoreHiddenPanel();
             clearProcessingGuide();
             setIsProcessing(false);
+            if (restoreScrollFailed) {
+                setMessage((prev) => `${prev} 이전 스크롤 위치 복원에 실패했습니다.`);
+            }
         }
     }, [clearProcessingGuide, pushCaptureHistory, restoreHiddenPanel, stopActiveCaptureResources]);
 
@@ -1577,8 +1736,8 @@ const QuickCameraCapture: React.FC = () => {
                             : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
                     }`}
                 >
-                    <div className="text-sm font-semibold">스크롤 방식</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">선택한 영역 기준으로 아래로 자동 스크롤하며 이어붙입니다. 공유 창에서는 현재 탭을 선택해야 합니다.</div>
+                    <div className="text-sm font-semibold">긴 화면 이어붙이기</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-400">보조 기능입니다. 현재 탭 공유만 허용하고, 긴 구간은 시작 전에 경고합니다.</div>
                 </button>
             </div>
 
@@ -1619,6 +1778,15 @@ const QuickCameraCapture: React.FC = () => {
                     <Download className="h-4 w-4" />
                     바로 캡처
                 </button>
+                {isProcessing && captureMode === 'scroll' && (
+                    <button
+                        type="button"
+                        onClick={requestProcessingCancel}
+                        className="inline-flex items-center gap-2 rounded-md border border-rose-500/50 bg-rose-500/15 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/25"
+                    >
+                        취소
+                    </button>
+                )}
             </div>
 
             <div

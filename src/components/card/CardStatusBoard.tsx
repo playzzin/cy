@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faBan, faChartPie, faCheckCircle, faClock, faCreditCard, faLock,
-    faUser, faUsers, faList, faTh, faPlus, faFileInvoiceDollar
+    faUser, faUsers, faList, faTh, faPlus, faFileInvoiceDollar, faTrash
 } from '@fortawesome/free-solid-svg-icons';
 import { Worker, manpowerService } from '../../services/manpowerService';
 
@@ -22,6 +22,7 @@ interface CardStatusBoardProps {
     onEdit: (card: Card) => void;
     onAssign: (card: Card) => void;
     onOpenBilling: (card: Card) => void;
+    onDelete: (card: Card) => void;
 }
 
 const getTeamFaIcon = (iconName?: string) => {
@@ -36,7 +37,7 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r},${g},${b},${alpha})`;
 };
 
-export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onOpenBilling }) => {
+export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onOpenBilling, onDelete }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
     const [workers, setWorkers] = useState<Worker[]>([]);
 
@@ -237,7 +238,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">배정</th>
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">청구대상</th>
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">메모</th>
-                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-16"></th>
+                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-24"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -371,6 +372,13 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     >
                                                         <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
                                                     </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onDelete(card); }}
+                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-rose-50 flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors"
+                                                        title="삭제"
+                                                    >
+                                                        <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -445,6 +453,16 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 title="청구 관리"
                                             >
                                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDelete(card);
+                                                }}
+                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-rose-100 flex items-center justify-center text-slate-400 hover:text-rose-700 transition-colors"
+                                                title="삭제"
+                                            >
+                                                <FontAwesomeIcon icon={faTrash} className="text-xs" />
                                             </button>
                                         </div>
                                     </div>

@@ -7,11 +7,13 @@ export interface Material {
     itemName: string;
     spec: string;
     unit: string;
+    unitPrice?: number;
     safetyStock?: number;
     description?: string;
     photoUrl?: string;
     isActive: boolean;
     isCatalogDefault?: boolean;
+    hiddenCatalogDefault?: boolean;
     createdAt?: Timestamp | FieldValue | null;
     updatedAt?: Timestamp | FieldValue | null;
 }

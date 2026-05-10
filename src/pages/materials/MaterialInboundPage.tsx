@@ -8,6 +8,7 @@ import { siteService, Site } from '../../services/siteService';
 import { Material, InboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
+import { handleMaterialQuantityInputKeyDown } from './materialKeyboardNavigation';
 
 // 임시저장 데이터 타입
 type InboundTempData = {
@@ -18,6 +19,18 @@ type InboundTempData = {
     supplier: string;
     quantities: Record<string, number>;
     savedAt: number;
+};
+
+const ITEMS_PER_COLUMN = 10;
+
+const getMaterialChunkGridClass = (chunkCount: number) => {
+    if (chunkCount >= 7) return 'grid-cols-7 min-w-[1330px]';
+    if (chunkCount === 6) return 'grid-cols-6 min-w-[1140px]';
+    if (chunkCount === 5) return 'grid-cols-5 min-w-[950px]';
+    if (chunkCount === 4) return 'grid-cols-4 min-w-[760px]';
+    if (chunkCount === 3) return 'grid-cols-3 min-w-[570px]';
+    if (chunkCount === 2) return 'grid-cols-2 min-w-[380px]';
+    return 'grid-cols-1 min-w-[190px]';
 };
 
 const MaterialInboundPage: React.FC = () => {
@@ -314,7 +327,7 @@ const MaterialInboundPage: React.FC = () => {
     });
 
     // Helper to render a "Section" (Card)
-    const renderSection = (title: string, items: Material[], colorClass = 'blue') => {
+    const renderSection = (title: string, items: Material[], colorClass = 'blue', sectionIndex = 0) => {
         if (items.length === 0) return null;
 
         // 1. Sort items by Category > Name > Spec (Numeric Aware)
@@ -364,14 +377,18 @@ const MaterialInboundPage: React.FC = () => {
             return (a.spec || '').localeCompare(b.spec || '', undefined, { numeric: true });
         });
 
-        // 2. Chunk into groups of 10 (Requested: 10 items per row)
+        // 10 rows per chunk lets 70 items render as 7 compact columns on one line.
         const chunks: Material[][] = [];
-        for (let i = 0; i < items.length; i += 10) {
-            chunks.push(items.slice(i, i + 10));
+        for (let i = 0; i < items.length; i += ITEMS_PER_COLUMN) {
+            chunks.push(items.slice(i, i + ITEMS_PER_COLUMN));
         }
 
         return (
-            <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6 h-full">
+            <div
+                className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden mb-6 h-full"
+                data-material-nav-section="true"
+                data-section-index={sectionIndex}
+            >
                 <div className={`bg-${colorClass}-50/50 px-4 py-3 border-b border-${colorClass}-100 flex justify-between items-center`}>
                     <h3 className="font-bold text-slate-700 flex items-center gap-2">
                         <span className={`bg-${colorClass}-500 w-2 h-6 rounded-sm`}></span>
@@ -382,50 +399,64 @@ const MaterialInboundPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Responsive Grid for Card Items - Adaptive to column width */}
-                <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-4 items-start">
-                    {chunks.map((chunk, chunkIndex) => (
-                        <div key={chunkIndex} className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
-                            <table className="w-full text-sm">
-                                <thead className="bg-slate-50 border-b border-slate-200">
-                                    <tr>
-                                        <th className="p-3 text-left text-sm font-bold text-slate-500 uppercase tracking-wider pl-4">품명/규격</th>
-                                        <th className="p-3 text-center text-sm font-bold text-slate-500 uppercase tracking-wider w-20">수량</th>
-                                        <th className="p-3 text-center text-sm font-bold text-slate-500 uppercase tracking-wider w-16">단위</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {chunk.map(material => {
-                                        const qty = quantities[material.id] || 0;
-                                        return (
-                                            <tr key={material.id} className={`transition-colors ${qty > 0 ? `bg-${colorClass}-50` : 'hover:bg-slate-50'}`}>
-                                                <td className="p-3 pl-4">
-                                                    <div className="text-sm text-slate-500">{material.itemName}</div>
-                                                    <div className="font-bold text-slate-700 text-base mt-0.5">{material.spec}</div>
-                                                </td>
-                                                <td className="p-2 text-center">
-                                                    <input
-                                                        type="number"
-                                                        value={qty || ''}
-                                                        onChange={(e) => handleQuantityChange(material.id, e.target.value)}
-                                                        placeholder="0"
-                                                        className={`w-full border rounded px-1.5 py-2 text-center font-bold text-lg transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${qty > 0
-                                                            ? `border-${colorClass}-500 text-${colorClass}-700 bg-white`
-                                                            : `border-slate-200 bg-slate-50 text-slate-400 focus:bg-white focus:border-${colorClass}-500 focus:text-slate-800`
-                                                            }`}
-                                                        onFocus={(e) => e.target.select()}
-                                                    />
-                                                </td>
-                                                <td className="p-2 text-center text-xs text-slate-400 font-medium whitespace-nowrap">
-                                                    {material.unit}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    ))}
+                <div className="overflow-x-auto">
+                    <div className={`p-2 grid ${getMaterialChunkGridClass(chunks.length)} gap-1.5 items-start`}>
+                        {chunks.map((chunk, chunkIndex) => (
+                            <div key={chunkIndex} className="bg-white rounded-md border border-slate-200 overflow-hidden shadow-sm">
+                                <table className="w-full table-fixed text-[11px] leading-tight">
+                                    <colgroup>
+                                        <col />
+                                        <col className="w-11" />
+                                        <col className="w-8" />
+                                    </colgroup>
+                                    <thead className="bg-slate-50 border-b border-slate-200">
+                                        <tr>
+                                            <th className="px-1.5 py-1.5 text-left font-bold text-slate-500 uppercase whitespace-nowrap">품명/규격</th>
+                                            <th className="px-0.5 py-1.5 text-center font-bold text-slate-500 uppercase whitespace-nowrap">수량</th>
+                                            <th className="px-0.5 py-1.5 text-center font-bold text-slate-500 uppercase whitespace-nowrap">단위</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                        {chunk.map((material, rowIndex) => {
+                                            const qty = quantities[material.id] || 0;
+                                            return (
+                                                <tr key={material.id} className={`transition-colors ${qty > 0 ? `bg-${colorClass}-50` : 'hover:bg-slate-50'}`}>
+                                                    <td className="px-1.5 py-1" title={`${material.itemName} ${material.spec}`}>
+                                                        <div className="flex min-w-0 items-center gap-0.5 whitespace-nowrap">
+                                                            <span className="min-w-0 truncate text-slate-500">{material.itemName}</span>
+                                                            <span className="shrink-0 text-slate-300">/</span>
+                                                            <span className="shrink-0 font-bold text-slate-700">{material.spec}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-0.5 py-0.5 text-center">
+                                                        <input
+                                                            type="number"
+                                                            value={qty || ''}
+                                                            onChange={(e) => handleQuantityChange(material.id, e.target.value)}
+                                                            onKeyDown={handleMaterialQuantityInputKeyDown}
+                                                            data-material-nav="true"
+                                                            data-section-index={sectionIndex}
+                                                            data-column-index={chunkIndex}
+                                                            data-row-index={rowIndex}
+                                                            placeholder="0"
+                                                            className={`h-6 w-full border rounded px-0.5 text-center font-bold text-xs transition-all outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${qty > 0
+                                                                ? `border-${colorClass}-500 text-${colorClass}-700 bg-white`
+                                                                : `border-slate-200 bg-slate-50 text-slate-400 focus:bg-white focus:border-${colorClass}-500 focus:text-slate-800`
+                                                                }`}
+                                                            onFocus={(e) => e.target.select()}
+                                                        />
+                                                    </td>
+                                                    <td className="px-0.5 py-0.5 text-center text-[10px] text-slate-400 font-medium whitespace-nowrap">
+                                                        {material.unit}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         );
@@ -523,18 +554,18 @@ const MaterialInboundPage: React.FC = () => {
                 <div className="flex flex-col gap-6 mb-6">
                     {/* Row 1: System Scaffolding */}
                     <div className="w-full">
-                        {renderSection('시스템 비계', scaffoldingList, 'blue')}
+                        {renderSection('시스템 비계', scaffoldingList, 'blue', 0)}
                     </div>
 
                     {/* Row 2: System Dongbari */}
                     <div className="w-full">
-                        {renderSection('시스템 동바리', dongbariList, 'blue')}
+                        {renderSection('시스템 동바리', dongbariList, 'blue', 1)}
                     </div>
 
                     {/* Others */}
                     {otherList.length > 0 && (
                         <div className="w-full">
-                            {renderSection('기타 및 소모품', otherList, 'slate')}
+                            {renderSection('기타 및 소모품', otherList, 'slate', 2)}
                         </div>
                     )}
                 </div>

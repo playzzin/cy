@@ -21,6 +21,7 @@ import {
 import { taxInvoiceListService } from '../../services/taxInvoiceListService';
 import { TaxInvoiceIssue, IssueStatus, SiteWorkSummary, STATUS_CONFIG } from '../../types/taxInvoiceList';
 import { exportIssuesToExcel } from '../../utils/taxInvoiceExcelUtils';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -34,14 +35,23 @@ const formatYearMonth = (ym: string) => {
     return `${y}년 ${Number(m)}월`;
 };
 
+const getMonthEndDate = (yearMonth: string) => {
+    const [rawYear, rawMonth] = yearMonth.split('-').map(Number);
+    const year = Number.isFinite(rawYear) ? rawYear : new Date().getFullYear();
+    const month = Number.isFinite(rawMonth) ? rawMonth : new Date().getMonth() + 1;
+    const lastDay = new Date(year, month, 0).getDate();
+    return `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+};
+
 const SITE_TYPE_OPTIONS = ['전체', '지원', '도급', '직영'];
 const PAYMENT_TYPE_OPTIONS = ['전체', '계산서', '노무'];
+const ISSUE_TYPE_OPTIONS = ['입력', '신규', '다원'];
 
 const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'> => ({
     yearMonth,
     no,
     isNew: '입력',
-    issueDate: `${yearMonth}-01`,
+    issueDate: getMonthEndDate(yearMonth),
     recipient: '',
     item: '',
     supplyAmount: 0,
@@ -58,6 +68,11 @@ const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' 
 });
 
 const fmt = (n: number) => n.toLocaleString('ko-KR');
+
+const getIssueTypeLabel = (value: TaxInvoiceIssue['isNew'] | boolean | null | undefined) => {
+    if (typeof value === 'boolean') return value ? '입력' : '';
+    return String(value ?? '');
+};
 
 // ─────────────────────────────────────────────
 // Sub-components
@@ -329,6 +344,8 @@ const EditableCell: React.FC<EditableCellProps> = ({
         let finalValue: string | number | boolean = draft;
         if (type === 'number') {
             finalValue = Number(draft.replace(/,/g, '')) || 0;
+        } else if (type === 'date') {
+            finalValue = normalizeTypedDateInput(draft) ?? draft;
         }
         onCommit(rowId, field, finalValue);
         setEditing(false);
@@ -380,8 +397,10 @@ const EditableCell: React.FC<EditableCellProps> = ({
             <input
                 ref={inputRef}
                 // number 타입은 selectionStart를 지원하지 않아 text로 변경하여 엑셀 스타일 이동 지원
-                type={type === 'date' ? 'date' : 'text'}
-                inputMode={type === 'number' ? 'decimal' : undefined}
+                type="text"
+                inputMode={type === 'number' ? 'decimal' : (type === 'date' ? 'numeric' : undefined)}
+                maxLength={type === 'date' ? 10 : undefined}
+                placeholder={type === 'date' ? 'YYYY-MM-DD' : undefined}
                 value={draft}
                 onChange={e => {
                     const val = e.target.value;
@@ -390,6 +409,8 @@ const EditableCell: React.FC<EditableCellProps> = ({
                         if (val === '' || /^-?\d*\.?\d*$/.test(val.replace(/,/g, ''))) {
                             setDraft(val);
                         }
+                    } else if (type === 'date') {
+                        setDraft(formatTypedDateInput(val));
                     } else {
                         setDraft(val);
                     }
@@ -427,7 +448,14 @@ interface ColumnFilterProps {
 
 const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, options }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
     const popoverRef = useRef<HTMLDivElement>(null);
+    const filteredOptions = useMemo(() => {
+        if (!options) return [];
+
+        const term = searchTerm.trim().toLowerCase();
+        return options.filter(opt => !term || opt.toLowerCase().includes(term));
+    }, [options, searchTerm]);
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -438,6 +466,46 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
         if (isOpen) document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) setSearchTerm('');
+    }, [isOpen]);
+
+    const clearFilter = () => {
+        onChange('');
+        setSearchTerm('');
+        setIsOpen(false);
+    };
+
+    const applyOption = (option: string) => {
+        onChange(option);
+        setSearchTerm('');
+        setIsOpen(false);
+    };
+
+    const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        e.stopPropagation();
+
+        if (e.key === 'Escape') {
+            setIsOpen(false);
+            return;
+        }
+
+        if (e.key !== 'Enter') return;
+
+        if (!options) {
+            setIsOpen(false);
+            return;
+        }
+
+        const normalizedTerm = searchTerm.trim().toLowerCase();
+        const exactOption = filteredOptions.find(opt => opt.toLowerCase() === normalizedTerm);
+        const optionToApply = exactOption ?? (filteredOptions.length === 1 ? filteredOptions[0] : undefined);
+
+        if (optionToApply) {
+            applyOption(optionToApply);
+        }
+    };
 
     return (
         <div className="relative inline-block ml-1" ref={popoverRef}>
@@ -455,20 +523,19 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                     {/* 검색창 (목록이 있을 때도 필터링을 위해 항상 표시 또는 조건부 표시) */}
                     <div className="relative mb-2">
                         <input
-                            autoFocus={!options}
+                            autoFocus
                             type="text"
-                            value={options ? (window as any)._filterSearch || '' : value}
+                            value={options ? searchTerm : value}
                             onChange={(e) => {
                                 if (options) {
-                                    (window as any)._filterSearch = e.target.value;
-                                    setIsOpen(true); // 리렌더링 유도
+                                    setSearchTerm(e.target.value);
                                 } else {
                                     onChange(e.target.value);
                                 }
                             }}
                             placeholder="검색..."
                             className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-400 outline-none"
-                            onKeyDown={(e) => { if (e.key === 'Enter') setIsOpen(false); }}
+                            onKeyDown={handleSearchKeyDown}
                         />
                         <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-2 text-slate-300 text-[10px]" />
                     </div>
@@ -476,28 +543,32 @@ const ColumnFilter: React.FC<ColumnFilterProps> = ({ label, value, onChange, opt
                     {options && (
                         <div className="space-y-1 max-h-48 overflow-y-auto border-t pt-2 border-slate-100">
                             <button
-                                onClick={() => { onChange(''); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                                onClick={clearFilter}
                                 className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${!value ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
                             >
                                 전체 (All)
                             </button>
-                            {options
-                                .filter(opt => !((window as any)._filterSearch) || opt.toLowerCase().includes(((window as any)._filterSearch).toLowerCase()))
-                                .map(opt => (
+                            {filteredOptions.length > 0 ? (
+                                filteredOptions.map(opt => (
                                     <button
                                         key={opt}
-                                        onClick={() => { onChange(opt); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                                        onClick={() => applyOption(opt)}
                                         className={`w-full text-left px-2 py-1.5 rounded-lg text-xs font-bold transition-all ${value === opt ? 'bg-indigo-50 text-indigo-600' : 'hover:bg-slate-50 text-slate-600'}`}
                                     >
                                         {opt}
                                     </button>
-                                ))}
+                                ))
+                            ) : (
+                                <div className="px-2 py-3 text-center text-xs text-slate-400">
+                                    일치하는 항목이 없습니다
+                                </div>
+                            )}
                         </div>
                     )}
                     
                     {value && (
                         <button 
-                            onClick={() => { onChange(''); setIsOpen(false); (window as any)._filterSearch = ''; }}
+                            onClick={clearFilter}
                             className="mt-2 w-full py-1 text-[10px] font-bold text-red-500 hover:bg-red-50 rounded-lg transition-all"
                         >
                             필터 초기화
@@ -609,7 +680,16 @@ const TaxInvoiceIssueListPage: React.FC = () => {
     const uniqueRecipients = useMemo(() => Array.from(new Set(issues.map(i => i.recipient))).filter((v): v is string => !!v).sort(), [issues]);
     const uniqueItems = useMemo(() => Array.from(new Set(issues.map(i => i.item))).filter((v): v is string => !!v).sort(), [issues]);
     const uniqueNotes = useMemo(() => Array.from(new Set(issues.map(i => i.note))).filter((v): v is string => !!v).sort(), [issues]);
-    const uniqueTeams = useMemo(() => Array.from(new Set(issues.map(i => i.teamName))).filter((v): v is string => !!v).sort(), [issues]);
+    const uniqueTeams = useMemo(() => Array.from(new Set(
+        issues.map(i => String(i.teamName ?? '').trim()).filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b, 'ko')), [issues]);
+    const uniqueIssueTypes = useMemo(() => {
+        const extraValues = Array.from(new Set(issues.map(i => getIssueTypeLabel(i.isNew))))
+            .filter((v): v is string => !!v && !ISSUE_TYPE_OPTIONS.includes(v))
+            .sort((a, b) => a.localeCompare(b, 'ko'));
+
+        return [...ISSUE_TYPE_OPTIONS, ...extraValues];
+    }, [issues]);
 
     // Keyboard Navigation State
     const [activeCell, setActiveCell] = useState<{ r: number, c: number } | null>(null);
@@ -691,11 +771,11 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Add row ──
     const handleAddRow = async () => {
-        const nextNo = issues.length > 0 ? Math.max(...issues.map(i => i.no)) + 1 : 1;
+        const nextNo = issues.length + 1;
         const newIssue = EMPTY_ISSUE(yearMonth, nextNo);
         try {
             const id = await taxInvoiceListService.addIssue(newIssue);
-            setIssues(prev => [...prev, { ...newIssue, id }]);
+            setIssues(prev => [...prev, { ...newIssue, id }].sort((a, b) => a.no - b.no));
         } catch (e) {
             console.error(e);
         }
@@ -707,7 +787,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         if (!window.confirm('이 항목을 삭제하시겠습니까?')) return;
         try {
             await taxInvoiceListService.deleteIssue(id);
-            setIssues(prev => prev.filter(i => i.id !== id));
+            const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
+            setIssues(renumbered);
             setSelectedIds(prev => {
                 const next = new Set(prev);
                 next.delete(id);
@@ -726,7 +807,8 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         try {
             const ids = Array.from(selectedIds);
             await taxInvoiceListService.deleteIssuesBatch(ids);
-            setIssues(prev => prev.filter(i => i.id && !selectedIds.has(i.id)));
+            const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
+            setIssues(renumbered);
             setSelectedIds(new Set());
         } catch (e) {
             console.error('일괄 삭제 실패:', e);
@@ -801,18 +883,19 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // ── Import sites as issues ──
     const handleImportSites = async (selected: SiteWorkSummary[]) => {
-        const maxNo = issues.length > 0 ? Math.max(...issues.map(i => i.no)) : 0;
+        const startNo = issues.length;
+        const monthEndDate = getMonthEndDate(yearMonth);
         const newIssues: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'>[] = selected.map((s, idx) => ({
             yearMonth,
-            no: maxNo + idx + 1,
+            no: startNo + idx + 1,
             isNew: '입력',
-            issueDate: `${yearMonth}-01`,
-            recipient: s.companyName,    // 발주사 → 공급받는자
+            issueDate: monthEndDate,
+            recipient: s.companyName,    // 상호명 → 공급받는자
             item: '',                    // 품목 (나중에 수정 가능)
             supplyAmount: 0,
             note: s.siteName,            // 현장명 → 비고
             manDays: s.manDays,
-            teamName: s.teamName,        // 현장담당팀
+            teamName: s.teamName,        // 실제 투입팀
             remark: '',                  // 특이사항 (나중에 입력)
             issueStatus: 'ready' as IssueStatus,
             scanCompleted: false,
@@ -831,7 +914,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                 console.error(e);
             }
         }
-        setIssues(prev => [...prev, ...added]);
+        if (added.length > 0) {
+            const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
+            setIssues(renumbered);
+        }
     };
 
     // ── Derived stats ──
@@ -858,18 +944,17 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         for (const [field, val] of Object.entries(columnFilters)) {
             if (!val) continue;
             
-            const issueVal = String((issue as any)[field] ?? '').toLowerCase();
-            const searchVal = val.toLowerCase();
+            const rawIssueVal = field === 'isNew'
+                ? getIssueTypeLabel(issue.isNew)
+                : field === 'issueStatus'
+                    ? STATUS_CONFIG[issue.issueStatus]?.label ?? issue.issueStatus
+                    : String((issue as any)[field] ?? '');
+            const issueVal = rawIssueVal.trim().toLowerCase();
+            const searchVal = val.trim().toLowerCase();
 
             // Status, Type 필터는 정확히 일치, 나머지는 포함 여부
-            if (['issueStatus', 'siteType', 'paymentType'].includes(field)) {
-                // Status는 label로 필터링될 수 있으므로 매칭 로직 주의
-                if (field === 'issueStatus') {
-                    const label = STATUS_CONFIG[issue.issueStatus].label;
-                    if (label !== val) return false;
-                } else {
-                    if (issueVal !== searchVal) return false;
-                }
+            if (['isNew', 'issueStatus', 'siteType', 'paymentType', 'teamName'].includes(field)) {
+                if (issueVal !== searchVal) return false;
             } else {
                 if (!issueVal.includes(searchVal)) return false;
             }
@@ -1115,7 +1200,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         />
                                     </th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-10">No</th>
-                                    <th className="px-2 py-3 text-center font-black text-slate-500 w-12">신규</th>
+                                    <th className="px-2 py-3 text-center font-black text-slate-500 w-12">
+                                        신규
+                                        <ColumnFilter
+                                            label="신규"
+                                            value={columnFilters.isNew || ''}
+                                            onChange={(v) => updateFilter('isNew', v)}
+                                            options={uniqueIssueTypes}
+                                        />
+                                    </th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-24">발행일</th>
                                     <th className="px-3 py-3 text-left font-black text-slate-500 w-28">
                                         공급받는자
@@ -1207,6 +1300,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                         const isSaving = saving.has(issue.id ?? '');
                                         const isSelected = selectedIds.has(issue.id ?? '');
                                         const statusCfg = STATUS_CONFIG[issue.issueStatus] || STATUS_CONFIG.pending;
+                                        const issueTypeLabel = getIssueTypeLabel(issue.isNew);
                                         return (
                                             <tr
                                                 key={issue.id}
@@ -1240,12 +1334,12 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                                 {/* 신규 */}
                                                 <td className="px-2 py-2 text-center">
                                                     <SelectCell
-                                                        value={typeof issue.isNew === 'boolean' ? (issue.isNew ? '입력' : '') : issue.isNew}
-                                                        options={['입력', '신규', '다원']}
+                                                        value={issueTypeLabel}
+                                                        options={ISSUE_TYPE_OPTIONS}
                                                         field="isNew"
                                                         rowId={issue.id}
                                                         onCommit={handleCellCommit}
-                                                        badgeClass={issue.isNew === '입력' ? 'text-violet-700' : (issue.isNew === '신규' ? 'text-blue-700' : 'text-emerald-700')}
+                                                        badgeClass={issueTypeLabel === '입력' ? 'text-violet-700' : (issueTypeLabel === '신규' ? 'text-blue-700' : 'text-emerald-700')}
                                                         rowIndex={idx}
                                                         colIndex={0}
                                                         isFocused={activeCell?.r === idx && activeCell?.c === 0}

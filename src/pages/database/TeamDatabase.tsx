@@ -34,6 +34,8 @@ const getPositionIcon = (role: string | undefined, positions: Position[]) => {
 };
 
 const TEAM_TYPE_OPTIONS = ['시공팀', '지원팀', '용역팀'] as const;
+const EXTERNAL_TEAM_COMPANY_NAME = '외부팀';
+const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
 
 const TeamColorPicker: React.FC<{
     value?: string | null;
@@ -395,6 +397,45 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
         return type === '시공사' || type === '미지정' || type === '협력사';
     });
 
+    const isExternalSupportTeamCompany = (team: Team) =>
+        String(team.type ?? '').trim() === '지원팀' &&
+        String(team.companyId ?? '').trim().length === 0 &&
+        String(team.companyName ?? '').trim() === EXTERNAL_TEAM_COMPANY_NAME;
+
+    const getCompanySelectValue = (team: Team) =>
+        isExternalSupportTeamCompany(team) ? EXTERNAL_TEAM_COMPANY_VALUE : (team.companyId || '');
+
+    const getCompanyOptionsForTeam = (team: Team) => {
+        const baseOptions = String(team.type ?? '').trim() === '지원팀'
+            ? companyOptions.filter((company) => String(company.type ?? '').trim() === '협력사')
+            : companyOptions;
+
+        if (String(team.type ?? '').trim() !== '지원팀') return baseOptions;
+
+        return [
+            { id: EXTERNAL_TEAM_COMPANY_VALUE, name: EXTERNAL_TEAM_COMPANY_NAME } as Company,
+            ...baseOptions
+        ];
+    };
+
+    const handleTeamCompanySelect = (team: Team, selectedId: string) => {
+        if (!team.id) return;
+
+        if (selectedId === EXTERNAL_TEAM_COMPANY_VALUE && String(team.type ?? '').trim() === '지원팀') {
+            handleTeamSelectChange(team.id, {
+                companyId: '',
+                companyName: EXTERNAL_TEAM_COMPANY_NAME
+            });
+            return;
+        }
+
+        const selectedCompany = companies.find(c => c.id === selectedId);
+        handleTeamSelectChange(team.id, {
+            companyId: selectedId,
+            companyName: selectedCompany ? selectedCompany.name : ''
+        });
+    };
+
     return (
         <div className="flex flex-col h-full bg-slate-50">
             {!hideHeader && (
@@ -591,20 +632,12 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 />
                                                             ) : col.key === 'companyName' ? (
                                                                 <select
-                                                                    value={team.companyId || ''}
-                                                                    onChange={(e) => {
-                                                                        const selectedCompany = companies.find(c => c.id === e.target.value);
-                                                                        if (team.id) {
-                                                                            handleTeamSelectChange(team.id, {
-                                                                                companyId: e.target.value,
-                                                                                companyName: selectedCompany ? selectedCompany.name : ''
-                                                                            });
-                                                                        }
-                                                                    }}
+                                                                    value={getCompanySelectValue(team)}
+                                                                    onChange={(e) => handleTeamCompanySelect(team, e.target.value)}
                                                                     className="border rounded px-2 py-1 w-full text-sm"
                                                                 >
                                                                     <option value="">미소속</option>
-                                                                    {companyOptions.map(company => (
+                                                                    {getCompanyOptionsForTeam(team).map(company => (
                                                                         <option key={company.id} value={company.id}>{company.name}</option>
                                                                     ))}
                                                                 </select>
@@ -756,20 +789,13 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 />
                                                             ) : col.key === 'companyName' ? (
                                                                 <SingleSelectPopover
-                                                                    options={companyOptions.map(company => ({
+                                                                    options={getCompanyOptionsForTeam(team).map(company => ({
                                                                         id: company.id || '',
                                                                         name: company.name,
                                                                         icon: <FontAwesomeIcon icon={faBuilding} className="text-slate-400" />
                                                                     }))}
-                                                                    selectedId={team.companyId || null}
-                                                                    onSelect={(id: string) => {
-                                                                        if (!team.id) return;
-                                                                        const selectedCompany = companies.find(c => c.id === id);
-                                                                        handleTeamSelectChange(team.id, {
-                                                                            companyId: id,
-                                                                            companyName: selectedCompany ? selectedCompany.name : ''
-                                                                        });
-                                                                    }}
+                                                                    selectedId={getCompanySelectValue(team) || null}
+                                                                    onSelect={(id: string) => handleTeamCompanySelect(team, id)}
                                                                     placeholder="미소속"
                                                                     minimal={true}
                                                                 />

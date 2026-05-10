@@ -38,7 +38,50 @@ interface Ledger {
     siteId: string;
     rows: GridRow[];
     description: string; // Ledger-level Work Content
+    responsibleTeamId?: string;
+    responsibleTeamName?: string;
 }
+
+type ReviewCandidateSource = 'schedule' | 'kakao';
+type ReviewCandidateAction = 'add-worker' | 'update-worker' | 'exclude-worker' | 'site-cancel';
+type ReviewCandidateStatus = 'pending' | 'applied' | 'ignored';
+type ReviewCandidateConfidence = 'high' | 'medium' | 'low';
+
+interface ReviewCandidate {
+    id: string;
+    source: ReviewCandidateSource;
+    action: ReviewCandidateAction;
+    status: ReviewCandidateStatus;
+    confidence: ReviewCandidateConfidence;
+    siteId: string;
+    siteName: string;
+    responsibleTeamId?: string;
+    responsibleTeamName?: string;
+    row?: GridRow;
+    originalRow?: GridRow;
+    summary: string;
+    detail?: string;
+    originalText?: string;
+    createdAt: number;
+}
+
+const REVIEW_SOURCE_LABELS: Record<ReviewCandidateSource, string> = {
+    schedule: '일정',
+    kakao: '카톡'
+};
+
+const REVIEW_ACTION_LABELS: Record<ReviewCandidateAction, string> = {
+    'add-worker': '추가',
+    'update-worker': '변경',
+    'exclude-worker': '미투입',
+    'site-cancel': '데마'
+};
+
+const REVIEW_CONFIDENCE_LABELS: Record<ReviewCandidateConfidence, string> = {
+    high: '높음',
+    medium: '보통',
+    low: '확인필요'
+};
 
 const normalizeSalaryType = (value?: string | null): string => {
     const normalized = String(value ?? '').trim();
@@ -77,6 +120,15 @@ const resolveReportWorkerSalaryType = (
     return resolveWorkerSalaryType(worker);
 };
 
+const normalizeWorkerName = (value?: string | null): string => {
+    return String(value ?? '').replace(/\s+/g, '').trim();
+};
+
+const isRetiredWorker = (worker?: Partial<Worker> | null): boolean => {
+    const status = String(worker?.status ?? '').trim();
+    return status === '퇴사' || status === '퇴사자' || status === 'inactive' || worker?.isActive === false;
+};
+
 // --- Child Component: DailyReportTable ---
 const DailyReportTable: React.FC<{
     ledger: Ledger;
@@ -84,11 +136,12 @@ const DailyReportTable: React.FC<{
     sites: Site[];
     teams: Team[];
     workerMap: Map<string, Worker & { isDuplicateName?: boolean }>;
+    retiredWorkerMap: Map<string, Worker>;
     globalDuplicateNames: Set<string>;
     onUpdate: (ledgerId: string, updates: Partial<Ledger>) => void;
     onDelete: (ledgerId: string) => void;
     onAddRow: (ledgerId: string) => void; 
-}> = ({ ledger, ledgerIndex, sites, teams, workerMap, globalDuplicateNames, onUpdate, onDelete, onAddRow }) => {
+}> = ({ ledger, ledgerIndex, sites, teams, workerMap, retiredWorkerMap, globalDuplicateNames, onUpdate, onDelete, onAddRow }) => {
 
     const hotRef = useRef<any>(null);
     const isEditingNameCellRef = useRef(false);
@@ -213,6 +266,7 @@ const DailyReportTable: React.FC<{
 
         const newRows = ledger.rows.map(row => ({ ...row }));
         let didChangeName = false;
+        const retiredWorkerNames = new Set<string>();
 
         changes.forEach(([row, col, oldValue, newValue]: [number, number, any, any]) => {
             if (row >= newRows.length) return;
@@ -220,7 +274,7 @@ const DailyReportTable: React.FC<{
             if (col === 0) { // Name column
                 didChangeName = true;
                 const rawName = newValue?.toString() || '';
-                const searchName = rawName.replace(/\s+/g, ''); 
+                const searchName = normalizeWorkerName(rawName); 
                 newRows[row].name = rawName;
 
                 if (searchName) {
@@ -246,10 +300,18 @@ const DailyReportTable: React.FC<{
                             newRows[row].workerTeamId = masterTeamId;
                         }
                     } else {
+                        const retiredWorker = retiredWorkerMap.get(searchName);
+                        if (retiredWorker) {
+                            retiredWorkerNames.add(retiredWorker.name || rawName);
+                        }
                         newRows[row].workerId = '';
                         newRows[row].unitPrice = null;
                         newRows[row].payType = '';
                         newRows[row].role = '작업자';
+                        newRows[row].teamName = '';
+                        newRows[row].teamId = '';
+                        newRows[row].workerTeamName = '';
+                        newRows[row].workerTeamId = '';
                     }
                 } else {
                     newRows[row].workerId = '';
@@ -259,6 +321,8 @@ const DailyReportTable: React.FC<{
                     newRows[row].teamName = '';
                     newRows[row].teamId = '';
                     newRows[row].description = '';
+                    newRows[row].workerTeamName = '';
+                    newRows[row].workerTeamId = '';
                 }
             } else if (col === 1) { 
                 newRows[row].manDay = Number(newValue) || 1;
@@ -280,8 +344,20 @@ const DailyReportTable: React.FC<{
             }
         }
 
+        if (retiredWorkerNames.size > 0) {
+            const names = Array.from(retiredWorkerNames);
+            void Swal.fire({
+                title: '퇴사자',
+                text: names.length === 1
+                    ? `${names[0]}님은 퇴사자로 등록되어 있습니다. 신규 등록이 필요한지, 기존 작업자를 재직으로 변경할지 확인해주세요.`
+                    : `다음 작업자는 퇴사자로 등록되어 있습니다: ${names.join(', ')}. 신규 등록이 필요한지, 기존 작업자를 재직으로 변경할지 확인해주세요.`,
+                icon: 'warning',
+                confirmButtonText: '확인'
+            });
+        }
+
         onUpdate(ledger.id, { rows: newRows });
-    }, [syncDuplicateFromHot, ledger.id, ledger.rows, onUpdate, teams, workerMap]);
+    }, [syncDuplicateFromHot, ledger.id, ledger.rows, onUpdate, teams, workerMap, retiredWorkerMap]);
 
     const normalizedLedgerSiteId = String(ledger.siteId ?? '').trim();
     const siteOptions = useMemo(
@@ -295,13 +371,15 @@ const DailyReportTable: React.FC<{
         [sites]
     );
     const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
+    const ledgerResponsibleTeamId = String(ledger.responsibleTeamId ?? selectedSite?.responsibleTeamId ?? '').trim();
+    const ledgerResponsibleTeamName = String(ledger.responsibleTeamName ?? selectedSite?.responsibleTeamName ?? '').trim();
+    const ledgerSiteType = String(selectedSite?.siteType ?? '').trim();
+    const ledgerPaymentMethod = String(selectedSite?.paymentMethod ?? '').trim();
 
     const siteTeams = useMemo(() => {
-        if (!normalizedLedgerSiteId) return [];
-        const site = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
-        if (!site || !site.responsibleTeamId) return [];
-        return teams.filter(t => t.id === site.responsibleTeamId);
-    }, [normalizedLedgerSiteId, sites, teams]);
+        if (!ledgerResponsibleTeamId) return [];
+        return teams.filter(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId);
+    }, [ledgerResponsibleTeamId, teams]);
 
     const handleAddTeamMembers = (team: Team) => {
         const teamWorkers = Array.from(workerMap.values()).filter(w => w.teamId === team.id);
@@ -341,7 +419,14 @@ const DailyReportTable: React.FC<{
     };
 
     const isSiteMissing = !ledger.siteId;
-    const unknownWorkersCount = ledger.rows.filter(r => r.name.trim() !== '' && !r.workerId).length;
+    const retiredWorkersCount = ledger.rows.filter(r => {
+        const name = normalizeWorkerName(r.name);
+        return name !== '' && !r.workerId && retiredWorkerMap.has(name);
+    }).length;
+    const unknownWorkersCount = ledger.rows.filter(r => {
+        const name = normalizeWorkerName(r.name);
+        return name !== '' && !r.workerId && !retiredWorkerMap.has(name);
+    }).length;
     const totalManDay = ledger.rows.reduce((sum, r) => {
         if (!r.name || r.name.trim() === '') return sum;
         return sum + (Number(r.manDay) || 0);
@@ -357,7 +442,15 @@ const DailyReportTable: React.FC<{
                             <SingleSelectPopover
                                 options={siteOptions}
                                 selectedId={normalizedLedgerSiteId || null}
-                                onSelect={(siteId) => onUpdate(ledger.id, { siteId: String(siteId ?? '').trim() })}
+                                onSelect={(siteId) => {
+                                    const nextSiteId = String(siteId ?? '').trim();
+                                    const nextSite = sites.find((site) => String(site.id ?? '').trim() === nextSiteId);
+                                    onUpdate(ledger.id, {
+                                        siteId: nextSiteId,
+                                        responsibleTeamId: String(nextSite?.responsibleTeamId ?? '').trim(),
+                                        responsibleTeamName: String(nextSite?.responsibleTeamName ?? '').trim()
+                                    });
+                                }}
                                 renderSelected={(selectedOption) => (
                                     <span className="text-slate-800 font-medium">{selectedOption.name}</span>
                                 )}
@@ -372,6 +465,11 @@ const DailyReportTable: React.FC<{
                         {unknownWorkersCount > 0 && (
                             <span className="bg-yellow-400 text-slate-900 text-[10px] px-1.5 rounded-full font-bold flex items-center gap-1" title="등록되지 않은 작업자 수">
                                 <FontAwesomeIcon icon={faExclamationTriangle} /> {unknownWorkersCount}
+                            </span>
+                        )}
+                        {retiredWorkersCount > 0 && (
+                            <span className="bg-orange-400 text-white text-[10px] px-1.5 rounded-full font-bold flex items-center gap-1" title="퇴사자로 등록된 작업자 수">
+                                <FontAwesomeIcon icon={faExclamationTriangle} /> 퇴사 {retiredWorkersCount}
                             </span>
                         )}
                         <button onClick={() => onDelete(ledger.id)} className="ml-1 text-white/70 hover:text-white" title="장부 삭제">
@@ -403,19 +501,31 @@ const DailyReportTable: React.FC<{
                                 <span className="font-medium">{selectedSite.partnerName}</span>
                             </div>
                         )}
-                        {selectedSite.responsibleTeamName && (
+                        {ledgerSiteType && (
+                            <div className="flex items-center gap-1" title="현장 구분">
+                                <span className="opacity-70 text-[9px]">구분:</span>
+                                <span className="font-medium">{ledgerSiteType}</span>
+                            </div>
+                        )}
+                        {ledgerPaymentMethod && (
+                            <div className="flex items-center gap-1" title="결제방식">
+                                <span className="opacity-70 text-[9px]">결제방식:</span>
+                                <span className="font-medium">{ledgerPaymentMethod}</span>
+                            </div>
+                        )}
+                        {ledgerResponsibleTeamName && (
                             <button
                                 onClick={() => {
-                                    const team = siteTeams.find(t => t.id === selectedSite.responsibleTeamId);
+                                    const team = siteTeams.find(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId);
                                     if (team) handleAddTeamMembers(team);
                                 }}
-                                disabled={!siteTeams.find(t => t.id === selectedSite.responsibleTeamId)}
+                                disabled={!siteTeams.find(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId)}
                                 className="flex items-center gap-1 hover:bg-white/20 px-1 py-0.5 rounded cursor-pointer transition-colors"
                                 title="현장담당팀 (클릭하여 팀원 일괄 추가)"
                             >
                                 <span>👷</span>
                                 <span className="opacity-70 text-[9px]">현장담당팀:</span>
-                                <span className="font-medium underline decoration-dotted">{selectedSite.responsibleTeamName}</span>
+                                <span className="font-medium underline decoration-dotted">{ledgerResponsibleTeamName}</span>
                             </button>
                         )}
                     </div>
@@ -465,8 +575,14 @@ const DailyReportTable: React.FC<{
                             if (normalized) {
                                 const matchedWorker = workerMap.get(normalized);
                                 if (!matchedWorker) {
-                                    cellProperties.className = 'unknown-worker-cell';
-                                    cellProperties.title = "등록되지 않았거나 퇴사한 작업자입니다. 확인해주세요.";
+                                    const retiredWorker = retiredWorkerMap.get(normalized);
+                                    if (retiredWorker) {
+                                        cellProperties.className = 'retired-worker-cell';
+                                        cellProperties.title = "퇴사자로 등록된 작업자입니다. 신규 등록 또는 재직 전환 여부를 확인해주세요.";
+                                    } else {
+                                        cellProperties.className = 'unknown-worker-cell';
+                                        cellProperties.title = "등록되지 않은 작업자입니다. 확인해주세요.";
+                                    }
                                 } else if (matchedWorker.isDuplicateName) {
                                     cellProperties.className = 'duplicate-worker-cell';
                                     cellProperties.title = `동명이인이 존재합니다 (${matchedWorker.teamName}). 정확한 인원인지 확인해주세요.`;
@@ -538,20 +654,25 @@ const DailyReportGridInput: React.FC = () => {
     const [isKakaoFileDragging, setIsKakaoFileDragging] = useState(false);
     const [kakaoText, setKakaoText] = useState('');
     const [kakaoFile, setKakaoFile] = useState<File | null>(null);
+    const [reviewCandidates, setReviewCandidates] = useState<ReviewCandidate[]>([]);
+    const [scheduleSnapshot, setScheduleSnapshot] = useState<Ledger[]>([]);
+    const [kakaoSnapshot, setKakaoSnapshot] = useState<Ledger[]>([]);
     const kakaoFileInputRef = useRef<HTMLInputElement>(null);
 
     const normalizeSiteId = useCallback((value: unknown): string => String(value ?? '').trim(), []);
 
     const buildWorkerSearchMap = useCallback((workerList: Worker[]) => {
         const map = new Map<string, Worker & { isDuplicateName?: boolean }>();
-        const activeWorkers = workerList.filter(w => w.status !== '퇴사' && w.status !== '퇴사자');
+        const activeWorkers = workerList.filter(w => !isRetiredWorker(w));
         const nameCounts = new Map<string, number>();
         activeWorkers.forEach(w => {
-            const key = w.name.replace(/\s+/g, '');
+            const key = normalizeWorkerName(w.name);
+            if (!key) return;
             nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
         });
         activeWorkers.forEach(w => {
-            const key = w.name.replace(/\s+/g, '');
+            const key = normalizeWorkerName(w.name);
+            if (!key) return;
             const isDuplicate = nameCounts.get(key)! > 1;
             map.set(key, { ...w, isDuplicateName: isDuplicate });
         });
@@ -559,6 +680,17 @@ const DailyReportGridInput: React.FC = () => {
     }, []);
 
     const workerMap = useMemo(() => buildWorkerSearchMap(workers), [workers, buildWorkerSearchMap]);
+    const retiredWorkerMap = useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach(worker => {
+            if (!isRetiredWorker(worker)) return;
+            const key = normalizeWorkerName(worker.name);
+            if (key && !map.has(key)) {
+                map.set(key, worker);
+            }
+        });
+        return map;
+    }, [workers]);
 
     const globalDuplicateNames = useMemo(() => {
         const counts = new Map<string, number>();
@@ -579,18 +711,26 @@ const DailyReportGridInput: React.FC = () => {
     const validationSummary = useMemo(() => {
         let missingSites = 0;
         let unknownWorkers = 0;
+        let retiredWorkers = 0;
         let totalWorkers = 0;
         ledgers.forEach(ledger => {
             if (!ledger.siteId) missingSites++;
             ledger.rows.forEach(r => {
-                if (r.name.trim() !== '') {
+                const normalizedName = normalizeWorkerName(r.name);
+                if (normalizedName !== '') {
                     totalWorkers++;
-                    if (!r.workerId) unknownWorkers++;
+                    if (!r.workerId) {
+                        if (retiredWorkerMap.has(normalizedName)) {
+                            retiredWorkers++;
+                        } else {
+                            unknownWorkers++;
+                        }
+                    }
                 }
             });
         });
-        return { missingSites, unknownWorkers, totalWorkers };
-    }, [ledgers]);
+        return { missingSites, unknownWorkers, retiredWorkers, totalWorkers };
+    }, [ledgers, retiredWorkerMap]);
 
     const fetchMasterData = useCallback(
         async (options?: { rematchLedgers?: boolean }) => {
@@ -643,19 +783,29 @@ const DailyReportGridInput: React.FC = () => {
         [buildWorkerSearchMap]
     );
 
-    const stateRef = useRef({ ledgers, date });
+    const stateRef = useRef({ ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot });
     const [hasTempData, setHasTempData] = useState(false);
 
     useEffect(() => {
-        stateRef.current = { ledgers, date };
-    }, [ledgers, date]);
+        stateRef.current = { ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot };
+    }, [ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot]);
 
     const performSave = useCallback(() => {
         try {
             const current = stateRef.current;
-            const isInitialEmpty = current.ledgers.length === 0 || (current.ledgers.length === 1 && !current.ledgers[0].siteId && current.ledgers[0].rows.every(r => !r.name || r.name.trim() === ''));
+            const isInitialEmpty = (current.ledgers.length === 0 || (current.ledgers.length === 1 && !current.ledgers[0].siteId && current.ledgers[0].rows.every(r => !r.name || r.name.trim() === '')))
+                && current.reviewCandidates.length === 0
+                && current.scheduleSnapshot.length === 0
+                && current.kakaoSnapshot.length === 0;
             if (isInitialEmpty) return;
-            const tempData = { ledgers: current.ledgers, date: current.date, savedAt: Date.now() };
+            const tempData = {
+                ledgers: current.ledgers,
+                date: current.date,
+                reviewCandidates: current.reviewCandidates,
+                scheduleSnapshot: current.scheduleSnapshot,
+                kakaoSnapshot: current.kakaoSnapshot,
+                savedAt: Date.now()
+            };
             localStorage.setItem('daily_report_temp_data', JSON.stringify(tempData));
             setHasTempData(true);
         } catch (e) {
@@ -674,6 +824,9 @@ const DailyReportGridInput: React.FC = () => {
             }
             setLedgers(tempData.ledgers);
             if (tempData.date) setDate(tempData.date);
+            if (Array.isArray(tempData.reviewCandidates)) setReviewCandidates(tempData.reviewCandidates);
+            if (Array.isArray(tempData.scheduleSnapshot)) setScheduleSnapshot(tempData.scheduleSnapshot);
+            if (Array.isArray(tempData.kakaoSnapshot)) setKakaoSnapshot(tempData.kakaoSnapshot);
             setHasTempData(true);
             return true;
         } catch (e) {
@@ -686,12 +839,15 @@ const DailyReportGridInput: React.FC = () => {
     const clearTempData = useCallback(() => {
         localStorage.removeItem('daily_report_temp_data');
         setHasTempData(false);
+        setReviewCandidates([]);
+        setScheduleSnapshot([]);
+        setKakaoSnapshot([]);
     }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => { performSave(); }, 1000);
         return () => clearTimeout(timer);
-    }, [ledgers, date, performSave]);
+    }, [ledgers, date, reviewCandidates, scheduleSnapshot, kakaoSnapshot, performSave]);
 
     useEffect(() => {
         const handleBeforeUnload = () => { performSave(); };
@@ -720,6 +876,9 @@ const DailyReportGridInput: React.FC = () => {
             const newLedgers: Ledger[] = [];
             siteGroups.forEach((siteReports, siteId) => {
                 const uniqueContent = Array.from(new Set(siteReports.map(r => r.workContent).filter(Boolean))).join(', ');
+                const responsibleReport = siteReports.find((report) => String(report.responsibleTeamName ?? report.responsibleTeamId ?? '').trim());
+                const responsibleTeamId = String(responsibleReport?.responsibleTeamId ?? '').trim();
+                const responsibleTeamName = String(responsibleReport?.responsibleTeamName ?? '').trim();
                 const aggregatedRows: GridRow[] = [];
                 siteReports.forEach(report => {
                     const reportTeamId = report.teamId || '';
@@ -753,7 +912,14 @@ const DailyReportGridInput: React.FC = () => {
                 if (needed > 0) rows.push(...createEmptyRows(needed));
                 else rows.push(...createEmptyRows(5));
 
-                newLedgers.push({ id: Date.now().toString() + Math.random(), siteId, rows: rows, description: uniqueContent });
+                newLedgers.push({
+                    id: Date.now().toString() + Math.random(),
+                    siteId,
+                    rows,
+                    description: uniqueContent,
+                    responsibleTeamId,
+                    responsibleTeamName
+                });
             });
             return newLedgers;
         } catch (error) {
@@ -771,17 +937,26 @@ const DailyReportGridInput: React.FC = () => {
             const serverLedgers = await fetchReportsForDate(date);
             if (serverLedgers && serverLedgers.length > 0) {
                 setLedgers(serverLedgers);
+                setReviewCandidates([]);
+                setScheduleSnapshot([]);
+                setKakaoSnapshot([]);
                 setHasTempData(false);
             } else {
                 const loaded = await loadTempData();
                 if (!loaded) {
                     setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+                    setReviewCandidates([]);
+                    setScheduleSnapshot([]);
+                    setKakaoSnapshot([]);
                 } else {
                     const tempDataStr = localStorage.getItem('daily_report_temp_data');
                     if (tempDataStr) {
                         const parsed = JSON.parse(tempDataStr);
                         if (parsed.date !== date) {
                             setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+                            setReviewCandidates([]);
+                            setScheduleSnapshot([]);
+                            setKakaoSnapshot([]);
                             setHasTempData(false);
                         }
                     }
@@ -803,12 +978,12 @@ const DailyReportGridInput: React.FC = () => {
         return () => window.removeEventListener('smart-construction:master-data-changed', onMasterDataChanged);
     }, [fetchMasterData]);
 
-    const createEmptyRows = (count: number): GridRow[] => {
+    const createEmptyRows = useCallback((count: number): GridRow[] => {
         return Array(count).fill(null).map(() => ({
             id: Math.random().toString(36).substr(2, 9),
             teamId: '', teamName: '', workerId: '', name: '', manDay: 1.0, unitPrice: null, payType: '', role: '작업자', description: '', workerTeamId: '', workerTeamName: ''
         }));
-    };
+    }, []);
 
     const normalizeLookupText = useCallback((value?: string | null): string => {
         return String(value ?? '').replace(/\s+/g, '').trim();
@@ -834,44 +1009,151 @@ const DailyReportGridInput: React.FC = () => {
     const findWorkerByAnalyzedName = useCallback((workerName?: string | null): (Worker & { isDuplicateName?: boolean }) | undefined => {
         const normalized = normalizeLookupText(workerName);
         if (!normalized) return undefined;
-        return workerMap.get(normalized) || workers.find(w => normalizeLookupText(w.name) === normalized);
-    }, [normalizeLookupText, workerMap, workers]);
+        return workerMap.get(normalized);
+    }, [normalizeLookupText, workerMap]);
+
+    const createCandidateId = useCallback((source: ReviewCandidateSource): string => {
+        return `${source}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    }, []);
+
+    const cloneLedgers = useCallback((sourceLedgers: Ledger[]): Ledger[] => {
+        return sourceLedgers.map(ledger => ({
+            ...ledger,
+            rows: ledger.rows.map(row => ({ ...row }))
+        }));
+    }, []);
+
+    const countLedgerWorkers = useCallback((sourceLedgers: Ledger[]): number => {
+        return sourceLedgers.reduce((sum, ledger) => sum + ledger.rows.filter(row => row.name.trim()).length, 0);
+    }, []);
+
+    const findReviewRowIndex = useCallback((rows: GridRow[], target?: GridRow): number => {
+        if (!target) return -1;
+        const targetWorkerId = normalizeSiteId(target.workerId);
+        const targetName = normalizeLookupText(target.name);
+        if (!targetWorkerId && !targetName) return -1;
+
+        return rows.findIndex(row => {
+            if (!row.name.trim()) return false;
+            if (targetWorkerId && normalizeSiteId(row.workerId) === targetWorkerId) return true;
+            return Boolean(targetName) && normalizeLookupText(row.name) === targetName;
+        });
+    }, [normalizeLookupText, normalizeSiteId]);
+
+    const findLedgerBySiteIndex = useCallback((sourceLedgers: Ledger[], siteId: string, siteName?: string): number => {
+        const normalizedSiteId = normalizeSiteId(siteId);
+        const normalizedSiteName = normalizeLookupText(siteName);
+        return sourceLedgers.findIndex(ledger => {
+            if (normalizedSiteId && normalizeSiteId(ledger.siteId) === normalizedSiteId) return true;
+            if (!normalizedSiteName) return false;
+            const site = sites.find(candidate => normalizeSiteId(candidate.id) === normalizeSiteId(ledger.siteId));
+            return normalizeLookupText(site?.name) === normalizedSiteName;
+        });
+    }, [normalizeLookupText, normalizeSiteId, sites]);
+
+    const hasCancelKeyword = useCallback((value?: string | null): boolean => {
+        return /데마|대마|취소|안감|작업없|작업\s*없|철수|중단/.test(String(value ?? ''));
+    }, []);
+
+    const applyCandidateToLedgerState = useCallback((sourceLedgers: Ledger[], candidate: ReviewCandidate): Ledger[] => {
+        const nextLedgers = sourceLedgers.map(ledger => ({
+            ...ledger,
+            rows: ledger.rows.map(row => ({ ...row }))
+        }));
+
+        let ledgerIndex = findLedgerBySiteIndex(nextLedgers, candidate.siteId, candidate.siteName);
+        if (ledgerIndex === -1) {
+            nextLedgers.push({
+                id: Date.now().toString() + Math.random(),
+                siteId: candidate.siteId,
+                rows: createEmptyRows(20),
+                description: '',
+                responsibleTeamId: candidate.responsibleTeamId,
+                responsibleTeamName: candidate.responsibleTeamName
+            });
+            ledgerIndex = nextLedgers.length - 1;
+        }
+
+        const ledger = nextLedgers[ledgerIndex];
+        if (!ledger.responsibleTeamId && candidate.responsibleTeamId) ledger.responsibleTeamId = candidate.responsibleTeamId;
+        if (!ledger.responsibleTeamName && candidate.responsibleTeamName) ledger.responsibleTeamName = candidate.responsibleTeamName;
+
+        if (candidate.action === 'site-cancel') {
+            ledger.rows = createEmptyRows(Math.max(20, ledger.rows.length));
+            ledger.description = ledger.description ? `${ledger.description}, 데마` : '데마';
+            return nextLedgers;
+        }
+
+        const targetRow = candidate.row || candidate.originalRow;
+        if (!targetRow) return nextLedgers;
+
+        const existingIndex = findReviewRowIndex(ledger.rows, targetRow);
+        if (candidate.action === 'exclude-worker') {
+            if (existingIndex >= 0) {
+                ledger.rows[existingIndex] = createEmptyRows(1)[0];
+            }
+            return nextLedgers;
+        }
+
+        const nextRow = { ...targetRow, id: targetRow.id || Math.random().toString(36).substr(2, 9) };
+        if (existingIndex >= 0) {
+            ledger.rows[existingIndex] = {
+                ...ledger.rows[existingIndex],
+                ...nextRow,
+                id: ledger.rows[existingIndex].id
+            };
+        } else {
+            let emptyIndex = ledger.rows.findIndex(row => !row.name.trim());
+            if (emptyIndex === -1) {
+                ledger.rows.push(...createEmptyRows(5));
+                emptyIndex = ledger.rows.findIndex(row => !row.name.trim());
+            }
+            ledger.rows[emptyIndex] = nextRow;
+        }
+
+        if (!ledger.description && candidate.detail) {
+            ledger.description = candidate.detail;
+        }
+
+        return nextLedgers;
+    }, [createEmptyRows, findLedgerBySiteIndex, findReviewRowIndex]);
+
+    const applyReviewCandidate = useCallback((candidateId: string) => {
+        setReviewCandidates(prev => {
+            const candidate = prev.find(item => item.id === candidateId);
+            if (!candidate || candidate.status !== 'pending') return prev;
+            setLedgers(current => applyCandidateToLedgerState(current, candidate));
+            return prev.map(item => item.id === candidateId ? { ...item, status: 'applied' } : item);
+        });
+    }, [applyCandidateToLedgerState]);
+
+    const ignoreReviewCandidate = useCallback((candidateId: string) => {
+        setReviewCandidates(prev => prev.map(item => item.id === candidateId ? { ...item, status: 'ignored' } : item));
+    }, []);
+
+    const applySafeReviewCandidates = useCallback(() => {
+        setReviewCandidates(prev => {
+            const safeCandidates = prev.filter(item =>
+                item.status === 'pending' &&
+                item.action === 'add-worker' &&
+                item.confidence !== 'low'
+            );
+            if (safeCandidates.length === 0) return prev;
+
+            setLedgers(current => safeCandidates.reduce((ledgers, candidate) => applyCandidateToLedgerState(ledgers, candidate), current));
+            const appliedIds = new Set(safeCandidates.map(item => item.id));
+            return prev.map(item => appliedIds.has(item.id) ? { ...item, status: 'applied' } : item);
+        });
+    }, [applyCandidateToLedgerState]);
+
+    const clearReviewedCandidates = useCallback(() => {
+        setReviewCandidates(prev => prev.filter(item => item.status === 'pending'));
+    }, []);
 
     const getScheduleWorkerIds = useCallback((assignment: DispatchAssignment): string[] => {
         const directWorkerIds = Array.isArray(assignment.workerIds) ? assignment.workerIds : [];
-        const supportTeams = Array.isArray(assignment.supportTeams) ? assignment.supportTeams : [];
-        const supportTeamIds = new Set(
-            [
-                ...(Array.isArray(assignment.supportTeamIds) ? assignment.supportTeamIds : []),
-                ...supportTeams.map(team => team.id)
-            ]
-                .map(normalizeSiteId)
-                .filter(Boolean)
-        );
-        const supportTeamNames = new Set(
-            supportTeams
-                .map(team => normalizeLookupText(team.name))
-                .filter(Boolean)
-        );
-
-        const supportWorkerIds = workers
-            .filter(worker => {
-                const workerId = normalizeSiteId(worker.id);
-                if (!workerId) return false;
-                if (worker.isActive === false) return false;
-                const status = String(worker.status ?? '');
-                if (status === '퇴사' || status === '퇴사자' || status === 'inactive' || status === '출입금지') return false;
-                const workerTeamId = normalizeSiteId(worker.teamId);
-                const workerTeamName = normalizeLookupText(worker.teamName);
-                return Boolean(
-                    (workerTeamId && supportTeamIds.has(workerTeamId)) ||
-                    (workerTeamName && supportTeamNames.has(workerTeamName))
-                );
-            })
-            .map(worker => normalizeSiteId(worker.id));
-
-        return Array.from(new Set([...directWorkerIds, ...supportWorkerIds].map(normalizeSiteId).filter(Boolean)));
-    }, [normalizeLookupText, normalizeSiteId, workers]);
+        return Array.from(new Set(directWorkerIds.map(normalizeSiteId).filter(Boolean)));
+    }, [normalizeSiteId]);
 
     const appendAnalyzedReports = useCallback((analyzedReports: AnalyzedDailyReport[]) => {
         const newLedgers: Ledger[] = [];
@@ -896,10 +1178,12 @@ const DailyReportGridInput: React.FC = () => {
                 const analyzedManDay = Number(analyzedWorker.manDay);
                 const manDay = Number.isFinite(analyzedManDay) && analyzedManDay > 0 ? analyzedManDay : 1;
                 const workerWorkContent = analyzedWorker.workContent || report.workContent || '';
+                const workerTeamName = matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || (isSupportTeam ? 'support' : '');
+                /*
                 const workerTeamName = isSupportTeam
                     ? '지원'
                     : (matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || '');
-
+                */
                 rows[idx] = {
                     id: Math.random().toString(36).substr(2, 9),
                     name: analyzedWorker.name,
@@ -909,7 +1193,10 @@ const DailyReportGridInput: React.FC = () => {
                     workerId: worker?.id || '',
                     unitPrice: worker?.unitPrice || 0,
                     payType: resolveWorkerSalaryType(worker),
+                    /*
                     role: analyzedWorker.role || worker?.role || '작업자',
+                    */
+                    role: analyzedWorker.role || worker?.role || 'worker',
                     description: workerWorkContent,
                     workerTeamId: worker?.teamId || '',
                     workerTeamName
@@ -918,7 +1205,14 @@ const DailyReportGridInput: React.FC = () => {
 
             const aggregatedContent = report.workContent
                 || Array.from(new Set(reportWorkers.map(w => w.workContent).filter(Boolean))).join(', ');
-            newLedgers.push({ id: Date.now().toString() + Math.random(), siteId, rows, description: aggregatedContent });
+            newLedgers.push({
+                id: Date.now().toString() + Math.random(),
+                siteId,
+                rows,
+                description: aggregatedContent,
+                responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                responsibleTeamName: String(site?.responsibleTeamName ?? '').trim()
+            });
         }
 
         if (newLedgers.length > 0) {
@@ -930,6 +1224,462 @@ const DailyReportGridInput: React.FC = () => {
 
         return { ledgerCount: newLedgers.length, totalUnknowns };
     }, [findSiteByAnalyzedName, findWorkerByAnalyzedName, normalizeLookupText, teams]);
+
+    const appendAnalyzedReviewCandidates = useCallback((analyzedReports: AnalyzedDailyReport[], sourceText = '') => {
+        const candidates: ReviewCandidate[] = [];
+        const analyzedWorkerKeysBySite = new Map<string, Set<string>>();
+        const reportedSiteKeys = new Set<string>();
+        let totalUnknowns = 0;
+        let missingCount = 0;
+        let cancelCount = 0;
+
+        const buildWorkerKey = (workerId?: string | null, workerName?: string | null) => {
+            const normalizedWorkerId = normalizeSiteId(workerId);
+            if (normalizedWorkerId) return `id:${normalizedWorkerId}`;
+            const normalizedName = normalizeLookupText(workerName);
+            return normalizedName ? `name:${normalizedName}` : '';
+        };
+
+        for (const report of analyzedReports) {
+            const reportWorkers = Array.isArray(report.workers)
+                ? report.workers.filter(w => normalizeLookupText(w?.name))
+                : [];
+            const site = findSiteByAnalyzedName(report.siteName);
+            const siteId = normalizeSiteId(site?.id);
+            const siteName = site?.name || report.siteName || '';
+            const siteKey = siteId || normalizeLookupText(siteName);
+            const aggregatedContent = report.workContent
+                || Array.from(new Set(reportWorkers.map(w => w.workContent).filter(Boolean))).join(', ');
+
+            if (siteKey) {
+                reportedSiteKeys.add(siteKey);
+                if (!analyzedWorkerKeysBySite.has(siteKey)) analyzedWorkerKeysBySite.set(siteKey, new Set<string>());
+            }
+
+            if (reportWorkers.length === 0) {
+                if (siteKey && hasCancelKeyword(`${report.siteName || ''} ${report.workContent || ''} ${sourceText}`)) {
+                    candidates.push({
+                        id: createCandidateId('kakao'),
+                        source: 'kakao',
+                        action: 'site-cancel',
+                        status: 'pending',
+                        confidence: site ? 'medium' : 'low',
+                        siteId,
+                        siteName,
+                        responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                        responsibleTeamName: String(site?.responsibleTeamName ?? '').trim(),
+                        summary: `${siteName || '현장 미확인'} 데마 후보`,
+                        detail: aggregatedContent || '데마',
+                        originalText: sourceText,
+                        createdAt: Date.now()
+                    });
+                    cancelCount++;
+                }
+                continue;
+            }
+
+            for (const analyzedWorker of reportWorkers) {
+                const worker = findWorkerByAnalyzedName(analyzedWorker.name);
+                if (!worker) totalUnknowns++;
+
+                const matchedTeam = worker?.teamId ? teams.find(t => t.id === worker.teamId) : undefined;
+                const isSupportTeam = worker?.teamType === '吏?먰?';
+                const analyzedManDay = Number(analyzedWorker.manDay);
+                const manDay = Number.isFinite(analyzedManDay) && analyzedManDay > 0 ? analyzedManDay : 1;
+                const workerWorkContent = analyzedWorker.workContent || aggregatedContent || '';
+                const workerTeamName = matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || (isSupportTeam ? 'support' : '');
+                /*
+                const workerTeamName = isSupportTeam
+                    ? '지원'
+                    : (matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || '');
+                */
+                const row: GridRow = {
+                    id: Math.random().toString(36).substr(2, 9),
+                    name: worker?.name || analyzedWorker.name,
+                    manDay,
+                    teamId: worker?.teamId || '',
+                    teamName: workerTeamName,
+                    workerId: worker?.id || '',
+                    unitPrice: worker?.unitPrice || 0,
+                    payType: worker ? resolveWorkerSalaryType(worker) : '',
+                    /*
+                    role: analyzedWorker.role || worker?.role || '?묒뾽??,
+                    description: workerWorkContent,
+                    workerTeamId: worker?.teamId || '',
+                    workerTeamName
+                };
+
+                    */
+                    role: analyzedWorker.role || worker?.role || 'worker',
+                    description: workerWorkContent,
+                    workerTeamId: worker?.teamId || '',
+                    workerTeamName
+                };
+
+                const workerKey = buildWorkerKey(row.workerId, row.name);
+                if (siteKey && workerKey) analyzedWorkerKeysBySite.get(siteKey)?.add(workerKey);
+
+                const ledgerIndex = findLedgerBySiteIndex(ledgers, siteId, siteName);
+                const existingRowIndex = ledgerIndex >= 0 ? findReviewRowIndex(ledgers[ledgerIndex].rows, row) : -1;
+                const existingRow = ledgerIndex >= 0 && existingRowIndex >= 0 ? ledgers[ledgerIndex].rows[existingRowIndex] : undefined;
+                const action: ReviewCandidateAction = existingRow ? 'update-worker' : 'add-worker';
+                const manDayChanged = existingRow && Number(existingRow.manDay || 0) !== manDay;
+                const confidence: ReviewCandidateConfidence = site && worker ? 'high' : worker ? 'medium' : 'low';
+
+                candidates.push({
+                    id: createCandidateId('kakao'),
+                    source: 'kakao',
+                    action,
+                    status: 'pending',
+                    confidence,
+                    siteId,
+                    siteName,
+                    responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                    responsibleTeamName: String(site?.responsibleTeamName ?? '').trim(),
+                    row,
+                    originalRow: existingRow,
+                    summary: worker
+                        ? `${row.name} ${action === 'add-worker' ? '추가 후보' : manDayChanged ? `${existingRow?.manDay} -> ${manDay}공수` : '출역 확인'}`
+                        : `${row.name} 미등록 작업자 후보`,
+                    detail: workerWorkContent,
+                    originalText: sourceText,
+                    createdAt: Date.now()
+                });
+            }
+        }
+
+        ledgers.forEach(ledger => {
+            const site = sites.find(candidate => normalizeSiteId(candidate.id) === normalizeSiteId(ledger.siteId));
+            const siteKey = normalizeSiteId(ledger.siteId) || normalizeLookupText(site?.name);
+            if (!siteKey || !reportedSiteKeys.has(siteKey)) return;
+            const analyzedKeys = analyzedWorkerKeysBySite.get(siteKey) || new Set<string>();
+
+            ledger.rows.forEach(row => {
+                if (!row.name.trim()) return;
+                const rowKey = buildWorkerKey(row.workerId, row.name);
+                if (!rowKey || analyzedKeys.has(rowKey)) return;
+                candidates.push({
+                    id: createCandidateId('kakao'),
+                    source: 'kakao',
+                    action: 'exclude-worker',
+                    status: 'pending',
+                    confidence: 'low',
+                    siteId: normalizeSiteId(ledger.siteId),
+                    siteName: site?.name || '',
+                    responsibleTeamId: ledger.responsibleTeamId,
+                    responsibleTeamName: ledger.responsibleTeamName,
+                    originalRow: row,
+                    summary: `${row.name} 카톡 미확인`,
+                    detail: '일정/현재 입력에는 있지만 카톡 분석에는 없는 작업자입니다.',
+                    originalText: sourceText,
+                    createdAt: Date.now()
+                });
+                missingCount++;
+            });
+        });
+
+        if (candidates.length > 0) {
+            setReviewCandidates(prev => [...prev, ...candidates]);
+        }
+
+        return { ledgerCount: candidates.length, totalUnknowns, missingCount, cancelCount };
+    }, [createCandidateId, findLedgerBySiteIndex, findReviewRowIndex, findSiteByAnalyzedName, findWorkerByAnalyzedName, hasCancelKeyword, ledgers, normalizeLookupText, normalizeSiteId, sites, teams]);
+
+    const buildKakaoSnapshotLedgers = useCallback((analyzedReports: AnalyzedDailyReport[]) => {
+        const ledgerBySiteKey = new Map<string, Ledger>();
+        let totalUnknowns = 0;
+
+        analyzedReports.forEach((report, reportIndex) => {
+            const reportWorkers = Array.isArray(report.workers)
+                ? report.workers.filter(w => normalizeLookupText(w?.name))
+                : [];
+            if (reportWorkers.length === 0) return;
+
+            const site = findSiteByAnalyzedName(report.siteName);
+            const siteId = normalizeSiteId(site?.id);
+            const siteName = site?.name || report.siteName || '';
+            const siteKey = siteId || normalizeLookupText(siteName) || `unknown-site-${reportIndex}`;
+            const aggregatedContent = report.workContent
+                || Array.from(new Set(reportWorkers.map(w => w.workContent).filter(Boolean))).join(', ');
+
+            if (!ledgerBySiteKey.has(siteKey)) {
+                ledgerBySiteKey.set(siteKey, {
+                    id: Date.now().toString() + Math.random(),
+                    siteId,
+                    rows: [],
+                    description: aggregatedContent,
+                    responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                    responsibleTeamName: String(site?.responsibleTeamName ?? '').trim()
+                });
+            }
+
+            const ledger = ledgerBySiteKey.get(siteKey)!;
+            if (aggregatedContent && !ledger.description.includes(aggregatedContent)) {
+                ledger.description = ledger.description ? `${ledger.description}, ${aggregatedContent}` : aggregatedContent;
+            }
+
+            reportWorkers.forEach((analyzedWorker) => {
+                const worker = findWorkerByAnalyzedName(analyzedWorker.name);
+                if (!worker) totalUnknowns += 1;
+
+                const matchedTeam = worker?.teamId ? teams.find(t => t.id === worker.teamId) : undefined;
+                const analyzedManDay = Number(analyzedWorker.manDay);
+                const manDay = Number.isFinite(analyzedManDay) && analyzedManDay > 0 ? analyzedManDay : 1;
+                const workerWorkContent = analyzedWorker.workContent || aggregatedContent || '';
+                const workerTeamName = matchedTeam?.name || worker?.teamName || analyzedWorker.teamName || report.teamName || '';
+
+                ledger.rows.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    teamId: worker?.teamId || '',
+                    teamName: workerTeamName,
+                    workerId: worker?.id || '',
+                    name: worker?.name || analyzedWorker.name,
+                    manDay,
+                    unitPrice: worker?.unitPrice ?? 0,
+                    payType: worker ? resolveWorkerSalaryType(worker) : '',
+                    role: analyzedWorker.role || worker?.role || '작업자',
+                    description: workerWorkContent,
+                    workerTeamId: worker?.teamId || '',
+                    workerTeamName
+                });
+            });
+        });
+
+        const snapshotLedgers = Array.from(ledgerBySiteKey.values()).map(ledger => {
+            const rows = ledger.rows.map(row => ({ ...row }));
+            const needed = 20 - rows.length;
+            if (needed > 0) rows.push(...createEmptyRows(needed));
+            else rows.push(...createEmptyRows(5));
+            return { ...ledger, rows };
+        });
+
+        return { ledgers: snapshotLedgers, totalUnknowns };
+    }, [createEmptyRows, findSiteByAnalyzedName, findWorkerByAnalyzedName, normalizeLookupText, normalizeSiteId, teams]);
+
+    const appendKakaoOriginalLedgers = useCallback((analyzedReports: AnalyzedDailyReport[]) => {
+        const { ledgers: analyzedLedgers, totalUnknowns } = buildKakaoSnapshotLedgers(analyzedReports);
+
+        if (analyzedLedgers.length > 0) {
+            setKakaoSnapshot(cloneLedgers(analyzedLedgers));
+            setReviewCandidates([]);
+            setLedgers(prev => {
+                const isInitialEmpty = prev.length === 0 || (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(row => !row.name.trim()));
+                return isInitialEmpty ? cloneLedgers(analyzedLedgers) : [...prev, ...cloneLedgers(analyzedLedgers)];
+            });
+        }
+
+        return {
+            ledgerCount: analyzedLedgers.length,
+            totalUnknowns,
+            workerCount: countLedgerWorkers(analyzedLedgers)
+        };
+    }, [buildKakaoSnapshotLedgers, cloneLedgers, countLedgerWorkers]);
+
+    const appendComparedKakaoCandidates = useCallback((analyzedReports: AnalyzedDailyReport[], sourceText = '') => {
+        const { ledgers: nextKakaoSnapshot, totalUnknowns } = buildKakaoSnapshotLedgers(analyzedReports);
+        setKakaoSnapshot(nextKakaoSnapshot);
+
+        const candidates: ReviewCandidate[] = [];
+        const reportedSiteKeys = new Set<string>();
+        const cancelSiteKeys = new Set<string>();
+        let missingCount = 0;
+        let cancelCount = 0;
+
+        const findSiteName = (siteId: string, fallbackName = '') => {
+            const site = sites.find(candidate => normalizeSiteId(candidate.id) === normalizeSiteId(siteId));
+            return site?.name || fallbackName;
+        };
+
+        const getLedgerSiteKey = (ledger: Ledger, fallbackName = '') => {
+            return normalizeSiteId(ledger.siteId) || normalizeLookupText(findSiteName(ledger.siteId, fallbackName));
+        };
+
+        const getMatchedRow = (sourceLedgers: Ledger[], siteId: string, siteName: string, targetRow: GridRow): GridRow | undefined => {
+            const ledgerIndex = findLedgerBySiteIndex(sourceLedgers, siteId, siteName);
+            if (ledgerIndex < 0) return undefined;
+            const rowIndex = findReviewRowIndex(sourceLedgers[ledgerIndex].rows, targetRow);
+            return rowIndex >= 0 ? sourceLedgers[ledgerIndex].rows[rowIndex] : undefined;
+        };
+
+        const rowDetail = (label: string, row?: GridRow) => {
+            if (!row || !row.name.trim()) return `${label}: 없음`;
+            return `${label}: ${row.name} ${Number(row.manDay || 0)}공수`;
+        };
+
+        analyzedReports.forEach((report) => {
+            const reportWorkers = Array.isArray(report.workers)
+                ? report.workers.filter(w => normalizeLookupText(w?.name))
+                : [];
+            if (reportWorkers.length > 0) return;
+
+            const site = findSiteByAnalyzedName(report.siteName);
+            const siteId = normalizeSiteId(site?.id);
+            const siteName = site?.name || report.siteName || '';
+            const siteKey = siteId || normalizeLookupText(siteName);
+            if (!siteKey || !hasCancelKeyword(`${report.siteName || ''} ${report.workContent || ''} ${sourceText}`)) return;
+
+            reportedSiteKeys.add(siteKey);
+            cancelSiteKeys.add(siteKey);
+            candidates.push({
+                id: createCandidateId('kakao'),
+                source: 'kakao',
+                action: 'site-cancel',
+                status: 'pending',
+                confidence: site ? 'medium' : 'low',
+                siteId,
+                siteName,
+                responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                responsibleTeamName: String(site?.responsibleTeamName ?? '').trim(),
+                summary: `${siteName || '현장 미확인'} 데마 의심`,
+                detail: report.workContent || sourceText,
+                originalText: sourceText,
+                createdAt: Date.now()
+            });
+            cancelCount += 1;
+        });
+
+        nextKakaoSnapshot.forEach((kakaoLedger) => {
+            const siteName = findSiteName(kakaoLedger.siteId);
+            const siteKey = getLedgerSiteKey(kakaoLedger, siteName);
+            if (siteKey) reportedSiteKeys.add(siteKey);
+
+            kakaoLedger.rows.forEach((kakaoRow) => {
+                if (!kakaoRow.name.trim()) return;
+
+                const currentRow = getMatchedRow(ledgers, kakaoLedger.siteId, siteName, kakaoRow);
+                const scheduleRow = getMatchedRow(scheduleSnapshot, kakaoLedger.siteId, siteName, kakaoRow);
+                const currentManDay = Number(currentRow?.manDay || 0);
+                const kakaoManDay = Number(kakaoRow.manDay || 0);
+                const scheduleManDay = Number(scheduleRow?.manDay || 0);
+                const manDayChanged = Boolean(currentRow) && Math.abs(currentManDay - kakaoManDay) > 0.001;
+                const manualChanged = Boolean(currentRow && scheduleRow) && Math.abs(currentManDay - scheduleManDay) > 0.001;
+                const needsWorkerMatch = Boolean(currentRow && !currentRow.workerId && kakaoRow.workerId);
+                const confidence: ReviewCandidateConfidence = kakaoLedger.siteId && kakaoRow.workerId ? 'high' : kakaoRow.workerId ? 'medium' : 'low';
+
+                if (!currentRow) {
+                    candidates.push({
+                        id: createCandidateId('kakao'),
+                        source: 'kakao',
+                        action: 'add-worker',
+                        status: 'pending',
+                        confidence,
+                        siteId: kakaoLedger.siteId,
+                        siteName,
+                        responsibleTeamId: kakaoLedger.responsibleTeamId,
+                        responsibleTeamName: kakaoLedger.responsibleTeamName,
+                        row: kakaoRow,
+                        summary: `${kakaoRow.name} 카톡 추가 작업자`,
+                        detail: [rowDetail('일정', scheduleRow), rowDetail('현재', currentRow), rowDetail('카톡', kakaoRow)].join(' / '),
+                        originalText: sourceText,
+                        createdAt: Date.now()
+                    });
+                    return;
+                }
+
+                if (manDayChanged || needsWorkerMatch) {
+                    const detailParts = [rowDetail('일정', scheduleRow), rowDetail('현재', currentRow), rowDetail('카톡', kakaoRow)];
+                    if (manualChanged) detailParts.push('현재 입력값이 일정과 달라 수동 수정 가능성이 있습니다.');
+
+                    candidates.push({
+                        id: createCandidateId('kakao'),
+                        source: 'kakao',
+                        action: 'update-worker',
+                        status: 'pending',
+                        confidence,
+                        siteId: kakaoLedger.siteId,
+                        siteName,
+                        responsibleTeamId: kakaoLedger.responsibleTeamId,
+                        responsibleTeamName: kakaoLedger.responsibleTeamName,
+                        row: kakaoRow,
+                        originalRow: currentRow,
+                        summary: manDayChanged ? `${kakaoRow.name} 공수 차이` : `${kakaoRow.name} 작업자 정보 보완`,
+                        detail: detailParts.join(' / '),
+                        originalText: sourceText,
+                        createdAt: Date.now()
+                    });
+                }
+            });
+        });
+
+        ledgers.forEach((currentLedger) => {
+            const siteName = findSiteName(currentLedger.siteId);
+            const siteKey = getLedgerSiteKey(currentLedger, siteName);
+            if (!siteKey || !reportedSiteKeys.has(siteKey) || cancelSiteKeys.has(siteKey)) return;
+
+            const kakaoLedgerIndex = findLedgerBySiteIndex(nextKakaoSnapshot, currentLedger.siteId, siteName);
+            const kakaoLedger = kakaoLedgerIndex >= 0 ? nextKakaoSnapshot[kakaoLedgerIndex] : undefined;
+            if (!kakaoLedger) return;
+
+            currentLedger.rows.forEach((currentRow) => {
+                if (!currentRow.name.trim()) return;
+                const kakaoRowIndex = findReviewRowIndex(kakaoLedger.rows, currentRow);
+                if (kakaoRowIndex >= 0) return;
+
+                const scheduleRow = getMatchedRow(scheduleSnapshot, currentLedger.siteId, siteName, currentRow);
+                candidates.push({
+                    id: createCandidateId('kakao'),
+                    source: 'kakao',
+                    action: 'exclude-worker',
+                    status: 'pending',
+                    confidence: 'low',
+                    siteId: normalizeSiteId(currentLedger.siteId),
+                    siteName,
+                    responsibleTeamId: currentLedger.responsibleTeamId,
+                    responsibleTeamName: currentLedger.responsibleTeamName,
+                    originalRow: currentRow,
+                    summary: `${currentRow.name} 카톡 미확인`,
+                    detail: [rowDetail('일정', scheduleRow), rowDetail('현재', currentRow), '카톡: 없음'].join(' / '),
+                    originalText: sourceText,
+                    createdAt: Date.now()
+                });
+                missingCount += 1;
+            });
+        });
+
+        setReviewCandidates(candidates);
+        return {
+            ledgerCount: candidates.length,
+            totalUnknowns,
+            missingCount,
+            cancelCount,
+            kakaoWorkerCount: countLedgerWorkers(nextKakaoSnapshot)
+        };
+    }, [buildKakaoSnapshotLedgers, countLedgerWorkers, createCandidateId, findLedgerBySiteIndex, findReviewRowIndex, findSiteByAnalyzedName, hasCancelKeyword, ledgers, normalizeLookupText, normalizeSiteId, scheduleSnapshot, sites]);
+
+    const appendKakaoCancelTextCandidates = useCallback((text: string): number => {
+        if (!hasCancelKeyword(text)) return 0;
+        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const candidates: ReviewCandidate[] = [];
+
+        sites.forEach(site => {
+            const siteName = String(site.name ?? '').trim();
+            const siteKey = normalizeLookupText(siteName);
+            if (!siteKey) return;
+            const matchedLine = lines.find(line => hasCancelKeyword(line) && normalizeLookupText(line).includes(siteKey));
+            if (!matchedLine) return;
+
+            candidates.push({
+                id: createCandidateId('kakao'),
+                source: 'kakao',
+                action: 'site-cancel',
+                status: 'pending',
+                confidence: 'medium',
+                siteId: normalizeSiteId(site.id),
+                siteName,
+                responsibleTeamId: normalizeSiteId(site.responsibleTeamId),
+                responsibleTeamName: String(site.responsibleTeamName ?? '').trim(),
+                summary: `${siteName} 데마 후보`,
+                detail: matchedLine,
+                originalText: text,
+                createdAt: Date.now()
+            });
+        });
+
+        if (candidates.length > 0) {
+            setReviewCandidates(prev => [...prev, ...candidates]);
+        }
+        return candidates.length;
+    }, [createCandidateId, hasCancelKeyword, normalizeLookupText, normalizeSiteId, sites]);
 
     const appendScheduleAssignments = useCallback((assignments: DispatchAssignment[]) => {
         const siteById = new Map<string, Site>();
@@ -969,6 +1719,7 @@ const DailyReportGridInput: React.FC = () => {
         let skippedSiteCount = 0;
         let emptyScheduleCount = 0;
         let duplicateWorkerCount = 0;
+        let supportTeamPlaceholderCount = 0;
 
         assignments.forEach((assignment) => {
             const siteId = normalizeSiteId(assignment.siteId);
@@ -999,7 +1750,26 @@ const DailyReportGridInput: React.FC = () => {
             }
 
             const workerIds = getScheduleWorkerIds(assignment);
-            if (workerIds.length === 0) {
+            const supportTeamOptions = [
+                ...(Array.isArray(assignment.supportTeams) ? assignment.supportTeams : []),
+                ...(Array.isArray(assignment.supportTeamIds) ? assignment.supportTeamIds : [])
+                    .map(teamId => {
+                        const matchedTeam = teamById.get(normalizeSiteId(teamId));
+                        return matchedTeam ? { id: normalizeSiteId(matchedTeam.id), name: matchedTeam.name, color: '' } : null;
+                    })
+                    .filter((team): team is { id: string; name: string; color: string } => Boolean(team))
+            ];
+            const supportTeamsForInput = new Map<string, { id: string; name: string }>();
+            supportTeamOptions.forEach(team => {
+                const supportTeamId = normalizeSiteId(team.id);
+                const supportTeamName = String(team.name ?? '').trim();
+                const supportTeamKey = supportTeamId || normalizeLookupText(supportTeamName);
+                if (supportTeamKey && supportTeamName) {
+                    supportTeamsForInput.set(supportTeamKey, { id: supportTeamId, name: supportTeamName });
+                }
+            });
+
+            if (workerIds.length === 0 && supportTeamsForInput.size === 0) {
                 emptyScheduleCount += 1;
                 return;
             }
@@ -1037,36 +1807,71 @@ const DailyReportGridInput: React.FC = () => {
                 });
                 totalWorkers += 1;
             });
+
+            supportTeamsForInput.forEach((supportTeam, supportTeamKey) => {
+                const workerKey = `support-team:${supportTeamKey}`;
+                if (group.workerKeys.has(workerKey)) {
+                    duplicateWorkerCount += 1;
+                    return;
+                }
+                group.workerKeys.add(workerKey);
+
+                group.rows.push({
+                    id: Math.random().toString(36).substr(2, 9),
+                    teamId: supportTeam.id,
+                    teamName: supportTeam.name,
+                    workerId: '',
+                    name: `[지원팀] ${supportTeam.name} 입력`,
+                    manDay: 1.0,
+                    unitPrice: null,
+                    payType: '',
+                    role: '지원팀입력',
+                    description: note || '지원팀 실제 작업자 입력 필요',
+                    workerTeamId: supportTeam.id,
+                    workerTeamName: supportTeam.name
+                });
+                totalWorkers += 1;
+                supportTeamPlaceholderCount += 1;
+            });
         });
 
-        const newLedgers = Array.from(scheduleGroups.values()).map((group) => {
-            const rows = [...group.rows];
-            const emptyRowCount = rows.length >= 20 ? 5 : 20 - rows.length;
-            rows.push(...createEmptyRows(emptyRowCount));
+        const scheduleLedgers: Ledger[] = Array.from(scheduleGroups.values()).map((group) => {
+            const site = sites.find((candidate) => normalizeSiteId(candidate.id) === normalizeSiteId(group.siteId));
+            const rows = group.rows.map(row => ({ ...row }));
+            const needed = 20 - rows.length;
+            if (needed > 0) rows.push(...createEmptyRows(needed));
+            else rows.push(...createEmptyRows(5));
+
             return {
                 id: Date.now().toString() + Math.random(),
                 siteId: group.siteId,
                 rows,
-                description: group.descriptionParts.join(', ')
-            } satisfies Ledger;
+                description: group.descriptionParts.join(', '),
+                responsibleTeamId: normalizeSiteId(site?.responsibleTeamId),
+                responsibleTeamName: String(site?.responsibleTeamName ?? '').trim()
+            };
         });
 
-        if (newLedgers.length > 0) {
+        if (scheduleLedgers.length > 0) {
+            setScheduleSnapshot(cloneLedgers(scheduleLedgers));
+            setKakaoSnapshot([]);
+            setReviewCandidates([]);
             setLedgers(prev => {
-                if (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(r => !r.name)) return newLedgers;
-                return [...prev, ...newLedgers];
+                const isInitialEmpty = prev.length === 0 || (prev.length === 1 && !prev[0].siteId && prev[0].rows.every(row => !row.name.trim()));
+                return isInitialEmpty ? cloneLedgers(scheduleLedgers) : [...prev, ...cloneLedgers(scheduleLedgers)];
             });
         }
 
         return {
-            ledgerCount: newLedgers.length,
+            ledgerCount: scheduleLedgers.length,
             totalWorkers,
             totalUnknowns,
             skippedSiteCount,
             emptyScheduleCount,
-            duplicateWorkerCount
+            duplicateWorkerCount,
+            supportTeamPlaceholderCount
         };
-    }, [findSiteByAnalyzedName, getScheduleWorkerIds, normalizeLookupText, normalizeSiteId, sites, teams, workers]);
+    }, [cloneLedgers, createEmptyRows, findSiteByAnalyzedName, getScheduleWorkerIds, normalizeLookupText, normalizeSiteId, sites, teams, workers]);
 
     const addLedger = useCallback(() => {
         setLedgers(prev => [...prev, { id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
@@ -1077,7 +1882,12 @@ const DailyReportGridInput: React.FC = () => {
     const updateLedger = useCallback((id: string, updates: Partial<Ledger>) => { setLedgers(prev => prev.map(l => l.id === id ? { ...l, ...updates } : l)); }, []);
     const handleReset = useCallback(async () => {
         const result = await Swal.fire({ title: '작성 내용 초기화', text: '현재 입력된 모든 내용을 삭제하고 새로 시작하시겠습니까?', icon: 'warning', showCancelButton: true, confirmButtonText: '초기화', cancelButtonText: '취소', confirmButtonColor: '#d33' });
-        if (result.isConfirmed) setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+        if (result.isConfirmed) {
+            setLedgers([{ id: Date.now().toString(), siteId: '', rows: createEmptyRows(20), description: '' }]);
+            setReviewCandidates([]);
+            setScheduleSnapshot([]);
+            setKakaoSnapshot([]);
+        }
     }, []);
     const addRowToLedger = useCallback((id: string) => {
         setLedgers(prev => prev.map(l => l.id !== id ? l : { ...l, rows: [...l.rows, ...createEmptyRows(5)] }));
@@ -1093,14 +1903,18 @@ const DailyReportGridInput: React.FC = () => {
             for (const ledger of ledgers) {
                 const normalizedLedgerSiteId = normalizeSiteId(ledger.siteId);
                 if (!normalizedLedgerSiteId) continue;
-                const validRows = ledger.rows.filter(r => r.name.trim() !== '');
+                const validRows = ledger.rows.filter(r => r.name.trim() !== '' && r.role !== '지원팀입력');
                 if (validRows.length === 0) continue;
                 const groups: { [key: string]: GridRow[] } = {};
                 validRows.forEach(row => { const key = normalizeSiteId(row.teamId) || 'no-team'; if (!groups[key]) groups[key] = []; groups[key].push(row); });
                 const site = sites.find((s) => normalizeSiteId(s.id) === normalizedLedgerSiteId);
+                const siteType = String(site?.siteType ?? '').trim();
+                const paymentType = String(site?.paymentMethod ?? '').trim();
+                const ledgerResponsibleTeamId = normalizeSiteId(ledger.responsibleTeamId) || normalizeSiteId(site?.responsibleTeamId);
+                const ledgerResponsibleTeamName = String(ledger.responsibleTeamName || site?.responsibleTeamName || '').trim();
                 for (const [teamKey, rows] of Object.entries(groups)) {
                     const realTeamId = teamKey === 'no-team' ? '' : normalizeSiteId(teamKey);
-                    const fallbackTeamId = normalizeSiteId(site?.responsibleTeamId) || normalizeSiteId(rows[0]?.workerTeamId) || normalizeSiteId(rows[0]?.teamId);
+                    const fallbackTeamId = ledgerResponsibleTeamId || normalizeSiteId(rows[0]?.workerTeamId) || normalizeSiteId(rows[0]?.teamId);
                     const resolvedTeamId = realTeamId || fallbackTeamId;
                     const team = teams.find((t) => normalizeSiteId(t.id) === resolvedTeamId);
                     if (!resolvedTeamId) { skippedGroupCount += 1; continue; }
@@ -1109,9 +1923,9 @@ const DailyReportGridInput: React.FC = () => {
                     const reportWorkers = rows.map(r => {
                         const matchedWorker = workers.find(w => w.id === r.workerId);
                         const resolvedSalaryType = normalizeSalaryType(r.payType) || resolveWorkerSalaryType(matchedWorker);
-                        return { salaryModel: resolvedSalaryType, payType: resolvedSalaryType, workerId: r.workerId || 'unknown', name: r.name, role: r.role, status: 'attendance' as const, manDay: r.manDay, workContent: r.description, teamId: normalizeSiteId(r.teamId) || resolvedTeamId, unitPrice: r.unitPrice ?? 0, workerTeamId: normalizeSiteId(r.workerTeamId) || normalizeSiteId(r.teamId) || resolvedTeamId, workerTeamName: r.workerTeamName || r.teamName || team?.name || site?.responsibleTeamName || '' };
+                        return { salaryModel: resolvedSalaryType, payType: resolvedSalaryType, workerId: r.workerId || 'unknown', name: r.name, role: r.role, status: 'attendance' as const, manDay: r.manDay, workContent: r.description, teamId: normalizeSiteId(r.teamId) || resolvedTeamId, unitPrice: r.unitPrice ?? 0, siteType, paymentType, workerTeamId: normalizeSiteId(r.workerTeamId) || normalizeSiteId(r.teamId) || resolvedTeamId, workerTeamName: r.workerTeamName || r.teamName || team?.name || ledgerResponsibleTeamName || '' };
                     });
-                    allReports.push({ date, teamId: resolvedTeamId, teamName: team?.name || site?.responsibleTeamName || rows[0]?.teamName || '', siteId: normalizedLedgerSiteId, siteName: site?.name || '', writerId: currentUser?.uid || 'unknown', workers: reportWorkers, totalManDay, responsibleTeamId: normalizeSiteId(site?.responsibleTeamId) || resolvedTeamId, responsibleTeamName: site?.responsibleTeamName || team?.name || '', companyId: site?.clientCompanyId || '', companyName: site?.clientCompanyName || '', constructorCompanyId: site?.companyId || '', constructorCompanyName: site?.companyName || '', partnerId: site?.partnerId || '', partnerName: site?.partnerName != null ? String(site.partnerName) : '', workContent: ledger.description || '' });
+                    allReports.push({ date, teamId: resolvedTeamId, teamName: team?.name || rows[0]?.teamName || ledgerResponsibleTeamName || '', siteId: normalizedLedgerSiteId, siteName: site?.name || '', writerId: currentUser?.uid || 'unknown', workers: reportWorkers, totalManDay, responsibleTeamId: ledgerResponsibleTeamId || resolvedTeamId, responsibleTeamName: ledgerResponsibleTeamName || team?.name || '', companyId: site?.clientCompanyId || '', companyName: site?.clientCompanyName || '', constructorCompanyId: site?.companyId || '', constructorCompanyName: site?.companyName || '', partnerId: site?.partnerId || '', partnerName: site?.partnerName != null ? String(site.partnerName) : '', workContent: ledger.description || '', siteType, paymentType });
                 }
             }
             if (allReports.length > 0) {
@@ -1146,6 +1960,7 @@ const DailyReportGridInput: React.FC = () => {
         skippedSiteCount: number;
         emptyScheduleCount: number;
         duplicateWorkerCount: number;
+        supportTeamPlaceholderCount: number;
     }) => {
         if (result.ledgerCount === 0) {
             Swal.fire('Info', '입력할 수 있는 저장 일정이 없습니다.', 'info');
@@ -1153,10 +1968,11 @@ const DailyReportGridInput: React.FC = () => {
         }
 
         const details = [
-            `${result.ledgerCount}개의 장부와 ${result.totalWorkers}명의 작업자가 입력되었습니다.`
+            `${result.ledgerCount}개의 장부와 ${result.totalWorkers}개의 작업자/지원팀 항목이 입력되었습니다.`
         ];
 
         if (result.totalUnknowns > 0) details.push(`마스터에서 찾지 못한 작업자 ${result.totalUnknowns}명은 확인이 필요합니다.`);
+        if (result.supportTeamPlaceholderCount > 0) details.push(`지원팀 ${result.supportTeamPlaceholderCount}건은 지원팀명으로 표시했습니다. 실제 투입 작업자 이름으로 바꿔 입력해주세요.`);
         if (result.skippedSiteCount > 0) details.push(`현장을 식별하지 못한 일정 ${result.skippedSiteCount}건은 제외했습니다.`);
         if (result.emptyScheduleCount > 0) details.push(`작업자 없는 일정 ${result.emptyScheduleCount}건은 현장 장부만 생성했습니다.`);
         if (result.duplicateWorkerCount > 0) details.push(`같은 현장에 중복 배정된 작업자 ${result.duplicateWorkerCount}건은 한 번만 넣었습니다.`);
@@ -1168,6 +1984,44 @@ const DailyReportGridInput: React.FC = () => {
             icon: hasWarnings ? 'warning' : 'success',
             confirmButtonText: '확인'
         });
+    }, []);
+
+    const showReviewAnalysisResult = useCallback((candidateCount: number, totalUnknowns: number) => {
+        if (candidateCount === 0) {
+            Swal.fire('Info', '입력할 카톡 일보 데이터가 없습니다.', 'info');
+            return;
+        }
+
+        let message = `${candidateCount}개의 카톡 장부가 입력창에 추가되었습니다.`;
+        if (totalUnknowns > 0) {
+            message += `\n미등록/오타 가능성이 있는 작업자 ${totalUnknowns}명이 있습니다. 빨간색 표시를 확인하세요.`;
+        }
+        Swal.fire('카톡 분석 완료', message, totalUnknowns > 0 ? 'warning' : 'success');
+    }, []);
+
+    const showReviewScheduleResult = useCallback((result: {
+        ledgerCount: number;
+        totalWorkers: number;
+        totalUnknowns: number;
+        skippedSiteCount: number;
+        emptyScheduleCount: number;
+        duplicateWorkerCount: number;
+    }) => {
+        if (result.ledgerCount === 0) {
+            Swal.fire('Info', '검토할 일정 후보가 없습니다.', 'info');
+            return;
+        }
+
+        const details = [
+            `${result.ledgerCount}개의 일정 후보를 검토함에 추가했습니다.`,
+            `작업자 ${result.totalWorkers}명`
+        ];
+        if (result.totalUnknowns > 0) details.push(`마스터에서 찾지 못한 작업자 ${result.totalUnknowns}명은 확인이 필요합니다.`);
+        if (result.skippedSiteCount > 0) details.push(`현장을 식별하지 못한 일정 ${result.skippedSiteCount}건은 제외했습니다.`);
+        if (result.emptyScheduleCount > 0) details.push(`작업자가 없는 일정 ${result.emptyScheduleCount}건은 후보로 만들지 않았습니다.`);
+        if (result.duplicateWorkerCount > 0) details.push(`중복 배정 작업자 ${result.duplicateWorkerCount}건은 한 번만 후보로 만들었습니다.`);
+
+        Swal.fire('일정 분석 완료', details.join('\n'), result.totalUnknowns > 0 || result.skippedSiteCount > 0 ? 'warning' : 'success');
     }, []);
 
     const handleScheduleAnalyzeClick = useCallback(async () => {
@@ -1209,8 +2063,8 @@ const DailyReportGridInput: React.FC = () => {
         setLoading(true);
         try {
             const analyzedReports = await geminiService.analyzeKakaoImage(file, buildKakaoAnalyzeContext());
-            const result = appendAnalyzedReports(analyzedReports);
-            showAnalysisResult(result.ledgerCount, result.totalUnknowns);
+            const result = appendKakaoOriginalLedgers(analyzedReports);
+            showReviewAnalysisResult(result.ledgerCount, result.totalUnknowns);
         } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : '이미지 분석에 실패했습니다.';
@@ -1233,8 +2087,8 @@ const DailyReportGridInput: React.FC = () => {
         setLoading(true);
         try {
             const analyzedReports = await geminiService.analyzeKakaoText(normalizedText, buildKakaoAnalyzeContext());
-            const result = appendAnalyzedReports(analyzedReports);
-            showAnalysisResult(result.ledgerCount, result.totalUnknowns);
+            const result = appendKakaoOriginalLedgers(analyzedReports);
+            showReviewAnalysisResult(result.ledgerCount, result.totalUnknowns);
         } catch (error) {
             console.error(error);
             const message = error instanceof Error ? error.message : '텍스트 분석에 실패했습니다.';
@@ -1293,12 +2147,20 @@ const DailyReportGridInput: React.FC = () => {
         await processKakaoText(text);
     }, [kakaoFile, kakaoText, resetKakaoModal]);
 
-    const hasWarnings = validationSummary.unknownWorkers > 0 || validationSummary.missingSites > 0;
+    const hasWarnings = validationSummary.unknownWorkers > 0 || validationSummary.retiredWorkers > 0 || validationSummary.missingSites > 0;
+    const pendingReviewCount = reviewCandidates.filter(item => item.status === 'pending').length;
+    const safePendingReviewCount = reviewCandidates.filter(item =>
+        item.status === 'pending' &&
+        item.action === 'add-worker' &&
+        item.confidence !== 'low'
+    ).length;
+    const scheduleSnapshotWorkerCount = useMemo(() => countLedgerWorkers(scheduleSnapshot), [countLedgerWorkers, scheduleSnapshot]);
+    const kakaoSnapshotWorkerCount = useMemo(() => countLedgerWorkers(kakaoSnapshot), [countLedgerWorkers, kakaoSnapshot]);
 
     return (
         <div className="flex flex-col h-full bg-slate-50 overflow-hidden relative" onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={(e) => { e.preventDefault(); if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragging(false); }} onDrop={(e) => { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processKakaoImage(file); }}>
             {isDragging && (
-                <div className="absolute inset-0 bg-yellow-400/80 z-50 flex items-center justify-center backdrop-blur-sm pointer-events-none">
+                <div className="absolute inset-0 bg-yellow-400/80 z-[9998] flex items-center justify-center backdrop-blur-sm pointer-events-none" style={{ zIndex: 9998 }}>
                     <div className="text-center bg-white p-8 rounded-2xl shadow-2xl">
                         <FontAwesomeIcon icon={faComment} className="text-6xl text-yellow-500 mb-4" />
                         <h2 className="text-3xl font-bold text-slate-800">카톡 이미지 떨어뜨리기</h2>
@@ -1309,7 +2171,8 @@ const DailyReportGridInput: React.FC = () => {
 
             {isKakaoModalOpen && (
                 <div
-                    className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+                    className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm"
+                    style={{ zIndex: 9999 }}
                     onMouseDown={(e) => {
                         if (e.target === e.currentTarget) closeKakaoModal();
                     }}
@@ -1484,7 +2347,7 @@ const DailyReportGridInput: React.FC = () => {
                         <div className="w-8 h-8 rounded-full bg-orange-100 flex items-center justify-center text-orange-600"><FontAwesomeIcon icon={faExclamationTriangle} /></div>
                         <div>
                             <p className="font-bold text-sm">확인이 필요한 항목이 있습니다</p>
-                            <p className="text-xs text-orange-700">{validationSummary.missingSites > 0 && <span>• 현장 미지정: <b>{validationSummary.missingSites}</b>건 </span>}{validationSummary.unknownWorkers > 0 && <span>• 미등록 작업자: <b>{validationSummary.unknownWorkers}</b>명 </span>}<span>(빨간색 표시를 확인해주세요)</span></p>
+                            <p className="text-xs text-orange-700">{validationSummary.missingSites > 0 && <span>• 현장 미지정: <b>{validationSummary.missingSites}</b>건 </span>}{validationSummary.unknownWorkers > 0 && <span>• 미등록 작업자: <b>{validationSummary.unknownWorkers}</b>명 </span>}{validationSummary.retiredWorkers > 0 && <span>• 퇴사자: <b>{validationSummary.retiredWorkers}</b>명 </span>}<span>(표시된 셀을 확인해주세요)</span></p>
                         </div>
                     </div>
                 </div>
@@ -1510,6 +2373,12 @@ const DailyReportGridInput: React.FC = () => {
                                 </span>
                             )}
                             <span className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded-full font-bold">총 {validationSummary.totalWorkers}명</span>
+                            {scheduleSnapshotWorkerCount > 0 && (
+                                <span className="bg-indigo-50 text-indigo-700 text-[10px] px-2 py-1 rounded-full font-bold">일정원본 {scheduleSnapshotWorkerCount}명</span>
+                            )}
+                            {kakaoSnapshotWorkerCount > 0 && (
+                                <span className="bg-yellow-50 text-yellow-700 text-[10px] px-2 py-1 rounded-full font-bold">카톡원본 {kakaoSnapshotWorkerCount}명</span>
+                            )}
                         </div>
                     </div>
                     <div className="flex gap-2">
@@ -1530,6 +2399,100 @@ const DailyReportGridInput: React.FC = () => {
                 </div>
             )}
 
+            {reviewCandidates.length > 0 && (
+                <div className="mx-6 mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-col gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-sm font-black text-slate-900">일정/카톡 비교 검토함</span>
+                                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-bold text-white">대기 {pendingReviewCount}</span>
+                                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700">전체 {reviewCandidates.length}</span>
+                            </div>
+                            <p className="mt-1 text-xs font-semibold text-slate-500">일정 원본, 현재 입력창, 카톡 원본을 비교한 차이입니다. 최종 저장 기준은 항상 현재 입력창입니다.</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                onClick={applySafeReviewCandidates}
+                                disabled={safePendingReviewCount === 0}
+                                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-500"
+                            >
+                                안전 추가만 전체 반영 {safePendingReviewCount > 0 ? `(${safePendingReviewCount})` : ''}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={clearReviewedCandidates}
+                                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+                            >
+                                처리완료 숨기기
+                            </button>
+                        </div>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
+                        {reviewCandidates.map(candidate => {
+                            const row = candidate.row || candidate.originalRow;
+                            const isPending = candidate.status === 'pending';
+                            const statusLabel = candidate.status === 'applied' ? '반영됨' : candidate.status === 'ignored' ? '무시됨' : '대기';
+                            const statusClass = candidate.status === 'applied'
+                                ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                                : candidate.status === 'ignored'
+                                    ? 'bg-slate-100 text-slate-500 ring-slate-200'
+                                    : candidate.confidence === 'low'
+                                        ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                                        : 'bg-blue-50 text-blue-700 ring-blue-200';
+
+                            return (
+                                <div key={candidate.id} className={`grid gap-3 px-4 py-3 lg:grid-cols-[1fr_auto] ${candidate.status !== 'pending' ? 'opacity-70' : ''}`}>
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-700">{REVIEW_SOURCE_LABELS[candidate.source]}</span>
+                                            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">{REVIEW_ACTION_LABELS[candidate.action]}</span>
+                                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ${statusClass}`}>{statusLabel}</span>
+                                            <span className="text-[11px] font-semibold text-slate-400">신뢰도 {REVIEW_CONFIDENCE_LABELS[candidate.confidence]}</span>
+                                        </div>
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                                            <span className="font-black text-slate-900">{candidate.summary}</span>
+                                            <span className="text-xs font-semibold text-slate-500">{candidate.siteName || '현장 미확인'}</span>
+                                            {row?.manDay !== undefined && candidate.action !== 'site-cancel' && (
+                                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-bold text-slate-700">{row.manDay}공수</span>
+                                            )}
+                                            {row?.teamName && <span className="text-xs font-semibold text-slate-500">{row.teamName}</span>}
+                                        </div>
+                                        {candidate.detail && (
+                                            <p className="mt-1 truncate text-xs font-medium text-slate-500">{candidate.detail}</p>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center justify-end gap-2">
+                                        {isPending && (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => applyReviewCandidate(candidate.id)}
+                                                    className={`rounded-lg px-3 py-2 text-xs font-black text-white shadow-sm transition ${
+                                                        candidate.action === 'exclude-worker' || candidate.action === 'site-cancel'
+                                                            ? 'bg-amber-600 hover:bg-amber-700'
+                                                            : 'bg-blue-600 hover:bg-blue-700'
+                                                    }`}
+                                                >
+                                                    {candidate.action === 'exclude-worker' ? '미투입 반영' : candidate.action === 'site-cancel' ? '데마 처리' : '반영'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => ignoreReviewCandidate(candidate.id)}
+                                                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-slate-100"
+                                                >
+                                                    무시
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
             <div className="flex-1 overflow-y-auto p-6">
                 <div className="flex flex-wrap gap-4 items-start content-start">
                     {ledgers.map((ledger, index) => (
@@ -1540,6 +2503,7 @@ const DailyReportGridInput: React.FC = () => {
                             sites={sites}
                             teams={teams}
                             workerMap={workerMap}
+                            retiredWorkerMap={retiredWorkerMap}
                             globalDuplicateNames={globalDuplicateNames}
                             onUpdate={updateLedger}
                             onDelete={removeLedger}
@@ -1564,6 +2528,7 @@ const DailyReportGridInput: React.FC = () => {
                 .handsontable-container .handsontable td:nth-child(2) { background-color: #FCE4EC; text-align: center; }
                 .handsontable-container .handsontable td:nth-child(3) { background-color: #F5F5F5; color: #64748b; font-size: 11px; }
                 .handsontable-container .handsontable td.unknown-worker-cell { background-color: #fca5a5 !important; color: #7f1d1d !important; font-weight: bold; border: 1px solid #ef4444 !important; }
+                .handsontable-container .handsontable td.retired-worker-cell { background-color: #fed7aa !important; color: #7c2d12 !important; font-weight: bold; border: 1px solid #f97316 !important; }
                 .handsontable-container .handsontable td.duplicate-worker-cell { background-color: #fef08a !important; color: #854d0e !important; font-weight: bold; border: 1px solid #eab308 !important; }
             `}</style>
 

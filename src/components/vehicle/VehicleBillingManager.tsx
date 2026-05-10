@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCalculator, faCheckDouble, faFileInvoiceDollar, faFloppyDisk, faPlus, faSearch, faTrash, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { companyService } from '../../services/companyService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
 import { vehicleService } from '../../services/vehicleService';
 import { VehicleBillingDocument, VehicleBillingIssuedToType } from '../../types/vehicleBilling';
@@ -11,6 +12,7 @@ import { toast, showConfirmAlert } from '../../utils/swal';
 import { format, subMonths } from 'date-fns';
 import { Vehicle } from '../../types/vehicle';
 import { Timestamp } from '../../types/timestamp';
+import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 
 type DraftStatus = 'DRAFT' | 'CONFIRMED' | 'PAID' | 'OVERDUE';
 
@@ -59,19 +61,20 @@ export const VehicleBillingManager: React.FC = () => {
     useEffect(() => {
         const loadMaster = async () => {
             try {
-                const [vehicleList, teamList, workerList] = await Promise.all([
+                const [vehicleList, teamList, companyList, workerList] = await Promise.all([
                     vehicleService.getVehicles(),
                     teamService.getTeams(),
+                    companyService.getCompanies(),
                     manpowerService.getWorkers()
                 ]);
 
                 setVehicles(vehicleList);
                 setCreateVehicleId((prev) => prev || (vehicleList[0]?.id ?? ''));
 
-                const sortedTeams = [...teamList].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko-KR'));
-                setTeams(sortedTeams);
+                const selectableTeams = buildCheongyeonEngTeams(teamList, companyList);
+                setTeams(selectableTeams);
                 setWorkers(workerList);
-                setSelectedTeamId((prev) => prev || (sortedTeams[0]?.id ?? ''));
+                setSelectedTeamId((prev) => prev || (selectableTeams[0]?.id ?? ''));
             } catch (e) {
                 console.error(e);
                 setVehicles([]);

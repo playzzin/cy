@@ -8,6 +8,8 @@ import { cardService } from '../../services/cardService';
 import { teamService, Team } from '../../services/teamService';
 import { Card, CardAssigneeType } from '../../types/card';
 import { toast, showConfirmAlert } from '../../utils/swal';
+import { hexToRgba, normalizeHexColor } from '../../utils/color';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 type AssigneeMode = CardAssigneeType;
 
@@ -68,6 +70,14 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
 
     const [saving, setSaving] = useState<boolean>(false);
 
+    const handleStartDateChange = (value: string) => {
+        setStartDate(formatTypedDateInput(value));
+    };
+
+    const normalizeStartDate = () => {
+        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+    };
+
     useEffect(() => {
         const loadWorkers = async () => {
             try {
@@ -126,6 +136,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     const selectedTeam = useMemo(() => {
         return teams.find((t) => t.id === selectedTeamId) ?? null;
     }, [teams, selectedTeamId]);
+    const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
 
     const selectedWorker = useMemo(() => {
         if (!selectedWorkerId) return null;
@@ -297,18 +308,29 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                             </div>
 
                             {mode === 'TEAM' && (
-                                <div>
+                                <div className="relative">
                                     <label className="block text-xs font-bold text-slate-600 mb-1">팀 선택</label>
+                                    {selectedTeam && (
+                                        <span
+                                            className="pointer-events-none absolute left-3 top-9 h-3 w-3 rounded-full border border-white shadow-sm"
+                                            style={{ backgroundColor: selectedTeamColor }}
+                                        />
+                                    )}
                                     <select
-                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
+                                        className={`w-full rounded-xl border border-slate-200 py-2.5 text-sm font-bold text-slate-700 ${selectedTeam ? 'pl-8 pr-3' : 'px-3'}`}
                                         value={selectedTeamId}
                                         onChange={(e) => setSelectedTeamId(e.target.value)}
+                                        style={selectedTeam ? {
+                                            borderColor: hexToRgba(selectedTeamColor, 0.35),
+                                            backgroundColor: hexToRgba(selectedTeamColor, 0.05),
+                                            color: selectedTeamColor
+                                        } : undefined}
                                     >
                                         {teams
                                             .slice()
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                             .map((t) => (
-                                                <option key={t.id} value={t.id}>
+                                                <option key={t.id} value={t.id} style={{ color: normalizeHexColor(t.color) }}>
                                                     {t.name}
                                                 </option>
                                             ))}
@@ -340,10 +362,14 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                 <div>
                                     <label className="block text-xs font-bold text-slate-600 mb-1">배정 시작일</label>
                                     <input
-                                        type="date"
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        placeholder="YYYY-MM-DD"
                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                         value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
+                                        onChange={(e) => handleStartDateChange(e.target.value)}
+                                        onBlur={normalizeStartDate}
                                     />
                                 </div>
                                 <div className="flex items-end">

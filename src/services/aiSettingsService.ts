@@ -45,16 +45,33 @@ const getEnvironmentApiKey = (): string => {
     ).trim();
 };
 
+const DEPRECATED_GEMINI_MODEL_REPLACEMENTS: Record<string, string> = {
+    'gemini-2.0-flash': 'gemini-2.5-flash',
+    'gemini-2.0-flash-001': 'gemini-2.5-flash',
+    'gemini-2.0-flash-lite': 'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite-001': 'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-preview-image-generation': 'gemini-2.5-flash-image',
+    'gemini-2.0-flash-lite-preview': 'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite-preview-02-05': 'gemini-2.5-flash-lite',
+    'gemini-2.5-flash-preview-05-20': 'gemini-2.5-flash',
+    'gemini-2.5-flash-preview-09-25': 'gemini-2.5-flash',
+    'gemini-2.5-flash-lite-preview-09-2025': 'gemini-2.5-flash-lite',
+    'gemini-2.5-flash-image-preview': 'gemini-2.5-flash-image'
+};
+
+export const normalizeGeminiModelName = (model: string | null | undefined, fallback = 'gemini-2.5-flash'): string => {
+    const trimmed = String(model || fallback).trim().replace(/^models\//, '');
+    return DEPRECATED_GEMINI_MODEL_REPLACEMENTS[trimmed] || trimmed || fallback;
+};
+
 export const AI_TEXT_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
     { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (권장)' },
-    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
-    { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
+    { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
     { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }
 ];
 
 export const AI_IMAGE_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
-    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image (권장)' },
-    { value: 'gemini-2.0-flash-preview-image-generation', label: 'Gemini 2.0 Flash Image Preview' }
+    { value: 'gemini-2.5-flash-image', label: 'Gemini 2.5 Flash Image (권장)' }
 ];
 
 export const AI_MANAGED_PAGES: AiManagedPage[] = [
@@ -115,6 +132,13 @@ export const AI_MANAGED_PAGES: AiManagedPage[] = [
         modelScope: 'imageModel'
     },
     {
+        id: 'estimate-drawing-ai',
+        name: '도면 AI 견적',
+        description: 'PDF/이미지 도면 Gemini 분석 및 시스템동바리/시스템비계 산출',
+        paths: ['/estimate/drawing-ai'],
+        modelScope: 'textModel'
+    },
+    {
         id: 'support-card-billing',
         name: '법인카드 청구관리',
         description: '첨부 문서 Gemini 분석(Cloud Function)',
@@ -135,6 +159,12 @@ const DEFAULT_MODELS: AiModelSettings = {
     analyticsModel: 'gemini-2.5-flash',
     imageModel: 'gemini-2.5-flash-image'
 };
+
+const normalizeModels = (models?: Partial<AiModelSettings> | null): AiModelSettings => ({
+    textModel: normalizeGeminiModelName(models?.textModel, DEFAULT_MODELS.textModel),
+    analyticsModel: normalizeGeminiModelName(models?.analyticsModel, DEFAULT_MODELS.analyticsModel),
+    imageModel: normalizeGeminiModelName(models?.imageModel, DEFAULT_MODELS.imageModel)
+});
 
 const buildDefaultPageEnabledById = (): Record<string, boolean> => {
     return AI_MANAGED_PAGES.reduce<Record<string, boolean>>((acc, page) => {
@@ -159,11 +189,7 @@ const mergeSettings = (raw?: Partial<AiSettingsState> | null): AiSettingsState =
     if (!raw) return defaults;
 
     return {
-        models: {
-            textModel: String(raw.models?.textModel || defaults.models.textModel),
-            analyticsModel: String(raw.models?.analyticsModel || defaults.models.analyticsModel),
-            imageModel: String(raw.models?.imageModel || defaults.models.imageModel)
-        },
+        models: normalizeModels(raw.models),
         pageEnabledById: {
             ...defaults.pageEnabledById,
             ...(raw.pageEnabledById || {})
@@ -207,9 +233,9 @@ const findManagedPageByPath = (pathname: string): AiManagedPage | undefined => {
 };
 
 const getModelByScope = (models: AiModelSettings, scope: AiModelScope): string => {
-    if (scope === 'textModel') return models.textModel;
-    if (scope === 'analyticsModel') return models.analyticsModel;
-    if (scope === 'imageModel') return models.imageModel;
+    if (scope === 'textModel') return normalizeGeminiModelName(models.textModel, DEFAULT_MODELS.textModel);
+    if (scope === 'analyticsModel') return normalizeGeminiModelName(models.analyticsModel, DEFAULT_MODELS.analyticsModel);
+    if (scope === 'imageModel') return normalizeGeminiModelName(models.imageModel, DEFAULT_MODELS.imageModel);
     return 'server-managed';
 };
 

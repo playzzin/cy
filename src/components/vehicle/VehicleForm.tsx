@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Vehicle, VehicleType, VehicleContract, VehicleInsurance } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import Swal from 'sweetalert2';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 interface VehicleFormProps {
     initialData?: Vehicle | null;
@@ -179,6 +180,18 @@ export const VehicleForm: React.FC<VehicleFormProps> = ({ initialData, onClose, 
         });
     };
 
+    const updateContractDate = (field: 'startDate' | 'endDate', value: string) => {
+        updateContract(field, formatTypedDateInput(value));
+    };
+
+    const normalizeContractDate = (field: 'startDate' | 'endDate') => {
+        const currentValue = String(formData.contract?.[field] ?? '');
+        const normalized = normalizeTypedDateInput(currentValue);
+        if (normalized) {
+            updateContract(field, normalized);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
@@ -260,17 +273,25 @@ export const VehicleForm: React.FC<VehicleFormProps> = ({ initialData, onClose, 
                                     <label className="block text-sm mb-1">계약 기간</label>
                                     <div className="flex gap-2">
                                         <input
-                                            type="date"
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={10}
+                                            placeholder="YYYY-MM-DD"
                                             className="border p-2 w-full rounded"
                                             value={formData.contract?.startDate ?? ''}
-                                            onChange={(e) => updateContract('startDate', e.target.value)}
+                                            onChange={(e) => updateContractDate('startDate', e.target.value)}
+                                            onBlur={() => normalizeContractDate('startDate')}
                                         />
                                         <span className="self-center">~</span>
                                         <input
-                                            type="date"
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={10}
+                                            placeholder="YYYY-MM-DD"
                                             className="border p-2 w-full rounded"
                                             value={formData.contract?.endDate ?? ''}
-                                            onChange={(e) => updateContract('endDate', e.target.value)}
+                                            onChange={(e) => updateContractDate('endDate', e.target.value)}
+                                            onBlur={() => normalizeContractDate('endDate')}
                                         />
                                     </div>
                                 </div>

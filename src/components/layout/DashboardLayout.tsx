@@ -84,9 +84,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         test: '/dashboard2',
         nation: '/dashboard3',
     };
-    const siteModeDashboardPath = siteModeDashboards[currentSite];
+    const siteModeDashboardPath = siteData?.[currentSite]?.menu ? siteModeDashboards[currentSite] : undefined;
     const isSiteLayerMode = Boolean(siteModeDashboardPath);
-    const usesSiteBranding = currentSite === 'test' || currentSite === 'nation';
+    const usesSiteBranding = isSiteLayerMode;
     const navigateSync = useCallback((to: string, options?: NavigateOptions) => {
         navigate(to, {
             ...options,
@@ -381,11 +381,20 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
 
     // Use position-based site for left menu
     // 'full' position uses currentSite (full admin menu)
+    const availableSiteKeys = siteData
+        ? Object.keys(siteData).filter((siteKey) => Boolean(siteData[siteKey]?.menu))
+        : [];
+    const fallbackSite = siteData?.admin?.menu
+        ? 'admin'
+        : (availableSiteKeys[0] || currentSite);
+    const baseSite = siteData?.[currentSite]?.menu ? currentSite : fallbackSite;
     const positionSite = POSITION_SITE_MAP[currentPosition];
     const effectiveSite = (currentPosition === 'full' || !positionSite)
-        ? currentSite
-        : (siteData?.[positionSite] ? positionSite : currentSite);
-    const currentSiteData = siteData ? siteData[effectiveSite] : null;
+        ? baseSite
+        : (siteData?.[positionSite]?.menu ? positionSite : baseSite);
+    const currentSiteData = siteData
+        ? (siteData[effectiveSite] || siteData[fallbackSite] || null)
+        : null;
 
     const handleMenuItemClick = (item: MenuItem, position?: number) => {
         if (!currentSiteData) return;
@@ -506,7 +515,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
             <SiteModeProvider {...siteModeValue}>
                 <div className="app">
                     <SidebarSkeleton />
-                    <main id="main-content" style={{ marginLeft: '250px' }}>
+                    <main id="main-content">
                         {children}
                     </main>
                 </div>
@@ -515,7 +524,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     }
 
     // Layout Variant for Cheongyeon SITE (test) - Same structure as Admin ERP with video background
-    if (isSiteLayerMode && currentSiteData) {
+    if (isSiteLayerMode && siteData?.[currentSite]?.menu && currentSiteData) {
         const isNation = currentSite === 'nation';
         return (
             <SiteModeProvider {...siteModeValue}>

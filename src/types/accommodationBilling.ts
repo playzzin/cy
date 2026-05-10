@@ -2,7 +2,7 @@ import { Timestamp } from 'firebase/firestore';
 
 export type AccommodationBillingStatus = 'draft' | 'confirmed';
 
-export type AccommodationBillingIssuedToType = 'team_leader' | 'worker';
+export type AccommodationBillingIssuedToType = 'team' | 'team_leader' | 'worker';
 
 export type AccommodationBillingTargetField =
     | 'accommodation'

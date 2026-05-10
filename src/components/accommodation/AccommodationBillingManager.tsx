@@ -41,12 +41,13 @@ const buildNewDocument = (params: {
     yearMonth: string;
     team: Team;
     issuedToType: AccommodationBillingIssuedToType;
-    issuedToWorker: { id: string; name: string };
+    issuedToWorker?: { id: string; name: string } | null;
 }): AccommodationBillingDocument => {
+    const workerId = params.issuedToType === 'worker' ? params.issuedToWorker?.id : undefined;
     const id = accommodationBillingService.buildBillingDocumentId({
         teamId: params.team.id ?? '',
         issuedToType: params.issuedToType,
-        workerId: params.issuedToWorker.id,
+        workerId,
         yearMonth: params.yearMonth
     });
 
@@ -56,8 +57,8 @@ const buildNewDocument = (params: {
         teamId: params.team.id ?? '',
         teamName: params.team.name,
         issuedToType: params.issuedToType,
-        issuedToWorkerId: params.issuedToWorker.id,
-        issuedToWorkerName: params.issuedToWorker.name,
+        issuedToWorkerId: workerId ?? '',
+        issuedToWorkerName: params.issuedToType === 'team' ? params.team.name : (params.issuedToWorker?.name ?? ''),
         status: 'draft',
         memo: '',
         lineItems: [createEmptyLineItem()]
@@ -77,7 +78,7 @@ const AccommodationBillingManager: React.FC = () => {
     });
 
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-    const [issuedToType, setIssuedToType] = useState<AccommodationBillingIssuedToType>('team_leader');
+    const [issuedToType, setIssuedToType] = useState<AccommodationBillingIssuedToType>('team');
     const [issuedToWorkerId, setIssuedToWorkerId] = useState<string>('');
 
     const [documents, setDocuments] = useState<AccommodationBillingDocument[]>([]);
@@ -173,13 +174,13 @@ const AccommodationBillingManager: React.FC = () => {
         if (!found) return;
         setDraft(found);
 
-        setIssuedToType(found.issuedToType);
-        setIssuedToWorkerId(found.issuedToWorkerId);
+        setIssuedToType(found.issuedToType === 'team_leader' ? 'team' : found.issuedToType);
+        setIssuedToWorkerId(found.issuedToType === 'worker' ? (found.issuedToWorkerId ?? '') : '');
     }, [documents, selectedDocumentId]);
 
     useEffect(() => {
-        if (issuedToType === 'team_leader') {
-            setIssuedToWorkerId(teamLeader?.id ?? '');
+        if (issuedToType === 'team') {
+            if (issuedToWorkerId) setIssuedToWorkerId('');
             return;
         }
 
@@ -187,7 +188,7 @@ const AccommodationBillingManager: React.FC = () => {
             const first = teamWorkers.find((w) => Boolean(w.id));
             setIssuedToWorkerId(first?.id ?? '');
         }
-    }, [issuedToType, teamLeader?.id, teamWorkers, issuedToWorkerId]);
+    }, [issuedToType, teamWorkers, issuedToWorkerId]);
 
     const canEdit = draft?.status !== 'confirmed';
 
@@ -215,15 +216,15 @@ const AccommodationBillingManager: React.FC = () => {
             return;
         }
 
-        const target = issuedToType === 'team_leader'
-            ? teamLeader
-            : (() => {
+        const target = issuedToType === 'worker'
+            ? (() => {
                 const w = teamWorkers.find((x) => x.id === issuedToWorkerId);
                 return w?.id ? { id: w.id, name: w.name } : null;
-            })();
+            })()
+            : null;
 
-        if (!target) {
-            toast.error(issuedToType === 'team_leader' ? '팀장의 작업자 정보가 없습니다.' : '청구 대상을 선택해주세요.');
+        if (issuedToType === 'worker' && !target) {
+            toast.error('청구 대상을 선택해주세요.');
             return;
         }
 
@@ -273,7 +274,7 @@ const AccommodationBillingManager: React.FC = () => {
             return;
         }
 
-        if (!draft.teamId || !draft.yearMonth || !draft.issuedToWorkerId) {
+        if (!draft.teamId || !draft.yearMonth || (issuedToType === 'worker' && !issuedToWorkerId)) {
             toast.error('필수 정보(팀/월/대상)가 누락되었습니다.');
             return;
         }
@@ -285,15 +286,14 @@ const AccommodationBillingManager: React.FC = () => {
 
         setSaving(true);
         try {
-            const resolvedIssuedToWorkerName =
-                issuedToType === 'team_leader'
-                    ? (teamLeader?.name ?? draft.issuedToWorkerName)
-                    : (teamWorkers.find((w) => w.id === issuedToWorkerId)?.name ?? draft.issuedToWorkerName);
+            const resolvedIssuedToWorkerName = issuedToType === 'team'
+                ? (selectedTeam?.name ?? draft.teamName)
+                : (teamWorkers.find((w) => w.id === issuedToWorkerId)?.name ?? draft.issuedToWorkerName);
 
             const resolvedId = accommodationBillingService.buildBillingDocumentId({
                 teamId: draft.teamId,
                 issuedToType,
-                workerId: issuedToWorkerId,
+                workerId: issuedToType === 'worker' ? issuedToWorkerId : undefined,
                 yearMonth: draft.yearMonth
             });
 
@@ -303,7 +303,7 @@ const AccommodationBillingManager: React.FC = () => {
                 teamName: selectedTeam?.name ?? draft.teamName,
                 issuedToWorkerName: resolvedIssuedToWorkerName,
                 issuedToType,
-                issuedToWorkerId
+                issuedToWorkerId: issuedToType === 'worker' ? issuedToWorkerId : ''
             };
 
             await accommodationBillingService.upsertBillingDocument(upsertDoc);
@@ -329,20 +329,23 @@ const AccommodationBillingManager: React.FC = () => {
         if (!draft) return;
         if (draft.status === 'confirmed') return;
 
-        const ok = window.confirm('확정하면 가불/공제(공제 항목)로 자동 반영됩니다.\n\n계속하시겠습니까?');
+        const ok = window.confirm(
+            issuedToType === 'worker'
+                ? '확정하면 선택한 개인의 가불/공제 항목으로 자동 반영됩니다.\n\n계속하시겠습니까?'
+                : '확정하면 팀 청구서로 잠금 처리됩니다.\n\n계속하시겠습니까?'
+        );
         if (!ok) return;
 
         setSaving(true);
         try {
-            const resolvedIssuedToWorkerName =
-                issuedToType === 'team_leader'
-                    ? (teamLeader?.name ?? draft.issuedToWorkerName)
-                    : (teamWorkers.find((w) => w.id === issuedToWorkerId)?.name ?? draft.issuedToWorkerName);
+            const resolvedIssuedToWorkerName = issuedToType === 'team'
+                ? (selectedTeam?.name ?? draft.teamName)
+                : (teamWorkers.find((w) => w.id === issuedToWorkerId)?.name ?? draft.issuedToWorkerName);
 
             const resolvedId = accommodationBillingService.buildBillingDocumentId({
                 teamId: draft.teamId,
                 issuedToType,
-                workerId: issuedToWorkerId,
+                workerId: issuedToType === 'worker' ? issuedToWorkerId : undefined,
                 yearMonth: draft.yearMonth
             });
 
@@ -352,7 +355,7 @@ const AccommodationBillingManager: React.FC = () => {
                 teamName: selectedTeam?.name ?? draft.teamName,
                 issuedToWorkerName: resolvedIssuedToWorkerName,
                 issuedToType,
-                issuedToWorkerId
+                issuedToWorkerId: issuedToType === 'worker' ? issuedToWorkerId : ''
             };
 
             await accommodationBillingService.upsertBillingDocument(upsertDoc);
@@ -488,13 +491,13 @@ const AccommodationBillingManager: React.FC = () => {
                     <div className="flex flex-col xl:flex-row gap-5 items-end justify-between">
                         <div className="flex gap-4 items-end w-full xl:w-auto">
                             <div>
-                                <label className="block text-xs font-bold text-slate-500 mb-1">청구 대상 유형</label>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">청구 방식</label>
                                 <div className="flex bg-slate-100 p-1 rounded-lg">
                                     <button
-                                        onClick={() => setIssuedToType('team_leader')}
-                                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${issuedToType === 'team_leader' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
+                                        onClick={() => setIssuedToType('team')}
+                                        className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${issuedToType === 'team' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
                                     >
-                                        팀장
+                                        팀
                                     </button>
                                     <button
                                         onClick={() => setIssuedToType('worker')}
@@ -505,14 +508,14 @@ const AccommodationBillingManager: React.FC = () => {
                                 </div>
                             </div>
                             <div className="flex-1 xl:w-64">
-                                <label className="block text-xs font-bold text-slate-500 mb-1">대상자 선택</label>
-                                {issuedToType === 'team_leader' ? (
+                                <label className="block text-xs font-bold text-slate-500 mb-1">청구 대상</label>
+                                {issuedToType === 'team' ? (
                                     <input
                                         type="text"
-                                        value={teamLeader ? `${teamLeader.name}` : ''}
+                                        value={selectedTeam?.name ?? ''}
                                         disabled
                                         className="w-full border-slate-300 rounded-lg text-sm bg-slate-100 text-slate-600"
-                                        placeholder="팀장 정보 없음"
+                                        placeholder="팀 선택"
                                     />
                                 ) : (
                                     <select

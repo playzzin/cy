@@ -9,6 +9,8 @@ import { toast, showConfirmAlert } from '../../utils/swal';
 import { format } from 'date-fns';
 
 import { teamService, Team } from '../../services/teamService';
+import { hexToRgba, normalizeHexColor } from '../../utils/color';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 
 interface VehicleAssignmentProps {
     vehicle: Vehicle;
@@ -42,6 +44,19 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
     const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
     const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
     const [saving, setSaving] = useState(false);
+    const selectedTeam = React.useMemo(
+        () => assigneeType === 'TEAM' ? teams.find(t => String(t.id) === String(selectedAssigneeId)) ?? null : null,
+        [assigneeType, selectedAssigneeId, teams]
+    );
+    const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+
+    const handleStartDateChange = (value: string) => {
+        setStartDate(formatTypedDateInput(value));
+    };
+
+    const normalizeStartDate = () => {
+        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+    };
 
     // Initial Load
     useEffect(() => {
@@ -136,7 +151,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
     const getOptions = () => {
         if (assigneeType === 'TEAM') {
             return teams.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
+                <option key={t.id} value={t.id} style={{ color: normalizeHexColor(t.color) }}>{t.name}</option>
             ));
         } else {
             return workers.map(w => (
@@ -217,19 +232,34 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                                 <div className="space-y-1">
                                     <label className="text-sm font-medium text-gray-600">배정 시작일</label>
                                     <input
-                                        type="date"
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        placeholder="YYYY-MM-DD"
                                         value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
+                                        onChange={(e) => handleStartDateChange(e.target.value)}
+                                        onBlur={normalizeStartDate}
                                         className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
                                     />
                                 </div>
 
-                                <div className="col-span-1 md:col-span-2 space-y-1">
+                                <div className="relative col-span-1 space-y-1 md:col-span-2">
                                     <label className="text-sm font-medium text-gray-600">{assigneeType === 'TEAM' ? '팀' : '작업자'} 선택</label>
+                                    {selectedTeam && (
+                                        <span
+                                            className="pointer-events-none absolute left-3 top-9 h-3 w-3 rounded-full border border-white shadow-sm"
+                                            style={{ backgroundColor: selectedTeamColor }}
+                                        />
+                                    )}
                                     <select
                                         value={selectedAssigneeId}
                                         onChange={(e) => setSelectedAssigneeId(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className={`w-full py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none ${selectedTeam ? 'pl-8 pr-3' : 'px-3'}`}
+                                        style={selectedTeam ? {
+                                            borderColor: hexToRgba(selectedTeamColor, 0.35),
+                                            backgroundColor: hexToRgba(selectedTeamColor, 0.05),
+                                            color: selectedTeamColor
+                                        } : undefined}
                                     >
                                         <option value="">선택하세요...</option>
                                         {getOptions()}

@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import Swal from 'sweetalert2';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
@@ -113,6 +112,34 @@ type DailyReportListViewState = {
 };
 
 const DAILY_REPORT_LIST_VIEW_KEY = 'output-management:daily-report-list-v2:v1';
+const DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX = 'dailyReportBoardInputDraft';
+
+const clearDailyReportBoardDrafts = (dates: Iterable<string>) => {
+    if (typeof window === 'undefined') return;
+    Array.from(new Set(Array.from(dates).filter(Boolean))).forEach((date) => {
+        window.localStorage.removeItem(`${DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX}:${date}`);
+    });
+};
+
+type DatePresetKey = 'prevMonth' | 'thisMonth' | 'yesterday' | 'today';
+
+const getMonthDateRange = (monthOffset: number): { start: string; end: string } => {
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() + monthOffset);
+    startDate.setDate(1);
+
+    const endDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+    return {
+        start: formatYmd(startDate),
+        end: formatYmd(endDate)
+    };
+};
+
+const getRelativeDateString = (dayOffset: number): string => {
+    const date = new Date();
+    date.setDate(date.getDate() + dayOffset);
+    return formatYmd(date);
+};
 
 const formatManDay = (value: number): string => {
     return (Number.isFinite(value) ? value : 0).toFixed(1);
@@ -204,7 +231,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [columnFilterSearch, setColumnFilterSearch] = useState('');
     const [pendingColumnFilterValues, setPendingColumnFilterValues] = useState<string[] | null>(null);
     const filterMenuRef = React.useRef<HTMLDivElement | null>(null);
-    const [isResettingDb, setIsResettingDb] = useState(false);
     const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
 
     useEffect(() => {
@@ -336,10 +362,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setEndDate(nextEndDate);
     }, []);
 
-    const handleSearch = useCallback(() => {
-        const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
-        const normalizedEnd = normalizeTypedDateInput(endDateInput) ?? endDate;
-
+    const searchRowsByRange = useCallback((normalizedStart: string, normalizedEnd: string) => {
         setStartDate(normalizedStart);
         setEndDate(normalizedEnd);
         setStartDateInput(normalizedStart);
@@ -356,7 +379,43 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }).finally(() => {
             setIsLoading(false);
         });
-    }, [startDateInput, endDateInput, startDate, endDate]);
+    }, []);
+
+    const datePresets = useMemo<Record<DatePresetKey, { label: string; start: string; end: string }>>(() => {
+        const prevMonth = getMonthDateRange(-1);
+        const thisMonth = getMonthDateRange(0);
+        const yesterday = getRelativeDateString(-1);
+
+        return {
+            prevMonth: { label: '전달', ...prevMonth },
+            thisMonth: { label: '이달', ...thisMonth },
+            yesterday: { label: '어제', start: yesterday, end: yesterday },
+            today: { label: '오늘', start: todayStr, end: todayStr }
+        };
+    }, [todayStr]);
+
+    const normalizedStartForPreset = normalizeTypedDateInput(startDateInput) ?? startDate;
+    const normalizedEndForPreset = normalizeTypedDateInput(endDateInput) ?? endDate;
+
+    const activeDatePreset = useMemo<DatePresetKey | null>(() => {
+        const matchingPreset = (Object.keys(datePresets) as DatePresetKey[]).find((key) => {
+            const preset = datePresets[key];
+            return preset.start === normalizedStartForPreset && preset.end === normalizedEndForPreset;
+        });
+        return matchingPreset ?? null;
+    }, [datePresets, normalizedStartForPreset, normalizedEndForPreset]);
+
+    const handleDatePresetClick = useCallback((key: DatePresetKey) => {
+        const preset = datePresets[key];
+        applyDateRange(preset.start, preset.end);
+    }, [applyDateRange, datePresets]);
+
+    const handleSearch = useCallback(() => {
+        const normalizedStart = normalizeTypedDateInput(startDateInput) ?? startDate;
+        const normalizedEnd = normalizeTypedDateInput(endDateInput) ?? endDate;
+
+        searchRowsByRange(normalizedStart, normalizedEnd);
+    }, [startDateInput, endDateInput, startDate, endDate, searchRowsByRange]);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
         return `${String(r.reportId)}::${String(r.workerId)}`;
@@ -685,6 +744,49 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const activeColumnFilterCount = useMemo(() => {
         return Object.keys(columnFilters).length;
     }, [columnFilters]);
+
+    const activeFilterLabels = useMemo(() => {
+        const labels: string[] = [];
+        const selectedSite = siteOptions.find((site) => {
+            return String(site.id ?? '') === selectedSiteId || String(site.legacyId ?? '') === selectedSiteId;
+        });
+        const selectedReportTeam = availableReportTeams.find((team) => {
+            const id = String(team.id ?? team.legacyId ?? team.name ?? '');
+            return id === selectedTeamId;
+        });
+        const selectedWorkerTeam = availableWorkerTeams.find((team) => {
+            const id = String(team.id ?? team.legacyId ?? team.name ?? '');
+            return id === selectedWorkerTeamId;
+        });
+
+        if (selectedSiteId) labels.push(`현장: ${selectedSite?.name ?? '선택됨'}`);
+        if (selectedTeamId) labels.push(`현장소속팀: ${selectedReportTeam?.name ?? '선택됨'}`);
+        if (selectedWorkerTeamId) labels.push(`소속팀: ${selectedWorkerTeam?.name ?? '선택됨'}`);
+        if (workerSearch.trim()) labels.push(`작업자: ${workerSearch.trim()}`);
+        if (activeColumnFilterCount > 0) labels.push(`표 필터 ${activeColumnFilterCount}개`);
+
+        return labels;
+    }, [
+        activeColumnFilterCount,
+        availableReportTeams,
+        availableWorkerTeams,
+        selectedSiteId,
+        selectedTeamId,
+        selectedWorkerTeamId,
+        siteOptions,
+        workerSearch
+    ]);
+
+    const hasActiveListFilters = activeFilterLabels.length > 0;
+
+    const handleClearListFilters = useCallback(() => {
+        setSelectedSiteId('');
+        setSelectedTeamId('');
+        setSelectedWorkerTeamId('');
+        setWorkerSearch('');
+        setColumnFilters({});
+        setOpenColumnFilter(null);
+    }, []);
 
     const sortedRows = useMemo(() => {
         const copied = [...filteredRows];
@@ -1115,9 +1217,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             workerTeamId: r.workerTeamId,
             workerTeamName: r.workerTeamName
         });
-        const fallbackWorkerTeamName = r.workerTeamName
-            ?? teams.find((team) => normalizeTeamId(team.id ?? team.legacyId ?? '') === canonicalWorkerTeamId)?.name
-            ?? '';
+        const fallbackWorkerTeamName = resolveWorkerTeamDisplayName({
+            workerTeamId: r.workerTeamId,
+            workerTeamName: r.workerTeamName
+        });
         return {
             siteId: normalizeSiteId(r.siteId),
             teamId: normalizeTeamId(r.teamId),
@@ -1139,7 +1242,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             siteType: String(r.siteType ?? ''),
             paymentType: String(r.paymentType ?? '')
         };
-    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveResponsibleTeamOptionId, resolveResponsibleTeamDisplayName, teams]);
+    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, resolveResponsibleTeamOptionId, resolveResponsibleTeamDisplayName]);
 
     const isRowDirty = useCallback((original: DailyReportWorkerRow, draft?: RowDraft) => {
         if (!draft) return false;
@@ -1162,10 +1265,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         if (draft.workContent !== (original.workContent ?? '')) return true;
         if (draft.siteType !== (original.siteType ?? '')) return true;
         if (draft.paymentType !== (original.paymentType ?? '')) return true;
-        if (draft.workerTeamName !== undefined && draft.workerTeamName !== (original.workerTeamName ?? '')) return true;
+        if (draft.workerTeamName !== undefined && draft.workerTeamName !== resolveWorkerTeamDisplayName({
+            workerTeamId: original.workerTeamId,
+            workerTeamName: original.workerTeamName
+        })) return true;
 
         return false;
-    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId]);
+    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamDisplayName]);
 
     const setRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>) => {
         const key = getRowKey(r);
@@ -1182,7 +1288,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     responsibleTeamName: r.responsibleTeamName
                 }),
                 workerName: r.workerName ?? '',
-                workerTeamName: r.workerTeamName ?? '',
+                workerTeamName: resolveWorkerTeamDisplayName({
+                    workerTeamId: r.workerTeamId,
+                    workerTeamName: r.workerTeamName
+                }),
                 workerTeamId: resolveWorkerTeamCanonicalId({
                     workerTeamId: r.workerTeamId,
                     workerTeamName: r.workerTeamName
@@ -1199,7 +1308,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 [key]: { ...current, ...changes }
             };
         });
-    }, [getRowKey, normalizeSiteId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamCanonicalId]);
+    }, [getRowKey, normalizeSiteId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName]);
 
     const mergeRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>): RowDraft => {
         const key = getRowKey(r);
@@ -1216,6 +1325,35 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             const { [rowKey]: _, ...rest } = prev;
             return rest;
         });
+    }, []);
+
+    const getSameDateSiteReportIds = useCallback((target: DailyReportWorkerRow) => {
+        const targetSiteId = normalizeSiteId(target.siteId);
+        const reportIds = new Set<string>();
+
+        rows.forEach((row) => {
+            if (row.date !== target.date) return;
+            if (normalizeSiteId(row.siteId) !== targetSiteId) return;
+            if (row.reportId) reportIds.add(row.reportId);
+        });
+
+        if (target.reportId) reportIds.add(target.reportId);
+        return Array.from(reportIds);
+    }, [normalizeSiteId, rows]);
+
+    const splitResponsibleTeamUpdates = useCallback((updates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string }) => {
+        const responsibleUpdates: Partial<DailyReportWorkerRow> = {};
+        const otherUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
+
+        Object.entries(updates).forEach(([key, value]) => {
+            if (key === 'responsibleTeamId' || key === 'responsibleTeamName') {
+                (responsibleUpdates as any)[key] = value;
+                return;
+            }
+            (otherUpdates as any)[key] = value;
+        });
+
+        return { responsibleUpdates, otherUpdates };
     }, []);
 
     const buildReportLevelUpdates = useCallback((original: DailyReportWorkerRow, draft: RowDraft) => {
@@ -1249,14 +1387,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 reportLevelUpdates.siteId = String(matchedSite.id);
                 reportLevelUpdates.siteName = matchedSite.name ?? '';
             }
-        }
-
-        if (draft.siteType !== (original.siteType ?? '')) {
-            reportLevelUpdates.siteType = draft.siteType;
-        }
-
-        if (draft.paymentType !== (original.paymentType ?? '')) {
-            reportLevelUpdates.paymentType = draft.paymentType;
         }
 
         return reportLevelUpdates;
@@ -1349,9 +1479,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 updates.name = draft.workerName;
             }
 
-            const resolvedWorkerTeamId = draft.workerTeamId
-                ? normalizeTeamId(draft.workerTeamId)
-                : resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
+            const originalWorkerTeamName = resolveWorkerTeamDisplayName({
+                workerTeamId: r.workerTeamId,
+                workerTeamName: r.workerTeamName
+            });
+            const workerTeamNameChanged = draft.workerTeamName !== undefined && draft.workerTeamName !== originalWorkerTeamName;
+            const resolvedWorkerTeamIdFromName = resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
+            const resolvedWorkerTeamId = workerTeamNameChanged
+                ? resolvedWorkerTeamIdFromName
+                : (draft.workerTeamId ? normalizeTeamId(draft.workerTeamId) : resolvedWorkerTeamIdFromName);
 
             if (draft.workerId) {
                 const matchedWorker = allWorkers.find(w => String(w.id) === String(draft.workerId));
@@ -1368,33 +1504,55 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             updates.manDay = Number(draft.manDay);
             updates.unitPrice = Number(draft.unitPrice);
             updates.workContent = draft.workContent;
-            updates.workerTeamName = draft.workerTeamName ?? '';
+            updates.workerTeamName = draft.workerTeamName ?? originalWorkerTeamName;
             updates.siteType = draft.siteType;
             updates.paymentType = draft.paymentType;
             updates.amount = updates.manDay * updates.unitPrice;
             const reportLevelUpdates = buildReportLevelUpdates(r, draft);
+            const { responsibleUpdates, otherUpdates } = splitResponsibleTeamUpdates(reportLevelUpdates);
+            const responsibleReportIds = Object.keys(responsibleUpdates).length > 0
+                ? getSameDateSiteReportIds(r)
+                : [];
 
             await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
-            if (Object.keys(reportLevelUpdates).length > 0) {
-                await dailyReportService.updateReport(r.reportId, reportLevelUpdates as any);
+            if (Object.keys(otherUpdates).length > 0) {
+                await dailyReportService.updateReport(r.reportId, otherUpdates as any);
+            }
+            for (const reportId of responsibleReportIds) {
+                await dailyReportService.updateReport(reportId, responsibleUpdates as any);
             }
             if (successMessage) {
                 toast.success(successMessage);
             }
             clearRowDraft(key);
 
+            const rowLevelWorkerUpdates: Partial<DailyReportWorkerRow> = { ...updates };
+            if (updates.name !== undefined) {
+                rowLevelWorkerUpdates.workerName = updates.name;
+                delete (rowLevelWorkerUpdates as any).name;
+            }
+            if (updates.teamId !== undefined) {
+                rowLevelWorkerUpdates.workerTeamId = updates.teamId;
+                delete (rowLevelWorkerUpdates as any).teamId;
+            }
+
             setRows(prev => prev.map(row => {
                 const isSameReport = row.reportId === r.reportId;
                 const isSameWorker = row.workerId === r.workerId;
+                const isSameDateSite = row.date === r.date && normalizeSiteId(row.siteId) === normalizeSiteId(r.siteId);
 
                 if (isSameWorker) {
-                    return { ...row, ...updates, ...reportLevelUpdates };
+                    return { ...row, ...rowLevelWorkerUpdates, ...otherUpdates, ...(isSameDateSite ? responsibleUpdates : {}) };
                 }
 
                 if (isSameReport) {
-                    if (Object.keys(reportLevelUpdates).length > 0) {
-                        return { ...row, ...reportLevelUpdates };
+                    if (Object.keys(otherUpdates).length > 0) {
+                        return { ...row, ...otherUpdates, ...(isSameDateSite ? responsibleUpdates : {}) };
                     }
+                }
+
+                if (isSameDateSite && Object.keys(responsibleUpdates).length > 0) {
+                    return { ...row, ...responsibleUpdates };
                 }
 
                 return row;
@@ -1411,7 +1569,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return next;
             });
         }
-    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, confirm, getRowKey, normalizeTeamId, resolveWorkerTeamCanonicalId, toast]);
+    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, confirm, getRowKey, getSameDateSiteReportIds, normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, splitResponsibleTeamUpdates, toast]);
 
     const handleSaveRow = useCallback(async (r: DailyReportWorkerRow) => {
         const key = getRowKey(r);
@@ -1544,15 +1702,6 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 if (bulkWorkerTeamName.trim()) updates.workerTeamName = bulkWorkerTeamName.trim();
                 
                 await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
-                
-                // 일보 수준 정보 업데이트
-                const reportUpdates: any = {};
-                if (bulkSiteType) reportUpdates.siteType = bulkSiteType;
-                if (bulkPaymentType) reportUpdates.paymentType = bulkPaymentType;
-                
-                if (Object.keys(reportUpdates).length > 0) {
-                    await dailyReportService.updateReport(r.reportId, reportUpdates);
-                }
             }
 
             toast.updated('일보');
@@ -1587,13 +1736,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setIsLoading(true);
         try {
             let successCount = 0;
+            const successDates = new Set<string>();
             for (const r of selected) {
                 try {
                     await dailyReportService.removeWorkerFromReport(r.reportId, r.workerId);
                     successCount++;
+                    successDates.add(r.date);
                 } catch (e) {
                     console.error(`Failed to delete worker ${r.workerName} `, e);
                 }
+            }
+
+            if (successDates.size > 0) {
+                clearDailyReportBoardDrafts(successDates);
             }
 
             if (successCount === selected.length) {
@@ -1657,11 +1812,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
                     if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
                     
-                    if (draft.workerTeamId !== undefined) {
+                    const originalWorkerTeamName = resolveWorkerTeamDisplayName({
+                        workerTeamId: r.workerTeamId,
+                        workerTeamName: r.workerTeamName
+                    });
+                    const workerTeamNameChanged = draft.workerTeamName !== undefined && draft.workerTeamName !== originalWorkerTeamName;
+                    const resolvedWorkerTeamIdFromName = resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
+
+                    if (workerTeamNameChanged) {
+                        if (resolvedWorkerTeamIdFromName) updates.teamId = resolvedWorkerTeamIdFromName;
+                    } else if (draft.workerTeamId !== undefined) {
                         updates.teamId = normalizeTeamId(draft.workerTeamId);
-                    } else {
-                        const resolvedWorkerTeamId = resolveWorkerTeamCanonicalId({ workerTeamName: draft.workerTeamName });
-                        if (resolvedWorkerTeamId) updates.teamId = resolvedWorkerTeamId;
+                    } else if (resolvedWorkerTeamIdFromName) {
+                        updates.teamId = resolvedWorkerTeamIdFromName;
                     }
 
                     if (!updates.teamId && draft.workerId) {
@@ -1676,16 +1839,23 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     updates.manDay = Number(draft.manDay);
                     updates.unitPrice = Number(draft.unitPrice);
                     updates.workContent = draft.workContent;
-                    updates.workerTeamName = draft.workerTeamName ?? '';
+                    updates.workerTeamName = draft.workerTeamName ?? originalWorkerTeamName;
                     updates.siteType = draft.siteType;
                     updates.paymentType = draft.paymentType;
                     updates.amount = updates.manDay * updates.unitPrice;
 
                     const reportLevelUpdates = buildReportLevelUpdates(r, draft);
+                    const { responsibleUpdates, otherUpdates } = splitResponsibleTeamUpdates(reportLevelUpdates);
+                    const responsibleReportIds = Object.keys(responsibleUpdates).length > 0
+                        ? getSameDateSiteReportIds(r)
+                        : [];
 
                     await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
-                    if (Object.keys(reportLevelUpdates).length > 0) {
-                        await dailyReportService.updateReport(r.reportId, reportLevelUpdates as any);
+                    if (Object.keys(otherUpdates).length > 0) {
+                        await dailyReportService.updateReport(r.reportId, otherUpdates as any);
+                    }
+                    for (const reportId of responsibleReportIds) {
+                        await dailyReportService.updateReport(reportId, responsibleUpdates as any);
                     }
 
                     successCount++;
@@ -1711,42 +1881,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     };
 
-    const isTransferBusy = isLoading || isResettingDb || isDownloadingExcel;
-
-    const handleResetDb = useCallback(async () => {
-        const confirmed = await Swal.fire({
-            icon: 'warning',
-            title: '일보 DB 초기화',
-            html: '<div class="text-sm text-slate-600">`daily_reports`와 `daily_report_workers`를 모두 비웁니다.<br />계속하려면 <strong>일보DB초기화</strong>를 입력하세요.</div>',
-            input: 'text',
-            inputPlaceholder: '일보DB초기화',
-            showCancelButton: true,
-            confirmButtonText: '초기화',
-            cancelButtonText: '취소',
-            confirmButtonColor: '#dc2626',
-            preConfirm: (value) => {
-                if (String(value ?? '').trim() !== '일보DB초기화') {
-                    Swal.showValidationMessage('확인 문구가 일치하지 않습니다.');
-                }
-                return value;
-            },
-        });
-        if (!confirmed.isConfirmed) return;
-
-        setIsResettingDb(true);
-        try {
-            const result = await dailyReportTransferService.resetDb();
-            setSelectedRowKeys(new Set());
-            setRowDrafts({});
-            await fetchRows();
-            toast.success(`DB 초기화 완료 (일보 ${result.reports} / 상세 ${result.legacyRows})`);
-        } catch (error) {
-            console.error('[DailyReportListV2] DB reset failed', error);
-            toast.error('일보 DB 초기화에 실패했습니다.');
-        } finally {
-            setIsResettingDb(false);
-        }
-    }, [fetchRows]);
+    const isTransferBusy = isLoading || isDownloadingExcel;
 
     const handleDownloadExcel = useCallback(async () => {
         if (sortedRows.length === 0) {
@@ -1758,6 +1893,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         try {
             const exportRows = sortedRows.map((row) => ({
                 ...row,
+                teamName: resolveResponsibleTeamDisplayName({
+                    responsibleTeamId: row.responsibleTeamId,
+                    responsibleTeamName: row.responsibleTeamName
+                }),
                 workerTeamName: resolveWorkerTeamDisplayName({
                     workerTeamId: row.workerTeamId,
                     workerTeamName: row.workerTeamName
@@ -1774,145 +1913,93 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
     }, [endDate, resolveWorkerTeamDisplayName, sortedRows, startDate]);
 
+    const renderDatePresetButton = (key: DatePresetKey) => {
+        const preset = datePresets[key];
+        const isActive = activeDatePreset === key;
+
+        return (
+            <button
+                key={key}
+                type="button"
+                onClick={() => handleDatePresetClick(key)}
+                aria-pressed={isActive}
+                title={`${preset.label} 기간 선택: ${preset.start} ~ ${preset.end}`}
+                className={`daily-report-v2-preset-btn px-2.5 py-1.5 text-xs rounded-lg font-semibold border transition-colors ${isActive
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+            >
+                {preset.label}
+            </button>
+        );
+    };
+
+    const emptyTitle = rows.length > 0
+        ? '현재 필터에 맞는 작업자가 없습니다'
+        : '조회된 작업자 내역이 없습니다';
+    const emptyDescription = rows.length > 0
+        ? '현장, 소속팀, 작업자 검색 또는 표 필터를 줄여서 다시 확인하세요.'
+        : '선택한 기간에 등록된 출력일보가 없거나 아직 조회되지 않았습니다.';
+
     return (
         <div className="daily-report-v2-page flex flex-col flex-1 min-h-0 gap-3 p-0 pb-1">
-            <div className="flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-2 items-end">
-                <div className="flex items-center gap-2 flex-wrap w-full">
-                    <div className="flex items-center gap-2">
-                        <div className="relative">
-                            <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <div className="daily-report-v2-toolbar flex-shrink-0 bg-white px-3 py-2.5 rounded-xl shadow-sm border border-slate-200">
+                <div className="daily-report-v2-toolbar-main">
+                    <section className="daily-report-v2-toolbar-section daily-report-v2-date-section" aria-label="조회 기간">
+                        <div className="daily-report-v2-date-inputs">
+                            <div className="relative">
+                                <FontAwesomeIcon icon={faCalendarAlt} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={startDateInput}
+                                    onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
+                                    onBlur={() => { commitDateInput('start'); }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            commitDateInput('start');
+                                        }
+                                    }}
+                                    aria-label="조회 시작일"
+                                    title="조회 시작일"
+                                    placeholder="YYYY-MM-DD"
+                                    className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
+                                />
+                            </div>
+                            <span className="text-slate-400">~</span>
                             <input
                                 type="text"
                                 inputMode="numeric"
-                                value={startDateInput}
-                                onChange={(e) => setStartDateInput(sanitizeTypedDateInput(e.target.value))}
-                                onBlur={() => { commitDateInput('start'); }}
+                                value={endDateInput}
+                                onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
+                                onBlur={() => { commitDateInput('end'); }}
                                 onKeyDown={(e) => {
                                     if (e.key === 'Enter') {
-                                        commitDateInput('start');
+                                        commitDateInput('end');
                                     }
                                 }}
+                                aria-label="조회 종료일"
+                                title="조회 종료일"
                                 placeholder="YYYY-MM-DD"
-                                className="pl-10 pr-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
+                                className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
                             />
                         </div>
-                        <span className="text-slate-400">~</span>
-                        <input
-                            type="text"
-                            inputMode="numeric"
-                            value={endDateInput}
-                            onChange={(e) => setEndDateInput(sanitizeTypedDateInput(e.target.value))}
-                            onBlur={() => { commitDateInput('end'); }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    commitDateInput('end');
-                                }
-                            }}
-                            placeholder="YYYY-MM-DD"
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm w-[130px]"
-                            />
 
-                        <div className="flex gap-1">
-                            <button
-                                onClick={() => {
-                                    const d = new Date();
-                                    d.setMonth(d.getMonth() - 1);
-                                    d.setDate(1);
-                                    const start = formatYmd(d);
-
-                                    const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-                                    const end = formatYmd(endD);
-                                    applyDateRange(start, end);
-                                }}
-                                className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
-                            >
-                                전달
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const d = new Date();
-                                    d.setDate(1);
-                                    const start = formatYmd(d);
-
-                                    const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-                                    const end = formatYmd(endD);
-                                    applyDateRange(start, end);
-                                }}
-                                className="px-2 py-1.5 text-xs bg-blue-50 text-blue-600 rounded-lg font-medium hover:bg-blue-100 transition-colors border border-blue-100"
-                            >
-                                이달
-                            </button>
-                            <button
-                                onClick={() => {
-                                    const y = new Date();
-                                    y.setDate(y.getDate() - 1);
-                                    const yStr = formatYmd(y);
-                                    applyDateRange(yStr, yStr);
-                                }}
-                                className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
-                            >
-                                어제
-                            </button>
-                            <button
-                                onClick={() => {
-                                    applyDateRange(todayStr, todayStr);
-                                }}
-                                className="px-2 py-1.5 text-xs bg-slate-50 text-slate-600 rounded-lg font-medium hover:bg-slate-100 transition-colors border border-slate-200"
-                            >
-                                오늘
-                            </button>
+                        <div className="daily-report-v2-preset-group" role="group" aria-label="빠른 날짜 선택">
+                            {renderDatePresetButton('prevMonth')}
+                            {renderDatePresetButton('thisMonth')}
+                            {renderDatePresetButton('yesterday')}
+                            {renderDatePresetButton('today')}
                         </div>
+                    </section>
 
-                        <button
-                            onClick={() => {
-                                setSortMode('date');
-                                setDateSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
-                            }}
-                            className={`px-3 py-2 text-sm rounded-lg font-medium flex items-center gap-2 transition-colors border ${dateSortOrder === 'desc'
-                                ? 'bg-indigo-50 text-indigo-600 border-indigo-100'
-                                : 'bg-amber-50 text-amber-600 border-amber-100'
-                                }`}
-                            title="날짜 정렬"
-                        >
-                            <FontAwesomeIcon icon={dateSortOrder === 'desc' ? faSortAmountDown : faSortAmountUp} />
-                        </button>
-
-                        <button
-                            onClick={() => {
-                                setSortMode('name');
-                                setNameSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                            }}
-                            className={`px-3 py-2 text-sm rounded-lg font-medium flex items-center gap-2 transition-colors border ${sortMode === 'name'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                            title="가나다(이름) 정렬"
-                        >
-                            <span className="text-xs font-bold">이름순</span>
-                            <FontAwesomeIcon icon={nameSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
-                        </button>
-
-                        <button
-                            onClick={() => {
-                                setSortMode('site');
-                                setSiteSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                            }}
-                            className={`px-3 py-2 text-sm rounded-lg font-medium flex items-center gap-2 transition-colors border ${sortMode === 'site'
-                                ? 'bg-amber-50 text-amber-700 border-amber-100'
-                                : 'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}
-                            title="현장명 정렬"
-                        >
-                            <span className="text-xs font-bold">현장순</span>
-                            <FontAwesomeIcon icon={siteSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
-                        </button>
-                    </div>
-
-                    <div className="flex gap-2 flex-wrap">
+                    <section className="daily-report-v2-toolbar-section daily-report-v2-filter-section" aria-label="목록 필터">
                         <select
                             value={selectedSiteId}
                             onChange={(e) => setSelectedSiteId(e.target.value)}
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm min-w-[120px]"
+                            aria-label="현장 필터"
+                            title="현장 필터"
+                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm"
                         >
                             <option value="">전체 현장</option>
                             {[...availableSites].sort((a, b) => a.name.localeCompare(b.name, 'ko')).map((s) => (
@@ -1923,7 +2010,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <select
                             value={selectedTeamId}
                             onChange={(e) => setSelectedTeamId(e.target.value)}
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm min-w-[120px]"
+                            aria-label="현장소속팀 필터"
+                            title="현장소속팀 필터"
+                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm"
                         >
                             <option value="">전체 현장소속팀</option>
                             {availableReportTeams.map((t) => (
@@ -1934,121 +2023,178 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <select
                             value={selectedWorkerTeamId}
                             onChange={(e) => setSelectedWorkerTeamId(e.target.value)}
-                            className="px-3 py-2 border-slate-300 rounded-lg text-sm min-w-[120px] bg-slate-50"
+                            aria-label="작업자 소속팀 필터"
+                            title="작업자 소속팀 필터"
+                            className="daily-report-v2-select px-3 py-2 border-slate-300 rounded-lg text-sm bg-slate-50"
                         >
                             <option value="">전체 소속팀</option>
                             {availableWorkerTeams.map((t) => (
                                 <option key={String(t.id)} value={String(t.id)}>{t.name}</option>
                             ))}
                         </select>
-                    </div>
 
-                    <div className="relative w-48">
-                        <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="text"
-                            value={workerSearch}
-                            onChange={(e) => setWorkerSearch(e.target.value)}
-                            placeholder="작업자 검색"
-                            className="w-full pl-10 pr-4 py-2 border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
-                        />
-                    </div>
+                        <div className="relative daily-report-v2-worker-search">
+                            <FontAwesomeIcon icon={faSearch} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                                type="text"
+                                value={workerSearch}
+                                onChange={(e) => setWorkerSearch(e.target.value)}
+                                aria-label="작업자 이름 검색"
+                                title="작업자 이름 검색"
+                                placeholder="작업자 검색"
+                                className="w-full pl-10 pr-4 py-2 border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"
+                            />
+                        </div>
+                    </section>
 
-                    <button
-                        onClick={handleToggleEditMode}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isEditMode
-                            ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={faPenToSquare} />
-                        {isEditMode ? '수정 종료' : '수정모드'}
-                    </button>
-
-                    {isEditMode && (
-                        <>
-                            <button
-                                onClick={() => setIsBulkEditOpen(true)}
-                                disabled={selectedRowKeys.size === 0}
-                                className={`px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${selectedRowKeys.size > 0
-                                    ? 'bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200'
-                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    }`}
-                                title="선택 항목 일괄 수정"
-                            >
-                                일괄수정 ({selectedRowKeys.size})
-                            </button>
-
-                            <button
-                                onClick={handleBulkDelete}
-                                disabled={selectedRowKeys.size === 0}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${selectedRowKeys.size > 0
-                                    ? 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
-                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    }`}
-                                title="선택 항목 삭제"
-                            >
-                                <FontAwesomeIcon icon={faTrash} />
-                                삭제
-                            </button>
-                        </>
-                    )}
-
-                    <button
-                        onClick={handleSearch}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95 ml-auto"
-                    >
-                        <FontAwesomeIcon icon={faSearch} />
-                        조회
-                    </button>
-
-                    <button
-                        onClick={() => { void handleResetDb(); }}
-                        disabled={isTransferBusy}
-                            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
-                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                            : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={isResettingDb ? faSpinner : faTrashCan} spin={isResettingDb} />
-                        DB초기화
-                    </button>
-
-                    <button
-                        onClick={() => { void handleDownloadExcel(); }}
-                        disabled={isTransferBusy}
-                            className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm whitespace-nowrap border transition-colors ${isTransferBusy
-                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                            }`}
-                    >
-                        <FontAwesomeIcon icon={isDownloadingExcel ? faSpinner : faDownload} spin={isDownloadingExcel} />
-                        조회목록 엑셀다운로드
-                    </button>
-
-                    {isEditMode && (
+                    <section className="daily-report-v2-toolbar-section daily-report-v2-sort-section" aria-label="정렬 및 수정 도구">
                         <button
-                            onClick={handleSaveAllDirtyRows}
-                            disabled={isLoading || dirtyRowCount === 0}
-                            className={`px-4 py-1.5 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 ml-2 border transition-colors ${dirtyRowCount > 0
-                                ? 'bg-red-500 hover:bg-red-600 text-white border-red-500 animate-pulse'
-                                : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            type="button"
+                            onClick={() => {
+                                setSortMode('date');
+                                setDateSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'));
+                            }}
+                            aria-label={`날짜 ${dateSortOrder === 'desc' ? '최신순' : '오래된순'} 정렬`}
+                            title={`날짜 ${dateSortOrder === 'desc' ? '최신순' : '오래된순'} 정렬`}
+                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'date'
+                                ? 'bg-indigo-50 text-indigo-600 border-indigo-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200'
                                 }`}
-                            title="변경된 모든 항목 저장"
                         >
-                            <FontAwesomeIcon icon={faSave} />
-                            전체 저장 ({dirtyRowCount})
+                            <FontAwesomeIcon icon={dateSortOrder === 'desc' ? faSortAmountDown : faSortAmountUp} />
+                            <span className="text-xs font-bold">날짜</span>
                         </button>
-                    )}
 
-                    <div className="bg-slate-800 text-white px-4 py-2 rounded-lg shadow-sm flex items-center gap-2 ml-2">
-                        <span className="text-xs font-light text-slate-300">Total</span>
-                        <span className="font-bold text-lg">{totals.totalManDay.toFixed(1)}</span>
-                        <span className="text-xs">공수</span>
-                        <span className="ml-2 text-xs font-light text-slate-300">|</span>
-                        <span className="font-bold text-lg">{formatNumber(Math.round(totals.totalAmount))}</span>
-                        <span className="text-xs">원</span>
-                    </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSortMode('name');
+                                setNameSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                            }}
+                            aria-label={`이름 ${nameSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+                            title={`이름 ${nameSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'name'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                }`}
+                        >
+                            <span className="text-xs font-bold">이름순</span>
+                            <FontAwesomeIcon icon={nameSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSortMode('site');
+                                setSiteSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                            }}
+                            aria-label={`현장 ${siteSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+                            title={`현장 ${siteSortOrder === 'asc' ? '오름차순' : '내림차순'} 정렬`}
+                            className={`daily-report-v2-sort-btn px-3 py-2 text-sm rounded-lg font-semibold flex items-center gap-2 transition-colors border ${sortMode === 'site'
+                                ? 'bg-amber-50 text-amber-700 border-amber-100'
+                                : 'bg-slate-50 text-slate-600 border-slate-200'
+                                }`}
+                        >
+                            <span className="text-xs font-bold">현장순</span>
+                            <FontAwesomeIcon icon={siteSortOrder === 'asc' ? faSortAmountUp : faSortAmountDown} />
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={handleToggleEditMode}
+                            aria-pressed={isEditMode}
+                            title={isEditMode ? '수정모드 종료' : '수정모드 시작'}
+                            className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${isEditMode
+                                ? 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                        >
+                            <FontAwesomeIcon icon={faPenToSquare} />
+                            {isEditMode ? '수정 종료' : '수정모드'}
+                        </button>
+
+                        {isEditMode && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsBulkEditOpen(true)}
+                                    disabled={selectedRowKeys.size === 0}
+                                    className={`daily-report-v2-tool-btn px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${selectedRowKeys.size > 0
+                                        ? 'bg-indigo-100 text-indigo-700 border-indigo-200 hover:bg-indigo-200'
+                                        : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                        }`}
+                                    title="선택 항목 일괄 수정"
+                                >
+                                    일괄수정 ({selectedRowKeys.size})
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={handleBulkDelete}
+                                    disabled={selectedRowKeys.size === 0}
+                                    className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${selectedRowKeys.size > 0
+                                        ? 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200'
+                                        : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                        }`}
+                                    title="선택 항목 삭제"
+                                >
+                                    <FontAwesomeIcon icon={faTrash} />
+                                    삭제
+                                </button>
+                            </>
+                        )}
+                    </section>
+
+                    <section className="daily-report-v2-toolbar-actions" aria-label="조회 작업">
+                        <button
+                            type="button"
+                            onClick={handleSearch}
+                            className="daily-report-v2-primary-action bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 transition-transform active:scale-95"
+                            title="현재 조건으로 조회"
+                        >
+                            <FontAwesomeIcon icon={faSearch} />
+                            조회
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => { void handleDownloadExcel(); }}
+                            disabled={isTransferBusy}
+                            className={`daily-report-v2-secondary-action flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${isTransferBusy
+                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                }`}
+                            title="현재 조회 목록을 엑셀로 다운로드"
+                        >
+                            <FontAwesomeIcon icon={isDownloadingExcel ? faSpinner : faDownload} spin={isDownloadingExcel} />
+                            엑셀 다운로드
+                        </button>
+
+                        {isEditMode && (
+                            <button
+                                type="button"
+                                onClick={handleSaveAllDirtyRows}
+                                disabled={isLoading || dirtyRowCount === 0}
+                                className={`daily-report-v2-secondary-action px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex items-center gap-2 border transition-colors ${dirtyRowCount > 0
+                                    ? 'bg-red-500 hover:bg-red-600 text-white border-red-500 animate-pulse'
+                                    : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                    }`}
+                                title="변경된 모든 항목 저장"
+                            >
+                                <FontAwesomeIcon icon={faSave} />
+                                전체 저장 ({dirtyRowCount})
+                            </button>
+                        )}
+
+                        <div className="daily-report-v2-total-chip bg-slate-800 text-white px-4 py-2 rounded-lg shadow-sm flex items-center gap-2" aria-label={`총 공수 ${totals.totalManDay.toFixed(1)}, 총 금액 ${formatNumber(Math.round(totals.totalAmount))}원`}>
+                            <span className="text-xs font-light text-slate-300">Total</span>
+                            <span className="font-bold text-lg">{totals.totalManDay.toFixed(1)}</span>
+                            <span className="text-xs">공수</span>
+                            <span className="ml-2 text-xs font-light text-slate-300">|</span>
+                            <span className="font-bold text-lg">{formatNumber(Math.round(totals.totalAmount))}</span>
+                            <span className="text-xs">원</span>
+                        </div>
+                    </section>
                 </div>
                 {isEditMode && (
                     <div className="w-full flex items-center gap-2 text-xs text-slate-500">
@@ -2202,19 +2348,44 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <span className="text-sm font-medium">불러오는 중...</span>
                     </div>
                 ) : sortedRows.length === 0 ? (
-                    <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper daily-report-v2-empty" style={{ flex: 1 }}>
-                        <table className="sheet-table daily-report-workbook-table">
-                            <tbody>
-                                <tr>
-                                    <td
-                                        colSpan={isEditMode ? 14 : 12}
-                                        className="sheet-empty-state"
-                                    >
-                                        조건에 맞는 작업자 내역이 없습니다.
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <div className="daily-report-v2-empty-state" role="status" aria-live="polite">
+                        <div className="daily-report-v2-empty-icon" aria-hidden="true">
+                            <FontAwesomeIcon icon={faFilter} />
+                        </div>
+                        <div className="daily-report-v2-empty-copy">
+                            <h2>{emptyTitle}</h2>
+                            <p>{emptyDescription}</p>
+                        </div>
+                        <div className="daily-report-v2-empty-meta" aria-label="현재 조회 조건">
+                            <span>기간: {startDate} ~ {endDate}</span>
+                            {activeFilterLabels.length > 0 ? (
+                                activeFilterLabels.map((label) => (
+                                    <span key={label}>{label}</span>
+                                ))
+                            ) : (
+                                <span>추가 필터 없음</span>
+                            )}
+                        </div>
+                        <div className="daily-report-v2-empty-actions">
+                            {hasActiveListFilters && (
+                                <button
+                                    type="button"
+                                    onClick={handleClearListFilters}
+                                    className="px-4 py-2 rounded-lg text-sm font-bold bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                                    title="현장, 팀, 작업자 검색, 표 필터를 모두 초기화"
+                                >
+                                    필터 초기화
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => searchRowsByRange(todayStr, todayStr)}
+                                className="px-4 py-2 rounded-lg text-sm font-bold bg-blue-600 text-white border border-blue-600 hover:bg-blue-700"
+                                title="오늘 날짜로 다시 조회"
+                            >
+                                오늘 날짜로 조회
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper" style={{ flex: 1 }}>
@@ -2329,6 +2500,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                     workerTeamId: displayRow.workerTeamId,
                                     workerTeamName: displayRow.workerTeamName
                                 });
+                                const originalWorkerTeamName = resolveWorkerTeamDisplayName({
+                                    workerTeamId: row.workerTeamId,
+                                    workerTeamName: row.workerTeamName
+                                });
 
                                 return (
                                     <tr
@@ -2396,7 +2571,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                         <td className="px-2.5 py-1.5">
                                             {isEditMode ? (
                                                 <select
-                                                    value={displayRow.responsibleTeamId}
+                                                    value={resolveResponsibleTeamOptionId({
+                                                        responsibleTeamId: displayRow.responsibleTeamId,
+                                                        responsibleTeamName: displayRow.responsibleTeamName ?? displayRow.teamName
+                                                    })}
                                                     onChange={(e) => {
                                                         const val = e.target.value;
                                                         const matchedTeam = teams.find(t => String(t.id ?? t.legacyId ?? '') === val);
@@ -2432,9 +2610,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 <input
                                                     type="text"
                                                     list="worker-team-list-v2"
-                                                    value={displayRow.workerTeamName}
-                                                    onChange={(e) => setRowDraft(row, { workerTeamName: e.target.value })}
-                                                    className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workerTeamName !== (row.workerTeamName ?? '') ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                    value={displayWorkerTeamName}
+                                                    onChange={(e) => {
+                                                        const nextWorkerTeamName = e.target.value;
+                                                        setRowDraft(row, {
+                                                            workerTeamName: nextWorkerTeamName,
+                                                            workerTeamId: resolveWorkerTeamCanonicalId({ workerTeamName: nextWorkerTeamName }) || undefined
+                                                        });
+                                                    }}
+                                                    className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workerTeamName !== originalWorkerTeamName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
                                             ) : (
                                                 <span className="truncate block text-slate-500" title={displayWorkerTeamName}>{displayWorkerTeamName}</span>

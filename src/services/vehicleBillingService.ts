@@ -76,8 +76,22 @@ const resolveVehicleUuid = async (id: string): Promise<string | null> => {
     if (isUuidString(id)) return id;
     const res = await listAllVehicles();
     const rows = (res as any)?.data?.vehicles ?? [];
-    const hit = Array.isArray(rows) ? rows.find((r: any) => String(r?.legacyId ?? '') === String(id)) : null;
+    const hit = Array.isArray(rows)
+        ? rows.find((r: any) => String(r?.id ?? '') === String(id) || String(r?.legacyId ?? '') === String(id))
+        : null;
     return hit?.id ? String(hit.id) : null;
+};
+
+const findWorkerRow = async (id: string | undefined | null): Promise<any | null> => {
+    const raw = id ? String(id) : '';
+    if (!raw) return null;
+    const res = await listWorkers();
+    const rows = (res as any)?.data?.workers ?? [];
+    if (!Array.isArray(rows)) return null;
+    return rows.find((row: any) => (
+        String(row?.id ?? '') === raw ||
+        String(row?.legacyId ?? '') === raw
+    )) ?? null;
 };
 
 const safeJsonParse = <T>(value: unknown, fallback: T): T => {
@@ -149,28 +163,53 @@ export const vehicleBillingService = {
         const totalAmount = fixedCost + variableCost;
         const billingId = `${yearMonth}_${vehicle.id}`;
 
+        const assignedWorker = vehicle.currentAssigneeType === 'WORKER'
+            ? await findWorkerRow(vehicle.currentAssigneeId)
+            : null;
+        const assignedTeamId = vehicle.currentAssigneeType === 'TEAM'
+            ? vehicle.currentAssigneeId
+            : (assignedWorker?.teamId ? String(assignedWorker.teamId) : undefined);
+        const assignedTeamName = vehicle.currentAssigneeType === 'TEAM'
+            ? vehicle.currentAssigneeName
+            : (assignedWorker?.teamName ? String(assignedWorker.teamName) : undefined);
+
+        const hasExplicitBillingTarget = Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
+        const targetType = hasExplicitBillingTarget ? vehicle.billingTargetType : vehicle.currentAssigneeType;
+        const targetId = hasExplicitBillingTarget ? vehicle.billingTargetId : vehicle.currentAssigneeId;
+        const targetName = hasExplicitBillingTarget ? vehicle.billingTargetName : vehicle.currentAssigneeName;
+        const targetWorker = targetType === 'WORKER'
+            ? (targetId && String(targetId) === String(vehicle.currentAssigneeId) ? assignedWorker : await findWorkerRow(targetId))
+            : null;
+
         const issuedToType =
-            vehicle.currentAssigneeType === 'TEAM'
+            targetType === 'TEAM'
                 ? 'team'
-                : vehicle.currentAssigneeType === 'WORKER'
+                : targetType === 'WORKER'
                     ? 'worker'
                     : undefined;
+
+        const billingTeamId = targetType === 'TEAM'
+            ? (targetId ?? undefined)
+            : (targetWorker?.teamId ? String(targetWorker.teamId) : assignedTeamId);
+        const billingTeamName = targetType === 'TEAM'
+            ? (targetName ?? undefined)
+            : (targetWorker?.teamName ? String(targetWorker.teamName) : assignedTeamName);
 
         const billingDoc: VehicleBillingDocument = {
             id: billingId,
             yearMonth,
             vehicleId: vehicle.id,
             vehiclePlate: vehicle.licensePlate,
-            assignedTeamId: vehicle.currentAssigneeType === 'TEAM' ? vehicle.currentAssigneeId : undefined,
-            assignedTeamName: vehicle.currentAssigneeType === 'TEAM' ? vehicle.currentAssigneeName : undefined,
-            teamId: vehicle.currentAssigneeType === 'TEAM' ? vehicle.currentAssigneeId : undefined,
-            teamName: vehicle.currentAssigneeType === 'TEAM' ? vehicle.currentAssigneeName : undefined,
+            assignedTeamId,
+            assignedTeamName,
+            teamId: billingTeamId,
+            teamName: billingTeamName,
             issuedToType,
-            issuedToWorkerId: issuedToType === 'worker' ? (vehicle.currentAssigneeId ?? undefined) : undefined,
+            issuedToWorkerId: issuedToType === 'worker' ? (targetId ?? undefined) : undefined,
             issuedToWorkerName: issuedToType === 'team'
-                ? (vehicle.currentAssigneeName ?? undefined)
+                ? (targetName ?? undefined)
                 : issuedToType === 'worker'
-                    ? (vehicle.currentAssigneeName ?? undefined)
+                    ? (targetName ?? undefined)
                     : undefined,
 
             fixedCost,
@@ -305,23 +344,30 @@ export const vehicleBillingService = {
                     const team = d?.team;
                     const issuedToWorker = d?.issuedToWorker;
 
-                    const fallbackTeamId = d?.assignedTeamId ? String(d.assignedTeamId) : undefined;
-                    const fallbackTeamName = d?.assignedTeamName ? String(d.assignedTeamName) : undefined;
+                    const fallbackTeamId = d?.teamId
+                        ? String(d.teamId)
+                        : (d?.assignedTeamId ? String(d.assignedTeamId) : undefined);
+                    const fallbackTeamName = d?.teamName
+                        ? String(d.teamName)
+                        : (d?.assignedTeamName ? String(d.assignedTeamName) : undefined);
 
                     const rawIssuedToType = d?.issuedToType ? String(d.issuedToType) : undefined;
                     const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
+                    const issuedToWorkerId = issuedToWorker?.id
+                        ? String(issuedToWorker.id)
+                        : (d?.issuedToWorkerId ? String(d.issuedToWorkerId) : undefined);
 
                     return {
                         id: String(d?.id ?? ''),
                         yearMonth: String(d?.yearMonth ?? ''),
-                        vehicleId: vehicle?.id ? String(vehicle.id) : '',
+                        vehicleId: vehicle?.id ? String(vehicle.id) : (d?.vehicleId ? String(d.vehicleId) : ''),
                         vehiclePlate: d?.vehiclePlate ? String(d.vehiclePlate) : (vehicle?.licensePlate ? String(vehicle.licensePlate) : ''),
                         assignedTeamId: d?.assignedTeamId ? String(d.assignedTeamId) : undefined,
                         assignedTeamName: d?.assignedTeamName ? String(d.assignedTeamName) : undefined,
                         teamId: team?.id ? String(team.id) : fallbackTeamId,
                         teamName: d?.teamName ? String(d.teamName) : (team?.name ? String(team.name) : fallbackTeamName),
                         issuedToType,
-                        issuedToWorkerId: issuedToWorker?.id ? String(issuedToWorker.id) : undefined,
+                        issuedToWorkerId,
                         issuedToWorkerName: issuedToType === 'team'
                             ? (d?.teamName ? String(d.teamName) : (team?.name ? String(team.name) : fallbackTeamName))
                             : (d?.issuedToWorkerName ? String(d.issuedToWorkerName) : (issuedToWorker?.name ? String(issuedToWorker.name) : undefined)),

@@ -12,6 +12,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { Accommodation } from '../../types/accommodation';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
+import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
 import { useAccommodationQuickAssignment } from './useAccommodationQuickAssignment';
 
 interface Props {
@@ -68,6 +69,12 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     });
     const [billingWorkerSearch, setBillingWorkerSearch] = React.useState('');
     const normalizedBillingWorkerSearch = billingWorkerSearch.trim().toLowerCase();
+    const handleStartDateChange = (value: string) => {
+        setStartDate(formatTypedDateInput(value));
+    };
+    const normalizeStartDate = () => {
+        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+    };
     const filteredBillingWorkerOptions = React.useMemo(() => {
         if (!normalizedBillingWorkerSearch) return billingWorkerOptions;
         return billingWorkerOptions.filter((workerOption) => {
@@ -196,9 +203,13 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                     <div>
                                         <label className="block text-xs font-bold text-slate-500 mb-1.5">입실일</label>
                                         <input
-                                            type="date"
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={10}
+                                            placeholder="YYYY-MM-DD"
                                             value={startDate}
-                                            onChange={(event) => setStartDate(event.target.value)}
+                                            onChange={(event) => handleStartDateChange(event.target.value)}
+                                            onBlur={normalizeStartDate}
                                             className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
                                         />
                                     </div>

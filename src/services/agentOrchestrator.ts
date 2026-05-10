@@ -38,7 +38,7 @@ async function callGeminiSimple(prompt: string): Promise<string> {
 
     try {
         aiSettingsService.assertCurrentPageEnabled('AI 에이전트 대화');
-        const model = aiSettingsService.getModels().textModel || 'gemini-2.0-flash';
+        const model = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
         const response = await fetch(

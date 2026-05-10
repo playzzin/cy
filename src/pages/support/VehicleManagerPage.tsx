@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Vehicle } from '../../types/vehicle';
+import { Vehicle, VehicleAssigneeType } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import { VehicleForm } from '../../components/vehicle/VehicleForm';
 import { VehicleAssignment } from '../../components/vehicle/VehicleAssignment';
 import { VehicleExpenseLog } from '../../components/vehicle/VehicleExpenseLog';
@@ -11,10 +12,18 @@ import { VehicleStatusBoard } from '../../components/vehicle/VehicleStatusBoard'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faCar, faChartPie, faGasPump, faRotateRight, faCircleExclamation } from '@fortawesome/free-solid-svg-icons';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
+import { hexToRgba, normalizeHexColor } from '../../utils/color';
+import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 
 interface VehicleManagerPageProps {
     embedded?: boolean;
 }
+
+type VehicleTargetSelection = {
+    type: VehicleAssigneeType;
+    id: string;
+    name: string;
+} | null;
 
 export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded = false }) => {
     // Data State
@@ -25,6 +34,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
     const [selectableTeams, setSelectableTeams] = useState<Team[]>([]); // Filtered for dropdown
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
 
@@ -48,16 +58,10 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 teamService.getTeams(),
                 companyService.getCompanies()
             ]);
-            // Filter teams (Cheongyeon Only)
-            const cheongyeonCompanies = companies.filter(c => c.name.includes('청연'));
-            const cheongyeonIdSet = new Set(cheongyeonCompanies.map(c => c.id).filter(id => !!id));
-            const cheongyeonNameSet = new Set(cheongyeonCompanies.map(c => c.name));
-            const allowedTeams = teamList.filter(t => {
-                if (t.companyId && cheongyeonIdSet.has(t.companyId)) return true;
-                if (t.companyName && cheongyeonNameSet.has(t.companyName)) return true;
-                return false;
-            }).sort((a, b) => a.name.localeCompare(b.name));
+            const workerList = await manpowerService.getWorkers();
+            const allowedTeams = buildCheongyeonEngTeams(teamList, companies);
             setVehicles(vehicleList);
+            setWorkers(workerList);
             setTeams(teamList.sort((a, b) => a.name.localeCompare(b.name)));
             setSelectableTeams(allowedTeams);
         } catch (error) {
@@ -85,6 +89,12 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
         });
     }, [vehicles, selectedTeamId, teams]);
 
+    const selectedTeam = React.useMemo(
+        () => teams.find(t => String(t.id) === String(selectedTeamId)) ?? null,
+        [selectedTeamId, teams]
+    );
+    const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+
     // 핸들러 함수들
     const handleRefresh = () => {
         setRefreshKey(prev => prev + 1);
@@ -95,6 +105,69 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     };
     const handleManageExpenses = (vehicle: Vehicle) => {
         setExpenseVehicle(vehicle);
+    };
+    const getTodayDateInput = () => new Date().toISOString().slice(0, 10);
+    const handleAssignmentChange = async (vehicle: Vehicle, target: VehicleTargetSelection) => {
+        try {
+            const sameTarget = target
+                && vehicle.currentAssigneeType === target.type
+                && String(vehicle.currentAssigneeId ?? '') === String(target.id);
+            if (sameTarget) return;
+
+            if (!target) {
+                if (vehicle.currentAssigneeId) {
+                    await vehicleService.unassignVehicle(vehicle.id, getTodayDateInput());
+                }
+            } else {
+                if (vehicle.currentAssigneeId) {
+                    await vehicleService.unassignVehicle(vehicle.id, getTodayDateInput());
+                }
+                await vehicleService.assignVehicle(
+                    vehicle.id,
+                    target.id,
+                    target.type,
+                    target.name,
+                    getTodayDateInput()
+                );
+            }
+
+            handleRefresh();
+        } catch (error) {
+            console.error('Failed to update vehicle assignment', error);
+            window.alert('차량 배정 변경 중 오류가 발생했습니다.');
+        }
+    };
+    const handleBillingTargetChange = async (vehicle: Vehicle, target: VehicleTargetSelection) => {
+        try {
+            await vehicleService.updateVehicle(vehicle.id, {
+                billingTargetId: target?.id ?? '',
+                billingTargetType: target?.type,
+                billingTargetName: target?.name ?? ''
+            });
+            handleRefresh();
+        } catch (error) {
+            console.error('Failed to update vehicle billing target', error);
+            window.alert('차량 청구대상 변경 중 오류가 발생했습니다.');
+        }
+    };
+    const handleDelete = async (vehicle: Vehicle) => {
+        const label = vehicle.licensePlate || vehicle.model || '선택한 차량';
+        const ok = window.confirm(`${label} 차량을 삭제하시겠습니까?\n삭제 후에는 복구할 수 없습니다.`);
+        if (!ok) return;
+
+        try {
+            await vehicleService.deleteVehicle(vehicle.id);
+            if (editingVehicle?.id === vehicle.id) {
+                setEditingVehicle(null);
+                setIsFormOpen(false);
+            }
+            if (assigningVehicle?.id === vehicle.id) setAssigningVehicle(null);
+            if (expenseVehicle?.id === vehicle.id) setExpenseVehicle(null);
+            handleRefresh();
+        } catch (error) {
+            console.error('Failed to delete vehicle', error);
+            window.alert('차량 삭제 중 오류가 발생했습니다.');
+        }
     };
     const handleFormSuccess = () => {
         setIsFormOpen(false);
@@ -156,16 +229,33 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                     </button>
                 </div>
 
-                <div className="flex items-center gap-3 px-2">
+                <div
+                    className="flex items-center gap-3 rounded-xl px-2 py-1"
+                    style={selectedTeam ? {
+                        backgroundColor: hexToRgba(selectedTeamColor, 0.07),
+                        boxShadow: `inset 4px 0 0 ${selectedTeamColor}`
+                    } : undefined}
+                >
                     <span className="text-sm font-bold text-slate-500">팀별 필터:</span>
+                    {selectedTeam && (
+                        <span
+                            className="h-3 w-3 rounded-full border border-white shadow-sm"
+                            style={{ backgroundColor: selectedTeamColor }}
+                        />
+                    )}
                     <select
                         value={selectedTeamId}
                         onChange={(e) => setSelectedTeamId(e.target.value)}
                         className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-48 p-2 outline-none"
+                        style={selectedTeam ? {
+                            borderColor: hexToRgba(selectedTeamColor, 0.35),
+                            backgroundColor: hexToRgba(selectedTeamColor, 0.05),
+                            color: selectedTeamColor
+                        } : undefined}
                     >
                         <option value="">전체 팀 보기</option>
-                        {teams.map(team => (
-                            <option key={team.id} value={team.id}>{team.name}</option>
+                        {selectableTeams.map(team => (
+                            <option key={team.id} value={team.id} style={{ color: normalizeHexColor(team.color) }}>{team.name}</option>
                         ))}
                     </select>
                 </div>
@@ -184,16 +274,17 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                     <div className="space-y-6">
                         <VehicleStatusBoard
                             vehicles={filteredVehicles}
-                            teams={teams}
+                            teams={selectableTeams}
+                            workers={workers}
                             loading={loading}
                             onEdit={handleEdit}
                             onManageExpenses={handleManageExpenses}
                             onAssign={(vehicle) => {
                                 setAssigningVehicle(vehicle);
                             }}
-                            onOpenBilling={() => {
-                                setShowBillingPanel(true);
-                            }}
+                            onAssignmentChange={handleAssignmentChange}
+                            onBillingTargetChange={handleBillingTargetChange}
+                            onDelete={handleDelete}
                         />
                         
                         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
@@ -223,6 +314,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                     <VehicleMonthlyLedger
                         vehicles={filteredVehicles}
                         teams={teams}
+                        teamFilterId={selectedTeamId}
                         loadingVehicles={loading}
                         onOpenExpenseLog={handleManageExpenses}
                     />

@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Vehicle } from '../../types/vehicle';
+import { Vehicle, VehicleAssigneeType } from '../../types/vehicle';
 import { Team } from '../../services/teamService';
+import { Worker } from '../../services/manpowerService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faCar, faGasPump, faWrench, faCheckCircle, faClock,
+    faCar, faGasPump, faCheckCircle, faClock,
     faWonSign, faExclamationTriangle, faCalendarAlt, faUser, faUsers,
-    faList, faTh, faTrash, faPlus, faFileInvoiceDollar
+    faList, faTh, faPlus, faPenToSquare, faTrash
 } from '@fortawesome/free-solid-svg-icons';
 import { iconMap } from '../../constants/iconMap';
 
@@ -17,12 +18,27 @@ interface TeamInfo {
 interface VehicleStatusBoardProps {
     vehicles: Vehicle[];
     teams?: Team[];
+    workers?: Worker[];
     loading: boolean;
     onEdit: (vehicle: Vehicle) => void;
     onManageExpenses: (vehicle: Vehicle) => void;
     onAssign: (vehicle: Vehicle) => void;
-    onOpenBilling: (vehicle: Vehicle) => void;
+    onAssignmentChange?: (vehicle: Vehicle, target: VehicleTargetSelection) => Promise<void> | void;
+    onBillingTargetChange?: (vehicle: Vehicle, target: VehicleTargetSelection) => Promise<void> | void;
+    onDelete: (vehicle: Vehicle) => void;
 }
+
+type VehicleTargetSelection = {
+    type: VehicleAssigneeType;
+    id: string;
+    name: string;
+} | null;
+
+const BILLING_FOLLOWS_ASSIGNMENT = '__assignment__';
+
+const makeTargetValue = (type?: VehicleAssigneeType | null, id?: string | null) => (
+    type && id ? `${type}:${id}` : ''
+);
 
 const getTeamFaIcon = (iconName?: string) => {
     if (!iconName) return faUsers;
@@ -40,13 +56,17 @@ const hexToRgba = (hex: string, alpha: number) => {
 export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
     vehicles,
     teams = [],
+    workers = [],
     loading,
     onEdit,
     onManageExpenses,
     onAssign,
-    onOpenBilling
+    onAssignmentChange,
+    onBillingTargetChange,
+    onDelete
 }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
+    const [savingKey, setSavingKey] = useState<string>('');
 
     // Build team info map: assigneeName -> {color, icon}
     const teamInfoMap = useMemo(() => {
@@ -56,6 +76,52 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
         });
         return map;
     }, [teams]);
+
+    const workerTeamInfoMap = useMemo(() => {
+        const map = new Map<string, TeamInfo>();
+        workers.forEach((worker) => {
+            if (!worker.id) return;
+            const teamInfo = worker.teamName ? teamInfoMap.get(worker.teamName) : undefined;
+            if (teamInfo) map.set(String(worker.id), teamInfo);
+        });
+        return map;
+    }, [workers, teamInfoMap]);
+
+    const sortedTeams = useMemo(
+        () => [...teams].sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR')),
+        [teams]
+    );
+
+    const sortedWorkers = useMemo(
+        () => [...workers]
+            .filter((worker) => Boolean(worker.id))
+            .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR')),
+        [workers]
+    );
+
+    const resolveTarget = (value: string): VehicleTargetSelection => {
+        if (!value || value === BILLING_FOLLOWS_ASSIGNMENT) return null;
+        const [type, id] = value.split(':') as [VehicleAssigneeType, string];
+        if (type === 'TEAM') {
+            const team = teams.find((item) => String(item.id) === String(id));
+            return team?.id ? { type: 'TEAM', id: team.id, name: team.name } : null;
+        }
+        if (type === 'WORKER') {
+            const worker = workers.find((item) => String(item.id) === String(id));
+            return worker?.id ? { type: 'WORKER', id: worker.id, name: worker.name } : null;
+        }
+        return null;
+    };
+
+    const runRowUpdate = async (key: string, callback?: () => Promise<void> | void) => {
+        if (!callback || savingKey) return;
+        setSavingKey(key);
+        try {
+            await callback();
+        } finally {
+            setSavingKey('');
+        }
+    };
 
     // 1. Statistics Calculation
     const stats = useMemo(() => {
@@ -164,8 +230,43 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
     };
 
     const getBillingTargetTypeLabel = (vehicle: Vehicle) => {
-        if (!vehicle.currentAssigneeName) return null;
-        return vehicle.currentAssigneeType === 'TEAM' ? '팀' : '개인';
+        const type = getBillingTargetType(vehicle);
+        const name = getBillingTargetName(vehicle);
+        if (!name) return null;
+        return type === 'TEAM' ? '팀' : '개인';
+    };
+
+    const getBillingTargetName = (vehicle: Vehicle) => {
+        return vehicle.billingTargetType && vehicle.billingTargetId
+            ? (vehicle.billingTargetName ?? '')
+            : (vehicle.currentAssigneeName ?? '');
+    };
+
+    const getBillingTargetType = (vehicle: Vehicle) => {
+        return vehicle.billingTargetType && vehicle.billingTargetId
+            ? vehicle.billingTargetType
+            : vehicle.currentAssigneeType;
+    };
+
+    const getBillingTargetTeamInfo = (vehicle: Vehicle) => {
+        const type = getBillingTargetType(vehicle);
+        const id = vehicle.billingTargetType && vehicle.billingTargetId
+            ? vehicle.billingTargetId
+            : vehicle.currentAssigneeId;
+        const name = getBillingTargetName(vehicle);
+        if (type === 'TEAM') return teamInfoMap.get(name);
+        if (type === 'WORKER' && id) return workerTeamInfoMap.get(String(id));
+        return undefined;
+    };
+
+    const getAssignmentSelectValue = (vehicle: Vehicle) => {
+        return makeTargetValue(vehicle.currentAssigneeType, vehicle.currentAssigneeId);
+    };
+
+    const getBillingTargetSelectValue = (vehicle: Vehicle) => {
+        return vehicle.billingTargetType && vehicle.billingTargetId
+            ? makeTargetValue(vehicle.billingTargetType, vehicle.billingTargetId)
+            : BILLING_FOLLOWS_ASSIGNMENT;
     };
 
     if (loading) {
@@ -319,7 +420,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">결제일</th>
                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">계약기간</th>
                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">렌트사(금융사)</th>
-                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-24"></th>
+                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-40"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -329,13 +430,11 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                     const tc = teamInfo?.color;
                                     const isContractExpired = vehicle.contract?.endDate && new Date(vehicle.contract.endDate) < new Date();
                                     const paymentDay = vehicle.contract?.paymentDay;
-                                    const billingTargetTypeLabel = getBillingTargetTypeLabel(vehicle);
 
                                     return (
                                         <tr
                                             key={vehicle.id}
-                                            onClick={() => onEdit(vehicle)}
-                                            className="hover:bg-indigo-50/40 cursor-pointer transition-colors group"
+                                            className="hover:bg-indigo-50/40 transition-colors group"
                                             style={tc ? { borderLeft: `3px solid ${tc}` } : undefined}
                                         >
                                             <td className="px-4 py-3 text-xs text-slate-400 font-mono">{rowIdx + 1}</td>
@@ -354,68 +453,62 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                                 {getStatusBadgeInline(vehicle.status || 'AVAILABLE')}
                                             </td>
                                             <td className="px-4 py-3">
-                                                {vehicle.currentAssigneeName ? (
-                                                    vehicle.currentAssigneeType === 'TEAM' ? (
-                                                        <span
-                                                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold"
-                                                            style={tc ? {
-                                                                backgroundColor: hexToRgba(tc, 0.1),
-                                                                color: tc,
-                                                                border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                            } : {
-                                                                backgroundColor: '#f1f5f9',
-                                                                color: '#475569',
-                                                                border: '1px solid #e2e8f0',
-                                                            }}
-                                                        >
-                                                            <FontAwesomeIcon icon={getTeamFaIcon(teamInfo?.icon)} className="text-[10px]" />
-                                                            {vehicle.currentAssigneeName}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                                            <FontAwesomeIcon icon={faUser} className="text-[10px]" />
-                                                            {vehicle.currentAssigneeName}
-                                                        </span>
-                                                    )
-                                                ) : (
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); onAssign(vehicle); }}
-                                                        className="px-2 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 border border-indigo-100 transition-colors flex items-center gap-1"
-                                                    >
-                                                        <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
-                                                        배정하기
-                                                    </button>
-                                                )}
+                                                <select
+                                                    value={getAssignmentSelectValue(vehicle)}
+                                                    disabled={!onAssignmentChange || savingKey === `assignment:${vehicle.id}`}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    onChange={(e) => {
+                                                        const value = e.target.value;
+                                                        void runRowUpdate(`assignment:${vehicle.id}`, () => onAssignmentChange?.(vehicle, resolveTarget(value)));
+                                                    }}
+                                                    className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:cursor-wait disabled:bg-slate-50"
+                                                >
+                                                    <option value="">미배정</option>
+                                                    <optgroup label="팀">
+                                                        {sortedTeams.map((team) => (
+                                                            <option key={team.id} value={makeTargetValue('TEAM', team.id)}>
+                                                                {team.name}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                    <optgroup label="개인">
+                                                        {sortedWorkers.map((worker) => (
+                                                            <option key={worker.id} value={makeTargetValue('WORKER', worker.id)}>
+                                                                {worker.name}{worker.teamName ? ` (${worker.teamName})` : ''}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                </select>
                                             </td>
                                             <td className="px-4 py-3">
-                                                {vehicle.currentAssigneeName && billingTargetTypeLabel ? (
-                                                    <span
-                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold"
-                                                        style={vehicle.currentAssigneeType === 'TEAM'
-                                                            ? (tc ? {
-                                                                backgroundColor: hexToRgba(tc, 0.1),
-                                                                color: tc,
-                                                                border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                            } : {
-                                                                backgroundColor: '#f1f5f9',
-                                                                color: '#475569',
-                                                                border: '1px solid #e2e8f0',
-                                                            })
-                                                            : {
-                                                                backgroundColor: '#eef2ff',
-                                                                color: '#4338ca',
-                                                                border: '1px solid #e0e7ff',
-                                                            }}
-                                                    >
-                                                        <FontAwesomeIcon
-                                                            icon={vehicle.currentAssigneeType === 'TEAM' ? getTeamFaIcon(teamInfo?.icon) : faUser}
-                                                            className="text-[10px]"
-                                                        />
-                                                        {billingTargetTypeLabel} · {vehicle.currentAssigneeName}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-xs text-slate-300">-</span>
-                                                )}
+                                                <select
+                                                    value={getBillingTargetSelectValue(vehicle)}
+                                                    disabled={!onBillingTargetChange || savingKey === `billing:${vehicle.id}`}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    onChange={(e) => {
+                                                        const value = e.target.value;
+                                                        void runRowUpdate(`billing:${vehicle.id}`, () => onBillingTargetChange?.(vehicle, resolveTarget(value)));
+                                                    }}
+                                                    className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:cursor-wait disabled:bg-slate-50"
+                                                >
+                                                    <option value={BILLING_FOLLOWS_ASSIGNMENT}>
+                                                        배정과 동일{vehicle.currentAssigneeName ? ` (${vehicle.currentAssigneeName})` : ''}
+                                                    </option>
+                                                    <optgroup label="팀">
+                                                        {sortedTeams.map((team) => (
+                                                            <option key={team.id} value={makeTargetValue('TEAM', team.id)}>
+                                                                {team.name}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                    <optgroup label="개인">
+                                                        {sortedWorkers.map((worker) => (
+                                                            <option key={worker.id} value={makeTargetValue('WORKER', worker.id)}>
+                                                                {worker.name}{worker.teamName ? ` (${worker.teamName})` : ''}
+                                                            </option>
+                                                        ))}
+                                                    </optgroup>
+                                                </select>
                                             </td>
                                             <td className="px-4 py-3 text-right font-bold text-slate-700">
                                                 {vehicle.contract?.monthlyFee
@@ -463,11 +556,18 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                                         <FontAwesomeIcon icon={faUser} className="text-xs" />
                                                     </button>
                                                     <button
-                                                        onClick={(e) => { e.stopPropagation(); onOpenBilling(vehicle); }}
-                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
-                                                        title="청구 관리"
+                                                        onClick={(e) => { e.stopPropagation(); onEdit(vehicle); }}
+                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                                                        title="차량 정보 수정"
                                                     >
-                                                        <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
+                                                        <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); onDelete(vehicle); }}
+                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-rose-50 flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors"
+                                                        title="삭제"
+                                                    >
+                                                        <FontAwesomeIcon icon={faTrash} className="text-xs" />
                                                     </button>
                                                 </div>
                                             </td>
@@ -497,12 +597,14 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                             ? teamInfoMap.get(vehicle.currentAssigneeName) : undefined;
                         const tc = teamInfo?.color;
                         const billingTargetTypeLabel = getBillingTargetTypeLabel(vehicle);
+                        const billingTargetType = getBillingTargetType(vehicle);
+                        const billingTargetName = getBillingTargetName(vehicle);
+                        const billingTargetTeamInfo = getBillingTargetTeamInfo(vehicle);
 
                         return (
                             <div
                                 key={vehicle.id}
-                                className="group bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden"
-                                onClick={() => onEdit(vehicle)}
+                                className="group bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-1 transition-all relative overflow-hidden"
                                 style={{
                                     borderLeftWidth: tc ? '4px' : undefined,
                                     borderLeftColor: tc || undefined,
@@ -534,11 +636,18 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                                 <FontAwesomeIcon icon={faUser} className="text-xs" />
                                             </button>
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); onOpenBilling(vehicle); }}
-                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-amber-100 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
-                                                title="청구 관리"
+                                                onClick={(e) => { e.stopPropagation(); onEdit(vehicle); }}
+                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                                                title="차량 정보 수정"
                                             >
-                                                <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
+                                                <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onDelete(vehicle); }}
+                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-rose-100 flex items-center justify-center text-slate-400 hover:text-rose-700 transition-colors"
+                                                title="삭제"
+                                            >
+                                                <FontAwesomeIcon icon={faTrash} className="text-xs" />
                                             </button>
                                         </div>
                                     </div>
@@ -587,14 +696,14 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                     <div className="space-y-3 pt-4 border-t border-slate-100">
                                         <div className="flex justify-between items-center text-sm">
                                             <span className="text-slate-400 font-medium text-xs">청구 대상</span>
-                                            {vehicle.currentAssigneeName && billingTargetTypeLabel ? (
+                                            {billingTargetName && billingTargetTypeLabel ? (
                                                 <span
                                                     className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-bold"
-                                                    style={vehicle.currentAssigneeType === 'TEAM'
-                                                        ? (tc ? {
-                                                            backgroundColor: hexToRgba(tc, 0.1),
-                                                            color: tc,
-                                                            border: `1px solid ${hexToRgba(tc, 0.2)}`,
+                                                    style={billingTargetType === 'TEAM'
+                                                        ? (billingTargetTeamInfo ? {
+                                                            backgroundColor: hexToRgba(billingTargetTeamInfo.color, 0.1),
+                                                            color: billingTargetTeamInfo.color,
+                                                            border: `1px solid ${hexToRgba(billingTargetTeamInfo.color, 0.2)}`,
                                                         } : {
                                                             backgroundColor: '#f1f5f9',
                                                             color: '#475569',
@@ -607,10 +716,10 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                                         }}
                                                 >
                                                     <FontAwesomeIcon
-                                                        icon={vehicle.currentAssigneeType === 'TEAM' ? getTeamFaIcon(teamInfo?.icon) : faUser}
+                                                        icon={billingTargetType === 'TEAM' ? getTeamFaIcon(billingTargetTeamInfo?.icon) : faUser}
                                                         className="text-[10px]"
                                                     />
-                                                    {billingTargetTypeLabel} · {vehicle.currentAssigneeName}
+                                                    {billingTargetTypeLabel} · {billingTargetName}
                                                 </span>
                                             ) : (
                                                 <span className="text-xs text-slate-300">미지정</span>

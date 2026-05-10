@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faBars,
     faUserGear,
     faGear,
     faUserShield,
@@ -50,6 +49,10 @@ interface HeaderProps {
     toggleDarkMode?: () => void;
 }
 
+const getMenuDisplayText = (text: string): string => {
+    return text === '일보목록v2' ? '일보목록' : text;
+};
+
 const Header: React.FC<HeaderProps> = ({
     toggleSidebar,
     togglePanel,
@@ -75,6 +78,11 @@ const Header: React.FC<HeaderProps> = ({
     const topNavCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const profileRef = useRef<HTMLDivElement>(null);
     const positionPanelRef = useRef<HTMLDivElement>(null);
+    const safeCurrentSiteData = currentSiteData || {
+        name: '청연ENG ERP',
+        icon: 'fa-shield-halved',
+        menu: []
+    };
 
     const clearTopNavCloseTimer = () => {
         if (topNavCloseTimerRef.current) {
@@ -179,13 +187,13 @@ const Header: React.FC<HeaderProps> = ({
             if (typeof child === 'string') {
                 const path = menuPaths[child] || '';
                 if (!path) return;
-                result.push({ label: child, path, sourceGroup: parentText });
+                result.push({ label: getMenuDisplayText(child), path, sourceGroup: parentText });
                 return;
             }
 
             const directPath = resolvePath(child);
             if (directPath) {
-                result.push({ label: child.text, path: directPath, sourceGroup: parentText });
+                result.push({ label: getMenuDisplayText(child.text), path: directPath, sourceGroup: parentText });
             }
 
             if (child.sub && child.sub.length > 0) {
@@ -202,15 +210,15 @@ const Header: React.FC<HeaderProps> = ({
         return Array.from(dedup.values());
     };
 
-    const cheongyeonTopNav: CheongyeonNavSection[] = Array.isArray(currentSiteData?.menu)
-        ? currentSiteData.menu
+    const cheongyeonTopNav: CheongyeonNavSection[] = Array.isArray(safeCurrentSiteData.menu)
+        ? safeCurrentSiteData.menu
             .filter((item: MenuItem) => !item.hide)
             .map((item: MenuItem, index: number) => {
                 const children = collectChildLinks(item.sub || [], item.text);
                 const path = resolvePath(item) || children[0]?.path || '';
                 return {
                     key: `${item.id || item.text || index}`,
-                    label: item.text,
+                    label: getMenuDisplayText(item.text),
                     path,
                     children,
                 };
@@ -236,14 +244,32 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <header id="main-header" style={headerStyle} className={isSiteLayerMode ? 'cheongyeon-header' : ''}>
             <div className="header-left-group">
-                <button className="header-btn" id="sidebar-toggle" onClick={toggleSidebar} aria-label="메뉴 토글">
-                    <FontAwesomeIcon icon={faBars} />
+                <button
+                    type="button"
+                    className={`app-menu-logo-button ${isSiteLayerMode ? 'cheongyeon-header-logo' : ''}`}
+                    id="sidebar-toggle"
+                    onClick={toggleSidebar}
+                    aria-label="메뉴 토글"
+                    title="메뉴 토글"
+                >
+                    {logoUrl ? (
+                        <img
+                            src={logoUrl}
+                            alt="Logo"
+                            className={isSiteLayerMode ? 'cheongyeon-header-logo-image' : 'app-menu-logo-image'}
+                        />
+                    ) : (
+                        <FontAwesomeIcon
+                            icon={resolveIcon(safeCurrentSiteData.icon, faShieldHalved)}
+                            className={isSiteLayerMode ? 'cheongyeon-header-logo-icon' : 'app-menu-logo-icon'}
+                        />
+                    )}
                 </button>
 
                 {isSiteLayerMode && (
                     <button
                         type="button"
-                        className="cheongyeon-header-logo"
+                        className="cheongyeon-header-logo cheongyeon-header-home-logo"
                         onClick={() => navigate(siteLandingPath)}
                         aria-label="청연 메인으로 이동"
                     >
@@ -255,25 +281,12 @@ const Header: React.FC<HeaderProps> = ({
                             />
                         ) : (
                             <FontAwesomeIcon
-                                icon={resolveIcon(currentSiteData.icon, faShieldHalved)}
+                                icon={resolveIcon(safeCurrentSiteData.icon, faShieldHalved)}
                                 className="cheongyeon-header-logo-icon"
                             />
                         )}
                     </button>
                 )}
-
-                <div className="mobile-logo-area">
-                    {logoUrl ? (
-                        <img 
-                            src={logoUrl} 
-                            alt="Logo" 
-                            style={{ height: '24px', width: 'auto', marginRight: '8px', objectFit: 'contain' }}
-                        />
-                    ) : (
-                        <FontAwesomeIcon icon={resolveIcon(currentSiteData.icon, faShieldHalved)} style={{ marginRight: '8px', color: '#3498db' }} />
-                    )}
-                    <span>{currentSiteData.name}</span>
-                </div>
             </div>
 
             {isSiteLayerMode && (
@@ -327,18 +340,19 @@ const Header: React.FC<HeaderProps> = ({
                         className="header-btn cheongyeon-theme-toggle"
                         onClick={toggleDarkMode}
                         title={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
+                        aria-label={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
                         style={{ color: isDarkMode ? '#fbbf24' : '#64748b' }}
                     >
                         <FontAwesomeIcon icon={isDarkMode ? faSun : faMoon} />
                     </button>
                 )}
-                <button className="header-btn" onClick={() => togglePanel('bottom')} title="빠른 실행">
+                <button className="header-btn" onClick={() => togglePanel('bottom')} title="빠른 실행" aria-label="빠른 실행 열기">
                     <FontAwesomeIcon icon={faUserGear} />
                 </button>
 
                 {isAdmin && (
                     <div className="relative" ref={positionPanelRef}>
-                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="모드 선택">
+                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="모드 선택" aria-label="모드 선택 열기">
                             <FontAwesomeIcon icon={faIdBadge} />
                         </button>
                         {isPositionPanelOpen && (
@@ -357,7 +371,7 @@ const Header: React.FC<HeaderProps> = ({
                 )}
 
                 {isAdmin && (
-                    <button className="header-btn text-red-400 hover:bg-white/10" onClick={() => togglePanel('admin')} title="관리자 메뉴">
+                    <button className="header-btn text-red-400 hover:bg-white/10" onClick={() => togglePanel('admin')} title="관리자 메뉴" aria-label="관리자 메뉴 열기">
                         <FontAwesomeIcon icon={faUserShield} />
                     </button>
                 )}
@@ -367,6 +381,7 @@ const Header: React.FC<HeaderProps> = ({
                         className="header-btn profile-btn"
                         onClick={() => setIsProfileOpen(!isProfileOpen)}
                         title="프로필"
+                        aria-label="프로필 메뉴 열기"
                     >
                         {currentUser?.photoURL ? (
                             <img

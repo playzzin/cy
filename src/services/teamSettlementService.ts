@@ -107,6 +107,12 @@ const calculateOverlapDays = (params: {
   return Math.floor((actualEnd.getTime() - actualStart.getTime()) / oneDayMs) + 1;
 };
 
+const addDays = (date: Date, days: number): Date => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
 const normalizeBillingStatus = (value: unknown): string => {
   const raw = String(value ?? '').trim().toLowerCase();
   if (!raw) return '';
@@ -574,8 +580,10 @@ export const teamSettlementService = {
       const isManagedSiteStrict = matchesTeam(responsibleTeamId);
       if (!isManagedSiteStrict) return;
 
+      const rowSiteType = String(row.siteType ?? '').trim();
+      const resolvedSiteType = rowSiteType || String(site?.siteType ?? '').trim();
       const managedKind: '도급' | '직영' | '지원' =
-        site?.siteType === '도급' || site?.siteType === '직영' || site?.siteType === '지원' ? site.siteType : '직영';
+        resolvedSiteType === '도급' || resolvedSiteType === '직영' || resolvedSiteType === '지원' ? resolvedSiteType : '직영';
 
       if (managedKind !== '도급' && managedKind !== '직영') return;
 
@@ -869,52 +877,182 @@ export const teamSettlementService = {
     let vehicleDeductions: TeamSettlementDeductionItem[] = vehicleDeductionsFromDocs;
 
     if (vehicleDeductions.length === 0) {
-      const [vehicles, expenses, workerLookups] = await Promise.all([
+      const [vehicles, expenses, workerLookups, vehicleAssignments] = await Promise.all([
         vehicleService.getVehicles(),
         vehicleService.getExpensesByMonth(params.yearMonth),
-        buildWorkerTeamLookups()
+        buildWorkerTeamLookups(),
+        vehicleService.listAllVehicleAssignments().catch(() => [])
       ]);
 
-      const expenseByVehicleId = new Map<string, number>();
+      const expenseByVehicleId = new Map<string, typeof expenses>();
       expenses.forEach((expense) => {
         const vehicleId = String(expense.vehicleId ?? '').trim();
         if (!vehicleId) return;
-        expenseByVehicleId.set(vehicleId, (expenseByVehicleId.get(vehicleId) ?? 0) + toFiniteNumberOrZero(expense.amount));
+        const list = expenseByVehicleId.get(vehicleId) ?? [];
+        list.push(expense);
+        expenseByVehicleId.set(vehicleId, list);
       });
 
+      const assignmentsByVehicleId = new Map<string, typeof vehicleAssignments>();
+      vehicleAssignments.forEach((assignment) => {
+        const vehicleId = String(assignment.vehicleId ?? '').trim();
+        if (!vehicleId) return;
+        const list = assignmentsByVehicleId.get(vehicleId) ?? [];
+        list.push(assignment);
+        assignmentsByVehicleId.set(vehicleId, list);
+      });
+
+      const resolveVehicleAssignmentTeamId = (assignment: { assigneeType?: unknown; assigneeId?: unknown; assigneeName?: unknown }): string => {
+        if (assignment.assigneeType === 'TEAM') {
+          return resolveTeamIdFromAny(
+            assignment.assigneeId ? String(assignment.assigneeId) : '',
+            assignment.assigneeName ? String(assignment.assigneeName) : ''
+          );
+        }
+
+        const workerId = String(assignment.assigneeId ?? '').trim();
+        const workerName = String(assignment.assigneeName ?? '').trim();
+        return workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
+      };
+
+      type VehicleCostSegment = {
+        key: string;
+        teamId: string;
+        startDate: Date;
+        endDate: Date;
+        overlapDays: number;
+      };
+
+      const allocateVehicleFixedCosts = (fixedCost: number, segments: VehicleCostSegment[]): Map<string, number> => {
+        const result = new Map<string, number>();
+        if (fixedCost <= 0 || segments.length === 0) return result;
+
+        const totalDays = segments.reduce((sum, segment) => sum + Math.max(0, segment.overlapDays), 0);
+        if (totalDays <= 0) return result;
+
+        let allocated = 0;
+        segments.forEach((segment, index) => {
+          const share = index === segments.length - 1
+            ? fixedCost - allocated
+            : Math.round(fixedCost * (segment.overlapDays / totalDays));
+          allocated += share;
+          result.set(segment.key, share);
+        });
+
+        return result;
+      };
+
+      const buildVehicleCostSegments = (vehicle: Awaited<ReturnType<typeof vehicleService.getVehicles>>[number]): VehicleCostSegment[] => {
+        if (!monthStart || !monthEnd) return [];
+        const vehicleId = String(vehicle.id ?? '').trim();
+        const activeAssignments = (assignmentsByVehicleId.get(vehicleId) ?? [])
+          .map((assignment) => ({
+            assignment,
+            startDate: parseYmdDate(String(assignment.startDate ?? '').trim()),
+            endDate: assignment.endDate ? parseYmdDate(String(assignment.endDate).trim()) : null
+          }))
+          .filter((entry) => {
+            if (!entry.startDate) return false;
+            if (entry.startDate.getTime() > monthEnd.getTime()) return false;
+            if (entry.endDate && entry.endDate.getTime() < monthStart.getTime()) return false;
+            return true;
+          })
+          .sort((a, b) => (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0));
+
+        const segments = activeAssignments.flatMap((entry, index): VehicleCostSegment[] => {
+          if (!entry.startDate) return [];
+          const teamId = resolveVehicleAssignmentTeamId(entry.assignment);
+          if (!teamId) return [];
+
+          const nextStartDate = activeAssignments[index + 1]?.startDate ?? null;
+          const explicitEndDate = entry.endDate ?? monthEnd;
+          const handoffEndDate = nextStartDate ? addDays(nextStartDate, -1) : monthEnd;
+          const startDate = entry.startDate.getTime() > monthStart.getTime() ? entry.startDate : monthStart;
+          const endDate = [explicitEndDate, handoffEndDate, monthEnd]
+            .reduce((min, date) => date.getTime() < min.getTime() ? date : min);
+          const overlapDays = calculateOverlapDays({ monthStart, monthEnd, startDate, endDate });
+          if (overlapDays <= 0) return [];
+
+          return [{
+            key: String(entry.assignment.id ?? `${vehicleId}:${index}`),
+            teamId,
+            startDate,
+            endDate,
+            overlapDays
+          }];
+        });
+
+        if (segments.length > 0) return segments;
+
+        let currentTeamId = '';
+        if (vehicle.currentAssigneeType === 'TEAM') {
+          currentTeamId = resolveTeamIdFromAny(
+            vehicle.currentAssigneeId ? String(vehicle.currentAssigneeId) : '',
+            vehicle.currentAssigneeName ? String(vehicle.currentAssigneeName) : ''
+          );
+        } else if (vehicle.currentAssigneeType === 'WORKER') {
+          const workerId = String(vehicle.currentAssigneeId ?? '').trim();
+          const workerName = String(vehicle.currentAssigneeName ?? '').trim();
+          currentTeamId = workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
+        }
+
+        return currentTeamId
+          ? [{
+            key: `current:${vehicleId || vehicle.licensePlate}`,
+            teamId: currentTeamId,
+            startDate: monthStart,
+            endDate: monthEnd,
+            overlapDays: monthEnd.getDate()
+          }]
+          : [];
+      };
+
       vehicleDeductions = vehicles
-        .map((vehicle): TeamSettlementDeductionItem | null => {
-          let assignedTeamId = '';
-
-          if (vehicle.currentAssigneeType === 'TEAM') {
-            assignedTeamId = resolveTeamIdFromAny(
-              vehicle.currentAssigneeId ? String(vehicle.currentAssigneeId) : '',
-              vehicle.currentAssigneeName ? String(vehicle.currentAssigneeName) : ''
-            );
-          } else if (vehicle.currentAssigneeType === 'WORKER') {
-            const workerId = String(vehicle.currentAssigneeId ?? '').trim();
-            const workerName = String(vehicle.currentAssigneeName ?? '').trim();
-            assignedTeamId = workerLookups.byAnyId.get(workerId) ?? workerLookups.byName.get(workerName) ?? '';
-          }
-
-          if (!assignedTeamId || !matchesTeam(assignedTeamId)) return null;
-
+        .flatMap((vehicle): TeamSettlementDeductionItem[] => {
+          const vehicleId = String(vehicle.id ?? '').trim();
+          const segments = buildVehicleCostSegments(vehicle);
+          if (segments.length === 0 || !monthEnd) return [];
           const fixedCost =
             vehicle.type === 'RENT' || vehicle.type === 'LEASE'
               ? toFiniteNumberOrZero(vehicle.contract?.monthlyFee)
               : 0;
-          const variableCost = toFiniteNumberOrZero(expenseByVehicleId.get(String(vehicle.id ?? '').trim()));
-          const totalAmount = Math.round(fixedCost + variableCost);
-          if (totalAmount <= 0) return null;
+          const fixedCostBySegment = allocateVehicleFixedCosts(fixedCost, segments);
 
-          return {
-            id: `vehicle_billing:${params.yearMonth}:${vehicle.id || vehicle.licensePlate}:ledger`,
-            source: 'auto',
-            origin: 'vehicle_billing',
-            category: `차량비 (${vehicle.licensePlate})`,
-            amount: totalAmount,
-            memo: '월별 공과금 대장 자동집계'
-          };
+          const variableCostBySegment = new Map<string, number>();
+          (expenseByVehicleId.get(vehicleId) ?? []).forEach((expense) => {
+            const expenseDate = parseYmdDate(String(expense.date ?? '').trim());
+            const targetSegment = expenseDate
+              ? segments.find((segment) =>
+                expenseDate.getTime() >= segment.startDate.getTime() &&
+                expenseDate.getTime() <= segment.endDate.getTime()
+              )
+              : undefined;
+            const segment = targetSegment ?? segments[0];
+            if (!segment) return;
+            variableCostBySegment.set(
+              segment.key,
+              (variableCostBySegment.get(segment.key) ?? 0) + toFiniteNumberOrZero(expense.amount)
+            );
+          });
+
+          return segments
+            .filter((segment) => matchesTeam(segment.teamId))
+            .map((segment): TeamSettlementDeductionItem | null => {
+              const fixedShare = Math.round(fixedCostBySegment.get(segment.key) ?? 0);
+              const variableCost = Math.round(variableCostBySegment.get(segment.key) ?? 0);
+              const totalAmount = Math.round(fixedShare + variableCost);
+              if (totalAmount <= 0) return null;
+
+              return {
+                id: `vehicle_billing:${params.yearMonth}:${vehicle.id || vehicle.licensePlate}:ledger:${segment.key}`,
+                source: 'auto',
+                origin: 'vehicle_billing',
+                category: `차량비 (${vehicle.licensePlate})`,
+                amount: totalAmount,
+                memo: `월별 차량 대장 배정일 자동배분 (${segment.overlapDays}일)`
+              };
+            })
+            .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
         })
         .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
     }

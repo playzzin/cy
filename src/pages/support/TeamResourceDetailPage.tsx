@@ -655,18 +655,30 @@ const TeamResourceDetailPage: React.FC = () => {
         const vehicleTotal = getVehicleTotal(selectedSummary);
         const cardTotal = selectedSummary.card;
         const total = getSummaryTotal(selectedSummary);
+        const accommodationRentTotal = selectedAccommodationResources.reduce(
+            (sum, resource) => sum + asNumber(resource.monthlyRent),
+            0
+        );
+        const vehicleFixedTotal = selectedVehicleResources.reduce(
+            (sum, resource) => sum + asNumber(resource.vehicle?.contract?.monthlyFee),
+            0
+        );
+        const assignedBillingTotal = accommodationRentTotal + vehicleFixedTotal;
         return {
             accommodationTotal,
             vehicleTotal,
             cardTotal,
             expenseTotal: selectedSummary.otherClaim + selectedSummary.payable - selectedSummary.receivable,
             total,
+            accommodationRentTotal,
+            vehicleFixedTotal,
+            assignedBillingTotal,
             accommodationCount: selectedAccommodationResources.length,
             vehicleCount: selectedVehicleResources.length,
             cardCount: selectedCardResources.length,
             expenseCount: selectedClaims.length,
         };
-    }, [selectedAccommodationResources.length, selectedCardResources.length, selectedClaims.length, selectedSummary, selectedVehicleResources.length]);
+    }, [selectedAccommodationResources, selectedCardResources.length, selectedClaims.length, selectedSummary, selectedVehicleResources]);
 
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
@@ -680,7 +692,51 @@ const TeamResourceDetailPage: React.FC = () => {
 
     const handleCsvDownload = () => {
         const teamName = selectedTeam?.name || '팀';
-        downloadCsv(`팀별_지원경비_${teamName}_${selectedMonth}.csv`, selectedCostLines.map(line => ({
+        const assignmentRows = [
+            ...selectedAccommodationResources.map(resource => {
+                const firstAssignment = resource.assignments[0];
+                const accommodation = resource.accommodation;
+                return {
+                    구분: '배정 숙소',
+                    일자: `${firstAssignment?.startDate || ''} ~ ${firstAssignment?.endDate || '현재'}`,
+                    팀: teamName,
+                    자원: accommodation?.name || firstAssignment?.accommodationName || '',
+                    항목: accommodation?.address || '',
+                    상태: firstAssignment?.status === 'ended' ? '종료' : '배정중',
+                    금액: resource.monthlyRent,
+                    메모: resource.assignments.map(item => item.workerName || item.workerId).filter(Boolean).join(', '),
+                };
+            }),
+            ...selectedVehicleResources.map(resource => {
+                const firstAssignment = resource.assignments[0];
+                const vehicle = resource.vehicle;
+                return {
+                    구분: '배정 차량',
+                    일자: `${firstAssignment?.startDate || ''} ~ ${firstAssignment?.endDate || '현재'}`,
+                    팀: teamName,
+                    자원: vehicle?.licensePlate || firstAssignment?.vehiclePlate || '',
+                    항목: [vehicle?.model, vehicle?.type].filter(Boolean).join(' / '),
+                    상태: firstAssignment ? '배정중' : '현재 배정',
+                    금액: asNumber(vehicle?.contract?.monthlyFee),
+                    메모: '',
+                };
+            }),
+            ...selectedCardResources.map(resource => {
+                const firstAssignment = resource.assignments[0];
+                const card = resource.card;
+                return {
+                    구분: '배정 카드',
+                    일자: `${firstAssignment?.startDate || ''} ~ ${firstAssignment?.endDate || '현재'}`,
+                    팀: teamName,
+                    자원: card?.name || firstAssignment?.cardLabel || '',
+                    항목: card?.maskedNumber || (card?.last4 ? `**** ${card.last4}` : ''),
+                    상태: card?.status || '',
+                    금액: resource.monthlyBilling,
+                    메모: card?.issuer || '',
+                };
+            }),
+        ];
+        const costRows = selectedCostLines.map(line => ({
             구분: line.source,
             일자: line.date || '',
             팀: teamName,
@@ -689,7 +745,8 @@ const TeamResourceDetailPage: React.FC = () => {
             상태: line.status,
             금액: line.amount,
             메모: line.memo || '',
-        })));
+        }));
+        downloadCsv(`팀별_지원경비_${teamName}_${selectedMonth}.csv`, [...assignmentRows, ...costRows]);
     };
 
     const renderTeamItem = (row: TeamResourceRow) => (
@@ -733,13 +790,13 @@ const TeamResourceDetailPage: React.FC = () => {
                     ) : (
                         lines.map(line => (
                             <tr key={line.id}>
-                                <td><span className={`trd-source-badge trd-source-badge--${line.source}`}>{line.source}</span></td>
-                                <td>{line.date || EMPTY_TEXT}</td>
-                                <td><strong>{line.resourceName}</strong></td>
-                                <td>{line.detail}</td>
-                                <td>{line.status}</td>
-                                <td className="tw-number">{formatCurrency(line.amount)}</td>
-                                <td className="tw-truncate" title={line.memo || ''}>{line.memo || EMPTY_TEXT}</td>
+                                <td data-label="구분"><span className={`trd-source-badge trd-source-badge--${line.source}`}>{line.source}</span></td>
+                                <td data-label="일자">{line.date || EMPTY_TEXT}</td>
+                                <td data-label="자원/결제"><strong>{line.resourceName}</strong></td>
+                                <td data-label="항목">{line.detail}</td>
+                                <td data-label="상태">{line.status}</td>
+                                <td data-label="금액" className="tw-number">{formatCurrency(line.amount)}</td>
+                                <td data-label="메모" className="tw-truncate" title={line.memo || ''}>{line.memo || EMPTY_TEXT}</td>
                             </tr>
                         ))
                     )}
@@ -864,23 +921,27 @@ const TeamResourceDetailPage: React.FC = () => {
             <section className="tw-kpi-grid" aria-label="선택 팀 지원 요약">
                 <div className="tw-kpi">
                     <BedDouble size={20} />
-                    <span>숙소 월금액</span>
+                    <span>숙소 청구액</span>
                     <strong>{formatCurrency(selectedStats.accommodationTotal)}</strong>
+                    <small>배정 월세 {formatCurrency(selectedStats.accommodationRentTotal)}</small>
                 </div>
                 <div className="tw-kpi">
                     <CarFront size={20} />
-                    <span>차량 월금액</span>
+                    <span>차량 청구액</span>
                     <strong>{formatCurrency(selectedStats.vehicleTotal)}</strong>
+                    <small>배정 고정비 {formatCurrency(selectedStats.vehicleFixedTotal)}</small>
                 </div>
                 <div className="tw-kpi">
                     <CreditCard size={20} />
-                    <span>카드 월금액</span>
+                    <span>카드 사용액</span>
                     <strong>{formatCurrency(selectedStats.cardTotal)}</strong>
+                    <small>배정 카드 {selectedStats.cardCount.toLocaleString('ko-KR')}장</small>
                 </div>
                 <div className="tw-kpi">
                     <Banknote size={20} />
                     <span>정산 반영 합계</span>
                     <strong>{formatCurrency(selectedStats.total)}</strong>
+                    <small>배정 고정비 {formatCurrency(selectedStats.assignedBillingTotal)}</small>
                 </div>
             </section>
 
@@ -889,9 +950,9 @@ const TeamResourceDetailPage: React.FC = () => {
                     <div className="tw-panel-heading">
                         <div>
                             <span>팀 / 상세 목록</span>
-                            <strong>{detailMenuItems.length.toLocaleString('ko-KR')}개</strong>
+                            <strong>{filteredTeamRows.length.toLocaleString('ko-KR')}팀</strong>
                         </div>
-                        <small>{selectedTeam?.name || '팀 선택'}</small>
+                        <small>상세 {detailMenuItems.length.toLocaleString('ko-KR')}개</small>
                     </div>
 
                     <div className="tw-worker-list">
@@ -998,9 +1059,11 @@ const TeamResourceDetailPage: React.FC = () => {
                                         <h3><ReceiptText size={18} />월별 금액 요약</h3>
                                         <div className="trd-summary-list">
                                             <div><span>숙소비</span><strong>{formatCurrency(selectedSummary.accommodation)}</strong></div>
+                                            <div><span>배정 숙소 월세</span><strong>{formatCurrency(selectedStats.accommodationRentTotal)}</strong></div>
                                             <div><span>개인숙소</span><strong>{formatCurrency(selectedSummary.privateRoom)}</strong></div>
                                             <div><span>전기/가스/수도/유선</span><strong>{formatCurrency(selectedSummary.electricity + selectedSummary.gas + selectedSummary.water + selectedSummary.internet)}</strong></div>
                                             <div><span>차량 렌트/수리/기타</span><strong>{formatCurrency(getVehicleTotal(selectedSummary))}</strong></div>
+                                            <div><span>배정 차량 고정비</span><strong>{formatCurrency(selectedStats.vehicleFixedTotal)}</strong></div>
                                             <div><span>카드 사용액</span><strong>{formatCurrency(selectedSummary.card)}</strong></div>
                                             <div><span>기타경비/후청구</span><strong>{formatCurrency(selectedStats.expenseTotal)}</strong></div>
                                             <div className="trd-summary-list__total"><span>정산 반영 합계</span><strong>{formatCurrency(selectedStats.total)}</strong></div>
@@ -1059,12 +1122,12 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             const accommodation = resource.accommodation;
                                                             return (
                                                                 <tr key={firstAssignment?.accommodationId || accommodation?.id || firstAssignment?.id}>
-                                                                    <td><strong>{accommodation?.name || firstAssignment?.accommodationName || EMPTY_TEXT}</strong></td>
-                                                                    <td className="tw-truncate" title={accommodation?.address || ''}>{accommodation?.address || EMPTY_TEXT}</td>
-                                                                    <td>{resource.assignments.map(item => item.workerName || item.workerId || EMPTY_TEXT).join(', ')}</td>
-                                                                    <td>{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
-                                                                    <td>{firstAssignment?.status === 'ended' ? '종료' : '배정중'}</td>
-                                                                    <td className="tw-number">{formatCurrency(resource.monthlyRent)}</td>
+                                                                    <td data-label="숙소명"><strong>{accommodation?.name || firstAssignment?.accommodationName || EMPTY_TEXT}</strong></td>
+                                                                    <td data-label="주소" className="tw-truncate" title={accommodation?.address || ''}>{accommodation?.address || EMPTY_TEXT}</td>
+                                                                    <td data-label="작업자">{resource.assignments.map(item => item.workerName || item.workerId || EMPTY_TEXT).join(', ')}</td>
+                                                                    <td data-label="배정기간">{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
+                                                                    <td data-label="상태">{firstAssignment?.status === 'ended' ? '종료' : '배정중'}</td>
+                                                                    <td data-label="월 임대료" className="tw-number">{formatCurrency(resource.monthlyRent)}</td>
                                                                 </tr>
                                                             );
                                                         })
@@ -1114,12 +1177,12 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             const firstAssignment = resource.assignments[0];
                                                             return (
                                                                 <tr key={vehicle?.id || firstAssignment?.vehicleId || firstAssignment?.id}>
-                                                                    <td><strong>{vehicle?.licensePlate || firstAssignment?.vehiclePlate || EMPTY_TEXT}</strong></td>
-                                                                    <td>{vehicle?.model || EMPTY_TEXT}</td>
-                                                                    <td>{vehicle?.type || EMPTY_TEXT}</td>
-                                                                    <td>{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
-                                                                    <td className="tw-number">{formatCurrency(vehicle?.contract?.monthlyFee)}</td>
-                                                                    <td className="tw-number">{formatCurrency(resource.monthlyBilling)}</td>
+                                                                    <td data-label="차량번호"><strong>{vehicle?.licensePlate || firstAssignment?.vehiclePlate || EMPTY_TEXT}</strong></td>
+                                                                    <td data-label="모델">{vehicle?.model || EMPTY_TEXT}</td>
+                                                                    <td data-label="계약구분">{vehicle?.type || EMPTY_TEXT}</td>
+                                                                    <td data-label="배정기간">{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
+                                                                    <td data-label="월 고정비" className="tw-number">{formatCurrency(vehicle?.contract?.monthlyFee)}</td>
+                                                                    <td data-label="월 청구액" className="tw-number">{formatCurrency(resource.monthlyBilling)}</td>
                                                                 </tr>
                                                             );
                                                         })
@@ -1157,13 +1220,13 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             const breakdown = summarizeVehicleBillingCosts(doc);
                                                             return (
                                                                 <tr key={doc.id}>
-                                                                    <td><strong>{doc.vehiclePlate || EMPTY_TEXT}</strong></td>
-                                                                    <td>{getBillingStatusLabel(doc.status)}</td>
-                                                                    <td className="tw-number">{formatCurrency(breakdown.rent)}</td>
-                                                                    <td className="tw-number">{formatCurrency(breakdown.fine)}</td>
-                                                                    <td className="tw-number">{formatCurrency(breakdown.repair)}</td>
-                                                                    <td className="tw-number">{formatCurrency(breakdown.other)}</td>
-                                                                    <td className="tw-number"><strong>{formatCurrency(breakdown.total)}</strong></td>
+                                                                    <td data-label="차량"><strong>{doc.vehiclePlate || EMPTY_TEXT}</strong></td>
+                                                                    <td data-label="상태">{getBillingStatusLabel(doc.status)}</td>
+                                                                    <td data-label="렌트료" className="tw-number">{formatCurrency(breakdown.rent)}</td>
+                                                                    <td data-label="과태료" className="tw-number">{formatCurrency(breakdown.fine)}</td>
+                                                                    <td data-label="수리" className="tw-number">{formatCurrency(breakdown.repair)}</td>
+                                                                    <td data-label="기타" className="tw-number">{formatCurrency(breakdown.other)}</td>
+                                                                    <td data-label="합계" className="tw-number"><strong>{formatCurrency(breakdown.total)}</strong></td>
                                                                 </tr>
                                                             );
                                                         })
@@ -1205,12 +1268,12 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             const firstAssignment = resource.assignments[0];
                                                             return (
                                                                 <tr key={card?.id || firstAssignment?.cardId || firstAssignment?.id}>
-                                                                    <td><strong>{card?.name || firstAssignment?.cardLabel || EMPTY_TEXT}</strong></td>
-                                                                    <td>{card?.maskedNumber || (card?.last4 ? `**** ${card.last4}` : EMPTY_TEXT)}</td>
-                                                                    <td>{card?.issuer || EMPTY_TEXT}</td>
-                                                                    <td>{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
-                                                                    <td>{card?.status || EMPTY_TEXT}</td>
-                                                                    <td className="tw-number">{formatCurrency(resource.monthlyBilling)}</td>
+                                                                    <td data-label="카드명"><strong>{card?.name || firstAssignment?.cardLabel || EMPTY_TEXT}</strong></td>
+                                                                    <td data-label="카드번호">{card?.maskedNumber || (card?.last4 ? `**** ${card.last4}` : EMPTY_TEXT)}</td>
+                                                                    <td data-label="발급사">{card?.issuer || EMPTY_TEXT}</td>
+                                                                    <td data-label="배정기간">{firstAssignment?.startDate || EMPTY_TEXT} ~ {firstAssignment?.endDate || '현재'}</td>
+                                                                    <td data-label="상태">{card?.status || EMPTY_TEXT}</td>
+                                                                    <td data-label="월 사용액" className="tw-number">{formatCurrency(resource.monthlyBilling)}</td>
                                                                 </tr>
                                                             );
                                                         })
@@ -1266,15 +1329,15 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                 : '청구대상 없음';
                                                         return (
                                                             <tr key={claim.id}>
-                                                                <td>{claim.date}</td>
-                                                                <td><span className="trd-expense-direction">{direction}</span></td>
-                                                                <td>{counterparty || EMPTY_TEXT}</td>
-                                                                <td className="tw-truncate" title={claim.siteName || ''}>{claim.siteName || EMPTY_TEXT}</td>
-                                                                <td>{claim.cardLabel || '현찰'}</td>
-                                                                <td>{getCategoryLabel(claim.category)}</td>
-                                                                <td className="tw-truncate" title={claim.description}>{claim.description}</td>
-                                                                <td>{getStatusLabel(claim.status)}</td>
-                                                                <td className="tw-number">{formatCurrency(claim.amount)}</td>
+                                                                <td data-label="날짜">{claim.date}</td>
+                                                                <td data-label="구분"><span className="trd-expense-direction">{direction}</span></td>
+                                                                <td data-label="상대팀">{counterparty || EMPTY_TEXT}</td>
+                                                                <td data-label="현장" className="tw-truncate" title={claim.siteName || ''}>{claim.siteName || EMPTY_TEXT}</td>
+                                                                <td data-label="결제">{claim.cardLabel || '현찰'}</td>
+                                                                <td data-label="항목">{getCategoryLabel(claim.category)}</td>
+                                                                <td data-label="내용" className="tw-truncate" title={claim.description}>{claim.description}</td>
+                                                                <td data-label="상태">{getStatusLabel(claim.status)}</td>
+                                                                <td data-label="금액" className="tw-number">{formatCurrency(claim.amount)}</td>
                                                             </tr>
                                                         );
                                                     })

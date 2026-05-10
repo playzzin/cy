@@ -55,6 +55,13 @@ export interface EstimateItem {
     status?: string;
     remarks?: string;
     etc?: string;
+
+    // --- 상세 산출 확장 필드 ---
+    calculationType?: string;
+    length?: number;
+    width?: number;
+    count?: number;
+    unitMode?: string;
 }
 
 export interface Estimate {
@@ -166,6 +173,11 @@ export const normalizeEstimateItem = (raw: Partial<EstimateItem> | any): Estimat
 
     if (height !== null) item.height = height;
     if (point !== null) item.point = point;
+    if (raw?.calculationType) item.calculationType = String(raw.calculationType);
+    if (raw?.length !== undefined && raw?.length !== null) item.length = toNumber(raw.length);
+    if (raw?.width !== undefined && raw?.width !== null) item.width = toNumber(raw.width);
+    if (raw?.count !== undefined && raw?.count !== null) item.count = toNumber(raw.count, 1);
+    if (raw?.unitMode) item.unitMode = String(raw.unitMode);
     if (raw?.install50 !== undefined && raw?.install50 !== null) item.install50 = toNumber(raw.install50);
     if (raw?.remove50 !== undefined && raw?.remove50 !== null) item.remove50 = toNumber(raw.remove50);
 

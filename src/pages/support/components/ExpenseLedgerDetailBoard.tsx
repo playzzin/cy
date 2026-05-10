@@ -45,6 +45,11 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
   payableClaims,
   otherClaims
 }) => {
+  const teamSectionHeaderStyle: React.CSSProperties = {
+    backgroundColor: hexToRgba(color, 0.15),
+    boxShadow: `inset 4px 0 0 ${color}`
+  };
+
   const accommodationRows = useMemo(() => {
     return accommodationDocs
       .map((doc) => {
@@ -151,12 +156,12 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       {
         key: 'other',
         title: '기타청구',
-        description: '상대팀 청구 없이 사용팀 비용으로 반영된 금액',
+        description: '해당 팀에게만 반영되는 보증금, 마이킹, 기타 청구 금액',
         colorClass: 'bg-amber-50 text-amber-800',
         totalClass: 'bg-amber-50 text-amber-800',
         rows: sortClaims(otherClaims).map((claim) => ({
           ...claim,
-          counterparty: '청구대상 없음'
+          counterparty: ''
         }))
       }
     ];
@@ -167,7 +172,7 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
         <div
           className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
-          style={{ backgroundColor: hexToRgba(color, 0.15) }}
+          style={teamSectionHeaderStyle}
         >
           {teamName} 숙소 상세내역
         </div>
@@ -221,7 +226,10 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       </div>
 
       <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
-        <div className="border-b border-slate-300 bg-slate-200 px-4 py-2 text-center text-sm font-black text-slate-900">
+        <div
+          className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
+          style={teamSectionHeaderStyle}
+        >
           차량 렌트 및 유지비 상세내역
         </div>
         <div className="overflow-x-auto">
@@ -275,7 +283,10 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
       </div>
 
       <div className="overflow-hidden border border-slate-300 bg-white shadow-sm">
-        <div className="border-b border-slate-300 bg-slate-200 px-4 py-2 text-center text-sm font-black text-slate-900">
+        <div
+          className="border-b border-slate-300 px-4 py-2 text-center text-sm font-black text-slate-900"
+          style={teamSectionHeaderStyle}
+        >
           카드 청구 상세내역
         </div>
         <div className="overflow-x-auto">
@@ -318,6 +329,10 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
 
       {claimSections.map((section) => {
         const subtotal = section.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        const isOtherSection = section.key === 'other';
+        const tableMinWidth = isOtherSection ? 'min-w-[520px]' : 'min-w-[760px]';
+        const emptyColSpan = isOtherSection ? 5 : 8;
+        const footerLabelColSpan = isOtherSection ? 3 : 6;
 
         return (
           <div key={section.key} className="overflow-hidden border border-slate-300 bg-white shadow-sm">
@@ -331,15 +346,15 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
               </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] border-collapse text-xs">
+              <table className={`w-full ${tableMinWidth} border-collapse text-xs`}>
                 <thead>
                   <tr className="bg-slate-100 text-slate-600">
                     <th className="border border-slate-200 px-2 py-1.5 text-center">날짜</th>
-                    <th className="border border-slate-200 px-2 py-1.5 text-center">상대팀</th>
-                    <th className="border border-slate-200 px-2 py-1.5 text-center">현장</th>
+                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">상대팀</th>}
+                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">현장</th>}
                     <th className="border border-slate-200 px-2 py-1.5 text-center">구분</th>
                     <th className="border border-slate-200 px-2 py-1.5 text-left">내용</th>
-                    <th className="border border-slate-200 px-2 py-1.5 text-center">결제</th>
+                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">결제</th>}
                     <th className="border border-slate-200 px-2 py-1.5 text-right">금액</th>
                     <th className="border border-slate-200 px-2 py-1.5 text-center">상태</th>
                   </tr>
@@ -348,24 +363,24 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                   {section.rows.length > 0 ? section.rows.map((claim) => (
                     <tr key={`${section.key}-${claim.id}`} className="hover:bg-slate-50">
                       <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.date?.slice(5) || '-'}</td>
-                      <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700">{claim.counterparty || '-'}</td>
-                      <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.siteName || '-'}</td>
+                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700">{claim.counterparty || '-'}</td>}
+                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.siteName || '-'}</td>}
                       <td className="border border-slate-200 px-2 py-1.5 text-center">{getCategoryLabel(claim.category)}</td>
                       <td className="border border-slate-200 px-2 py-1.5 font-bold text-slate-800">{claim.description}</td>
-                      <td className="border border-slate-200 px-2 py-1.5 text-center text-slate-500">{claim.cardLabel || '-'}</td>
+                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center text-slate-500">{claim.cardLabel || '-'}</td>}
                       <td className="border border-slate-200 px-2 py-1.5 text-right font-black tabular-nums">{formatCurrency(claim.amount)}</td>
                       <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-500">{getStatusLabel(claim.status)}</td>
                     </tr>
                   )) : (
                     <tr>
-                      <td colSpan={8} className="border border-slate-200 px-4 py-6 text-center font-bold text-slate-400">내역이 없습니다.</td>
+                      <td colSpan={emptyColSpan} className="border border-slate-200 px-4 py-6 text-center font-bold text-slate-400">내역이 없습니다.</td>
                     </tr>
                   )}
                 </tbody>
                 {section.rows.length > 0 && (
                   <tfoot>
                     <tr className={section.totalClass}>
-                      <td colSpan={6} className="border border-slate-200 px-2 py-2 text-center font-black">합계</td>
+                      <td colSpan={footerLabelColSpan} className="border border-slate-200 px-2 py-2 text-center font-black">합계</td>
                       <td className="border border-slate-200 px-2 py-2 text-right font-black tabular-nums">{formatCurrency(subtotal)}</td>
                       <td className="border border-slate-200 px-2 py-2" />
                     </tr>

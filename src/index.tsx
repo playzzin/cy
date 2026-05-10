@@ -4,6 +4,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { setupPwaInstallPromptCapture } from './pwaInstallPrompt';
+import { registerServiceWorker } from './serviceWorkerRegistration';
 import { library } from '@fortawesome/fontawesome-svg-core';
 import { fas } from '@fortawesome/free-solid-svg-icons';
 import { AuthProvider } from './contexts/AuthContext';
@@ -26,6 +28,8 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,
 });
 
+setupPwaInstallPromptCapture();
+
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
@@ -35,3 +39,5 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+registerServiceWorker();

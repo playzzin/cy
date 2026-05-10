@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalculator,
     faCheckDouble,
     faFloppyDisk,
     faMagnifyingGlass,
+    faPlus,
     faSearch,
     faTrash,
+    faUser,
+    faUsers,
     faUpload
 } from '@fortawesome/free-solid-svg-icons';
 import { format, subMonths } from 'date-fns';
@@ -14,8 +18,10 @@ import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage
 import { httpsCallable } from 'firebase/functions';
 import { functions as firebaseFunctions, storage } from '../../config/firebase';
 import { Card } from '../../types/card';
-import { CardBillingCostItem, CardBillingDocument } from '../../types/cardBilling';
+import { CardBillingCostItem, CardBillingDocument, CardBillingIssuedToType } from '../../types/cardBilling';
 import { cardBillingService } from '../../services/cardBillingService';
+import { teamService, Team } from '../../services/teamService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import { aiSettingsService } from '../../services/aiSettingsService';
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { Timestamp } from '../../types/timestamp';
@@ -26,8 +32,30 @@ interface CardBillingManagerProps {
     onRefreshCards: () => void;
 }
 
+const createEmptyLineItem = (): CardBillingCostItem => ({
+    id: uuidv4(),
+    label: '',
+    amount: 0,
+    type: 'VARIABLE',
+    category: 'OTHER'
+});
+
+const computeTotals = (lineItems: CardBillingCostItem[] = []) => {
+    const total = lineItems.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+    return {
+        variableCost: total,
+        totalAmount: total
+    };
+};
+
 export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, loadingCards, onRefreshCards }) => {
     const [yearMonth, setYearMonth] = useState(format(subMonths(new Date(), 1), 'yyyy-MM'));
+    const [teams, setTeams] = useState<Team[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
+    const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+    const [issuedToType, setIssuedToType] = useState<CardBillingIssuedToType>('team');
+    const [issuedToWorkerId, setIssuedToWorkerId] = useState<string>('');
+    const [createCardId, setCreateCardId] = useState<string>('');
 
     const [documents, setDocuments] = useState<CardBillingDocument[]>([]);
     const [selectedDocumentId, setSelectedDocumentId] = useState<string>('');
@@ -39,11 +67,38 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
     const [analyzingAttachment, setAnalyzingAttachment] = useState(false);
     const [selectedAttachmentPath, setSelectedAttachmentPath] = useState<string>('');
     const [isAiEnabledOnPage, setIsAiEnabledOnPage] = useState(true);
+    const [newLineItemLabel, setNewLineItemLabel] = useState('');
+    const [newLineItemCategory, setNewLineItemCategory] = useState('');
+    const [newLineItemAmount, setNewLineItemAmount] = useState<number>(0);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
         setIsAiEnabledOnPage(aiSettingsService.isPathEnabled(window.location.pathname));
     }, []);
+
+    useEffect(() => {
+        const loadMaster = async () => {
+            try {
+                const [teamList, workerList] = await Promise.all([
+                    teamService.getTeams(),
+                    manpowerService.getWorkers()
+                ]);
+                const sortedTeams = [...teamList].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko-KR'));
+                setTeams(sortedTeams);
+                setWorkers(workerList);
+                setSelectedTeamId((prev) => prev || (sortedTeams[0]?.id ?? ''));
+            } catch (error) {
+                console.error(error);
+                toast.error('팀/작업자 정보를 불러오지 못했습니다.');
+            }
+        };
+
+        loadMaster();
+    }, []);
+
+    useEffect(() => {
+        setCreateCardId((prev) => prev || (cards[0]?.id ?? ''));
+    }, [cards]);
 
     useEffect(() => {
         loadBillings();
@@ -82,6 +137,27 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
         return documents.find((d) => d.id === selectedDocumentId) ?? null;
     }, [documents, selectedDocumentId]);
 
+    const selectedTeam = useMemo(() => {
+        return teams.find((team) => String(team.id) === String(selectedTeamId) || String(team.legacyId ?? '') === String(selectedTeamId)) ?? null;
+    }, [teams, selectedTeamId]);
+
+    const teamWorkers = useMemo(() => {
+        if (!selectedTeamId) return [];
+
+        const teamIdCandidates = new Set<string>();
+        if (selectedTeam?.id) teamIdCandidates.add(String(selectedTeam.id));
+        if (selectedTeam?.legacyId) teamIdCandidates.add(String(selectedTeam.legacyId));
+        teamIdCandidates.add(String(selectedTeamId));
+
+        return workers.filter((worker) => Boolean(worker.id) && worker.teamId && teamIdCandidates.has(String(worker.teamId)));
+    }, [workers, selectedTeamId, selectedTeam]);
+
+    const canEdit = selectedDocument?.status !== 'CONFIRMED';
+
+    const selectedTotals = useMemo(() => {
+        return computeTotals(selectedDocument?.lineItems ?? []);
+    }, [selectedDocument]);
+
     useEffect(() => {
         const paths = selectedDocument?.statementAttachmentPaths ?? [];
         setSelectedAttachmentPath((prev) => {
@@ -89,6 +165,23 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
             return paths[paths.length - 1] ?? '';
         });
     }, [selectedDocument]);
+
+    useEffect(() => {
+        if (issuedToType === 'team') {
+            if (issuedToWorkerId) setIssuedToWorkerId('');
+            return;
+        }
+
+        if (!teamWorkers.some((worker) => worker.id === issuedToWorkerId)) {
+            setIssuedToWorkerId(teamWorkers[0]?.id ?? '');
+        }
+    }, [issuedToType, issuedToWorkerId, teamWorkers]);
+
+    useEffect(() => {
+        setNewLineItemLabel('');
+        setNewLineItemCategory('');
+        setNewLineItemAmount(0);
+    }, [selectedDocumentId]);
 
     const sanitizeFileName = (name: string): string => {
         const v = String(name || '').trim();
@@ -281,6 +374,70 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
         }
     };
 
+    const handleCreateNew = async () => {
+        const card = cards.find((item) => String(item.id) === String(createCardId)) ?? null;
+        if (!card) {
+            toast.error('카드를 선택해주세요.');
+            return;
+        }
+
+        if (!selectedTeam?.id) {
+            toast.error('발행 팀을 선택해주세요.');
+            return;
+        }
+
+        const target = issuedToType === 'worker'
+            ? (() => {
+                const worker = teamWorkers.find((item) => String(item.id) === String(issuedToWorkerId));
+                return worker?.id ? { id: worker.id, name: worker.name } : null;
+            })()
+            : null;
+
+        if (issuedToType === 'worker' && !target) {
+            toast.error('발행 대상을 선택해주세요.');
+            return;
+        }
+
+        setProcessing(true);
+        try {
+            const generated = await cardBillingService.generateBilling(card, yearMonth);
+            const resolvedId = cardBillingService.buildBillingDocumentId({
+                cardId: card.id,
+                teamId: selectedTeam.id,
+                issuedToType,
+                workerId: issuedToType === 'worker' ? target?.id : undefined,
+                yearMonth
+            });
+
+            if (documents.some((doc) => doc.id === resolvedId)) {
+                const ok = await showConfirmAlert('청구서 생성', '이미 해당 카드의 청구서가 존재합니다. 재계산하여 덮어쓸까요?');
+                if (!ok.isConfirmed) return;
+            }
+
+            const next: CardBillingDocument = {
+                ...generated,
+                id: resolvedId,
+                teamId: selectedTeam.id,
+                teamName: selectedTeam.name,
+                issuedToType,
+                issuedToWorkerId: issuedToType === 'worker' ? target?.id : undefined,
+                issuedToWorkerName: issuedToType === 'team' ? selectedTeam.name : (target?.name ?? ''),
+                updatedAt: Timestamp.now()
+            };
+
+            await cardBillingService.saveBilling(next);
+            toast.success('청구서가 생성되었습니다.');
+            await loadBillings();
+            setSelectedDocumentId(resolvedId);
+        } catch (error: unknown) {
+            console.error(error);
+            const msg = error instanceof Error ? error.message : '청구서 생성에 실패했습니다.';
+            toast.error(msg);
+        } finally {
+            setProcessing(false);
+        }
+    };
+
     const handleGenerateDrafts = async () => {
         const result = await showConfirmAlert('청구 문서 생성', `${yearMonth} 기준으로 청구 초안을 생성할까요?`);
         if (!result.isConfirmed) return;
@@ -310,13 +467,77 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
         }
     };
 
+    const handleDocumentPatch = (patch: Partial<CardBillingDocument>) => {
+        if (!selectedDocument) return;
+        updateSelectedDocument((doc) => ({
+            ...doc,
+            ...patch,
+            updatedAt: Timestamp.now()
+        }));
+    };
+
+    const handleLineItemChange = (id: string, patch: Partial<CardBillingCostItem>) => {
+        if (!selectedDocument || !canEdit) return;
+
+        const lineItems = (selectedDocument.lineItems ?? []).map((item) => (
+            item.id === id ? { ...item, ...patch } : item
+        ));
+        const totals = computeTotals(lineItems);
+        handleDocumentPatch({
+            lineItems,
+            variableCost: totals.variableCost,
+            totalAmount: totals.totalAmount
+        });
+    };
+
+    const handleAddLineItem = () => {
+        if (!selectedDocument || !canEdit) return;
+        const label = newLineItemLabel.trim();
+        if (!label) {
+            toast.error('항목명을 입력해주세요.');
+            return;
+        }
+
+        const nextItem: CardBillingCostItem = {
+            ...createEmptyLineItem(),
+            label,
+            amount: Number(newLineItemAmount || 0),
+            category: newLineItemCategory.trim() || 'OTHER'
+        };
+        const lineItems = [...(selectedDocument.lineItems ?? []), nextItem];
+        const totals = computeTotals(lineItems);
+
+        handleDocumentPatch({
+            lineItems,
+            variableCost: totals.variableCost,
+            totalAmount: totals.totalAmount
+        });
+        setNewLineItemLabel('');
+        setNewLineItemCategory('');
+        setNewLineItemAmount(0);
+    };
+
+    const handleRemoveLineItem = (id?: string) => {
+        if (!selectedDocument || !canEdit || !id) return;
+        const lineItems = (selectedDocument.lineItems ?? []).filter((item) => item.id !== id);
+        const totals = computeTotals(lineItems);
+        handleDocumentPatch({
+            lineItems,
+            variableCost: totals.variableCost,
+            totalAmount: totals.totalAmount
+        });
+    };
+
     const handleSaveSelected = async () => {
         if (!selectedDocument) return;
 
         setSaving(true);
         try {
+            const totals = computeTotals(selectedDocument.lineItems ?? []);
             await cardBillingService.saveBilling({
                 ...selectedDocument,
+                variableCost: totals.variableCost,
+                totalAmount: totals.totalAmount,
                 updatedAt: Timestamp.now()
             });
             toast.success('저장되었습니다.');
@@ -332,6 +553,7 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
 
     const handleConfirmSelected = async () => {
         if (!selectedDocument) return;
+        if (!canEdit) return;
 
         const result = await showConfirmAlert('청구 확정', '선택한 청구 문서를 확정할까요?', '확정');
         if (!result.isConfirmed) return;
@@ -377,37 +599,134 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
 
     return (
         <div className="space-y-5">
-            <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-4">
-                <div>
-                    <h2 className="text-xl font-extrabold text-slate-900">카드 청구관리</h2>
-                    <p className="text-slate-500 font-medium mt-1 text-sm">배정된 카드의 월별 사용내역을 기반으로 청구 문서를 생성/확정합니다.</p>
-                </div>
+            <div className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
+                <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-4">
+                    <div>
+                        <h2 className="text-xl font-extrabold text-slate-900">카드 청구관리</h2>
+                        <p className="text-slate-500 font-medium mt-1 text-sm">차량과 같은 방식으로 발행 팀/대상을 지정하고 카드 사용내역 기반 청구서를 생성합니다.</p>
+                    </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                    <input
-                        className="border border-slate-200 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-700"
-                        value={yearMonth}
-                        onChange={(e) => setYearMonth(e.target.value)}
-                        placeholder="YYYY-MM"
-                    />
-                    <button
-                        onClick={loadBillings}
-                        disabled={loading || loadingCards}
-                        className="px-4 py-2.5 rounded-xl font-bold text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-2"
-                    >
-                        <FontAwesomeIcon icon={faSearch} />
-                        조회
-                    </button>
-                    <button
-                        onClick={handleGenerateDrafts}
-                        disabled={processing || loadingCards}
-                        className={`px-4 py-2.5 rounded-xl font-bold text-sm text-white flex items-center gap-2 ${
-                            processing ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'
-                        }`}
-                    >
-                        <FontAwesomeIcon icon={faCalculator} />
-                        {processing ? '생성 중...' : '초안 생성'}
-                    </button>
+                    <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap items-end gap-2">
+                            <div>
+                                <div className="text-xs font-bold text-slate-500 mb-1">청구 월</div>
+                                <input
+                                    type="month"
+                                    className="border border-slate-200 rounded-xl px-3 py-2.5 font-mono font-bold text-slate-700"
+                                    value={yearMonth}
+                                    onChange={(e) => setYearMonth(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-slate-500 mb-1">발행 팀</div>
+                                <select
+                                    value={selectedTeamId}
+                                    onChange={(e) => setSelectedTeamId(e.target.value)}
+                                    className="px-3 py-2.5 border border-slate-200 rounded-xl bg-white text-sm min-w-[220px]"
+                                >
+                                    <option value="">팀 선택</option>
+                                    {teams.map((team) => (
+                                        <option key={team.id} value={team.id}>
+                                            {team.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <div className="text-xs font-bold text-slate-500 mb-1">발행 대상</div>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                                        <button
+                                            type="button"
+                                            onClick={() => setIssuedToType('team')}
+                                            className={`px-3 py-2 text-xs font-bold rounded-lg transition flex items-center gap-1 ${
+                                                issuedToType === 'team' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'
+                                            }`}
+                                        >
+                                            <FontAwesomeIcon icon={faUsers} />
+                                            팀
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIssuedToType('worker')}
+                                            className={`px-3 py-2 text-xs font-bold rounded-lg transition flex items-center gap-1 ${
+                                                issuedToType === 'worker' ? 'bg-white shadow-sm text-indigo-700' : 'text-slate-500 hover:text-slate-700'
+                                            }`}
+                                        >
+                                            <FontAwesomeIcon icon={faUser} />
+                                            개인
+                                        </button>
+                                    </div>
+                                    {issuedToType === 'team' ? (
+                                        <input
+                                            value={selectedTeam?.name ?? ''}
+                                            disabled
+                                            placeholder="팀 선택"
+                                            className="px-3 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-sm w-[160px]"
+                                        />
+                                    ) : (
+                                        <select
+                                            value={issuedToWorkerId}
+                                            onChange={(e) => setIssuedToWorkerId(e.target.value)}
+                                            className="px-3 py-2.5 border border-slate-200 rounded-xl bg-white text-sm w-[160px]"
+                                        >
+                                            <option value="">작업자 선택</option>
+                                            {teamWorkers.map((worker) => (
+                                                <option key={worker.id} value={worker.id}>
+                                                    {worker.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                            <select
+                                value={createCardId}
+                                onChange={(e) => setCreateCardId(e.target.value)}
+                                className="px-3 py-2.5 border border-slate-200 rounded-xl bg-white text-sm min-w-[240px]"
+                            >
+                                {cards
+                                    .slice()
+                                    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
+                                    .map((card) => (
+                                        <option key={card.id} value={card.id}>
+                                            {card.name} ({card.last4})
+                                        </option>
+                                    ))}
+                            </select>
+                            <button
+                                onClick={handleCreateNew}
+                                disabled={processing || loadingCards}
+                                className={`px-4 py-2.5 rounded-xl font-bold text-sm text-white flex items-center gap-2 ${
+                                    processing ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700'
+                                }`}
+                            >
+                                <FontAwesomeIcon icon={faPlus} />
+                                카드 청구서 생성
+                            </button>
+                            <button
+                                onClick={loadBillings}
+                                disabled={loading || loadingCards}
+                                className="px-4 py-2.5 rounded-xl font-bold text-sm bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-2"
+                            >
+                                <FontAwesomeIcon icon={faSearch} />
+                                조회
+                            </button>
+                            <button
+                                onClick={handleGenerateDrafts}
+                                disabled={processing || loadingCards}
+                                className={`px-4 py-2.5 rounded-xl font-bold text-sm text-white flex items-center gap-2 ${
+                                    processing ? 'bg-slate-400 cursor-wait' : 'bg-slate-800 hover:bg-slate-900'
+                                }`}
+                            >
+                                <FontAwesomeIcon icon={faCalculator} />
+                                {processing ? '생성 중...' : '배정 카드 일괄 생성'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -464,9 +783,9 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                 <div className="flex flex-wrap items-center gap-2">
                                     <button
                                         onClick={handleSaveSelected}
-                                        disabled={saving}
+                                        disabled={saving || !canEdit}
                                         className={`px-4 py-2.5 rounded-xl font-bold text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100 flex items-center gap-2 ${
-                                            saving ? 'opacity-60 cursor-wait' : ''
+                                            saving || !canEdit ? 'opacity-60 cursor-not-allowed' : ''
                                         }`}
                                     >
                                         <FontAwesomeIcon icon={faFloppyDisk} />
@@ -474,9 +793,9 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                     </button>
                                     <button
                                         onClick={handleConfirmSelected}
-                                        disabled={saving}
+                                        disabled={saving || !canEdit}
                                         className={`px-4 py-2.5 rounded-xl font-bold text-sm bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center gap-2 ${
-                                            saving ? 'opacity-60 cursor-wait' : ''
+                                            saving || !canEdit ? 'opacity-60 cursor-not-allowed' : ''
                                         }`}
                                     >
                                         <FontAwesomeIcon icon={faCheckDouble} />
@@ -499,13 +818,13 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                                     <div className="text-xs font-bold text-slate-500">변동비</div>
                                     <div className="text-2xl font-extrabold text-slate-800 font-mono mt-1">
-                                        {Number(selectedDocument.variableCost ?? 0).toLocaleString()}
+                                        {Number(selectedTotals.variableCost ?? 0).toLocaleString()}
                                     </div>
                                 </div>
                                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                                     <div className="text-xs font-bold text-slate-500">총액</div>
                                     <div className="text-2xl font-extrabold text-indigo-700 font-mono mt-1">
-                                        {Number(selectedDocument.totalAmount ?? 0).toLocaleString()}
+                                        {Number(selectedTotals.totalAmount ?? 0).toLocaleString()}
                                     </div>
                                 </div>
                                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
@@ -585,7 +904,39 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                             </div>
 
                             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                                <div className="px-4 py-3 bg-slate-900 text-white font-extrabold text-sm">라인 아이템</div>
+                                <div className="px-4 py-3 bg-slate-900 text-white flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+                                    <div className="font-extrabold text-sm">라인 아이템</div>
+                                    {canEdit && (
+                                        <div className="flex flex-wrap items-end gap-2 text-slate-900">
+                                            <input
+                                                value={newLineItemLabel}
+                                                onChange={(e) => setNewLineItemLabel(e.target.value)}
+                                                className="px-3 py-2 rounded-xl text-sm min-w-[220px]"
+                                                placeholder="항목명"
+                                            />
+                                            <input
+                                                value={newLineItemCategory}
+                                                onChange={(e) => setNewLineItemCategory(e.target.value)}
+                                                className="px-3 py-2 rounded-xl text-sm w-[140px]"
+                                                placeholder="카테고리"
+                                            />
+                                            <input
+                                                type="number"
+                                                value={Number(newLineItemAmount || 0)}
+                                                onChange={(e) => setNewLineItemAmount(Number(e.target.value || 0))}
+                                                className="px-3 py-2 rounded-xl text-sm text-right font-mono w-[150px]"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={handleAddLineItem}
+                                                className="px-3 py-2 rounded-xl text-xs font-bold bg-white text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-2"
+                                            >
+                                                <FontAwesomeIcon icon={faPlus} />
+                                                추가
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-sm min-w-[720px]">
                                         <thead className="bg-slate-100 text-slate-600 text-xs font-bold">
@@ -593,19 +944,60 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                                                 <th className="px-4 py-3 text-left">항목</th>
                                                 <th className="px-4 py-3 text-left">카테고리</th>
                                                 <th className="px-4 py-3 text-right">금액</th>
+                                                <th className="px-4 py-3 text-right w-[80px]"></th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {(selectedDocument.lineItems ?? []).length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={3} className="px-4 py-6 text-slate-400 text-center">라인 아이템이 없습니다.</td>
+                                                    <td colSpan={4} className="px-4 py-6 text-slate-400 text-center">라인 아이템이 없습니다.</td>
                                                 </tr>
                                             ) : (
-                                                (selectedDocument.lineItems ?? []).map((li) => (
-                                                    <tr key={li.id} className="hover:bg-indigo-50/20">
-                                                        <td className="px-4 py-3 font-bold text-slate-800">{li.label}</td>
-                                                        <td className="px-4 py-3 text-slate-600">{li.category ?? '-'}</td>
-                                                        <td className="px-4 py-3 text-right font-mono font-extrabold text-slate-800">{Number(li.amount ?? 0).toLocaleString()}</td>
+                                                (selectedDocument.lineItems ?? []).map((li, index) => (
+                                                    <tr key={li.id ?? index} className="hover:bg-indigo-50/20">
+                                                        <td className="px-4 py-3">
+                                                            <input
+                                                                value={li.label}
+                                                                disabled={!canEdit}
+                                                                onChange={(e) => li.id && handleLineItemChange(li.id, { label: e.target.value })}
+                                                                className={`w-full px-3 py-2 border rounded-xl text-sm font-bold ${
+                                                                    canEdit ? 'border-slate-200' : 'border-slate-100 bg-slate-50'
+                                                                }`}
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <input
+                                                                value={li.category ?? ''}
+                                                                disabled={!canEdit}
+                                                                onChange={(e) => li.id && handleLineItemChange(li.id, { category: e.target.value })}
+                                                                className={`w-full px-3 py-2 border rounded-xl text-sm ${
+                                                                    canEdit ? 'border-slate-200' : 'border-slate-100 bg-slate-50'
+                                                                }`}
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            <input
+                                                                type="number"
+                                                                value={Number(li.amount ?? 0)}
+                                                                disabled={!canEdit}
+                                                                onChange={(e) => li.id && handleLineItemChange(li.id, { amount: Number(e.target.value || 0) })}
+                                                                className={`w-full px-3 py-2 border rounded-xl text-right font-mono font-extrabold ${
+                                                                    canEdit ? 'border-slate-200' : 'border-slate-100 bg-slate-50'
+                                                                }`}
+                                                            />
+                                                        </td>
+                                                        <td className="px-4 py-3 text-right">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleRemoveLineItem(li.id)}
+                                                                disabled={!canEdit}
+                                                                className={`w-9 h-9 rounded-xl inline-flex items-center justify-center ${
+                                                                    canEdit ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                                                                }`}
+                                                            >
+                                                                <FontAwesomeIcon icon={faTrash} className="text-xs" />
+                                                            </button>
+                                                        </td>
                                                     </tr>
                                                 ))
                                             )}

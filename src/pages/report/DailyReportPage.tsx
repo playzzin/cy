@@ -1,14 +1,20 @@
 import React, { useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import DailyReportBoardInput from './DailyReportBoardInput';
 import DailyReportInput from './DailyReportInput';
 import DailyReportListV2 from './DailyReportListV2';
-import OutputManagementTabs from '../../components/common/OutputManagementTabs';
+import OutputManagementTabs, { OutputManagementTabKey } from '../../components/common/OutputManagementTabs';
 
 const DailyReportPage: React.FC = () => {
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const tab = searchParams.get('tab');
-    const activeTab = tab === 'list' ? 'list-v2' : (tab || 'input');
+    const activeTab = tab === 'list'
+        ? 'list-v2'
+        : tab === 'list-v2' || tab === 'input' || tab === 'board-input'
+            ? tab
+            : 'input';
+    const isBoardInputTab = activeTab === 'board-input';
 
     useEffect(() => {
         if (!tab) {
@@ -31,8 +37,8 @@ const DailyReportPage: React.FC = () => {
         setSearchParams(next);
     };
 
-    const handleTopTabSelect = (nextTab: 'status' | 'input' | 'list-v2' | 'history') => {
-        if (nextTab === 'input' || nextTab === 'list-v2') {
+    const handleTopTabSelect = (nextTab: OutputManagementTabKey) => {
+        if (nextTab === 'input' || nextTab === 'board-input' || nextTab === 'list-v2') {
             handleTabChange(nextTab);
             return;
         }
@@ -46,17 +52,25 @@ const DailyReportPage: React.FC = () => {
     };
 
     return (
-        <div className="flex flex-col h-full bg-[#f1f5f9] font-['Pretendard']">
+        <div
+            className={`flex min-h-0 flex-col bg-[#f1f5f9] font-['Pretendard'] ${
+                isBoardInputTab
+                    ? 'h-[calc(100vh_-_var(--header-height)_-_40px)] max-h-[calc(100vh_-_var(--header-height)_-_40px)] overflow-hidden md:h-[calc(100vh_-_var(--header-height)_-_60px)] md:max-h-[calc(100vh_-_var(--header-height)_-_60px)]'
+                    : 'h-full'
+            }`}
+        >
             <OutputManagementTabs
-                activeTab={activeTab === 'list-v2' ? 'list-v2' : 'input'}
+                activeTab={isBoardInputTab ? 'board-input' : activeTab === 'list-v2' ? 'list-v2' : 'input'}
                 onTabSelect={handleTopTabSelect}
                 title="출력일보 관리"
             />
 
             {/* Content Area */}
-            <div className="flex-1 min-h-0">
+            <div className={`flex-1 min-h-0 ${isBoardInputTab ? 'overflow-hidden' : ''}`}>
                 {activeTab === 'input' ? (
                     <DailyReportInput />
+                ) : activeTab === 'board-input' ? (
+                    <DailyReportBoardInput />
                 ) : (
                     <div className="h-full min-h-0 px-3 pt-3 pb-1 md:px-4 md:pt-4 md:pb-1">
                         <DailyReportListV2 initialDate={searchParams.get('date') || undefined} />

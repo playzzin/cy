@@ -40,6 +40,9 @@ import { downloadEstimateExcel } from '../../utils/estimateExcelUtils';
 
 type DecRateType = 'real' | 'install';
 type DecPType = '2p' | '3p' | '4p';
+type DetailProduct = '계단타워' | '작업발판' | '안전통로' | '브라켓';
+type MeasureProduct = '' | DetailProduct;
+type UnitMode = 'SET' | 'EA';
 
 type RcRow = {
     id: string;
@@ -59,7 +62,38 @@ type DecRow = {
     volume: number;
 };
 
+type HebeRow = {
+    id: string;
+    section: string;
+    itemName: MeasureProduct;
+    length: number;
+    height: number;
+    count: number;
+    unitPrice: number;
+};
+
+type RubeRow = {
+    id: string;
+    section: string;
+    itemName: MeasureProduct;
+    length: number;
+    width: number;
+    height: number;
+    count: number;
+    unitPrice: number;
+};
+
+type SetEaRow = {
+    id: string;
+    itemName: DetailProduct;
+    unitMode: UnitMode;
+    quantity: number;
+    unitPrice: number;
+    note: string;
+};
+
 const HEIGHT_OPTIONS = [6, 8, 10, 12, 14, 16, 18, 20, 22] as const;
+const DETAIL_PRODUCTS: DetailProduct[] = ['계단타워', '작업발판', '안전통로', '브라켓'];
 
 const HEIGHT_MULTIPLIERS: Record<number, number> = {
     6: 1.0,
@@ -85,14 +119,17 @@ const STATUS_CONFIG: Record<EstimateStatus, { label: string; color: string; bg: 
     rejected: { label: '반려', color: 'text-rose-600', bg: 'bg-rose-100', icon: faTimesCircle }
 };
 
-const DEFAULT_SCOPE_NOTES = `- 본 문서는 RC/DEC 상세 산출 기준 견적서입니다.
+const DEFAULT_SCOPE_NOTES = `- 본 문서는 RC/DEC, 헤베, 루베, SET/EA 상세 산출 기준 견적서입니다.
 - RC/DEC 각 구간별 합계를 먼저 산출한 뒤 총액을 계산합니다.
+- 헤베는 길이 × 높이 × 수량으로 m2 물량을 산출합니다.
+- 루베는 길이 × 폭 × 높이 × 수량으로 m3 물량을 산출합니다.
+- SET/EA는 계단타워, 작업발판, 안전통로, 브라켓 품목별 수량 × 단가로 산출합니다.
 - 높이계수/기준단가/포인트/물량 변경 시 금액은 자동 계산됩니다.
-- 공급가액 = RC 합계 + DEC 합계
+- 공급가액 = RC 합계 + DEC 합계 + 헤베 합계 + 루베 합계 + SET/EA 합계
 - VAT = max(공급가액 - 할인, 0) × VAT율
 - 총액 = max(공급가액 - 할인, 0) + VAT`;
 
-const createRowId = (prefix: 'rc' | 'dec'): string =>
+const createRowId = (prefix: 'rc' | 'dec' | 'hebe' | 'rube' | 'unit'): string =>
     `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const toNumber = (value: unknown, fallback = 0): number => {
@@ -110,6 +147,17 @@ const normalizeHeight = (value: unknown): number => {
         ? parsed
         : HEIGHT_OPTIONS[0];
 };
+
+const normalizeDetailProduct = (value: unknown, fallback: DetailProduct = '계단타워'): DetailProduct => {
+    return DETAIL_PRODUCTS.includes(value as DetailProduct) ? (value as DetailProduct) : fallback;
+};
+
+const normalizeMeasureProduct = (value: unknown, fallback: MeasureProduct = ''): MeasureProduct => {
+    if (value === '') return '';
+    return DETAIL_PRODUCTS.includes(value as DetailProduct) ? (value as DetailProduct) : fallback;
+};
+
+const normalizeUnitMode = (value: unknown): UnitMode => (String(value).toUpperCase() === 'EA' ? 'EA' : 'SET');
 
 const getDefaultRcRows = (): RcRow[] => [
     {
@@ -133,19 +181,56 @@ const getDefaultDecRows = (): DecRow[] => [
     }
 ];
 
+const getDefaultHebeRows = (): HebeRow[] => [
+    {
+        id: createRowId('hebe'),
+        section: '헤베 A구간',
+        itemName: '',
+        length: 0,
+        height: 0,
+        count: 1,
+        unitPrice: 0
+    }
+];
+
+const getDefaultRubeRows = (): RubeRow[] => [
+    {
+        id: createRowId('rube'),
+        section: '루베 A구간',
+        itemName: '',
+        length: 0,
+        width: 0,
+        height: 0,
+        count: 1,
+        unitPrice: 0
+    }
+];
+
+const getDefaultSetEaRows = (): SetEaRow[] =>
+    DETAIL_PRODUCTS.map((itemName) => ({
+        id: createRowId('unit'),
+        itemName,
+        unitMode: itemName === '브라켓' ? 'EA' : 'SET',
+        quantity: 0,
+        unitPrice: 0,
+        note: ''
+    }));
+
 const getEmptyDetailedDraft = (): EstimateDraft => {
     const base = getEmptyDraft('estimate');
     return {
         ...base,
         title: '상세 견적서',
-        notes: 'RC/DEC 상세 산출',
+        notes: 'RC/DEC/헤베/루베/SET-EA 상세 산출',
         items: [],
         estimateMode: 'standard',
         scopeNotes: DEFAULT_SCOPE_NOTES
     };
 };
 
-const parseRowsFromItems = (items: EstimateItem[]): { rcRows: RcRow[]; decRows: DecRow[] } => {
+const parseRowsFromItems = (
+    items: EstimateItem[]
+): { rcRows: RcRow[]; decRows: DecRow[]; hebeRows: HebeRow[]; rubeRows: RubeRow[]; setEaRows: SetEaRow[] } => {
     const rcRows = items
         .filter((item) => item.category === 'RC' || item.workType === 'rc')
         .map<RcRow>((item) => ({
@@ -176,9 +261,63 @@ const parseRowsFromItems = (items: EstimateItem[]): { rcRows: RcRow[]; decRows: 
             };
         });
 
+    const hebeRows = items
+        .filter(
+            (item) =>
+                item.category === '헤베' ||
+                item.workType === 'hebe' ||
+                item.calculationType === 'hebe'
+        )
+        .map<HebeRow>((item) => ({
+            id: item.id || createRowId('hebe'),
+            section: item.section || '',
+            itemName: normalizeMeasureProduct(item.description || item.label || item.section),
+            length: toNumber(item.length),
+            height: toNumber(item.height),
+            count: toNumber(item.count, 1),
+            unitPrice: toNumber(item.unitPrice || item.finalUnitPrice)
+        }));
+
+    const rubeRows = items
+        .filter(
+            (item) =>
+                item.category === '루베' ||
+                item.workType === 'rube' ||
+                item.calculationType === 'rube'
+        )
+        .map<RubeRow>((item) => ({
+            id: item.id || createRowId('rube'),
+            section: item.section || '',
+            itemName: normalizeMeasureProduct(item.description || item.label || item.section),
+            length: toNumber(item.length),
+            width: toNumber(item.width),
+            height: toNumber(item.height),
+            count: toNumber(item.count, 1),
+            unitPrice: toNumber(item.unitPrice || item.finalUnitPrice)
+        }));
+
+    const setEaRows = items
+        .filter(
+            (item) =>
+                item.category === 'SET/EA' ||
+                item.workType === 'setEa' ||
+                item.calculationType === 'setEa'
+        )
+        .map<SetEaRow>((item) => ({
+            id: item.id || createRowId('unit'),
+            itemName: normalizeDetailProduct(item.description || item.label || item.section),
+            unitMode: normalizeUnitMode(item.unitMode || item.unit),
+            quantity: toNumber(item.quantity),
+            unitPrice: toNumber(item.unitPrice || item.finalUnitPrice),
+            note: item.note || ''
+        }));
+
     return {
         rcRows: rcRows.length > 0 ? rcRows : getDefaultRcRows(),
-        decRows: decRows.length > 0 ? decRows : getDefaultDecRows()
+        decRows: decRows.length > 0 ? decRows : getDefaultDecRows(),
+        hebeRows: hebeRows.length > 0 ? hebeRows : getDefaultHebeRows(),
+        rubeRows: rubeRows.length > 0 ? rubeRows : getDefaultRubeRows(),
+        setEaRows: setEaRows.length > 0 ? setEaRows : getDefaultSetEaRows()
     };
 };
 
@@ -188,6 +327,9 @@ const DetailedEstimateManagePage: React.FC = () => {
     const [myCompany, setMyCompany] = useState<CompanyZod | null>(null);
     const [rcRows, setRcRows] = useState<RcRow[]>(() => getDefaultRcRows());
     const [decRows, setDecRows] = useState<DecRow[]>(() => getDefaultDecRows());
+    const [hebeRows, setHebeRows] = useState<HebeRow[]>(() => getDefaultHebeRows());
+    const [rubeRows, setRubeRows] = useState<RubeRow[]>(() => getDefaultRubeRows());
+    const [setEaRows, setSetEaRows] = useState<SetEaRow[]>(() => getDefaultSetEaRows());
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [searchText, setSearchText] = useState('');
@@ -282,6 +424,37 @@ const DetailedEstimateManagePage: React.FC = () => {
         [decRows]
     );
 
+    const calculatedHebe = useMemo(
+        () =>
+            hebeRows.map((row) => {
+                const area = row.length * row.height * row.count;
+                const totalAmount = area * row.unitPrice;
+                const unitPricePerM2 = area > 0 ? totalAmount / area : 0;
+                return { ...row, area, totalAmount, unitPricePerM2 };
+            }),
+        [hebeRows]
+    );
+
+    const calculatedRube = useMemo(
+        () =>
+            rubeRows.map((row) => {
+                const volume = row.length * row.width * row.height * row.count;
+                const totalAmount = volume * row.unitPrice;
+                const unitPricePerM3 = volume > 0 ? totalAmount / volume : 0;
+                return { ...row, volume, totalAmount, unitPricePerM3 };
+            }),
+        [rubeRows]
+    );
+
+    const calculatedSetEa = useMemo(
+        () =>
+            setEaRows.map((row) => {
+                const totalAmount = row.quantity * row.unitPrice;
+                return { ...row, totalAmount };
+            }),
+        [setEaRows]
+    );
+
     const rcTotalAmount = useMemo(
         () => calculatedRc.reduce((sum, row) => sum + row.totalAmount, 0),
         [calculatedRc]
@@ -302,9 +475,38 @@ const DetailedEstimateManagePage: React.FC = () => {
     );
     const decAverageUnitPrice = decTotalVolume > 0 ? decTotalAmount / decTotalVolume : 0;
 
-    const subtotal = rcTotalAmount + decTotalAmount;
-    const totalVolume = rcTotalVolume + decTotalVolume;
-    const averageUnitPrice = totalVolume > 0 ? subtotal / totalVolume : 0;
+    const hebeTotalAmount = useMemo(
+        () => calculatedHebe.reduce((sum, row) => sum + row.totalAmount, 0),
+        [calculatedHebe]
+    );
+    const hebeTotalArea = useMemo(
+        () => calculatedHebe.reduce((sum, row) => sum + row.area, 0),
+        [calculatedHebe]
+    );
+    const hebeAverageUnitPrice = hebeTotalArea > 0 ? hebeTotalAmount / hebeTotalArea : 0;
+
+    const rubeTotalAmount = useMemo(
+        () => calculatedRube.reduce((sum, row) => sum + row.totalAmount, 0),
+        [calculatedRube]
+    );
+    const rubeTotalVolume = useMemo(
+        () => calculatedRube.reduce((sum, row) => sum + row.volume, 0),
+        [calculatedRube]
+    );
+    const rubeAverageUnitPrice = rubeTotalVolume > 0 ? rubeTotalAmount / rubeTotalVolume : 0;
+
+    const setEaTotalAmount = useMemo(
+        () => calculatedSetEa.reduce((sum, row) => sum + row.totalAmount, 0),
+        [calculatedSetEa]
+    );
+    const setEaTotalQuantity = useMemo(
+        () => calculatedSetEa.reduce((sum, row) => sum + row.quantity, 0),
+        [calculatedSetEa]
+    );
+
+    const subtotal = rcTotalAmount + decTotalAmount + hebeTotalAmount + rubeTotalAmount + setEaTotalAmount;
+    const totalM3Volume = rcTotalVolume + decTotalVolume + rubeTotalVolume;
+    const averageUnitPrice = totalM3Volume > 0 ? (rcTotalAmount + decTotalAmount + rubeTotalAmount) / totalM3Volume : 0;
     const taxableBase = Math.max(0, subtotal - (draft.discount || 0));
     const vatRate = draft.vatRate || 10;
     const tax = draft.includeVat ? Math.round(taxableBase * (vatRate / 100)) : 0;
@@ -360,8 +562,99 @@ const DetailedEstimateManagePage: React.FC = () => {
             } as EstimateItem;
         });
 
-        return [...rcItems, ...decItems];
-    }, [calculatedRc, calculatedDec]);
+        const hebeItems = calculatedHebe.map((row, index) => {
+            const label = row.itemName || `헤베 ${index + 1}`;
+            const item = createItem({
+                category: '헤베',
+                section: row.section,
+                label,
+                unit: 'm2',
+                quantity: row.area,
+                finalUnitPrice: Math.round(row.unitPrice)
+            });
+            return {
+                ...item,
+                id: row.id,
+                category: '헤베',
+                section: row.section,
+                label,
+                description: row.itemName,
+                workType: 'hebe',
+                calculationType: 'hebe',
+                unit: 'm2',
+                length: row.length,
+                height: row.height,
+                count: row.count,
+                quantity: row.area,
+                finalUnitPrice: Math.round(row.unitPrice),
+                unitPrice: Math.round(row.unitPrice),
+                amount: Math.round(row.totalAmount),
+                note: `${formatCurrency(row.length)}m × ${formatCurrency(row.height)}m × ${formatCurrency(row.count)}`
+            } as EstimateItem;
+        });
+
+        const rubeItems = calculatedRube.map((row, index) => {
+            const label = row.itemName || `루베 ${index + 1}`;
+            const item = createItem({
+                category: '루베',
+                section: row.section,
+                label,
+                unit: 'm3',
+                quantity: row.volume,
+                finalUnitPrice: Math.round(row.unitPrice)
+            });
+            return {
+                ...item,
+                id: row.id,
+                category: '루베',
+                section: row.section,
+                label,
+                description: row.itemName,
+                workType: 'rube',
+                calculationType: 'rube',
+                unit: 'm3',
+                length: row.length,
+                width: row.width,
+                height: row.height,
+                count: row.count,
+                quantity: row.volume,
+                finalUnitPrice: Math.round(row.unitPrice),
+                unitPrice: Math.round(row.unitPrice),
+                amount: Math.round(row.totalAmount),
+                note: `${formatCurrency(row.length)}m × ${formatCurrency(row.width)}m × ${formatCurrency(row.height)}m × ${formatCurrency(row.count)}`
+            } as EstimateItem;
+        });
+
+        const setEaItems = calculatedSetEa.map((row) => {
+            const item = createItem({
+                category: 'SET/EA',
+                section: row.itemName,
+                label: row.itemName,
+                unit: row.unitMode,
+                quantity: row.quantity,
+                finalUnitPrice: Math.round(row.unitPrice)
+            });
+            return {
+                ...item,
+                id: row.id,
+                category: 'SET/EA',
+                section: row.itemName,
+                label: row.itemName,
+                description: row.itemName,
+                workType: 'setEa',
+                calculationType: 'setEa',
+                unit: row.unitMode,
+                unitMode: row.unitMode,
+                quantity: row.quantity,
+                finalUnitPrice: Math.round(row.unitPrice),
+                unitPrice: Math.round(row.unitPrice),
+                amount: Math.round(row.totalAmount),
+                note: row.note
+            } as EstimateItem;
+        });
+
+        return [...rcItems, ...decItems, ...hebeItems, ...rubeItems, ...setEaItems];
+    }, [calculatedRc, calculatedDec, calculatedHebe, calculatedRube, calculatedSetEa]);
 
     const updateDraft = (field: keyof EstimateDraft, value: any) => {
         setDraft((previous) => ({ ...previous, [field]: value }));
@@ -413,10 +706,86 @@ const DetailedEstimateManagePage: React.FC = () => {
         );
     };
 
+    const addHebeRow = () => {
+        setHebeRows((previous) => [
+            ...previous,
+            { id: createRowId('hebe'), section: '', itemName: '', length: 0, height: 0, count: 1, unitPrice: 0 }
+        ]);
+    };
+
+    const updateHebeRow = (id: string, field: keyof Omit<HebeRow, 'id'>, value: string | number) => {
+        setHebeRows((previous) =>
+            previous.map((row) => {
+                if (row.id !== id) return row;
+                if (field === 'section') return { ...row, section: String(value) };
+                if (field === 'itemName') return { ...row, itemName: normalizeMeasureProduct(value, row.itemName) };
+                return { ...row, [field]: toNumber(value) };
+            })
+        );
+    };
+
+    const removeHebeRow = (id: string) => {
+        setHebeRows((previous) =>
+            previous.length <= 1 ? previous : previous.filter((row) => row.id !== id)
+        );
+    };
+
+    const addRubeRow = () => {
+        setRubeRows((previous) => [
+            ...previous,
+            { id: createRowId('rube'), section: '', itemName: '', length: 0, width: 0, height: 0, count: 1, unitPrice: 0 }
+        ]);
+    };
+
+    const updateRubeRow = (id: string, field: keyof Omit<RubeRow, 'id'>, value: string | number) => {
+        setRubeRows((previous) =>
+            previous.map((row) => {
+                if (row.id !== id) return row;
+                if (field === 'section') return { ...row, section: String(value) };
+                if (field === 'itemName') return { ...row, itemName: normalizeMeasureProduct(value, row.itemName) };
+                return { ...row, [field]: toNumber(value) };
+            })
+        );
+    };
+
+    const removeRubeRow = (id: string) => {
+        setRubeRows((previous) =>
+            previous.length <= 1 ? previous : previous.filter((row) => row.id !== id)
+        );
+    };
+
+    const addSetEaRow = () => {
+        setSetEaRows((previous) => [
+            ...previous,
+            { id: createRowId('unit'), itemName: '계단타워', unitMode: 'SET', quantity: 0, unitPrice: 0, note: '' }
+        ]);
+    };
+
+    const updateSetEaRow = (id: string, field: keyof Omit<SetEaRow, 'id'>, value: string | number) => {
+        setSetEaRows((previous) =>
+            previous.map((row) => {
+                if (row.id !== id) return row;
+                if (field === 'itemName') return { ...row, itemName: normalizeDetailProduct(value, row.itemName) };
+                if (field === 'unitMode') return { ...row, unitMode: normalizeUnitMode(value) };
+                if (field === 'note') return { ...row, note: String(value) };
+                return { ...row, [field]: toNumber(value) };
+            })
+        );
+    };
+
+    const removeSetEaRow = (id: string) => {
+        setSetEaRows((previous) =>
+            previous.length <= 1 ? previous : previous.filter((row) => row.id !== id)
+        );
+    };
+
     const resetPage = () => {
         setDraft(applySupplierDefaults(getEmptyDetailedDraft(), myCompany));
         setRcRows(getDefaultRcRows());
         setDecRows(getDefaultDecRows());
+        setHebeRows(getDefaultHebeRows());
+        setRubeRows(getDefaultRubeRows());
+        setSetEaRows(getDefaultSetEaRows());
     };
 
     const saveEstimate = async () => {
@@ -498,6 +867,9 @@ const DetailedEstimateManagePage: React.FC = () => {
         const parsed = parseRowsFromItems(item.items || []);
         setRcRows(parsed.rcRows);
         setDecRows(parsed.decRows);
+        setHebeRows(parsed.hebeRows);
+        setRubeRows(parsed.rubeRows);
+        setSetEaRows(parsed.setEaRows);
         setDraft({
             ...applySupplierDefaults(getEmptyDetailedDraft(), myCompany),
             ...item,
@@ -727,7 +1099,7 @@ const DetailedEstimateManagePage: React.FC = () => {
                                 draft={draft}
                             />
 
-                            <div className="mb-6 mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                            <div className="mb-6 mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
                                 <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
                                     <p className="text-[11px] font-bold tracking-wide text-indigo-600">RC 합계</p>
                                     <p className="text-[22px] font-black text-indigo-900">
@@ -738,6 +1110,24 @@ const DetailedEstimateManagePage: React.FC = () => {
                                     <p className="text-[11px] font-bold tracking-wide text-emerald-600">DEC 합계</p>
                                     <p className="text-[22px] font-black text-emerald-900">
                                         {formatCurrency(decTotalAmount)} 원
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-sky-600">헤베 합계</p>
+                                    <p className="text-[22px] font-black text-sky-900">
+                                        {formatCurrency(hebeTotalAmount)} 원
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-violet-100 bg-violet-50 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-violet-600">루베 합계</p>
+                                    <p className="text-[22px] font-black text-violet-900">
+                                        {formatCurrency(rubeTotalAmount)} 원
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-orange-100 bg-orange-50 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-orange-600">SET/EA 합계</p>
+                                    <p className="text-[22px] font-black text-orange-900">
+                                        {formatCurrency(setEaTotalAmount)} 원
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-3">
@@ -758,7 +1148,7 @@ const DetailedEstimateManagePage: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
                                 <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 px-4 py-3">
                                     <p className="text-[11px] font-bold tracking-wide text-indigo-600">RC 물량</p>
                                     <p className="text-[18px] font-black text-indigo-900">
@@ -769,6 +1159,24 @@ const DetailedEstimateManagePage: React.FC = () => {
                                     <p className="text-[11px] font-bold tracking-wide text-emerald-600">DEC 물량</p>
                                     <p className="text-[18px] font-black text-emerald-900">
                                         {formatCurrency(decTotalVolume)} m3
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-sky-100 bg-sky-50/70 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-sky-600">헤베 물량</p>
+                                    <p className="text-[18px] font-black text-sky-900">
+                                        {formatCurrency(hebeTotalArea)} m2
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-violet-100 bg-violet-50/70 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-violet-600">루베 물량</p>
+                                    <p className="text-[18px] font-black text-violet-900">
+                                        {formatCurrency(rubeTotalVolume)} m3
+                                    </p>
+                                </div>
+                                <div className="rounded-xl border border-orange-100 bg-orange-50/70 px-4 py-3">
+                                    <p className="text-[11px] font-bold tracking-wide text-orange-600">SET/EA 수량</p>
+                                    <p className="text-[18px] font-black text-orange-900">
+                                        {formatCurrency(setEaTotalQuantity)}
                                     </p>
                                 </div>
                                 <div className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3">
@@ -1046,6 +1454,433 @@ const DetailedEstimateManagePage: React.FC = () => {
                                 </div>
                             </div>
 
+                            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                                <div className="flex items-center justify-between border-b border-slate-100 bg-sky-50/70 p-4">
+                                    <div>
+                                        <h2 className="text-[16px] font-black text-sky-900">헤베 상세 산출</h2>
+                                        <p className="text-[11px] font-bold text-slate-500">
+                                            길이 × 높이 × 수량으로 m2 물량을 산출한 뒤 단가를 적용합니다.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={addHebeRow}
+                                        className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-sky-700"
+                                    >
+                                        <FontAwesomeIcon icon={faPlus} />
+                                        헤베 구간 추가
+                                    </button>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[1120px] border-collapse text-left">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                                <th className="px-4 py-3">구간명</th>
+                                                <th className="px-4 py-3">품목</th>
+                                                <th className="px-4 py-3 text-right">길이(m)</th>
+                                                <th className="px-4 py-3 text-right">높이(m)</th>
+                                                <th className="px-4 py-3 text-right">수량</th>
+                                                <th className="px-4 py-3 text-right text-sky-700">산출면적(m2)</th>
+                                                <th className="px-4 py-3 text-right">단가</th>
+                                                <th className="px-4 py-3 text-right">합계금액</th>
+                                                <th className="px-4 py-3 text-right text-sky-700">m2 단가</th>
+                                                <th className="px-4 py-3" />
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {calculatedHebe.map((row) => (
+                                                <tr key={row.id} className="group hover:bg-sky-50/20">
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            value={row.section}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'section', event.target.value)
+                                                            }
+                                                            placeholder="구간명 입력"
+                                                            className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-[13px] font-bold outline-none transition-all group-hover:border-slate-200 focus:border-sky-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <select
+                                                            value={row.itemName}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'itemName', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[13px] font-black outline-none focus:border-sky-400"
+                                                        >
+                                                            <option value=""></option>
+                                                            {DETAIL_PRODUCTS.map((product) => (
+                                                                <option key={product} value={product}>
+                                                                    {product}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={row.length || ''}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'length', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-sky-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={row.height || ''}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'height', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-sky-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="1"
+                                                            value={row.count || ''}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'count', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-sky-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-sky-700">
+                                                        {formatCurrency(row.area)}
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            value={row.unitPrice || ''}
+                                                            onChange={(event) =>
+                                                                updateHebeRow(row.id, 'unitPrice', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] font-bold outline-none focus:border-sky-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-slate-900">
+                                                        {formatCurrency(row.totalAmount)}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-sky-700">
+                                                        {formatCurrency(row.unitPricePerM2)}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-center">
+                                                        <button
+                                                            onClick={() => removeHebeRow(row.id)}
+                                                            className="rounded-lg p-1.5 text-slate-300 transition-all hover:bg-rose-50 hover:text-rose-500"
+                                                        >
+                                                            <FontAwesomeIcon icon={faTrash} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-slate-900 font-bold text-white">
+                                            <tr>
+                                                <td className="px-4 py-4" colSpan={5}>
+                                                    헤베 합계
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-slate-300">
+                                                    {formatCurrency(hebeTotalArea)} m2
+                                                </td>
+                                                <td />
+                                                <td className="px-4 py-4 text-right text-[18px]">
+                                                    {formatCurrency(hebeTotalAmount)}
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-[18px] text-sky-300">
+                                                    {formatCurrency(hebeAverageUnitPrice)}
+                                                </td>
+                                                <td />
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                                <div className="flex items-center justify-between border-b border-slate-100 bg-violet-50/70 p-4">
+                                    <div>
+                                        <h2 className="text-[16px] font-black text-violet-900">루베 상세 산출</h2>
+                                        <p className="text-[11px] font-bold text-slate-500">
+                                            길이 × 폭 × 높이 × 수량으로 m3 물량을 산출한 뒤 단가를 적용합니다.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={addRubeRow}
+                                        className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-violet-700"
+                                    >
+                                        <FontAwesomeIcon icon={faPlus} />
+                                        루베 구간 추가
+                                    </button>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[1240px] border-collapse text-left">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                                <th className="px-4 py-3">구간명</th>
+                                                <th className="px-4 py-3">품목</th>
+                                                <th className="px-4 py-3 text-right">길이(m)</th>
+                                                <th className="px-4 py-3 text-right">폭(m)</th>
+                                                <th className="px-4 py-3 text-right">높이(m)</th>
+                                                <th className="px-4 py-3 text-right">수량</th>
+                                                <th className="px-4 py-3 text-right text-violet-700">산출부피(m3)</th>
+                                                <th className="px-4 py-3 text-right">단가</th>
+                                                <th className="px-4 py-3 text-right">합계금액</th>
+                                                <th className="px-4 py-3 text-right text-violet-700">m3 단가</th>
+                                                <th className="px-4 py-3" />
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {calculatedRube.map((row) => (
+                                                <tr key={row.id} className="group hover:bg-violet-50/20">
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            value={row.section}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'section', event.target.value)
+                                                            }
+                                                            placeholder="구간명 입력"
+                                                            className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-[13px] font-bold outline-none transition-all group-hover:border-slate-200 focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <select
+                                                            value={row.itemName}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'itemName', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[13px] font-black outline-none focus:border-violet-400"
+                                                        >
+                                                            <option value=""></option>
+                                                            {DETAIL_PRODUCTS.map((product) => (
+                                                                <option key={product} value={product}>
+                                                                    {product}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={row.length || ''}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'length', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={row.width || ''}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'width', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            value={row.height || ''}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'height', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="1"
+                                                            value={row.count || ''}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'count', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] outline-none focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-violet-700">
+                                                        {formatCurrency(row.volume)}
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            value={row.unitPrice || ''}
+                                                            onChange={(event) =>
+                                                                updateRubeRow(row.id, 'unitPrice', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] font-bold outline-none focus:border-violet-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-slate-900">
+                                                        {formatCurrency(row.totalAmount)}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-violet-700">
+                                                        {formatCurrency(row.unitPricePerM3)}
+                                                    </td>
+                                                    <td className="px-4 py-2 text-center">
+                                                        <button
+                                                            onClick={() => removeRubeRow(row.id)}
+                                                            className="rounded-lg p-1.5 text-slate-300 transition-all hover:bg-rose-50 hover:text-rose-500"
+                                                        >
+                                                            <FontAwesomeIcon icon={faTrash} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-slate-900 font-bold text-white">
+                                            <tr>
+                                                <td className="px-4 py-4" colSpan={6}>
+                                                    루베 합계
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-slate-300">
+                                                    {formatCurrency(rubeTotalVolume)} m3
+                                                </td>
+                                                <td />
+                                                <td className="px-4 py-4 text-right text-[18px]">
+                                                    {formatCurrency(rubeTotalAmount)}
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-[18px] text-violet-300">
+                                                    {formatCurrency(rubeAverageUnitPrice)}
+                                                </td>
+                                                <td />
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                                <div className="flex items-center justify-between border-b border-slate-100 bg-orange-50/70 p-4">
+                                    <div>
+                                        <h2 className="text-[16px] font-black text-orange-900">SET / EA 상세 산출</h2>
+                                        <p className="text-[11px] font-bold text-slate-500">
+                                            계단타워, 작업발판, 안전통로, 브라켓 품목별 SET 또는 EA 수량으로 산출합니다.
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={addSetEaRow}
+                                        className="inline-flex items-center gap-2 rounded-xl bg-orange-600 px-4 py-2 text-[12px] font-black text-white transition-all hover:bg-orange-700"
+                                    >
+                                        <FontAwesomeIcon icon={faPlus} />
+                                        SET/EA 품목 추가
+                                    </button>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[940px] border-collapse text-left">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                                                <th className="px-4 py-3">품목</th>
+                                                <th className="px-4 py-3 text-center">단위</th>
+                                                <th className="px-4 py-3 text-right">수량</th>
+                                                <th className="px-4 py-3 text-right">단가</th>
+                                                <th className="px-4 py-3 text-right text-orange-700">합계금액</th>
+                                                <th className="px-4 py-3">비고</th>
+                                                <th className="px-4 py-3" />
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {calculatedSetEa.map((row) => (
+                                                <tr key={row.id} className="group hover:bg-orange-50/20">
+                                                    <td className="px-4 py-2">
+                                                        <select
+                                                            value={row.itemName}
+                                                            onChange={(event) =>
+                                                                updateSetEaRow(row.id, 'itemName', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[13px] font-black outline-none focus:border-orange-400"
+                                                        >
+                                                            {DETAIL_PRODUCTS.map((product) => (
+                                                                <option key={product} value={product}>
+                                                                    {product}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <select
+                                                            value={row.unitMode}
+                                                            onChange={(event) =>
+                                                                updateSetEaRow(row.id, 'unitMode', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-center text-[13px] font-black outline-none focus:border-orange-400"
+                                                        >
+                                                            <option value="SET">SET</option>
+                                                            <option value="EA">EA</option>
+                                                        </select>
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            step="1"
+                                                            value={row.quantity || ''}
+                                                            onChange={(event) =>
+                                                                updateSetEaRow(row.id, 'quantity', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] font-black text-orange-600 outline-none focus:border-orange-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            type="number"
+                                                            value={row.unitPrice || ''}
+                                                            onChange={(event) =>
+                                                                updateSetEaRow(row.id, 'unitPrice', event.target.value)
+                                                            }
+                                                            className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-right text-[13px] font-bold outline-none focus:border-orange-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-right text-[13px] font-black text-orange-700">
+                                                        {formatCurrency(row.totalAmount)}
+                                                    </td>
+                                                    <td className="px-4 py-2">
+                                                        <input
+                                                            value={row.note}
+                                                            onChange={(event) =>
+                                                                updateSetEaRow(row.id, 'note', event.target.value)
+                                                            }
+                                                            placeholder="비고"
+                                                            className="w-full rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-[13px] outline-none transition-all group-hover:border-slate-200 focus:border-orange-400"
+                                                        />
+                                                    </td>
+                                                    <td className="px-4 py-2 text-center">
+                                                        <button
+                                                            onClick={() => removeSetEaRow(row.id)}
+                                                            className="rounded-lg p-1.5 text-slate-300 transition-all hover:bg-rose-50 hover:text-rose-500"
+                                                        >
+                                                            <FontAwesomeIcon icon={faTrash} />
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot className="bg-slate-900 font-bold text-white">
+                                            <tr>
+                                                <td className="px-4 py-4" colSpan={2}>
+                                                    SET/EA 합계
+                                                </td>
+                                                <td className="px-4 py-4 text-right text-slate-300">
+                                                    {formatCurrency(setEaTotalQuantity)}
+                                                </td>
+                                                <td />
+                                                <td className="px-4 py-4 text-right text-[18px]">
+                                                    {formatCurrency(setEaTotalAmount)}
+                                                </td>
+                                                <td colSpan={2} />
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+
                             <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
                                 <div className="rounded-2xl bg-slate-800 p-5">
                                     <h3 className="mb-3 text-[13px] font-black text-white">높이 계수</h3>
@@ -1079,8 +1914,17 @@ const DetailedEstimateManagePage: React.FC = () => {
                                         <div className="rounded-xl border border-emerald-500/30 bg-emerald-900/20 p-3 text-emerald-100">
                                             DEC 합계금액 = DEC 적용단가 × DEC 물량(m3), DEC m3단가 = DEC 합계금액 ÷ DEC 물량(m3)
                                         </div>
+                                        <div className="rounded-xl border border-sky-500/30 bg-sky-900/20 p-3 text-sky-100">
+                                            헤베 산출면적(m2) = 길이 × 높이 × 수량, 헤베 합계금액 = 산출면적 × 단가
+                                        </div>
+                                        <div className="rounded-xl border border-violet-500/30 bg-violet-900/20 p-3 text-violet-100">
+                                            루베 산출부피(m3) = 길이 × 폭 × 높이 × 수량, 루베 합계금액 = 산출부피 × 단가
+                                        </div>
+                                        <div className="rounded-xl border border-orange-500/30 bg-orange-900/20 p-3 text-orange-100">
+                                            SET/EA 합계금액 = 계단타워/작업발판/안전통로/브라켓 품목별 수량 × 단가
+                                        </div>
                                         <div className="rounded-xl border border-slate-700 bg-slate-700/30 p-3 text-slate-200">
-                                            공급가액 = RC 합계 + DEC 합계 = {formatCurrency(rcTotalAmount)} + {formatCurrency(decTotalAmount)} = {formatCurrency(subtotal)} 원
+                                            공급가액 = RC + DEC + 헤베 + 루베 + SET/EA = {formatCurrency(subtotal)} 원
                                         </div>
                                         <div className="rounded-xl border border-amber-500/30 bg-amber-900/20 p-3 text-amber-100">
                                             VAT = max(공급가액 - 할인, 0) × {vatRate}% = {formatCurrency(tax)} 원

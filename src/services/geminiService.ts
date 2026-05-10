@@ -1,4 +1,4 @@
-import { aiSettingsService } from './aiSettingsService';
+import { aiSettingsService, normalizeGeminiModelName } from './aiSettingsService';
 
 export interface AnalyzedIdCard {
     name?: string;
@@ -60,17 +60,16 @@ const getApiKeyOrThrow = (): string => {
 };
 
 const buildGeminiGenerateContentUrl = (apiKey: string, model?: string): string => {
-    const selectedModel = model || aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
+    const selectedModel = normalizeGeminiModelName(model || aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
     return `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`;
 };
 
 const getTextModelCandidates = (): string[] => {
-    const selectedModel = aiSettingsService.getModels().textModel || 'gemini-2.5-flash';
+    const selectedModel = normalizeGeminiModelName(aiSettingsService.getModels().textModel, 'gemini-2.5-flash');
     return Array.from(new Set([
         selectedModel,
-        'gemini-2.0-flash',
-        'gemini-2.0-flash-lite',
-        'gemini-2.5-flash'
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite'
     ].filter(Boolean)));
 };
 

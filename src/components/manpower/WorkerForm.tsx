@@ -20,6 +20,61 @@ interface WorkerFormProps {
     isEditMode?: boolean;
 }
 
+type AffiliationType = '시공사' | '협력사';
+
+const CONSTRUCTION_COMPANY_TYPE: AffiliationType = '시공사';
+const PARTNER_COMPANY_TYPE: AffiliationType = '협력사';
+const UNASSIGNED_TEAM_TYPE = '미배정';
+const EXTERNAL_TEAM_NAME = '외부팀';
+const EXTERNAL_TEAM_COMPANY_VALUE = '__EXTERNAL_TEAM__';
+const DAILY_PAY_TYPE = '일급제';
+const SUPPORT_PAY_TYPE = '지원팀';
+
+const applyCompanySelectionDefaults = (
+    prev: Partial<Worker>,
+    company?: Company | null
+): Partial<Worker> => {
+    if (company?.type === PARTNER_COMPANY_TYPE) {
+        return {
+            ...prev,
+            companyId: company.id || '',
+            companyName: company.name,
+            teamId: '',
+            teamName: '',
+            teamType: UNASSIGNED_TEAM_TYPE,
+            payType: SUPPORT_PAY_TYPE,
+            salaryModel: SUPPORT_PAY_TYPE,
+        };
+    }
+
+    const next: Partial<Worker> = {
+        ...prev,
+        companyId: company?.id || '',
+        companyName: company?.name || '',
+        teamId: '',
+        teamName: '',
+        teamType: UNASSIGNED_TEAM_TYPE,
+    };
+
+    if (prev.payType === SUPPORT_PAY_TYPE || prev.salaryModel === SUPPORT_PAY_TYPE) {
+        next.payType = DAILY_PAY_TYPE;
+        next.salaryModel = DAILY_PAY_TYPE;
+    }
+
+    return next;
+};
+
+const applyExternalCompanyDefaults = (prev: Partial<Worker>): Partial<Worker> => ({
+    ...prev,
+    companyId: '',
+    companyName: EXTERNAL_TEAM_NAME,
+    teamId: '',
+    teamName: '',
+    teamType: UNASSIGNED_TEAM_TYPE,
+    payType: SUPPORT_PAY_TYPE,
+    salaryModel: SUPPORT_PAY_TYPE,
+});
+
 const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, positions, onSave, onCancel, isEditMode = false }) => {
     const [formData, setFormData] = useState<Partial<Worker>>({
         name: '',
@@ -28,26 +83,31 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
         contact: '',
         email: '',
         role: '작업자',
-        teamType: '미배정',
+        teamType: UNASSIGNED_TEAM_TYPE,
         teamName: '',
         teamId: '',
         companyId: '',
         companyName: '',
-        status: '미배정',
+        status: UNASSIGNED_TEAM_TYPE,
         unitPrice: 0,
         bankName: '',
         accountNumber: '',
         accountHolder: '',
         fileNameSaved: '',
-        payType: '일급제',
-        salaryModel: '일급제',
+        payType: DAILY_PAY_TYPE,
+        salaryModel: DAILY_PAY_TYPE,
         color: '#0f766e',
         bloodType: ''
     });
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [affiliationType, setAffiliationType] = useState<'시공사' | '협력사'>('시공사');
+    const [affiliationType, setAffiliationType] = useState<AffiliationType>(CONSTRUCTION_COMPANY_TYPE);
     const [isNewTeam, setIsNewTeam] = useState(false);
     const [newTeamName, setNewTeamName] = useState('');
+    const isPartnerAffiliation = affiliationType === PARTNER_COMPANY_TYPE;
+    const isExternalCompanySelected =
+        isPartnerAffiliation &&
+        !formData.companyId &&
+        String(formData.companyName ?? '').trim() === EXTERNAL_TEAM_NAME;
     const companyOptions = React.useMemo(() => companies
         .filter((company) => company.type === affiliationType && Boolean(company.id))
         .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
@@ -55,13 +115,48 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             id: company.id!,
             name: company.name
         })), [companies, affiliationType]);
+    const displayedCompanyOptions = React.useMemo(
+        () => isPartnerAffiliation
+            ? [{ id: EXTERNAL_TEAM_COMPANY_VALUE, name: EXTERNAL_TEAM_NAME }, ...companyOptions]
+            : companyOptions,
+        [companyOptions, isPartnerAffiliation]
+    );
+    const selectedCompanyOptionId = isExternalCompanySelected
+        ? EXTERNAL_TEAM_COMPANY_VALUE
+        : (formData.companyId || '');
+    const selectedCompany = formData.companyId
+        ? companies.find(c => c.id === formData.companyId)
+        : null;
+    const teamOptions = React.useMemo(() => {
+        if (isExternalCompanySelected) {
+            return teams.filter((team) => {
+                const teamCompany = team.companyId ? companies.find(c => c.id === team.companyId) : null;
+                const teamType = String(team.type ?? '').trim();
+                const teamCompanyName = String(team.companyName ?? '').trim();
+                return (
+                    teamCompanyName === EXTERNAL_TEAM_NAME ||
+                    teamCompany?.type === PARTNER_COMPANY_TYPE ||
+                    teamType === SUPPORT_PAY_TYPE ||
+                    teamType === '용역팀'
+                );
+            });
+        }
+
+        if (!formData.companyId) return [];
+
+        return teams.filter(t =>
+            t.companyId === formData.companyId ||
+            (selectedCompany?.name && t.companyName === selectedCompany.name)
+        );
+    }, [companies, formData.companyId, isExternalCompanySelected, selectedCompany?.name, teams]);
+    const canSelectTeam = Boolean(formData.companyId) || isExternalCompanySelected;
 
     // companyId가 변경되면 affiliationType을 동기화
     useEffect(() => {
         if (formData.companyId) {
             const comp = companies.find(c => c.id === formData.companyId);
-            if (comp && (comp.type === '시공사' || comp.type === '협력사')) {
-                setAffiliationType(comp.type as '시공사' | '협력사');
+            if (comp && (comp.type === CONSTRUCTION_COMPANY_TYPE || comp.type === PARTNER_COMPANY_TYPE)) {
+                setAffiliationType(comp.type as AffiliationType);
             }
         }
     }, [formData.companyId, companies]);
@@ -77,19 +172,19 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 contact: '',
                 email: '',
                 role: '작업자',
-                teamType: '미배정',
+                teamType: UNASSIGNED_TEAM_TYPE,
                 teamName: '',
                 teamId: '',
                 companyId: '',
                 companyName: '',
-                status: '미배정',
+                status: UNASSIGNED_TEAM_TYPE,
                 unitPrice: 0,
                 bankName: '',
                 accountNumber: '',
                 accountHolder: '',
                 fileNameSaved: '',
-                payType: '일급제',
-                salaryModel: '일급제',
+                payType: DAILY_PAY_TYPE,
+                salaryModel: DAILY_PAY_TYPE,
                 color: '#0f766e',
                 bloodType: ''
             });
@@ -107,18 +202,26 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
             }
 
             if (name === 'payType' || name === 'salaryModel') {
-                updates.payType = value;
-                updates.salaryModel = value;
+                updates.payType = isPartnerAffiliation ? SUPPORT_PAY_TYPE : value;
+                updates.salaryModel = isPartnerAffiliation ? SUPPORT_PAY_TYPE : value;
             }
 
             if (name === 'teamId') {
                 const team = teams.find(t => t.id === value);
                 if (team) {
+                    const shouldKeepExternalCompany =
+                        isPartnerAffiliation &&
+                        !prev.companyId &&
+                        String(prev.companyName ?? '').trim() === EXTERNAL_TEAM_NAME;
+
                     updates.teamName = team.name;
                     updates.teamType = team.type;
 
                     // 소속 회사 자동 설정 (팀에 연결된 회사가 있는 경우)
-                    if (team.companyId) {
+                    if (shouldKeepExternalCompany) {
+                        updates.companyId = '';
+                        updates.companyName = EXTERNAL_TEAM_NAME;
+                    } else if (team.companyId) {
                         const comp = companies.find(c => c.id === team.companyId);
                         if (comp) {
                             updates.companyId = comp.id;
@@ -131,19 +234,24 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                         updates.payType = team.defaultSalaryModel;
                         updates.salaryModel = team.defaultSalaryModel;
                     }
+
+                    if (isPartnerAffiliation) {
+                        updates.payType = SUPPORT_PAY_TYPE;
+                        updates.salaryModel = SUPPORT_PAY_TYPE;
+                    }
                 } else {
                     updates.teamName = '';
-                    updates.teamType = '미배정';
+                    updates.teamType = UNASSIGNED_TEAM_TYPE;
+                    if (isPartnerAffiliation) {
+                        updates.payType = SUPPORT_PAY_TYPE;
+                        updates.salaryModel = SUPPORT_PAY_TYPE;
+                    }
                 }
             }
 
             if (name === 'companyId') {
                 const company = companies.find(c => c.id === value);
-                if (company) {
-                    updates.companyName = company.name;
-                } else {
-                    updates.companyName = '';
-                }
+                return applyCompanySelectionDefaults(updates, company);
             }
 
             return updates;
@@ -219,6 +327,20 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                 await showErrorAlert('팀 생성 실패', err.message);
                 return;
             }
+        }
+
+        const shouldUseExternalCompanyDefault =
+            affiliationType === PARTNER_COMPANY_TYPE &&
+            (!finalData.companyId || String(finalData.companyName ?? '').trim() === EXTERNAL_TEAM_NAME);
+
+        if (shouldUseExternalCompanyDefault) {
+            finalData = {
+                ...finalData,
+                companyId: '',
+                companyName: EXTERNAL_TEAM_NAME,
+                payType: SUPPORT_PAY_TYPE,
+                salaryModel: SUPPORT_PAY_TYPE,
+            };
         }
 
         await onSave(finalData, selectedFile);
@@ -405,10 +527,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                             <input
                                                 type="radio"
                                                 name="affiliationType"
-                                                checked={affiliationType === '시공사'}
+                                                checked={affiliationType === CONSTRUCTION_COMPANY_TYPE}
                                                 onChange={() => {
-                                                    setAffiliationType('시공사');
-                                                    setFormData(prev => ({ ...prev, companyId: '', companyName: '', teamId: '', teamName: '' }));
+                                                    setAffiliationType(CONSTRUCTION_COMPANY_TYPE);
+                                                    setFormData(prev => applyCompanySelectionDefaults(prev, null));
                                                 }}
                                                 disabled={isNewTeam}
                                                 className="text-brand-600 focus:ring-brand-500"
@@ -419,10 +541,10 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                             <input
                                                 type="radio"
                                                 name="affiliationType"
-                                                checked={affiliationType === '협력사'}
+                                                checked={affiliationType === PARTNER_COMPANY_TYPE}
                                                 onChange={() => {
-                                                    setAffiliationType('협력사');
-                                                    setFormData(prev => ({ ...prev, companyId: '', companyName: '', teamId: '', teamName: '' }));
+                                                    setAffiliationType(PARTNER_COMPANY_TYPE);
+                                                    setFormData(prev => applyExternalCompanyDefaults(prev));
                                                 }}
                                                 disabled={isNewTeam}
                                                 className="text-brand-600 focus:ring-brand-500"
@@ -431,42 +553,37 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                         </label>
                                     </div>
                                     <SingleSelectPopover
-                                        options={companyOptions}
-                                        selectedId={formData.companyId || ''}
+                                        options={displayedCompanyOptions}
+                                        selectedId={selectedCompanyOptionId}
                                         onSelect={(val) => {
+                                            if (val === EXTERNAL_TEAM_COMPANY_VALUE) {
+                                                setFormData(prev => applyExternalCompanyDefaults(prev));
+                                                return;
+                                            }
                                             const comp = companies.find(c => c.id === val);
-                                            setFormData(prev => ({
-                                                ...prev,
-                                                companyId: val,
-                                                companyName: comp ? comp.name : '',
-                                                teamId: '',
-                                                teamName: ''
-                                            }));
+                                            setFormData(prev => applyCompanySelectionDefaults(prev, comp));
                                         }}
                                         placeholder={'\uD68C\uC0AC \uAC80\uC0C9'}
                                     />
                                     {false && <select
                                         name="companyId"
-                                        value={formData.companyId || ''}
+                                        value={selectedCompanyOptionId}
                                         onChange={(e) => {
                                             // Handle Change locally to ensure Team reset
                                             const val = e.target.value;
+                                            if (val === EXTERNAL_TEAM_COMPANY_VALUE) {
+                                                setFormData(prev => applyExternalCompanyDefaults(prev));
+                                                return;
+                                            }
                                             const comp = companies.find(c => c.id === val);
-                                            setFormData(prev => ({
-                                                ...prev,
-                                                companyId: val,
-                                                companyName: comp ? comp.name : '',
-                                                teamId: '',
-                                                teamName: ''
-                                            }));
+                                            setFormData(prev => applyCompanySelectionDefaults(prev, comp));
                                         }}
                                         className="w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
                                     >
                                         <option value="">
                                             {affiliationType === '시공사' ? '시공사 선택' : '협력사 선택'}
                                         </option>
-                                        {companies
-                                            .filter(c => c.type === affiliationType)
+                                        {displayedCompanyOptions
                                             .map(c => (
                                                 <option key={c.id} value={c.id}>{c.name}</option>
                                             ))
@@ -484,14 +601,13 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                                     name="teamId"
                                     value={formData.teamId || ''}
                                     onChange={handleChange}
-                                    disabled={isNewTeam || !formData.companyId}
-                                    className={`w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white ${(isNewTeam || !formData.companyId) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'cursor-pointer'}`}
+                                    disabled={isNewTeam || !canSelectTeam}
+                                    className={`w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white ${(isNewTeam || !canSelectTeam) ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'cursor-pointer'}`}
                                 >
                                     <option value="">
-                                        {isNewTeam ? '새 팀 생성 예정' : (!formData.companyId ? '회사 먼저 선택' : '미배정 (선택)')}
+                                        {isNewTeam ? '새 팀 생성 예정' : (!canSelectTeam ? '회사 먼저 선택' : '팀 선택')}
                                     </option>
-                                    {teams
-                                        .filter(t => t.companyId === formData.companyId)
+                                    {teamOptions
                                         .map(t => (
                                             <option key={t.id} value={t.id}>{t.name}</option>
                                         ))
@@ -604,14 +720,15 @@ const WorkerForm: React.FC<WorkerFormProps> = ({ initialData, teams, companies, 
                             <div className="col-span-9 md:col-span-4 p-2 border-r border-slate-200">
                                 <select
                                     name="payType"
-                                    value={formData.payType || '일급제'}
+                                    value={isPartnerAffiliation ? SUPPORT_PAY_TYPE : (formData.payType || DAILY_PAY_TYPE)}
                                     onChange={handleChange}
-                                    className="w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium cursor-pointer focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
+                                    disabled={isPartnerAffiliation}
+                                    className={`w-full border-slate-200 rounded text-sm py-1.5 px-3 font-medium focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white ${isPartnerAffiliation ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'cursor-pointer'}`}
                                 >
-                                    <option value="일급제">일급제</option>
+                                    <option value={DAILY_PAY_TYPE}>일급제</option>
                                     <option value="주급제">주급제</option>
                                     <option value="월급제">월급제</option>
-                                    <option value="지원팀">지원팀</option>
+                                    <option value={SUPPORT_PAY_TYPE}>지원팀</option>
                                     <option value="용역팀">용역팀</option>
                                     <option value="가지급">가지급</option>
                                 </select>

@@ -201,6 +201,35 @@ a {
     color: var(--primary-color);
 }
 
+.app-menu-logo-button {
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 4px;
+    color: var(--primary-color);
+    background: transparent;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.app-menu-logo-button:hover {
+    background: #f0f0f0;
+    transform: translateY(-1px);
+}
+
+.app-menu-logo-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.app-menu-logo-icon {
+    font-size: 22px;
+}
+
 .profile-btn {
     padding: 0 4px;
     /* Reduce padding for profile button */
@@ -1344,6 +1373,10 @@ a {
 
     .mobile-logo-area {
         display: block;
+    }
+
+    .cheongyeon-header-home-logo {
+        display: none;
     }
 
     #mobile-close-btn {
