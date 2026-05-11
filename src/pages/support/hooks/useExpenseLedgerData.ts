@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { accommodationBillingService } from '../../../services/accommodationBillingService';
 import { cardBillingService } from '../../../services/cardBillingService';
 import { cardService } from '../../../services/cardService';
@@ -88,11 +88,12 @@ const ALL_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: stri
   { value: 'tool', label: '공구비' },
   { value: 'deposit', label: '보증금' },
   { value: 'marking', label: '마이킹' },
+  { value: 'fieldGoods', label: '현장물품' },
   { value: 'etc', label: '기타' }
 ];
 
 const HIDDEN_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['fuel', 'material', 'tool'];
-const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'etc'];
+const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'fieldGoods', 'etc'];
 const OTHER_CLAIM_ONLY_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking'];
 
 export const CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(

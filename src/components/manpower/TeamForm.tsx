@@ -4,6 +4,7 @@ import { Worker, manpowerService } from '../../services/manpowerService';
 import { Company, companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUsers, faCheck, faTimes, faPlus } from '@fortawesome/free-solid-svg-icons';
+import TeamColorPicker from './TeamColorPicker';
 
 interface TeamFormProps {
     initialData?: Partial<Team>;
@@ -504,21 +505,10 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
                                 팀 색상
                             </div>
                             <div className="col-span-9 md:col-span-10 p-2">
-                                <div className="flex items-center gap-3">
-                                    <input
-                                        type="color"
-                                        value={currentTeam.color || '#2563eb'}
-                                        onChange={(e) => setCurrentTeam({ ...currentTeam, color: e.target.value })}
-                                        className="h-8 w-8 rounded border border-slate-200 cursor-pointer p-0 shadow-sm"
-                                    />
-                                    <input
-                                        type="text"
-                                        value={currentTeam.color || ''}
-                                        onChange={(e) => setCurrentTeam({ ...currentTeam, color: e.target.value })}
-                                        placeholder="#2563eb"
-                                        className="w-32 border-slate-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm py-1.5 px-3 font-mono shadow-sm"
-                                    />
-                                </div>
+                                <TeamColorPicker
+                                    value={currentTeam.color}
+                                    onChange={(color) => setCurrentTeam(prev => ({ ...prev, color }))}
+                                />
                             </div>
                         </div>
                     </div>

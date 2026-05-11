@@ -173,8 +173,72 @@ interface DbFilterState {
 
 const INPUT_ROW_COUNT = 80;
 const DB_PAGE_SIZE = 100;
+const DB_INITIAL_LOAD_LIMIT = 300;
 const INPUT_GRID_DERIVED_SOURCE = 'workbook-input-derived';
 const INPUT_GRID_MOUSE_COMMIT_SOURCE = 'workbook-input-mouse-commit';
+type EntryLoadScope = 'none' | 'recent' | 'range' | 'all';
+interface EntryLoadQuery {
+    scope: EntryLoadScope;
+    startDate?: string;
+    endDate?: string;
+    limitCount?: number;
+    orderDirection?: 'asc' | 'desc';
+}
+
+const createRecentDbEntryLoadQuery = (): EntryLoadQuery => ({
+    scope: 'recent',
+    limitCount: DB_INITIAL_LOAD_LIMIT,
+    orderDirection: 'desc'
+});
+
+const createAllEntryLoadQuery = (): EntryLoadQuery => ({
+    scope: 'all',
+    orderDirection: 'asc'
+});
+
+const createRangeEntryLoadQuery = (startDate: string, endDate: string): EntryLoadQuery => {
+    const normalizedStart = String(startDate ?? '').trim();
+    const normalizedEnd = String(endDate ?? '').trim();
+
+    if (normalizedStart && normalizedEnd && normalizedStart > normalizedEnd) {
+        return {
+            scope: 'range',
+            startDate: normalizedEnd,
+            endDate: normalizedStart,
+            orderDirection: 'asc'
+        };
+    }
+
+    return {
+        scope: 'range',
+        startDate: normalizedStart,
+        endDate: normalizedEnd,
+        orderDirection: 'asc'
+    };
+};
+
+const buildEntryLoadQueryKey = (entryQuery: EntryLoadQuery) => [
+    entryQuery.scope,
+    entryQuery.startDate ?? '',
+    entryQuery.endDate ?? '',
+    entryQuery.limitCount ?? '',
+    entryQuery.orderDirection ?? 'asc'
+].join('|');
+
+const getEntryLoadScopeText = (scope: EntryLoadScope, count: number) => {
+    if (scope === 'all') return `전체 ${count.toLocaleString()}건`;
+    if (scope === 'recent') return `최근 ${count.toLocaleString()}건`;
+    if (scope === 'range') return `기간 ${count.toLocaleString()}건`;
+    return '미로드';
+};
+
+interface RefreshPageDataOptions {
+    forceEntries?: boolean;
+    forceCatalogs?: boolean;
+    loadEntries?: boolean;
+    entryQuery?: EntryLoadQuery;
+}
+
 const buildDefaultLedgerStart = (date: Date) => (
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
 );
@@ -1154,10 +1218,7 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     const paymentEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter(isPaymentEntry)
-        .filter((entry) => {
-            if (!isSettlementMode) return true;
-            return entry.date <= endDate;
-        })
+        .filter((entry) => entry.date <= endDate)
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
@@ -1436,6 +1497,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const [receiptActionLoading, setReceiptActionLoading] = useState(false);
     const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
     const [entriesLoaded, setEntriesLoaded] = useState(false);
+    const [entryLoadScope, setEntryLoadScope] = useState<EntryLoadScope>('none');
     const [partnerNames, setPartnerNames] = useState<string[]>([]);
     const [siteNames, setSiteNames] = useState<string[]>([]);
     const [teamNames, setTeamNames] = useState<string[]>([]);
@@ -1444,6 +1506,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const teamSeedNamesRef = useRef<string[]>([]);
     const catalogsLoadedRef = useRef(false);
     const entriesLoadedRef = useRef(false);
+    const entryLoadQueryRef = useRef<EntryLoadQuery>({ scope: 'none' });
+    const entryLoadQueryKeyRef = useRef(buildEntryLoadQueryKey({ scope: 'none' }));
     const [selectedTeam, setSelectedTeam] = useState('');
     const [baseYear, setBaseYear] = useState(currentYear);
     const selectedTeamInputRef = useRef<HTMLInputElement | null>(null);
@@ -1516,13 +1580,21 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         setTeamNames(Array.from(nextTeamNames).sort((left, right) => left.localeCompare(right, 'ko')));
     }, []);
 
-    const refreshPageData = useCallback(async (options?: { forceEntries?: boolean; forceCatalogs?: boolean; loadEntries?: boolean }) => {
+    const refreshPageData = useCallback(async (options?: RefreshPageDataOptions): Promise<WorkbookLedgerEntry[] | null> => {
+        let loadedEntries: WorkbookLedgerEntry[] | null = null;
         setLoading(true);
         try {
             const shouldLoadCatalogs = options?.forceCatalogs || !catalogsLoadedRef.current;
             const shouldLoadEntries = options?.loadEntries ?? entriesLoadedRef.current;
+            const requestedEntryQuery = options?.entryQuery ?? entryLoadQueryRef.current;
             const [savedEntries, companies, sites, teams] = await Promise.all([
-                shouldLoadEntries ? ledgerService.getEntries({ force: options?.forceEntries }) : Promise.resolve(null),
+                shouldLoadEntries ? ledgerService.getEntries({
+                    force: options?.forceEntries,
+                    startDate: requestedEntryQuery.startDate,
+                    endDate: requestedEntryQuery.endDate,
+                    limitCount: requestedEntryQuery.limitCount,
+                    orderDirection: requestedEntryQuery.orderDirection
+                }) : Promise.resolve(null),
                 shouldLoadCatalogs ? companyService.getActiveCompanies() : Promise.resolve(null),
                 shouldLoadCatalogs ? siteService.getSites() : Promise.resolve(null),
                 shouldLoadCatalogs ? teamService.getTeams() : Promise.resolve(null)
@@ -1542,9 +1614,13 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             }
 
             if (savedEntries) {
+                loadedEntries = savedEntries;
                 rebuildLookupOptions(savedEntries);
                 entriesLoadedRef.current = true;
+                entryLoadQueryRef.current = requestedEntryQuery;
+                entryLoadQueryKeyRef.current = buildEntryLoadQueryKey(requestedEntryQuery);
                 setEntriesLoaded(true);
+                setEntryLoadScope(requestedEntryQuery.scope);
             }
         } catch (error) {
             console.error(error);
@@ -1552,16 +1628,39 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setLoading(false);
         }
+
+        return loadedEntries;
     }, [ledgerService, rebuildLookupOptions]);
 
     useEffect(() => {
         refreshPageData({ forceCatalogs: true, loadEntries: false });
     }, [refreshPageData]);
 
+    const getEntryLoadQueryForTab = useCallback((tab: WorkbookTab): EntryLoadQuery => {
+        if (tab === 'database') {
+            return createRecentDbEntryLoadQuery();
+        }
+
+        if (tab === 'ledger') {
+            return createRangeEntryLoadQuery(ledgerFilter.startDate, ledgerFilter.endDate);
+        }
+
+        if (tab === 'summary') {
+            return createRangeEntryLoadQuery(summaryFilter.startDate, summaryFilter.endDate);
+        }
+
+        return { scope: 'none' };
+    }, [ledgerFilter.endDate, ledgerFilter.startDate, summaryFilter.endDate, summaryFilter.startDate]);
+
     useEffect(() => {
-        if (activeTab === 'input' || entriesLoadedRef.current) return;
-        refreshPageData({ loadEntries: true });
-    }, [activeTab, refreshPageData]);
+        if (activeTab === 'input') return;
+
+        const entryQuery = getEntryLoadQueryForTab(activeTab);
+        const nextQueryKey = buildEntryLoadQueryKey(entryQuery);
+        if (entriesLoadedRef.current && entryLoadQueryKeyRef.current === nextQueryKey) return;
+
+        refreshPageData({ loadEntries: true, entryQuery });
+    }, [activeTab, getEntryLoadQueryForTab, refreshPageData]);
 
     useEffect(() => {
         const loadPurchaseAccounts = async () => {
@@ -1972,8 +2071,45 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         }
     }, [currentUser?.uid, refreshPageData, syncTopInputRefs]);
 
+    const loadAllEntries = useCallback(async (reason: 'view' | 'download' | 'reset' = 'view') => {
+        if (entryLoadScope === 'all') {
+            return entries;
+        }
+
+        if (reason !== 'view') {
+            const result = await Swal.fire({
+                title: '전체 DB 불러오기',
+                text: reason === 'download'
+                    ? '현재 화면은 일부 데이터만 불러온 상태입니다. 다운로드 전에 전체 DB를 한 번 불러올까요?'
+                    : '현재 화면은 일부 데이터만 불러온 상태입니다. 초기화 전에 전체 DB를 한 번 확인할까요?',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '전체 불러오기',
+                cancelButtonText: '취소'
+            });
+
+            if (!result.isConfirmed) return null;
+        }
+
+        return refreshPageData({
+            forceEntries: true,
+            loadEntries: true,
+            entryQuery: createAllEntryLoadQuery()
+        });
+    }, [entries, entryLoadScope, refreshPageData]);
+
+    const handleLoadAllEntries = useCallback(() => {
+        loadAllEntries('view');
+    }, [loadAllEntries]);
+
     const handleDownloadDb = useCallback(async () => {
-        if (entries.length === 0) {
+        const downloadEntries = entryLoadScope === 'all'
+            ? entries
+            : await loadAllEntries('download');
+
+        if (!downloadEntries) return;
+
+        if (downloadEntries.length === 0) {
             Swal.fire('안내', '다운로드할 DB 데이터가 없습니다.', 'info');
             return;
         }
@@ -1984,7 +2120,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             const { saveAs } = await import('file-saver');
             const worksheet = XLSX.utils.aoa_to_sheet([
                 [...DB_HEADERS],
-                ...entries.map(toDbRow)
+                ...downloadEntries.map(toDbRow)
             ]);
 
             const workbook = XLSX.utils.book_new();
@@ -2006,7 +2142,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setDownloadingDb(false);
         }
-    }, [entries]);
+    }, [entries, entryLoadScope, loadAllEntries]);
 
     const handleCopyCapture = useCallback(async (
         target: 'ledger' | 'summary',
@@ -2450,14 +2586,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [currentUser?.uid, entries, refreshPageData]);
 
     const handleResetDatabase = useCallback(async () => {
-        if (entries.length === 0) {
+        const resetEntries = entryLoadScope === 'all'
+            ? entries
+            : await loadAllEntries('reset');
+
+        if (!resetEntries) return;
+
+        if (resetEntries.length === 0) {
             Swal.fire('안내', '초기화할 DB 데이터가 없습니다.', 'info');
             return;
         }
 
         const result = await Swal.fire({
             title: 'DB 초기화',
-            html: `현재 저장된 <strong>${entries.length.toLocaleString()}건</strong>을 모두 초기화합니다.<br />계속하려면 <strong>초기화</strong>를 입력하세요.`,
+            html: `현재 저장된 <strong>${resetEntries.length.toLocaleString()}건</strong>을 모두 초기화합니다.<br />계속하려면 <strong>초기화</strong>를 입력하세요.`,
             input: 'text',
             inputPlaceholder: '초기화',
             icon: 'warning',
@@ -2491,7 +2633,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         } finally {
             setDbActionLoading(false);
         }
-    }, [currentUser?.uid, entries.length, refreshPageData]);
+    }, [currentUser?.uid, entries, entryLoadScope, loadAllEntries, refreshPageData]);
 
     const handleBulkDeleteDbEntries = useCallback(async () => {
         if (selectedDbEntryIds.length === 0) {
@@ -2898,8 +3040,23 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [currentUser?.uid, refreshPageData]);
 
     const applyLedgerFilter = useCallback(() => {
-        setLedgerFilter({ ...ledgerDraft });
-    }, [ledgerDraft]);
+        const draft = {
+            ...ledgerDraft,
+            startDate: normalizeDate(ledgerDraft.startDate) || defaultLedgerStart,
+            endDate: normalizeDate(ledgerDraft.endDate) || todayString
+        };
+
+        const nextFilter = draft.startDate <= draft.endDate
+            ? draft
+            : {
+                ...draft,
+                startDate: draft.endDate,
+                endDate: draft.startDate
+            };
+
+        setLedgerDraft(nextFilter);
+        setLedgerFilter(nextFilter);
+    }, [defaultLedgerStart, ledgerDraft, todayString]);
 
     const applySummaryFilter = useCallback(() => {
         const draft = {
@@ -2916,15 +3073,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
             return;
         }
 
-        setSummaryFilter(
-            startDate <= endDate
-                ? draft
-                : {
-                    ...draft,
-                    startDate: draft.endDate,
-                    endDate: draft.startDate
-                }
-        );
+        const nextFilter = startDate <= endDate
+            ? draft
+            : {
+                ...draft,
+                startDate: draft.endDate,
+                endDate: draft.startDate
+            };
+
+        setSummaryFilter(nextFilter);
     }, [defaultLedgerStart, summaryDraft, todayString]);
 
     const ledgerRows = useMemo(
@@ -4197,7 +4354,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                     </tr>
                     <tr>
                         <th className="sheet-label-green">저장건수</th>
-                        <td className="sheet-value-light">{entries.length.toLocaleString()}건</td>
+                        <td className="sheet-value-light">{getEntryLoadScopeText(entryLoadScope, entries.length)}</td>
                         <td className="sheet-spacer workbook-db-sort-cell" colSpan={4}>
                             <div className="workbook-db-sort-actions">
                                 <button
@@ -4831,7 +4988,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 />
                             </td>
                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
-                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
+                                <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, entries.length)}</div>
                             </td>
                         </tr>
                     </tbody>
@@ -5024,7 +5181,7 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                                 />
                             </td>
                             <td className="sheet-spacer sheet-filter-count-cell" colSpan={6}>
-                                <div className="sheet-button-count">{entries.length.toLocaleString()}건</div>
+                                <div className="sheet-button-count">{getEntryLoadScopeText(entryLoadScope, entries.length)}</div>
                             </td>
                         </tr>
                     </tbody>
@@ -5183,6 +5340,15 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
                         <p>{`${companyLabel} 매입매출 전용 장부 페이지입니다.`}</p>
                     </div>
                     <div className="workbook-title-actions">
+                        <button
+                            type="button"
+                            className="workbook-toolbar-button"
+                            onClick={handleLoadAllEntries}
+                            disabled={loading || entryLoadScope === 'all'}
+                        >
+                            <FontAwesomeIcon icon={faDatabase} />
+                            전체 DB 불러오기
+                        </button>
                         <button
                             type="button"
                             className="workbook-toolbar-button"

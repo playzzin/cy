@@ -905,8 +905,8 @@ const CheongyeonHome: React.FC = () => {
                                     />
                                     <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                                     <Tooltip
-                                        formatter={(value?: number) => [`${formatStatValue(Number(value ?? 0), 1)}`, '투입 공수']}
-                                        labelFormatter={(label: string) => trendMode === 'daily' ? `${label}` : `${label}월`}
+                                        formatter={(value: unknown) => [`${formatStatValue(Number(value ?? 0), 1)}`, '투입 공수']}
+                                        labelFormatter={(label: unknown) => trendMode === 'daily' ? `${label}` : `${label}월`}
                                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                                     />
                                     <Bar
@@ -949,8 +949,8 @@ const CheongyeonHome: React.FC = () => {
                                     />
                                     <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                                     <Tooltip
-                                        formatter={(value?: number) => [`${Number(value ?? 0).toLocaleString()}개 현장`, '현장 수']}
-                                        labelFormatter={(label: string) => trendMode === 'daily' ? `${label}` : `${label}월`}
+                                        formatter={(value: unknown) => [`${Number(value ?? 0).toLocaleString()}개 현장`, '현장 수']}
+                                        labelFormatter={(label: unknown) => trendMode === 'daily' ? `${label}` : `${label}월`}
                                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                                     />
                                     <Bar

@@ -20,20 +20,20 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTaxInvoiceListApi = exports.getTaxInvoiceStatusApi = exports.issueTaxInvoiceApi = void 0;
-const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const taxInvoiceService_1 = require("./services/taxInvoiceService");
+const auth_1 = require("./auth");
 // Firebase Admin 초기화
 admin.initializeApp();
 /**
  * 세금계산서 즉시 발행 API
  * POST /taxinvoice/issue
  */
-exports.issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+exports.issueTaxInvoiceApi = auth_1.protectedRegion.https.onRequest(async (req, res) => {
     // CORS 헤더 설정
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
         return;
@@ -43,6 +43,9 @@ exports.issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest
         res.status(405).json({ error: 'Method not allowed' });
         return;
     }
+    const auth = await (0, auth_1.requireHttpAuth)(req, res);
+    if (!auth)
+        return;
     try {
         const data = req.body;
         // 필수 필드 검증
@@ -54,6 +57,13 @@ exports.issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest
             return;
         }
         // 바로빌 API 호출
+        if (!Array.isArray(data.items) || data.items.length === 0 || data.items.length > 99) {
+            res.status(400).json({
+                error: 'Invalid invoice items',
+                message: 'Invoice items must contain between 1 and 99 rows.'
+            });
+            return;
+        }
         const result = await (0, taxInvoiceService_1.issueTaxInvoice)(data);
         if (result.code === 0) {
             // 발행 이력을 Firestore에 저장
@@ -89,8 +99,9 @@ exports.issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest
  * 세금계산서 상태 조회 API
  * GET /taxinvoice/status/:invoiceNum
  */
-exports.getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+exports.getTaxInvoiceStatusApi = auth_1.protectedRegion.https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
         return;
@@ -99,6 +110,9 @@ exports.getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.onReq
         res.status(405).json({ error: 'Method not allowed' });
         return;
     }
+    const auth = await (0, auth_1.requireHttpAuth)(req, res);
+    if (!auth)
+        return;
     try {
         const invoiceNum = req.query.invoiceNum;
         if (!invoiceNum) {
@@ -120,8 +134,9 @@ exports.getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.onReq
  * 세금계산서 발행 이력 조회 API
  * GET /taxinvoice/list
  */
-exports.getTaxInvoiceListApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+exports.getTaxInvoiceListApi = auth_1.protectedRegion.https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
         return;
@@ -130,8 +145,11 @@ exports.getTaxInvoiceListApi = functions.region('asia-northeast3').https.onReque
         res.status(405).json({ error: 'Method not allowed' });
         return;
     }
+    const auth = await (0, auth_1.requireHttpAuth)(req, res);
+    if (!auth)
+        return;
     try {
-        const limit = parseInt(req.query.limit) || 50;
+        const limit = (0, auth_1.parseBoundedLimit)(req.query.limit, 50, 100);
         const snapshot = await admin.firestore()
             .collection('taxInvoices')
             .orderBy('issuedAt', 'desc')

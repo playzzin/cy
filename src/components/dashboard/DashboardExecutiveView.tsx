@@ -9,16 +9,21 @@ import { companyService } from '../../services/companyService';
 import { taskService } from '../../services/taskService';
 import { Task, STATUS_CONFIG } from '../../types/task';
 import WeatherWidget from '../widgets/WeatherWidget';
+import { RoleFocusPanel } from './RoleFocusPanel';
+import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
+import { useQuickMenuActions } from './useQuickMenuActions';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faUsers, faBuilding, faClipboardList, faHardHat,
-    faArrowRight, faChartLine, faCalendarCheck, faFileInvoiceDollar,
-    faDatabase, faCog, faSpinner, faHandHoldingDollar, faRightLeft,
-    faSignature, faFileSignature, faMoneyBillTrendUp,
-    faPaperPlane, faListCheck, faFileExcel
+    faArrowRight, faChartLine, faSpinner, faRightLeft,
+    faListCheck
 } from '@fortawesome/free-solid-svg-icons';
 
-export const DashboardExecutiveView: React.FC = () => {
+interface DashboardExecutiveViewProps {
+    modeConfig?: DashboardModeConfig;
+}
+
+export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = ({ modeConfig = DASHBOARD_MODES[0] }) => {
     const { currentUser } = useAuth();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(true);
@@ -156,30 +161,29 @@ export const DashboardExecutiveView: React.FC = () => {
     }
 
     return (
-        <DashboardExecutiveViewContent stats={stats} />
+        <DashboardExecutiveViewContent stats={stats} modeConfig={modeConfig} />
     );
 };
 
 // Internal component to handle the displaying using the fetched stats
-const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
-    const { currentUser } = useAuth();
+const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: DashboardModeConfig }> = ({ stats, modeConfig }) => {
     const navigate = useNavigate();
-    const [linkedWorker, setLinkedWorker] = useState<any>(null);
+    const quickActions = useQuickMenuActions(modeConfig);
 
-    useEffect(() => {
-        const fetchWorker = async () => {
-            if (currentUser?.uid) {
-                const worker = await manpowerService.getWorkerByUid(currentUser.uid);
-                setLinkedWorker(worker);
-            }
-        };
-        fetchWorker();
-    }, [currentUser]);
-
-    const displayWorker = linkedWorker || { name: '관리자', role: '최고관리자' };
+    const handleQuickActionClick = (path: string, openInNewTab?: boolean) => {
+        if (openInNewTab) {
+            window.open(path, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        navigate(path);
+    };
 
     return (
         <div>
+            <div className="mb-8">
+                <RoleFocusPanel modeConfig={modeConfig} />
+            </div>
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
                 {/* Workers Card */}
@@ -297,34 +301,10 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                     <section>
                         <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
                             <FontAwesomeIcon icon={faChartLine} className="text-brand-600" />
-                            빠른 실행
+                            {modeConfig.shortLabel} 빠른 실행
                         </h2>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {(() => {
-                                const allActions = [
-                                    { label: '일보 작성', desc: '오늘의 작업 내용 기록', path: '/reports/daily?tab=input', icon: faCalendarCheck, color: 'brand' },
-                                    { label: '통합 DB', desc: '인력 및 현장 데이터 관리', path: '/database/manpower-db', icon: faDatabase, color: 'blue' },
-                                    { label: '지원팀 지급', desc: '메뉴가 막혀도 여기서 바로 이동', path: '/payroll/support-team', icon: faFileInvoiceDollar, color: 'green' },
-                                    { label: '시스템 설정', desc: '환경설정 및 백업', path: '/settings', icon: faCog, color: 'slate' },
-                                    { label: '서명 생성기', desc: '자동 서명 생성 및 직접 입력', path: '/payroll/signature-generator', icon: faSignature, color: 'indigo' },
-                                    { label: '급여 지급', desc: '급여 대장 및 지급 현황', path: '/payroll/wage-payment', icon: faHandHoldingDollar, color: 'emerald' },
-                                    { label: '급여 통계', desc: '일급/월급 통계 분석', path: '/payroll/statistics', icon: faChartLine, color: 'sky' },
-                                    { label: '위임장', desc: '본인대리인 급여수령 위임장', path: '/payroll/delegation-letter', icon: faFileSignature, color: 'rose' },
-                                    { label: '현장 현황', desc: '현장별 실시간 현황판', path: '/dashboard/site-status', icon: faBuilding, color: 'purple' },
-                                    { label: '지원비 명세서', desc: '일용노무비 지급명세서 작성', path: '/payroll/support-claim', icon: faFileExcel, color: 'violet' },
-                                    { label: '월급제 집계', desc: '월급제 인원 공수 · 지급 관리', path: '/payroll/monthly-wage', icon: faListCheck, color: 'orange' },
-                                    { label: '가불 · 공제', desc: '가불 등록 및 공제 현황', path: '/payroll/advance-payment?tab=register', icon: faMoneyBillTrendUp, color: 'amber' },
-                                    { label: '알림톡 발송', desc: '급여/공지 알림톡 빠른 전송', path: '/payroll/kakao-notification', icon: faPaperPlane, color: 'cyan' },
-                                    {
-                                        label: '메뉴 관리',
-                                        desc: '시스템 메뉴 구조 설정',
-                                        path: '/admin/menu-manager',
-                                        icon: faCog,
-                                        color: 'gray',
-                                        adminOnly: true
-                                    }
-                                ];
-
                                 const colorMap: Record<string, { bg: string, text: string, hover: string, iconBg: string }> = {
                                     brand: { bg: 'bg-brand-50', text: 'text-brand-600', hover: 'hover:border-brand-500', iconBg: 'group-hover:bg-brand-100' },
                                     blue: { bg: 'bg-blue-50', text: 'text-blue-600', hover: 'hover:border-blue-500', iconBg: 'group-hover:bg-blue-100' },
@@ -339,18 +319,17 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any }> = ({ stats }) => {
                                     orange: { bg: 'bg-orange-50', text: 'text-orange-600', hover: 'hover:border-orange-500', iconBg: 'group-hover:bg-orange-100' },
                                     amber: { bg: 'bg-amber-50', text: 'text-amber-600', hover: 'hover:border-amber-500', iconBg: 'group-hover:bg-amber-100' },
                                     cyan: { bg: 'bg-cyan-50', text: 'text-cyan-600', hover: 'hover:border-cyan-500', iconBg: 'group-hover:bg-cyan-100' },
+                                    teal: { bg: 'bg-teal-50', text: 'text-teal-600', hover: 'hover:border-teal-500', iconBg: 'group-hover:bg-teal-100' },
                                     gray: { bg: 'bg-gray-100', text: 'text-gray-600', hover: 'hover:border-gray-500', iconBg: 'group-hover:bg-gray-200' }
                                 };
 
-                                return allActions
-                                    .filter(action => !action.adminOnly || ['admin', '사장', '실장'].includes(displayWorker.role || ''))
-                                    .slice(0, 12)
+                                return quickActions
                                     .map((action, idx) => {
                                         const theme = colorMap[action.color] || colorMap.slate;
                                         return (
                                             <button
                                                 key={idx}
-                                                onClick={() => navigate(action.path)}
+                                                onClick={() => handleQuickActionClick(action.path, action.openInNewTab)}
                                                 className={`p-6 bg-white rounded-xl border border-slate-200 ${theme.hover} hover:shadow-md transition-all text-left group`}
                                             >
                                                 <div className={`w-10 h-10 ${theme.bg} rounded-lg flex items-center justify-center mb-3 ${theme.iconBg} transition-colors`}>

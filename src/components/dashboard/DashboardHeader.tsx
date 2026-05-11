@@ -1,19 +1,23 @@
 import React from 'react';
 import styled from 'styled-components';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faExchangeAlt } from '@fortawesome/free-solid-svg-icons';
 import { AppInstallButton } from './AppInstallButton';
+import { DashboardModeConfig } from './roleDashboardConfig';
+import type { PositionItem } from '../../types/menu';
+import { resolveIcon } from '../../constants/iconMap';
 
 interface DashboardHeaderProps {
     user: any;
     logoUrl: string;
     logoIsVideo: boolean;
-    viewMode: 'executive' | 'field';
-    onToggleView: () => void;
+    modeConfig: DashboardModeConfig;
+    positions: PositionItem[];
+    currentPosition: string;
+    onPositionChange: (positionId: string) => void;
 }
 
-const HeaderContainer = styled.div`
-    background: linear-gradient(to right, #0f172a, #1e293b);
+const HeaderContainer = styled.div<{ $gradient: string }>`
+    background: ${(props) => props.$gradient};
     color: white;
     padding: 32px 32px 96px 32px; /* Extra padding bottom for overlap */
     position: relative;
@@ -117,21 +121,35 @@ const WelcomeText = styled.p`
     font-size: 0.875rem;
 `;
 
-const ToggleButton = styled.button`
+const ModeSwitcher = styled.div`
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px;
     background: rgba(255, 255, 255, 0.1);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 9999px;
-    color: white;
-    font-size: 0.875rem;
-    font-weight: 500;
+    border-radius: 999px;
+`;
+
+const ModeButton = styled.button<{ $active: boolean }>`
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 7px 11px;
+    background: ${(props) => (props.$active ? 'rgba(255, 255, 255, 0.95)' : 'transparent')};
+    border: 0;
+    border-radius: 999px;
+    color: ${(props) => (props.$active ? '#0f172a' : 'rgba(255, 255, 255, 0.8)')};
+    font-size: 0.8rem;
+    font-weight: 800;
+    white-space: nowrap;
     transition: all 0.2s;
 
     &:hover {
-        background: rgba(255, 255, 255, 0.2);
+        background: ${(props) => (props.$active ? '#ffffff' : 'rgba(255, 255, 255, 0.16)')};
+        color: ${(props) => (props.$active ? '#0f172a' : '#ffffff')};
     }
 `;
 
@@ -150,11 +168,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     user,
     logoUrl,
     logoIsVideo,
-    viewMode,
-    onToggleView
+    modeConfig,
+    positions,
+    currentPosition,
+    onPositionChange
 }) => {
     return (
-        <HeaderContainer>
+        <HeaderContainer $gradient={modeConfig.gradient}>
             <ContentHelper>
                 <LogoSection>
                     <LogoWrapper>
@@ -174,7 +194,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                     </LogoWrapper>
                     <TextSection>
                         <Title>청연ENG ERP</Title>
-                        <Subtitle>Smart Construction Management System</Subtitle>
+                        <Subtitle>{modeConfig.label} · {modeConfig.roleGroup}</Subtitle>
                     </TextSection>
                 </LogoSection>
 
@@ -195,10 +215,26 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
 
                     <ActionGroup>
                         <AppInstallButton />
-                        <ToggleButton onClick={onToggleView}>
-                            <FontAwesomeIcon icon={faExchangeAlt} />
-                            {viewMode === 'executive' ? '현장 소장 모드로 전환' : '관리자 모드로 전환'}
-                        </ToggleButton>
+                        <ModeSwitcher aria-label="대시보드 직책 모드">
+                            {positions.length > 0 ? (
+                                positions.map((position) => (
+                                    <ModeButton
+                                        key={position.id}
+                                        type="button"
+                                        $active={currentPosition === position.id}
+                                        onClick={() => onPositionChange(position.id)}
+                                    >
+                                        <FontAwesomeIcon icon={resolveIcon(position.icon, modeConfig.icon)} />
+                                        {position.name}
+                                    </ModeButton>
+                                ))
+                            ) : (
+                                <ModeButton type="button" $active>
+                                    <FontAwesomeIcon icon={modeConfig.icon} />
+                                    {modeConfig.shortLabel}
+                                </ModeButton>
+                            )}
+                        </ModeSwitcher>
                     </ActionGroup>
                 </InfoSection>
             </ContentHelper>

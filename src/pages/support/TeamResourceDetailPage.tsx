@@ -40,6 +40,7 @@ import '../manpower/TeamWorkerDetailPage.css';
 import './TeamResourceDetailPage.css';
 
 type DetailView = 'summary' | 'accommodation' | 'vehicle' | 'card' | 'expense';
+type MobileView = 'list' | 'detail';
 type ResourceStatusFilter = 'all' | 'assigned' | 'billed';
 
 interface TeamResourceRow {
@@ -214,6 +215,7 @@ const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boo
 const TeamResourceDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [selectedTeamId, setSelectedTeamId] = useState('');
+    const [mobileView, setMobileView] = useState<MobileView>('list');
     const [isTeamPickerOpen, setIsTeamPickerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [detailView, setDetailView] = useState<DetailView>('summary');
@@ -278,6 +280,7 @@ const TeamResourceDetailPage: React.FC = () => {
     useEffect(() => {
         if (teamOptions.length === 0) {
             setSelectedTeamId('');
+            setMobileView('list');
             return;
         }
 
@@ -683,6 +686,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const handleTeamSelect = (teamId: string) => {
         setSelectedTeamId(teamId);
         setIsTeamPickerOpen(false);
+        setMobileView('detail');
     };
 
     const handleRefresh = async () => {
@@ -945,7 +949,25 @@ const TeamResourceDetailPage: React.FC = () => {
                 </div>
             </section>
 
-            <main className="tw-workspace">
+            <div className="tw-mobile-switch" role="tablist" aria-label="모바일 보기 전환">
+                <button
+                    type="button"
+                    className={mobileView === 'list' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
+                    onClick={() => setMobileView('list')}
+                >
+                    목록
+                </button>
+                <button
+                    type="button"
+                    className={mobileView === 'detail' ? 'tw-mobile-switch__button tw-mobile-switch__button--active' : 'tw-mobile-switch__button'}
+                    onClick={() => setMobileView('detail')}
+                    disabled={!selectedTeam}
+                >
+                    상세
+                </button>
+            </div>
+
+            <main className={`tw-workspace tw-workspace--${mobileView}`}>
                 <section className="tw-worker-panel">
                     <div className="tw-panel-heading">
                         <div>
@@ -995,7 +1017,10 @@ const TeamResourceDetailPage: React.FC = () => {
                                     aria-selected={detailView === item.id}
                                     className={detailView === item.id ? 'trd-detail-menu__item trd-detail-menu__item--active' : 'trd-detail-menu__item'}
                                     style={{ '--team-color': teamColor } as React.CSSProperties}
-                                    onClick={() => setDetailView(item.id)}
+                                    onClick={() => {
+                                        setDetailView(item.id);
+                                        setMobileView('detail');
+                                    }}
                                     disabled={!selectedTeam}
                                 >
                                     <span className="trd-detail-menu__icon">{item.icon}</span>
@@ -1011,6 +1036,13 @@ const TeamResourceDetailPage: React.FC = () => {
                 </section>
 
                 <section className="tw-detail-panel">
+                    <button
+                        type="button"
+                        className="tw-mobile-back"
+                        onClick={() => setMobileView('list')}
+                    >
+                        목록으로
+                    </button>
                     {!selectedTeam ? (
                         <div className="tw-empty-detail">
                             <Building2 size={44} />
@@ -1054,7 +1086,10 @@ const TeamResourceDetailPage: React.FC = () => {
                             </div>
 
                             {detailView === 'summary' && (
-                                <div className="tw-section-grid">
+                                <div
+                                    className="tw-section-grid tw-section-grid--team-accent trd-summary-grid"
+                                    style={{ '--team-color': teamColor } as React.CSSProperties}
+                                >
                                     <section className="tw-detail-section">
                                         <h3><ReceiptText size={18} />월별 금액 요약</h3>
                                         <div className="trd-summary-list">

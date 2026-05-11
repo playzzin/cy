@@ -3,10 +3,12 @@ import {
     deleteDoc,
     doc,
     getDocs,
+    onSnapshot,
     setDoc,
     updateDoc,
     writeBatch,
 } from 'firebase/firestore';
+import type { DocumentData, FirestoreError, QuerySnapshot, Unsubscribe } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
 export type FieldGoodsTransactionKind = 'purchase' | 'issue';
@@ -48,6 +50,7 @@ export type FieldGoodsTransactionInput = Omit<FieldGoodsTransaction, 'id' | 'cre
 
 const ITEMS_COLLECTION = 'fieldGoodsItems';
 const TRANSACTIONS_COLLECTION = 'fieldGoodsTransactions';
+const FIRESTORE_BATCH_LIMIT = 450;
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -91,16 +94,43 @@ const normalizeTransaction = (raw: Record<string, any>): FieldGoodsTransaction =
 const stripUndefined = <T extends Record<string, unknown>>(value: T): T =>
     Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 
+const mapItemsSnapshot = (snap: QuerySnapshot<DocumentData>): FieldGoodsItem[] =>
+    snap.docs
+        .map((entry) => normalizeItem({ id: entry.id, ...entry.data() }))
+        .sort((left, right) => {
+            const sortCompare = (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
+            if (sortCompare !== 0) return sortCompare;
+            return left.name.localeCompare(right.name, 'ko-KR');
+        });
+
+const mapTransactionsSnapshot = (snap: QuerySnapshot<DocumentData>): FieldGoodsTransaction[] =>
+    snap.docs
+        .map((entry) => normalizeTransaction({ id: entry.id, ...entry.data() }))
+        .sort((left, right) => {
+            const dateCompare = right.date.localeCompare(left.date);
+            if (dateCompare !== 0) return dateCompare;
+            return right.createdAt.localeCompare(left.createdAt);
+        });
+
+const chunkRows = <T>(rows: T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let index = 0; index < rows.length; index += size) {
+        chunks.push(rows.slice(index, index + size));
+    }
+    return chunks;
+};
+
 export const fieldGoodsService = {
     async getItems(): Promise<FieldGoodsItem[]> {
         const snap = await getDocs(collection(db, ITEMS_COLLECTION));
-        return snap.docs
-            .map((entry) => normalizeItem({ id: entry.id, ...entry.data() }))
-            .sort((left, right) => {
-                const sortCompare = (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
-                if (sortCompare !== 0) return sortCompare;
-                return left.name.localeCompare(right.name, 'ko-KR');
-            });
+        return mapItemsSnapshot(snap);
+    },
+
+    subscribeItems(
+        onChange: (items: FieldGoodsItem[]) => void,
+        onError?: (error: FirestoreError) => void
+    ): Unsubscribe {
+        return onSnapshot(collection(db, ITEMS_COLLECTION), (snap) => onChange(mapItemsSnapshot(snap)), onError);
     },
 
     async addItem(input: FieldGoodsItemInput): Promise<FieldGoodsItem> {
@@ -156,19 +186,23 @@ export const fieldGoodsService = {
 
     async getTransactions(): Promise<FieldGoodsTransaction[]> {
         const snap = await getDocs(collection(db, TRANSACTIONS_COLLECTION));
-        return snap.docs
-            .map((entry) => normalizeTransaction({ id: entry.id, ...entry.data() }))
-            .sort((left, right) => {
-                const dateCompare = right.date.localeCompare(left.date);
-                if (dateCompare !== 0) return dateCompare;
-                return right.createdAt.localeCompare(left.createdAt);
-            });
+        return mapTransactionsSnapshot(snap);
+    },
+
+    subscribeTransactions(
+        onChange: (transactions: FieldGoodsTransaction[]) => void,
+        onError?: (error: FirestoreError) => void
+    ): Unsubscribe {
+        return onSnapshot(
+            collection(db, TRANSACTIONS_COLLECTION),
+            (snap) => onChange(mapTransactionsSnapshot(snap)),
+            onError
+        );
     },
 
     async addTransactionsBatch(inputs: FieldGoodsTransactionInput[]): Promise<FieldGoodsTransaction[]> {
         if (!inputs.length) return [];
 
-        const batch = writeBatch(db);
         const timestamp = nowIso();
         const rows = inputs.map((input) => {
             const ref = doc(collection(db, TRANSACTIONS_COLLECTION));
@@ -186,12 +220,16 @@ export const fieldGoodsService = {
                 createdAt: timestamp,
                 updatedAt: timestamp,
             };
-            batch.set(ref, row);
-            return row;
+            return { ref, row };
         });
 
-        await batch.commit();
-        return rows;
+        for (const chunk of chunkRows(rows, FIRESTORE_BATCH_LIMIT)) {
+            const batch = writeBatch(db);
+            chunk.forEach(({ ref, row }) => batch.set(ref, row));
+            await batch.commit();
+        }
+
+        return rows.map(({ row }) => row);
     },
 
     async updateTransaction(

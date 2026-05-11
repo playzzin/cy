@@ -7,6 +7,8 @@
 import { db } from '../config/firebase';
 import { collection, query, where, getDocs, doc, getDoc, limit, orderBy } from 'firebase/firestore';
 
+const AGENT_COLLECTION_SCAN_LIMIT = 1000;
+
 // ===========================
 // Types
 // ===========================
@@ -836,7 +838,7 @@ export class DataSearchAgent {
 
         // 팀 소속 작업자 조회
         const workersRef = collection(db, 'workers');
-        const workersQ = query(workersRef, where('teamId', '==', teamDoc.id));
+        const workersQ = query(workersRef, where('teamId', '==', teamDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const workersSnapshot = await getDocs(workersQ);
 
         const members = workersSnapshot.docs.map(doc => ({
@@ -847,7 +849,7 @@ export class DataSearchAgent {
 
         // 팀이 투입된 현장 조회
         const sitesRef = collection(db, 'sites');
-        const sitesQ = query(sitesRef, where('teamId', '==', teamDoc.id));
+        const sitesQ = query(sitesRef, where('teamId', '==', teamDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const sitesSnapshot = await getDocs(sitesQ);
 
         const sites = sitesSnapshot.docs.map(doc => ({
@@ -906,7 +908,7 @@ export class DataSearchAgent {
 
         // 투입된 팀 조회
         const teamsRef = collection(db, 'teams');
-        const teamsQ = query(teamsRef, where('siteId', '==', siteDoc.id));
+        const teamsQ = query(teamsRef, where('siteId', '==', siteDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const teamsSnapshot = await getDocs(teamsQ);
 
         const teams = teamsSnapshot.docs.map(doc => ({
@@ -955,7 +957,7 @@ export class DataSearchAgent {
 
         // 소속 작업자 조회
         const workersRef = collection(db, 'workers');
-        const workersQ = query(workersRef, where('companyId', '==', companyDoc.id));
+        const workersQ = query(workersRef, where('companyId', '==', companyDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const workersSnapshot = await getDocs(workersQ);
 
         const workers = workersSnapshot.docs.map(doc => ({
@@ -966,7 +968,7 @@ export class DataSearchAgent {
 
         // 회사가 참여한 현장 조회
         const sitesRef = collection(db, 'sites');
-        const sitesQ = query(sitesRef, where('companyId', '==', companyDoc.id));
+        const sitesQ = query(sitesRef, where('companyId', '==', companyDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const sitesSnapshot = await getDocs(sitesQ);
 
         const sites = sitesSnapshot.docs.map(doc => ({
@@ -1170,7 +1172,7 @@ export class DataSearchAgent {
 
         // 해당 현장의 일보에서 팀 추출
         const reportsRef = collection(db, 'dailyReports');
-        const reportsQ = query(reportsRef, where('siteId', '==', siteId));
+        const reportsQ = query(reportsRef, where('siteId', '==', siteId), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const reportsSnap = await getDocs(reportsQ);
 
         const teamIds = new Set<string>();
@@ -1188,7 +1190,7 @@ export class DataSearchAgent {
 
                 // 팀 인원 수 계산
                 const workersRef = collection(db, 'workers');
-                const workersQ = query(workersRef, where('teamId', '==', teamId));
+                const workersQ = query(workersRef, where('teamId', '==', teamId), limit(AGENT_COLLECTION_SCAN_LIMIT));
                 const workersSnap = await getDocs(workersQ);
 
                 teams.push({
@@ -1217,7 +1219,7 @@ export class DataSearchAgent {
 
         // 해당 팀의 일보에서 현장 추출
         const reportsRef = collection(db, 'dailyReports');
-        const reportsQ = query(reportsRef, where('teamId', '==', teamId));
+        const reportsQ = query(reportsRef, where('teamId', '==', teamId), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const reportsSnap = await getDocs(reportsQ);
 
         const siteIds = new Set<string>();
@@ -1258,7 +1260,7 @@ export class DataSearchAgent {
 
         // 소속 작업자 조회
         const workersRef = collection(db, 'workers');
-        const workersQ = query(workersRef, where('companyId', '==', companyId));
+        const workersQ = query(workersRef, where('companyId', '==', companyId), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const workersSnap = await getDocs(workersQ);
 
         const workers = [];
@@ -1286,9 +1288,9 @@ export class DataSearchAgent {
     /**
      * 공수 기준 상위 작업자 조회
      */
-    private async getTopWorkersByManpower(limit: number): Promise<Array<{ name: string; workDays: number; totalManDay: number; teamName?: string }>> {
+    private async getTopWorkersByManpower(resultLimit: number): Promise<Array<{ name: string; workDays: number; totalManDay: number; teamName?: string }>> {
         const reportsRef = collection(db, 'dailyReports');
-        const reportsSnap = await getDocs(reportsRef);
+        const reportsSnap = await getDocs(query(reportsRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         // 작업자별 공수 집계
         const workerStats = new Map<string, { workDays: number; totalManDay: number; workerId: string }>();
@@ -1309,7 +1311,7 @@ export class DataSearchAgent {
         // 정렬
         const sortedWorkers = Array.from(workerStats.entries())
             .sort((a, b) => b[1].totalManDay - a[1].totalManDay)
-            .slice(0, limit);
+            .slice(0, resultLimit);
 
         // 작업자 정보 조회
         const results = [];
@@ -1343,7 +1345,7 @@ export class DataSearchAgent {
      */
     private async getTeamsBySize(): Promise<Array<{ name: string; memberCount: number; leader?: string }>> {
         const workersRef = collection(db, 'workers');
-        const workersSnap = await getDocs(workersRef);
+        const workersSnap = await getDocs(query(workersRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         // 팀별 인원 집계
         const teamCounts = new Map<string, number>();
@@ -1379,7 +1381,8 @@ export class DataSearchAgent {
         const reportsQ = query(
             reportsRef,
             where('date', '>=', startDate),
-            where('date', '<=', endDate)
+            where('date', '<=', endDate),
+            limit(AGENT_COLLECTION_SCAN_LIMIT)
         );
         const reportsSnap = await getDocs(reportsQ);
 
@@ -1431,7 +1434,7 @@ export class DataSearchAgent {
      */
     private async getUnassignedWorkers(): Promise<Array<{ name: string; role: string; phone?: string }>> {
         const workersRef = collection(db, 'workers');
-        const workersQ = query(workersRef, where('teamId', '==', null));
+        const workersQ = query(workersRef, where('teamId', '==', null), limit(AGENT_COLLECTION_SCAN_LIMIT));
         const workersSnap = await getDocs(workersQ);
 
         return workersSnap.docs.map(doc => {
@@ -1449,7 +1452,7 @@ export class DataSearchAgent {
      */
     private async getActiveWorkers(): Promise<Array<{ name: string; role: string; teamName?: string }>> {
         const workersRef = collection(db, 'workers');
-        const workersSnap = await getDocs(workersRef);
+        const workersSnap = await getDocs(query(workersRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         const workers = [];
         for (const workerDoc of workersSnap.docs) {
@@ -1495,7 +1498,7 @@ export class DataSearchAgent {
      */
     private async searchWorkersByPartialName(searchTerm: string): Promise<Array<{ name: string; role: string; teamName?: string; companyName?: string }>> {
         const workersRef = collection(db, 'workers');
-        const workersSnap = await getDocs(workersRef);
+        const workersSnap = await getDocs(query(workersRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         const results = [];
         for (const workerDoc of workersSnap.docs) {
@@ -1536,7 +1539,7 @@ export class DataSearchAgent {
      */
     private async searchCompaniesByPartialName(searchTerm: string): Promise<Array<{ name: string; workerCount: number; siteCount: number }>> {
         const companiesRef = collection(db, 'companies');
-        const companiesSnap = await getDocs(companiesRef);
+        const companiesSnap = await getDocs(query(companiesRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         const results = [];
         for (const companyDoc of companiesSnap.docs) {
@@ -1545,12 +1548,12 @@ export class DataSearchAgent {
             if (companyData.name.includes(searchTerm)) {
                 // 소속 작업자 수
                 const workersRef = collection(db, 'workers');
-                const workersQ = query(workersRef, where('companyId', '==', companyDoc.id));
+                const workersQ = query(workersRef, where('companyId', '==', companyDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
                 const workersSnap = await getDocs(workersQ);
 
                 // 참여 현장 수
                 const sitesRef = collection(db, 'sites');
-                const sitesQ = query(sitesRef, where('companyId', '==', companyDoc.id));
+                const sitesQ = query(sitesRef, where('companyId', '==', companyDoc.id), limit(AGENT_COLLECTION_SCAN_LIMIT));
                 const sitesSnap = await getDocs(sitesQ);
 
                 results.push({
@@ -1569,7 +1572,7 @@ export class DataSearchAgent {
      */
     private async findSimilarWorkers(searchName: string): Promise<Array<{ name: string; similarity: number; teamName?: string; phone?: string }>> {
         const workersRef = collection(db, 'workers');
-        const workersSnap = await getDocs(workersRef);
+        const workersSnap = await getDocs(query(workersRef, limit(AGENT_COLLECTION_SCAN_LIMIT)));
 
         const results = [];
         for (const workerDoc of workersSnap.docs) {

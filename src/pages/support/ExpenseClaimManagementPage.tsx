@@ -643,7 +643,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
 
                 <div className="sm:col-span-2">
                   <span className={labelClass}>{isOtherClaim ? '기타청구 구분' : '경비 구분'}</span>
-                  <div className={isOtherClaim ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2 sm:grid-cols-4'}>
+                  <div className={isOtherClaim ? 'grid grid-cols-2 gap-2 sm:grid-cols-4' : 'grid grid-cols-2 gap-2 sm:grid-cols-4'}>
                     {categoryOptions.map((option) => {
                       const active = form.category === option.value;
 

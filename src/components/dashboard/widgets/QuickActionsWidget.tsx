@@ -2,17 +2,9 @@ import React from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import {
-    faPen,
-    faClipboardList,
-    faUsers,
-    faHardHat,
-    faBuilding,
-    faFileInvoiceDollar,
-    faHandHoldingDollar,
-    faRightLeft,
-    faBolt
-} from '@fortawesome/free-solid-svg-icons';
+import { faBolt } from '@fortawesome/free-solid-svg-icons';
+import { DASHBOARD_MODES, DashboardModeConfig } from '../roleDashboardConfig';
+import { useQuickMenuActions } from '../useQuickMenuActions';
 
 const WidgetContainer = styled.div`
     background: #ffffff;
@@ -104,94 +96,69 @@ const Label = styled.h4`
     transition: color 0.2s ease;
 `;
 
-export const QuickActionsWidget: React.FC = () => {
-    const navigate = useNavigate();
+interface QuickActionsWidgetProps {
+    modeConfig?: DashboardModeConfig;
+}
 
-    const actions = [
-        {
-            label: '일보 작성',
-            icon: faPen,
-            path: '/reports/daily?tab=input',
-            color: '#3b82f6', // blue-500
-            bg: '#eff6ff'     // blue-50
-        },
-        {
-            label: '오늘 현황',
-            icon: faClipboardList,
-            path: '/reports/daily?tab=list-v2',
-            color: '#f97316', // orange-500
-            bg: '#fff7ed'     // orange-50
-        },
-        {
-            label: '작업자 관리',
-            icon: faUsers,
-            path: '/database/manpower-db',
-            color: '#06b6d4', // cyan-500
-            bg: '#ecfeff'     // cyan-50
-        },
-        {
-            label: '팀 관리',
-            icon: faHardHat,
-            path: '/database/team-db',
-            color: '#8b5cf6', // violet-500
-            bg: '#f5f3ff'     // violet-50
-        },
-        {
-            label: '현장 현황',
-            icon: faBuilding,
-            path: '/dashboard/site-status',
-            color: '#10b981', // emerald-500
-            bg: '#ecfdf5'     // emerald-50
-        },
-        {
-            label: '급여 조회',
-            icon: faFileInvoiceDollar,
-            path: '/payroll/wage-payment',
-            color: '#14b8a6', // teal-500
-            bg: '#f0fdfa'     // teal-50
-        },
-        {
-            label: '가불 신청',
-            icon: faHandHoldingDollar,
-            path: '/payroll/advance-payment',
-            color: '#eab308', // yellow-500
-            bg: '#fefce8'     // yellow-50
-        },
-        {
-            label: '지원 관리',
-            icon: faRightLeft,
-            path: '/payroll/support-claim',
-            color: '#ec4899', // pink-500
-            bg: '#fdf2f8'     // pink-50
+const actionThemeMap: Record<string, { color: string; bg: string }> = {
+    brand: { color: '#3b82f6', bg: '#eff6ff' },
+    blue: { color: '#2563eb', bg: '#eff6ff' },
+    green: { color: '#16a34a', bg: '#f0fdf4' },
+    slate: { color: '#475569', bg: '#f8fafc' },
+    indigo: { color: '#4f46e5', bg: '#eef2ff' },
+    emerald: { color: '#059669', bg: '#ecfdf5' },
+    sky: { color: '#0284c7', bg: '#f0f9ff' },
+    rose: { color: '#e11d48', bg: '#fff1f2' },
+    purple: { color: '#9333ea', bg: '#faf5ff' },
+    violet: { color: '#8b5cf6', bg: '#f5f3ff' },
+    orange: { color: '#f97316', bg: '#fff7ed' },
+    amber: { color: '#d97706', bg: '#fffbeb' },
+    cyan: { color: '#06b6d4', bg: '#ecfeff' },
+    teal: { color: '#0d9488', bg: '#f0fdfa' },
+    gray: { color: '#4b5563', bg: '#f9fafb' },
+};
+
+export const QuickActionsWidget: React.FC<QuickActionsWidgetProps> = ({ modeConfig = DASHBOARD_MODES[2] }) => {
+    const navigate = useNavigate();
+    const actions = useQuickMenuActions(modeConfig);
+
+    const handleActionClick = (path: string, openInNewTab?: boolean) => {
+        if (openInNewTab) {
+            window.open(path, '_blank', 'noopener,noreferrer');
+            return;
         }
-    ];
+        navigate(path);
+    };
 
     return (
         <WidgetContainer>
             <Header>
                 <Title>
                     <FontAwesomeIcon icon={faBolt} />
-                    빠른 실행
+                    {modeConfig.shortLabel} 빠른 실행
                 </Title>
             </Header>
             <Grid>
-                {actions.map((action, index) => (
-                    <ActionButton
-                        key={index}
-                        onClick={() => navigate(action.path)}
-                        $color={action.color}
-                        $bg={action.bg}
-                    >
-                        <IconWrapper
-                            className="icon-wrapper"
-                            $color={action.color}
-                            $bg={action.bg}
+                {actions.map((action, index) => {
+                    const theme = actionThemeMap[action.color] || actionThemeMap.slate;
+                    return (
+                        <ActionButton
+                            key={`${action.path}-${index}`}
+                            onClick={() => handleActionClick(action.path, action.openInNewTab)}
+                            $color={theme.color}
+                            $bg={theme.bg}
                         >
-                            <FontAwesomeIcon icon={action.icon} />
-                        </IconWrapper>
-                        <Label>{action.label}</Label>
-                    </ActionButton>
-                ))}
+                            <IconWrapper
+                                className="icon-wrapper"
+                                $color={theme.color}
+                                $bg={theme.bg}
+                            >
+                                <FontAwesomeIcon icon={action.icon} />
+                            </IconWrapper>
+                            <Label>{action.label}</Label>
+                        </ActionButton>
+                    );
+                })}
             </Grid>
         </WidgetContainer>
     );

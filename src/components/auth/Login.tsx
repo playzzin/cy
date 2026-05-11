@@ -182,40 +182,46 @@ const Login: React.FC = () => {
       {introPhase !== 'login' && (
         <div
           className={[
-            'absolute inset-0 z-40 flex items-center justify-center px-4 transition-opacity duration-700 ease-out sm:px-6',
+            'absolute inset-0 z-40 flex items-center justify-center overflow-hidden px-5 transition-opacity duration-700 ease-out',
             introPhase === 'splash' ? 'opacity-100' : 'pointer-events-none opacity-0',
           ].join(' ')}
         >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.12),_rgba(2,6,23,0.94)_58%,_rgba(2,6,23,1)_100%)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,_rgba(255,255,255,0.04)_0%,_rgba(148,163,184,0.02)_38%,_rgba(15,23,42,0.22)_100%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(145deg,_#05111f_0%,_#083344_48%,_#0f172a_100%)]" />
+          <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(125,211,252,0.14)_1px,transparent_1px),linear-gradient(90deg,rgba(125,211,252,0.14)_1px,transparent_1px)] [background-size:64px_64px]" />
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,_rgba(34,211,238,0.16)_0%,_transparent_34%,_rgba(251,191,36,0.12)_76%,_transparent_100%)]" />
 
-          <button
-            type="button"
-            onClick={handleIntroStart}
-            disabled={introLoading}
-            className="relative z-10 flex w-full max-w-xl flex-col items-center gap-5 rounded-[28px] border border-slate-700/70 bg-slate-950/45 px-6 py-9 shadow-[0_30px_90px_rgba(0,0,0,0.45)] backdrop-blur-xl transition-transform duration-500 hover:scale-[1.02] disabled:cursor-wait disabled:opacity-80 sm:gap-6 sm:rounded-[36px] sm:px-10 sm:py-12"
-            style={{ maxWidth: 'min(36rem, calc(100vw - 2rem))' }}
-          >
-            <div className="relative flex h-32 w-32 items-center justify-center rounded-full border border-white/10 bg-[radial-gradient(circle_at_30%_25%,_rgba(255,255,255,0.92),_rgba(203,213,225,0.8)_18%,_rgba(71,85,105,0.92)_42%,_rgba(15,23,42,0.98)_76%)] shadow-[inset_0_2px_12px_rgba(255,255,255,0.3),0_20px_45px_rgba(56,189,248,0.18)] sm:h-44 sm:w-44">
-              <div className="absolute inset-2 rounded-full border border-white/10" />
-              <div className="absolute inset-5 rounded-full bg-[conic-gradient(from_210deg,_rgba(255,255,255,0.8),_rgba(100,116,139,0.08),_rgba(255,255,255,0.75),_rgba(15,23,42,0.5),_rgba(255,255,255,0.8))] opacity-90" />
-              <div className="relative bg-[linear-gradient(180deg,_#ffffff_0%,_#d5dee9_20%,_#6b7280_48%,_#f8fafc_72%,_#4b5563_100%)] bg-clip-text text-[3.4rem] font-black tracking-[-0.14em] text-transparent [text-shadow:0_2px_18px_rgba(255,255,255,0.25)] sm:text-[4.7rem]">
-                CY
-              </div>
-            </div>
+          <div className="relative z-10 flex w-full max-w-md flex-col items-center text-center">
+            <button
+              type="button"
+              onClick={handleIntroStart}
+              disabled={introLoading}
+              aria-label="인트로 시작"
+              className="group grid h-32 w-32 place-items-center rounded-[2rem] border border-cyan-100/25 bg-white/10 shadow-[0_28px_60px_rgba(0,0,0,0.34),0_0_0_8px_rgba(14,116,144,0.1)] backdrop-blur transition-transform duration-300 hover:scale-[1.03] disabled:cursor-wait disabled:opacity-80 sm:h-36 sm:w-36"
+            >
+              <img
+                src="/icons/icon-192.png"
+                alt=""
+                className="h-[7.1rem] w-[7.1rem] rounded-[1.65rem] shadow-[0_18px_36px_rgba(0,0,0,0.26)] sm:h-32 sm:w-32"
+              />
+            </button>
 
-            <div className="max-w-md text-center">
-              <p className="text-[11px] font-semibold tracking-[0.28em] text-slate-300/70 sm:text-xs sm:tracking-[0.38em]">CHEONGYEON ENG INTRO</p>
-              <h1 className="mt-3 break-words text-2xl font-black tracking-[0.12em] text-slate-100 sm:text-3xl sm:tracking-[0.18em]">CLICK THE CY LOGO</h1>
-              <p className="mt-4 text-xs leading-relaxed text-slate-400 sm:text-sm">
-                메탈릭 CY 로고를 클릭하면 스토리지의 INTRO_1.MP4가 재생된 뒤 로그인 화면이 나타납니다.
-              </p>
-            </div>
+            <div className="mt-7 text-xs font-semibold text-cyan-100/80">CHUNG YEON ENG</div>
+            <h1 className="mt-3 text-3xl font-black leading-tight text-slate-50 sm:text-4xl">
+              청연ENG ERP
+            </h1>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-slate-300/80">
+              현장 운영, 정산, 인력 데이터를 하나의 흐름으로 연결합니다.
+            </p>
 
-            <div className="inline-flex items-center rounded-full border border-cyan-300/25 bg-cyan-400/10 px-5 py-2 text-xs font-semibold tracking-[0.24em] text-cyan-100/85">
-              {introLoading ? 'INTRO LOADING' : 'START INTRO'}
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={handleIntroStart}
+              disabled={introLoading}
+              className="mt-8 rounded-lg border border-cyan-200/30 bg-cyan-300 px-6 py-3 text-sm font-bold text-slate-950 shadow-[0_16px_40px_rgba(34,211,238,0.18)] transition-colors hover:bg-cyan-200 disabled:cursor-wait disabled:opacity-80"
+            >
+              {introLoading ? '인트로 준비 중' : '인트로 시작'}
+            </button>
+          </div>
         </div>
       )}
 

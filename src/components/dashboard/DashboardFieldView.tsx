@@ -7,9 +7,11 @@ import { MyTeamStatusWidget } from './widgets/MyTeamStatusWidget';
 import { WeeklyTrendWidget } from './widgets/WeeklyTrendWidget';
 import { QuickActionsWidget } from './widgets/QuickActionsWidget';
 import { RecentReportsWidget } from './widgets/RecentReportsWidget';
-import { startOfMonth, endOfMonth, format, subDays } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
+import { RoleFocusPanel } from './RoleFocusPanel';
+import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
 
 const Container = styled.div`
     display: flex;
@@ -33,7 +35,11 @@ const Col = styled.div<{ $span: number }>`
     grid-column: span ${props => props.$span};
 `;
 
-export const DashboardFieldView: React.FC = () => {
+interface DashboardFieldViewProps {
+    modeConfig?: DashboardModeConfig;
+}
+
+export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConfig = DASHBOARD_MODES[2] }) => {
     // Determine date range for data fetching
     // We want data for at least the last 7 days for the trend, and today for the summary.
     // Fetching from start of month to end of month usually covers "Today", unless it's the 1st of month.
@@ -99,6 +105,8 @@ export const DashboardFieldView: React.FC = () => {
 
     return (
         <Container>
+            <RoleFocusPanel modeConfig={modeConfig} />
+
             {/* Top Row: Today Summary - High Priority */}
             <Grid>
                 <Col $span={12}>
@@ -110,24 +118,26 @@ export const DashboardFieldView: React.FC = () => {
             </Grid>
 
             {/* Middle Row: Analytics & Team Status */}
-            <Grid>
-                <Col $span={6}>
-                    <MyTeamStatusWidget
-                        teamPerformance={dashboardData?.teamPerformance || []}
-                        dailyTrend={dashboardData?.dailyTrend || []}
-                    />
-                </Col>
-                <Col $span={6}>
-                    <WeeklyTrendWidget
-                        dailyTrend={dashboardData?.dailyTrend || []}
-                    />
-                </Col>
-            </Grid>
+            {modeConfig.id !== 'worker' && (
+                <Grid>
+                    <Col $span={6}>
+                        <MyTeamStatusWidget
+                            teamPerformance={dashboardData?.teamPerformance || []}
+                            dailyTrend={dashboardData?.dailyTrend || []}
+                        />
+                    </Col>
+                    <Col $span={6}>
+                        <WeeklyTrendWidget
+                            dailyTrend={dashboardData?.dailyTrend || []}
+                        />
+                    </Col>
+                </Grid>
+            )}
 
             {/* Quick Actions */}
             <Grid>
                 <Col $span={12}>
-                    <QuickActionsWidget />
+                    <QuickActionsWidget modeConfig={modeConfig} />
                 </Col>
             </Grid>
 

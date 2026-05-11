@@ -1,0 +1,23 @@
+import React from 'react';
+
+type AppIntroScreenProps = {
+  message?: string;
+};
+
+const AppIntroScreen: React.FC<AppIntroScreenProps> = ({
+  message = '현장 데이터 준비 중'
+}) => (
+  <div className="app-intro" role="status" aria-live="polite" aria-label="청연ENG ERP 로딩 중">
+    <div className="app-intro__content">
+      <div className="app-intro__mark-shell" aria-hidden="true">
+        <img className="app-intro__mark" src="/icons/icon-192.png" alt="" />
+      </div>
+      <div className="app-intro__eyebrow">CHUNG YEON ENG</div>
+      <h1 className="app-intro__title">청연ENG ERP</h1>
+      <div className="app-intro__message">{message}</div>
+      <div className="app-intro__progress" aria-hidden="true" />
+    </div>
+  </div>
+);
+
+export default AppIntroScreen;

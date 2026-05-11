@@ -782,11 +782,16 @@ a {
 }
 
 .logo-text {
+    display: inline-block;
     font-size: 18px;
     font-weight: bold;
     margin-left: 10px;
+    min-width: 0;
     opacity: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
     transition: opacity 0.2s;
+    white-space: nowrap;
 }
 
 #mobile-close-btn {

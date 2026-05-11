@@ -1,21 +1,21 @@
 import * as functions from 'firebase-functions';
 import { barobillKakaoService } from '../services/barobillKakaoService';
+import { protectedRegion, requireCallableAuth } from '../auth';
 
 /**
  * [Callable] Send Kakao AlimTalk (Notification)
  */
-export const sendKakaoAlimtalk = functions
-    .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
-        // Auth Check (Optional but recommended)
-        // if (!context.auth) {
-        //     throw new functions.https.HttpsError('unauthenticated', 'The function must be called while authenticated.');
-        // }
+export const sendKakaoAlimtalk = protectedRegion.https.onCall(async (data, context) => {
+        requireCallableAuth(context);
 
         const { to, templateCode, content, refNum } = data;
 
         if (!to || !templateCode || !content) {
             throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters: to, templateCode, content');
+        }
+
+        if (String(content).length > 1000) {
+            throw new functions.https.HttpsError('invalid-argument', 'Message content is too long.');
         }
 
         try {
@@ -30,13 +30,17 @@ export const sendKakaoAlimtalk = functions
 /**
  * [Callable] Send Kakao FriendTalk (Marketing/General)
  */
-export const sendFriendTalk = functions
-    .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+export const sendFriendTalk = protectedRegion.https.onCall(async (data, context) => {
+        requireCallableAuth(context);
+
         const { to, content, refNum } = data;
 
         if (!to || !content) {
             throw new functions.https.HttpsError('invalid-argument', 'Missing required parameters: to, content');
+        }
+
+        if (String(content).length > 1000) {
+            throw new functions.https.HttpsError('invalid-argument', 'Message content is too long.');
         }
 
         try {
@@ -51,9 +55,9 @@ export const sendFriendTalk = functions
 /**
  * [Callable] Get Kakao Management URL (Channel/Template)
  */
-export const getKakaoManagementUrl = functions
-    .region('asia-northeast3')
-    .https.onCall(async (data, context) => {
+export const getKakaoManagementUrl = protectedRegion.https.onCall(async (data, context) => {
+        requireCallableAuth(context);
+
         const { type } = data; // 'CHANNEL' or 'TEMPLATE'
 
         try {

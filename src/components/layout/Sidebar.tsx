@@ -47,6 +47,7 @@ import { userService } from '../../services/userService';
 import { rolePermissionService } from '../../services/rolePermissionService';
 import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
+import { isRunningAsStandaloneApp } from '../../pwaInstallPrompt';
 
 import { resolveIcon } from '../../constants/iconMap';
 
@@ -362,6 +363,8 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
     }, [logoUrl]);
 
+    const shouldShowLogoText = !isSidebarCollapsed && !isRunningAsStandaloneApp();
+
     return (
         <>
             <nav id="sidebar" onMouseLeave={handleMouseLeaveNav} style={sidebarStyle} className={isCheongyeon ? 'cheongyeon-sidebar' : ''}>
@@ -390,6 +393,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 id="sidebar-logo-icon"
                                 style={{ color: '#1abc9c', fontSize: '24px', marginRight: '0' }}
                             />
+                        )}
+                        {shouldShowLogoText && (
+                            <span className="logo-text" title={safeCurrentSiteData.name}>
+                                {safeCurrentSiteData.name}
+                            </span>
                         )}
                     </div>
                     {/* PC 전용: 접기 버튼 (펼쳐진 상태일 때만 표시) */}

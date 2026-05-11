@@ -2,7 +2,12 @@ import {
     collection,
     doc,
     getDocs,
+    limit as firestoreLimit,
+    orderBy,
+    query,
+    type QueryConstraint,
     updateDoc,
+    where,
     writeBatch
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -39,6 +44,10 @@ type WorkbookLedgerEntryInput = Omit<WorkbookLedgerEntry, 'createdAt' | 'updated
 type WorkbookLedgerEntryUpdate = Partial<Omit<WorkbookLedgerEntry, 'id' | 'createdAt' | 'createdBy' | 'deletedAt' | 'deletedBy'>>;
 type GetEntriesOptions = {
     force?: boolean;
+    startDate?: string;
+    endDate?: string;
+    limitCount?: number;
+    orderDirection?: 'asc' | 'desc';
 };
 
 const DEFAULT_COLLECTION_NAME = 'sales_purchase_workbook_entries';
@@ -93,6 +102,26 @@ const sortEntries = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
 
 const cloneEntry = (entry: WorkbookLedgerEntry): WorkbookLedgerEntry => ({ ...entry });
 const cloneEntries = (entries: WorkbookLedgerEntry[]) => entries.map(cloneEntry);
+
+const normalizeLimit = (value: unknown): number | null => {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.trunc(parsed);
+};
+
+const buildCacheKey = (options: GetEntriesOptions) => {
+    const startDate = normalizeText(options.startDate);
+    const endDate = normalizeText(options.endDate);
+    const limitCount = normalizeLimit(options.limitCount);
+    const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
+
+    return [
+        startDate ? `start:${startDate}` : 'start:',
+        endDate ? `end:${endDate}` : 'end:',
+        limitCount ? `limit:${limitCount}` : 'limit:',
+        `order:${orderDirection}`
+    ].join('|');
+};
 
 const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
     transactionType: entry.transactionType,
@@ -153,19 +182,56 @@ export interface WorkbookLedgerService {
 
 export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | string = 'cheongyeon'): WorkbookLedgerService => {
     const collectionName = resolveCollectionName(tenantKey);
-    let cachedEntries: WorkbookLedgerEntry[] | null = null;
+    const cachedEntriesByQuery = new Map<string, WorkbookLedgerEntry[]>();
 
-    const setCachedEntries = (entries: WorkbookLedgerEntry[]) => {
-        cachedEntries = cloneEntries(entries).sort(sortEntries);
+    const setCachedEntries = (cacheKey: string, entries: WorkbookLedgerEntry[]) => {
+        cachedEntriesByQuery.set(cacheKey, cloneEntries(entries).sort(sortEntries));
+    };
+
+    const clearCachedEntries = () => {
+        cachedEntriesByQuery.clear();
+    };
+
+    const getEntriesCollectionQuery = (options: GetEntriesOptions = {}) => {
+        const constraints: QueryConstraint[] = [];
+        const startDate = normalizeText(options.startDate);
+        const endDate = normalizeText(options.endDate);
+        const limitCount = normalizeLimit(options.limitCount);
+        const orderDirection = options.orderDirection === 'desc' ? 'desc' : 'asc';
+
+        if (startDate) {
+            constraints.push(where('date', '>=', startDate));
+        }
+
+        if (endDate) {
+            constraints.push(where('date', '<=', endDate));
+        }
+
+        if (startDate || endDate || limitCount) {
+            constraints.push(orderBy('date', orderDirection));
+        }
+
+        if (limitCount) {
+            constraints.push(firestoreLimit(limitCount));
+        }
+
+        const entriesCollection = collection(db, collectionName);
+        return constraints.length > 0 ? query(entriesCollection, ...constraints) : entriesCollection;
     };
 
     const service: WorkbookLedgerService = {
         async getEntries(options: GetEntriesOptions = {}): Promise<WorkbookLedgerEntry[]> {
+            const cacheKey = buildCacheKey(options);
+            const cachedEntries = cachedEntriesByQuery.get(cacheKey);
             if (!options.force && cachedEntries) {
                 return cloneEntries(cachedEntries);
             }
 
-            const snapshot = await getDocs(collection(db, collectionName));
+            if (options.force) {
+                clearCachedEntries();
+            }
+
+            const snapshot = await getDocs(getEntriesCollectionQuery(options));
             const entries = snapshot.docs.map((entryDoc) => {
                 const data = entryDoc.data() as Record<string, unknown>;
                 const deletedAt = normalizeText(data.deletedAt);
@@ -198,7 +264,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 } as WorkbookLedgerEntry;
             }).filter((entry): entry is WorkbookLedgerEntry => entry !== null);
 
-            setCachedEntries(entries);
+            setCachedEntries(cacheKey, entries);
             return cloneEntries(entries);
         },
 
@@ -227,9 +293,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 await batch.commit();
             }
 
-            if (cachedEntries) {
-                setCachedEntries([...cachedEntries, ...createdEntries]);
-            }
+            clearCachedEntries();
 
             return cloneEntries(createdEntries);
         },
@@ -239,11 +303,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
             const payload = sanitizeUpdate(updates, now);
             await updateDoc(doc(collection(db, collectionName), id), payload);
 
-            if (cachedEntries) {
-                setCachedEntries(
-                    cachedEntries.map((entry) => (entry.id === id ? { ...entry, ...(payload as Partial<WorkbookLedgerEntry>) } : entry))
-                );
-            }
+            clearCachedEntries();
         },
 
         async softDeleteEntry(id: string, deletedBy?: string): Promise<void> {
@@ -254,9 +314,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 updatedAt: now
             });
 
-            if (cachedEntries) {
-                setCachedEntries(cachedEntries.filter((entry) => entry.id !== id));
-            }
+            clearCachedEntries();
         },
 
         async softDeleteEntries(ids: string[], deletedBy?: string): Promise<number> {
@@ -284,10 +342,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 await batch.commit();
             }
 
-            if (cachedEntries) {
-                const deletedIdSet = new Set(normalizedIds);
-                setCachedEntries(cachedEntries.filter((entry) => !entry.id || !deletedIdSet.has(entry.id)));
-            }
+            clearCachedEntries();
 
             return normalizedIds.length;
         },
@@ -302,7 +357,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                 .map((entryDoc) => entryDoc.id);
 
             if (activeEntryIds.length === 0) {
-                setCachedEntries([]);
+                clearCachedEntries();
                 return 0;
             }
 
@@ -310,7 +365,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         },
 
         invalidateCache(): void {
-            cachedEntries = null;
+            clearCachedEntries();
         }
     };
 

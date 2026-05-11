@@ -7,6 +7,7 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import { issueTaxInvoice, getTaxInvoiceStatus, TaxInvoiceData } from './services/taxInvoiceService';
+import { parseBoundedLimit, protectedRegion, requireHttpAuth } from './auth';
 
 // Firebase Admin 초기화
 admin.initializeApp();
@@ -15,11 +16,11 @@ admin.initializeApp();
  * 세금계산서 즉시 발행 API
  * POST /taxinvoice/issue
  */
-export const issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+export const issueTaxInvoiceApi = protectedRegion.https.onRequest(async (req, res) => {
     // CORS 헤더 설정
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
@@ -31,6 +32,9 @@ export const issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRe
         res.status(405).json({ error: 'Method not allowed' });
         return;
     }
+
+    const auth = await requireHttpAuth(req, res);
+    if (!auth) return;
 
     try {
         const data: TaxInvoiceData = req.body;
@@ -45,6 +49,14 @@ export const issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRe
         }
 
         // 바로빌 API 호출
+        if (!Array.isArray(data.items) || data.items.length === 0 || data.items.length > 99) {
+            res.status(400).json({
+                error: 'Invalid invoice items',
+                message: 'Invoice items must contain between 1 and 99 rows.'
+            });
+            return;
+        }
+
         const result = await issueTaxInvoice(data);
 
         if (result.code === 0) {
@@ -81,8 +93,9 @@ export const issueTaxInvoiceApi = functions.region('asia-northeast3').https.onRe
  * 세금계산서 상태 조회 API
  * GET /taxinvoice/status/:invoiceNum
  */
-export const getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+export const getTaxInvoiceStatusApi = protectedRegion.https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
@@ -93,6 +106,9 @@ export const getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.
         res.status(405).json({ error: 'Method not allowed' });
         return;
     }
+
+    const auth = await requireHttpAuth(req, res);
+    if (!auth) return;
 
     try {
         const invoiceNum = req.query.invoiceNum as string;
@@ -117,8 +133,9 @@ export const getTaxInvoiceStatusApi = functions.region('asia-northeast3').https.
  * 세금계산서 발행 이력 조회 API
  * GET /taxinvoice/list
  */
-export const getTaxInvoiceListApi = functions.region('asia-northeast3').https.onRequest(async (req, res) => {
+export const getTaxInvoiceListApi = protectedRegion.https.onRequest(async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.status(204).send('');
@@ -130,8 +147,11 @@ export const getTaxInvoiceListApi = functions.region('asia-northeast3').https.on
         return;
     }
 
+    const auth = await requireHttpAuth(req, res);
+    if (!auth) return;
+
     try {
-        const limit = parseInt(req.query.limit as string) || 50;
+        const limit = parseBoundedLimit(req.query.limit, 50, 100);
         const snapshot = await admin.firestore()
             .collection('taxInvoices')
             .orderBy('issuedAt', 'desc')

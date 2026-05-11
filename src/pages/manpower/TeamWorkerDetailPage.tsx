@@ -261,7 +261,7 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
     const [detailView, setDetailView] = useState<DetailView>('profile');
     const [mobileView, setMobileView] = useState<MobileView>('list');
-    const [showSensitive, setShowSensitive] = useState(false);
+    const [showSensitive, setShowSensitive] = useState(true);
     const [loadingMaster, setLoadingMaster] = useState(true);
     const [loadingOutput, setLoadingOutput] = useState(false);
     const [masterError, setMasterError] = useState('');
@@ -1070,7 +1070,10 @@ const TeamWorkerDetailPage: React.FC = () => {
                             </div>
 
                             {detailView === 'profile' && (
-                            <div className="tw-section-grid">
+                            <div
+                                className="tw-section-grid tw-section-grid--team-accent"
+                                style={{ '--team-color': selectedWorkerTeamColor } as React.CSSProperties}
+                            >
                                 <section className="tw-detail-section">
                                     <h3><UserRound size={18} />작업자 정보</h3>
                                     <div className="tw-detail-grid">

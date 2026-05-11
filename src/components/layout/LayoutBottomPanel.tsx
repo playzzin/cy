@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faXmark, faCalculator, faNoteSticky, faUserGear, faCamera } from '@fortawesome/free-solid-svg-icons';
+import { faXmark, faCalculator, faUserGear, faCamera } from '@fortawesome/free-solid-svg-icons';
 import Calculator from '../tools/Calculator';
-import QuickMemoEditor from '../tools/QuickMemo';
 import QuickCameraCapture from '../tools/QuickCameraCapture';
 
 interface LayoutBottomPanelProps {
@@ -12,19 +11,20 @@ interface LayoutBottomPanelProps {
     changeSite?: (site: string) => void;
 }
 
+type QuickTab = 'calculator' | 'camera';
+
 const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
     isOpen,
     togglePanel
 }) => {
     const LABEL_QUICK = '\ube60\ub978 \uc2e4\ud589';
-    const LABEL_MEMO = '\uba54\ubaa8\uc7a5';
     const LABEL_CALC = '\uacc4\uc0b0\uae30';
     const LABEL_CAMERA = '\uce74\uba54\ub77c';
-    const [activeTab, setActiveTab] = useState<'memo' | 'calculator' | 'camera'>('memo');
+    const [activeTab, setActiveTab] = useState<QuickTab>('calculator');
 
     useEffect(() => {
         if (!isOpen) {
-            setActiveTab('memo');
+            setActiveTab('calculator');
         }
     }, [isOpen]);
 
@@ -56,17 +56,6 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
                     <div className="flex bg-black/30 rounded-lg p-1 gap-1 w-full sm:w-auto">
                         <button
                             type="button"
-                            onClick={() => setActiveTab('memo')}
-                            className={`flex-1 sm:flex-none justify-center items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'memo'
-                                ? 'bg-yellow-500 text-black shadow-lg shadow-yellow-500/30'
-                                : 'text-gray-400 hover:text-white hover:bg-white/10'
-                                }`}
-                        >
-                            <FontAwesomeIcon icon={faNoteSticky} />
-                            {LABEL_MEMO}
-                        </button>
-                        <button
-                            type="button"
                             onClick={() => setActiveTab('calculator')}
                             className={`flex-1 sm:flex-none justify-center items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-all ${activeTab === 'calculator'
                                 ? 'bg-green-600 text-white shadow-lg shadow-green-500/30'
@@ -92,7 +81,6 @@ const LayoutBottomPanel: React.FC<LayoutBottomPanelProps> = ({
             </div>
 
             <div className="panel-content p-4 overflow-y-auto custom-scrollbar bg-[#1e1e1e]">
-                {activeTab === 'memo' && <QuickMemoEditor />}
                 {activeTab === 'calculator' && <Calculator />}
                 {activeTab === 'camera' && <QuickCameraCapture />}
             </div>

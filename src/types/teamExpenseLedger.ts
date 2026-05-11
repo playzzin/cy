@@ -7,6 +7,7 @@ export type TeamExpenseClaimCategory =
   | 'tool'
   | 'deposit'
   | 'marking'
+  | 'fieldGoods'
   | 'etc';
 export type TeamExpenseClaimStatus = 'draft' | 'charged' | 'settled';
 export type TeamExpenseClaimType = 'teamCharge' | 'otherExpense';

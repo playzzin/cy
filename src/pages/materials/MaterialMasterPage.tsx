@@ -213,6 +213,15 @@ const MaterialMasterPage: React.FC = () => {
         ) : (
             <div className="flex-1 overflow-auto">
                 <table className="w-full min-w-[760px] text-sm">
+                    <colgroup>
+                        <col className="w-32" />
+                        <col className="w-40" />
+                        <col className="w-32" />
+                        <col className="w-20" />
+                        <col className="w-28" />
+                        <col />
+                        <col className="w-24" />
+                    </colgroup>
                     <thead className="sticky top-0 z-10 border-b border-slate-300 bg-slate-100">
                         <tr>
                             <th className="p-3 text-left font-bold text-slate-700">분류</th>
@@ -278,7 +287,7 @@ const MaterialMasterPage: React.FC = () => {
     );
 
     return (
-        <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[1800px] w-full mx-auto bg-slate-50 overflow-hidden">
+        <div className="flex-1 min-h-0 flex w-full max-w-none flex-col bg-slate-50 p-6 overflow-hidden">
             <div className="flex justify-between items-center mb-6 flex-shrink-0">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -426,7 +435,7 @@ const MaterialMasterPage: React.FC = () => {
                             {renderMaterialGroup('동바리', groupedMaterials.dongbari, 'bg-indigo-500', '동바리 자재가 없습니다.')}
                             {renderMaterialGroup('비계', groupedMaterials.scaffolding, 'bg-emerald-500', '비계 자재가 없습니다.')}
                             {groupedMaterials.other.length > 0 && (
-                                <div className="xl:col-span-2">
+                                <div className="min-h-0 xl:col-span-2">
                                     {renderMaterialGroup('기타', groupedMaterials.other, 'bg-slate-400', '기타 자재가 없습니다.')}
                                 </div>
                             )}

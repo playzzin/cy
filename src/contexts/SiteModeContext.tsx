@@ -1,12 +1,16 @@
 import React, { createContext, useContext } from 'react';
-import { SiteData, SiteDataType } from '../types/menu';
+import { PositionItem, SiteData, SiteDataType } from '../types/menu';
 
 export interface SiteModeContextType {
     siteData: SiteDataType | null;
     currentSite: string;
     effectiveSite: string;
     currentSiteData: SiteData | null;
+    currentPosition: string;
+    currentPositionData: PositionItem | null;
+    positions: PositionItem[];
     changeSite: (siteKey: string) => void;
+    changePosition: (positionId: string) => void;
     isDarkMode: boolean;
     toggleDarkMode: () => void;
 }
@@ -19,13 +23,29 @@ export function SiteModeProvider({
     currentSite,
     effectiveSite,
     currentSiteData,
+    currentPosition,
+    currentPositionData,
+    positions,
     changeSite,
+    changePosition,
     isDarkMode,
     toggleDarkMode
 }: SiteModeContextType & { children: React.ReactNode }) {
     return (
         <SiteModeContext.Provider
-            value={{ siteData, currentSite, effectiveSite, currentSiteData, changeSite, isDarkMode, toggleDarkMode }}
+            value={{
+                siteData,
+                currentSite,
+                effectiveSite,
+                currentSiteData,
+                currentPosition,
+                currentPositionData,
+                positions,
+                changeSite,
+                changePosition,
+                isDarkMode,
+                toggleDarkMode
+            }}
         >
             {children}
         </SiteModeContext.Provider>

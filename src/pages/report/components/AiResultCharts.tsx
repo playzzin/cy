@@ -43,7 +43,7 @@ export const AiResultCharts: React.FC<AiResultChartsProps> = ({ result }) => {
                         <Tooltip
                             contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155' }}
                             itemStyle={{ color: '#e2e8f0' }}
-                            formatter={(val: number | string | undefined) => [typeof val === 'number' ? val.toFixed(1) : (val ?? ''), '공수']}
+                            formatter={(val: unknown) => [typeof val === 'number' ? val.toFixed(1) : String(val ?? ''), '공수']}
                         />
                         <Area type="monotone" dataKey="totalManDay" stroke="#3b82f6" fillOpacity={1} fill="url(#colorManDay)" />
                     </AreaChart>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faSearch, faPenToSquare, faPlus, faTable, faTrash, faPalette,
+    faSearch, faPenToSquare, faPlus, faTable, faTrash,
     faChevronDown, faChevronRight, faHardHat, faBuilding, faUsers, faTimes,
     faUserGear, faUserShield, faUser
 } from '@fortawesome/free-solid-svg-icons';
@@ -17,8 +17,9 @@ import SingleSelectPopover, { InputPopover } from '../../components/common/Singl
 import { useColumnSettings } from '../../hooks/useColumnSettings';
 import { positionService, Position } from '../../services/positionService';
 import { getIcon } from '../../utils/iconMapper';
-import { DEFAULT_TEAM_COLOR, SOLID_COLOR_PALETTE } from '../../constants/solidColorPalette';
+import { DEFAULT_TEAM_COLOR } from '../../constants/solidColorPalette';
 import { useMasterData } from '../../contexts/MasterDataContext';
+import TeamColorInput from '../../components/manpower/TeamColorPicker';
 
 // 직책별 아이콘 매핑 (positions DB 기반)
 const getPositionIcon = (role: string | undefined, positions: Position[]) => {
@@ -51,7 +52,7 @@ const TeamColorPicker: React.FC<{
                 title="팀 색상 선택"
             />
             <div className="absolute left-0 top-10 z-30 grid w-max grid-cols-10 gap-1.5 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-                {SOLID_COLOR_PALETTE.map((color) => (
+                {([] as string[]).map((color) => (
                     <button
                         key={color}
                         type="button"
@@ -688,9 +689,14 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
                                                                 />
                                                             ) : col.key === 'name' ? (
                                                                 <div className="flex items-center gap-2">
-                                                                    <TeamColorPicker
+                                                                    <TeamColorInput
                                                                         value={team.color}
-                                                                        onChange={(color) => team.id && handleTeamColorSelect(team.id, color)}
+                                                                        onChange={(color) => team.id && handleTeamChange(team.id, 'color', color)}
+                                                                        onCommit={(color) => {
+                                                                            if (!team.id) return;
+                                                                            return handleTeamColorSelect(team.id, color);
+                                                                        }}
+                                                                        compact
                                                                     />
                                                                     <input
                                                                         type="text"

@@ -19,8 +19,8 @@ const notify = () => {
   listeners.forEach((listener) => listener());
 };
 
-export const isAppInstalled = () => {
-  if (installed) return true;
+export const isRunningAsStandaloneApp = () => {
+  if (typeof window === 'undefined') return false;
 
   const standaloneMedia = window.matchMedia?.('(display-mode: standalone)').matches;
   const navigatorStandalone = 'standalone' in window.navigator
@@ -28,6 +28,12 @@ export const isAppInstalled = () => {
     : false;
 
   return Boolean(standaloneMedia || navigatorStandalone);
+};
+
+export const isAppInstalled = () => {
+  if (installed) return true;
+
+  return isRunningAsStandaloneApp();
 };
 
 export const getInstallPrompt = () => deferredPrompt;

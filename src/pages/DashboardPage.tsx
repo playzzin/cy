@@ -9,17 +9,18 @@ import { DashboardFieldView } from '../components/dashboard/DashboardFieldView';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
-import ProfileSetup from '../components/auth/ProfileSetup';
-
-type ViewMode = 'executive' | 'field';
+import { useSiteMode } from '../contexts/SiteModeContext';
+import {
+    getDashboardModeConfigForPosition,
+} from '../components/dashboard/roleDashboardConfig';
 
 const DashboardPage: React.FC = () => {
     const { currentUser } = useAuth();
+    const { currentPosition, currentPositionData, positions, changePosition } = useSiteMode();
     const [loading, setLoading] = useState(true);
     const [linkedWorker, setLinkedWorker] = useState<any>(null);
     const [logoUrl, setLogoUrl] = useState<string>('');
     const [logoIsVideo, setLogoIsVideo] = useState<boolean>(false);
-    const [viewMode, setViewMode] = useState<ViewMode>('executive');
 
     useEffect(() => {
         const initDashboard = async () => {
@@ -57,19 +58,6 @@ const DashboardPage: React.FC = () => {
                 const worker = await manpowerService.getWorkerByUid(currentUser.uid);
                 setLinkedWorker(worker);
 
-                // 3. Set Default View based on Role (Optional Logic)
-                if (worker) {
-                    // For example, if role is 'field_manager', default to 'field'
-                    // For now, default to 'executive' but maybe switch if user prefers?
-                    // We can save preference in localStorage
-                    const savedView = localStorage.getItem('dashboard_view_mode') as ViewMode;
-                    if (savedView) {
-                        setViewMode(savedView);
-                    } else if (['소장', '반장'].includes(worker.role || '')) {
-                        setViewMode('field');
-                    }
-                }
-
             } catch (error) {
                 console.error("Dashboard initialization failed", error);
             } finally {
@@ -80,11 +68,9 @@ const DashboardPage: React.FC = () => {
         initDashboard();
     }, [currentUser]);
 
-    const handleToggleView = () => {
-        const newMode = viewMode === 'executive' ? 'field' : 'executive';
-        setViewMode(newMode);
-        localStorage.setItem('dashboard_view_mode', newMode);
-    };
+    const selectedPositionName =
+        currentPositionData?.name || (currentPosition === 'full' ? '전체 메뉴' : linkedWorker?.role);
+    const modeConfig = getDashboardModeConfigForPosition(currentPosition, selectedPositionName);
 
     if (loading) {
         return (
@@ -112,31 +98,33 @@ const DashboardPage: React.FC = () => {
                 user={linkedWorker || { name: '관리자', role: '최고관리자' }}
                 logoUrl={logoUrl}
                 logoIsVideo={logoIsVideo}
-                viewMode={viewMode}
-                onToggleView={handleToggleView}
+                modeConfig={modeConfig}
+                positions={positions}
+                currentPosition={currentPosition}
+                onPositionChange={changePosition}
             />
 
             <main className="max-w-7xl mx-auto px-6 -mt-16 pb-12 relative z-10 w-full overflow-hidden">
                 <AnimatePresence mode="wait">
-                    {viewMode === 'executive' ? (
+                    {modeConfig.layout === 'executive' ? (
                         <motion.div
-                            key="executive"
+                            key={`${currentPosition}-${modeConfig.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                             transition={{ duration: 0.4, ease: "easeOut" }}
                         >
-                            <DashboardExecutiveView />
+                            <DashboardExecutiveView modeConfig={modeConfig} />
                         </motion.div>
                     ) : (
                         <motion.div
-                            key="field"
+                            key={`${currentPosition}-${modeConfig.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -20 }}
                             transition={{ duration: 0.4, ease: "easeOut" }}
                         >
-                            <DashboardFieldView />
+                            <DashboardFieldView modeConfig={modeConfig} />
                         </motion.div>
                     )}
                 </AnimatePresence>

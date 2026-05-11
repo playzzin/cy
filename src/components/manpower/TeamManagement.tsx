@@ -7,6 +7,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faPlus, faPenToSquare, faTrash, faUsers, faChevronDown, faChevronRight, faBuilding, faFileExcel, faFileImport, faFileExport } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx';
 import TeamForm from './TeamForm';
+import TeamColorPicker from './TeamColorPicker';
 
 interface TeamManagementProps {
     onDataChange?: () => void;
@@ -23,6 +24,7 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
     const [lastDoc, setLastDoc] = useState<any>(null);
     const [hasMore, setHasMore] = useState(true);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [savingColorTeamIds, setSavingColorTeamIds] = useState<Record<string, boolean>>({});
     const LIMIT = 100;
 
     const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
@@ -84,6 +86,32 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
         } catch (error) {
             console.error("Failed to update team leader", error);
             alert("팀장 수정에 실패했습니다.");
+        }
+    };
+
+    const handleUpdateColor = (teamId: string, color: string) => {
+        setTeams(prev => prev.map(t =>
+            t.id === teamId
+                ? { ...t, color }
+                : t
+        ));
+    };
+
+    const handleCommitColor = async (teamId: string, color: string) => {
+        setSavingColorTeamIds(prev => ({ ...prev, [teamId]: true }));
+        try {
+            await teamService.updateTeam(teamId, { color });
+            if (onDataChange) onDataChange();
+        } catch (error) {
+            console.error("Failed to update team color", error);
+            alert("팀 색상 저장에 실패했습니다.");
+            fetchData();
+        } finally {
+            setSavingColorTeamIds(prev => {
+                const next = { ...prev };
+                delete next[teamId];
+                return next;
+            });
         }
     };
 
@@ -257,12 +285,13 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
                     />
                 ) : (
                     <>
-                        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                            <table className="w-full text-left border-collapse">
+                        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-x-auto">
+                            <table className="w-full min-w-[1180px] text-left border-collapse">
                                 <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider">
                                     <tr>
                                         <th className="px-6 py-3 border-b border-slate-200 w-10"></th>
                                         <th className="px-6 py-3 border-b border-slate-200">팀명</th>
+                                        <th className="px-6 py-3 border-b border-slate-200">팀색상</th>
                                         <th className="px-6 py-3 border-b border-slate-200">회사명</th>
                                         <th className="px-6 py-3 border-b border-slate-200">팀유형</th>
                                         <th className="px-6 py-3 border-b border-slate-200">팀장</th>
@@ -274,9 +303,9 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-sm">
                                     {isLoading ? (
-                                        <tr><td colSpan={8} className="text-center py-10">로딩중...</td></tr>
+                                        <tr><td colSpan={9} className="text-center py-10">로딩중...</td></tr>
                                     ) : teams.length === 0 ? (
-                                        <tr><td colSpan={8} className="text-center py-10 text-slate-400">등록된 팀이 없습니다.</td></tr>
+                                        <tr><td colSpan={9} className="text-center py-10 text-slate-400">등록된 팀이 없습니다.</td></tr>
                                     ) : (
                                         teams.map((team) => {
                                             const isExpanded = expandedTeamId === team.id;
@@ -307,6 +336,15 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
                                                                     )}
                                                                 </span>
                                                             </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-slate-600" onClick={(e) => e.stopPropagation()}>
+                                                            <TeamColorPicker
+                                                                value={team.color}
+                                                                onChange={(color) => handleUpdateColor(team.id!, color)}
+                                                                onCommit={(color) => handleCommitColor(team.id!, color)}
+                                                                disabled={savingColorTeamIds[team.id!]}
+                                                                compact
+                                                            />
                                                         </td>
                                                         <td className="px-6 py-4 text-slate-600">{team.companyName || '-'}</td>
                                                         <td className="px-6 py-4 text-slate-600">
@@ -342,7 +380,7 @@ const TeamManagement: React.FC<TeamManagementProps> = ({ onDataChange }) => {
                                                     </tr>
                                                     {isExpanded && (
                                                         <tr className="bg-slate-50">
-                                                            <td colSpan={8} className="p-4 border-b border-slate-200">
+                                                            <td colSpan={9} className="p-4 border-b border-slate-200">
                                                                 <div className="flex gap-6">
                                                                     {/* Assigned Sites */}
                                                                     <div className="flex-1 bg-white rounded-lg border border-slate-200 p-4">

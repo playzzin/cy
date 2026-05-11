@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './contexts/AuthContext';
 import PrivateRoute from './components/auth/PrivateRoute';
 import { Login } from './components/auth/index';
+import AppIntroScreen from './components/common/AppIntroScreen';
 
 const lazyNamed = <T extends React.ComponentType<any>>(
   loader: () => Promise<unknown>,
@@ -12,12 +13,6 @@ const lazyNamed = <T extends React.ComponentType<any>>(
     const module = (await loader()) as Record<string, T>;
     return { default: module[exportName] };
   });
-
-const RouteLoadingFallback: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
-    로딩 중...
-  </div>
-);
 
 const ProtectedRouteShell = React.lazy(() => import('./routes/ProtectedRouteShell'));
 const DashboardPage = React.lazy(() => import('./pages/DashboardPage'));
@@ -199,7 +194,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <Router future={{ v7_relativeSplatPath: true }}>
-        <React.Suspense fallback={<RouteLoadingFallback />}>
+        <React.Suspense fallback={<AppIntroScreen />}>
           <Routes>
           {/* Public Routes */}
           <Route path="/" element={<Login />} />

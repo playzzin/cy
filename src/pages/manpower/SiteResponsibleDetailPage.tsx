@@ -970,7 +970,10 @@ const SiteResponsibleDetailPage: React.FC = () => {
                             </div>
 
                             {detailView === 'siteInfo' && (
-                                <div className="tw-section-grid">
+                                <div
+                                    className="tw-section-grid tw-section-grid--team-accent"
+                                    style={{ '--team-color': siteDisplayColor } as React.CSSProperties}
+                                >
                                     <section className="tw-detail-section">
                                         <h3><Building2 size={18} />현장정보</h3>
                                         <div className="tw-detail-grid">

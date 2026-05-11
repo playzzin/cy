@@ -1,15 +1,10 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import DashboardLayout from '../components/layout/DashboardLayout';
+import AppIntroScreen from '../components/common/AppIntroScreen';
 import { MasterDataProvider } from '../contexts/MasterDataContext';
 import { useWorkerTeamIdMigration } from '../hooks/useWorkerTeamIdMigration';
 import { menuServiceV11 } from '../services/menuServiceV11';
-
-const RouteLoadingFallback: React.FC = () => (
-  <div className="flex min-h-screen items-center justify-center text-sm text-slate-500">
-    로딩 중...
-  </div>
-);
 
 const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { status, result } = useWorkerTeamIdMigration();
@@ -30,7 +25,7 @@ const MigrationRunner: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
 const DashboardLayoutWrapper = () => (
   <DashboardLayout>
-    <React.Suspense fallback={<RouteLoadingFallback />}>
+    <React.Suspense fallback={<AppIntroScreen message="업무 화면 준비 중" />}>
       <Outlet />
     </React.Suspense>
   </DashboardLayout>

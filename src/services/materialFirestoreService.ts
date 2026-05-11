@@ -77,10 +77,16 @@ export const materialFirestoreService = {
 
     getInboundsByRange: async (startDate: string, endDate: string, siteId?: string) => {
         const ref = collection(db, INBOUND_COLLECTION).withConverter(createConverter(MaterialInboundSchema));
-        let q = query(ref, where('transactionDate', '>=', startDate), where('transactionDate', '<=', endDate), orderBy('transactionDate', 'desc'));
         if (siteId) {
-            q = query(q, where('siteId', '==', siteId));
+            const siteQuery = query(ref, where('siteId', '==', siteId));
+            const snap = await getDocs(siteQuery);
+            return snap.docs
+                .map(d => d.data())
+                .filter(row => row.transactionDate >= startDate && row.transactionDate <= endDate)
+                .sort((left, right) => String(right.transactionDate || '').localeCompare(String(left.transactionDate || '')));
         }
+
+        const q = query(ref, where('transactionDate', '>=', startDate), where('transactionDate', '<=', endDate), orderBy('transactionDate', 'desc'));
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data());
     },
@@ -112,10 +118,16 @@ export const materialFirestoreService = {
 
     getOutboundsByRange: async (startDate: string, endDate: string, siteId?: string) => {
         const ref = collection(db, OUTBOUND_COLLECTION).withConverter(createConverter(MaterialOutboundSchema));
-        let q = query(ref, where('transactionDate', '>=', startDate), where('transactionDate', '<=', endDate), orderBy('transactionDate', 'desc'));
         if (siteId) {
-            q = query(q, where('siteId', '==', siteId));
+            const siteQuery = query(ref, where('siteId', '==', siteId));
+            const snap = await getDocs(siteQuery);
+            return snap.docs
+                .map(d => d.data())
+                .filter(row => row.transactionDate >= startDate && row.transactionDate <= endDate)
+                .sort((left, right) => String(right.transactionDate || '').localeCompare(String(left.transactionDate || '')));
         }
+
+        const q = query(ref, where('transactionDate', '>=', startDate), where('transactionDate', '<=', endDate), orderBy('transactionDate', 'desc'));
         const snap = await getDocs(q);
         return snap.docs.map(d => d.data());
     },

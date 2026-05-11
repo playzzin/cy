@@ -170,11 +170,17 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-scale-in">
+        <div
+            className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/50 p-3 backdrop-blur-sm sm:items-center sm:p-4"
+            style={{
+                paddingTop: 'max(12px, env(safe-area-inset-top))',
+                paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
+            }}
+        >
+            <div className="flex max-h-[calc(100dvh-24px)] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-scale-in sm:rounded-2xl">
 
                 {/* Header */}
-                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 flex justify-between items-center">
+                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 flex justify-between items-center gap-3 sm:px-6 sm:py-4">
                     <h3 className="text-white font-bold text-lg flex items-center gap-2">
                         <FontAwesomeIcon icon={faPen} />
                         서명 등록 - {workerName}
@@ -192,7 +198,7 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
                     </div>
                 </div>
 
-                <div className="p-6">
+                <div className="overflow-y-auto p-4 sm:p-6">
                     <div className="space-y-4">
                         <div className="flex flex-col gap-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -239,7 +245,7 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
 
                         <div
                             ref={manualContainerRef}
-                            className="border border-slate-200 rounded-xl bg-white shadow-inner h-64 overflow-hidden relative"
+                            className="border border-slate-200 rounded-xl bg-white shadow-inner h-52 overflow-hidden relative sm:h-64"
                         >
                             {canvasSize && (
                                 <SignatureCanvas
@@ -284,17 +290,17 @@ const SignatureGeneratorModal: React.FC<SignatureGeneratorModalProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
                     <button
                         onClick={onClose}
-                        className="px-5 py-2.5 text-slate-500 font-bold hover:bg-slate-200 rounded-xl transition-colors"
+                        className="w-full px-5 py-3 text-slate-500 font-bold hover:bg-slate-200 rounded-xl transition-colors sm:w-auto sm:py-2.5"
                     >
                         취소
                     </button>
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        className="w-full px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 sm:w-auto sm:py-2.5"
                     >
                         <FontAwesomeIcon icon={faSave} />
                         {saving ? '저장 중...' : '서명 저장하기'}

@@ -5,11 +5,26 @@
  */
 
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../config/firebase';
+import { auth, functions } from '../config/firebase';
 
 // Firebase Functions URL (기본값: Production URL)
 // 로컬 테스트 시: firebase emulators:start 후 http://localhost:5001/cyee-9c1e4/us-central1 로 설정
 const FUNCTIONS_BASE_URL = process.env.REACT_APP_API_URL || 'https://asia-northeast3-cyee-9c1e4.cloudfunctions.net';
+
+const getCurrentUserIdToken = async (): Promise<string> => {
+    const user = auth.currentUser;
+    if (!user) {
+        throw new Error('Authentication is required.');
+    }
+    return user.getIdToken();
+};
+
+const fetchWithAuth = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+    const token = await getCurrentUserIdToken();
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+};
 
 export interface TaxInvoiceRequest {
     // 공급자 정보
@@ -182,7 +197,7 @@ export async function issueTaxInvoice(data: TaxInvoiceRequest): Promise<TaxInvoi
 
     // 실제 API 호출
     try {
-        const response = await fetch(`${FUNCTIONS_BASE_URL}/issueTaxInvoiceApi`, {
+        const response = await fetchWithAuth(`${FUNCTIONS_BASE_URL}/issueTaxInvoiceApi`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -482,8 +497,8 @@ export async function reRegistHometaxScrap(): Promise<number> {
  */
 export async function getTaxInvoiceStatus(invoiceNum: string): Promise<TaxInvoiceResponse> {
     try {
-        const response = await fetch(
-            `${FUNCTIONS_BASE_URL}/getTaxInvoiceStatusApi?invoiceNum=${invoiceNum}`
+        const response = await fetchWithAuth(
+            `${FUNCTIONS_BASE_URL}/getTaxInvoiceStatusApi?invoiceNum=${encodeURIComponent(invoiceNum)}`
         );
 
         const payload = await safeJson(response);
@@ -572,8 +587,9 @@ export async function getTaxInvoiceList(limit = 50): Promise<TaxInvoiceListItem[
     }
 
     try {
-        const response = await fetch(
-            `${FUNCTIONS_BASE_URL}/getTaxInvoiceListApi?limit=${limit}`
+        const safeLimit = Math.min(Math.max(Math.floor(limit), 1), 100);
+        const response = await fetchWithAuth(
+            `${FUNCTIONS_BASE_URL}/getTaxInvoiceListApi?limit=${safeLimit}`
         );
 
         const payload = await safeJson(response);

@@ -29,6 +29,7 @@ import fieldGoodsService, {
     FieldGoodsTransactionInput,
     FieldGoodsTransactionKind,
 } from '../../services/fieldGoodsService';
+import { normalizeHexColor } from '../../utils/color';
 
 type ProgramView = 'input' | 'billing' | 'ledger' | 'master';
 
@@ -244,6 +245,7 @@ const FieldGoodsProgramPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [loadError, setLoadError] = useState('');
+    const [firestoreLive, setFirestoreLive] = useState(false);
 
     const [transactionDate, setTransactionDate] = useState(today());
     const [transactionKind, setTransactionKind] = useState<FieldGoodsTransactionKind>('issue');
@@ -320,7 +322,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                 id,
                 name,
                 active: team.status !== 'closed',
-                color: normalizeText(team.color) || '#64748b',
+                color: normalizeHexColor(team.color),
                 companyId,
                 companyName,
                 status: team.status || 'active',
@@ -369,8 +371,50 @@ const FieldGoodsProgramPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        void loadProgramData();
-    }, [loadProgramData]);
+        let mounted = true;
+        let itemsReady = false;
+        let transactionsReady = false;
+        let syncFailed = false;
+
+        const markReady = () => {
+            if (!itemsReady || !transactionsReady || !mounted || syncFailed) return;
+            setLoading(false);
+            setFirestoreLive(true);
+        };
+
+        const handleSyncError = (error: unknown) => {
+            if (!mounted) return;
+            syncFailed = true;
+            console.error('Field goods Firestore sync failed:', error);
+            setFirestoreLive(false);
+            setLoading(false);
+            setLoadError('현장물품 Firestore 실시간 동기화에 실패했습니다. 로그인 상태와 Firestore 권한을 확인해 주세요.');
+        };
+
+        setLoading(true);
+        setFirestoreLive(false);
+        setLoadError('');
+
+        const unsubscribeItems = fieldGoodsService.subscribeItems((nextItems) => {
+            if (!mounted) return;
+            itemsReady = true;
+            setItems(sortItems(nextItems));
+            markReady();
+        }, handleSyncError);
+
+        const unsubscribeTransactions = fieldGoodsService.subscribeTransactions((nextTransactions) => {
+            if (!mounted) return;
+            transactionsReady = true;
+            setTransactions(sortTransactions(nextTransactions));
+            markReady();
+        }, handleSyncError);
+
+        return () => {
+            mounted = false;
+            unsubscribeItems();
+            unsubscribeTransactions();
+        };
+    }, []);
 
     useEffect(() => {
         if (!defaultTeamId) {
@@ -1131,8 +1175,18 @@ const FieldGoodsProgramPage: React.FC = () => {
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-indigo-600" />
                         현장물품 매입·반출 청구
                     </h1>
-                    <div className="mt-1 text-sm text-slate-500">
-                        품목과 원장은 Firebase DB에 저장되며, 팀 정보는 팀 DB에서 불러옵니다.
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                        <span>품목과 원장은 Firebase DB에 저장되며, 팀 정보는 팀 DB에서 불러옵니다.</span>
+                        <span
+                            className={[
+                                'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-black',
+                                firestoreLive
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-slate-200 bg-slate-100 text-slate-500',
+                            ].join(' ')}
+                        >
+                            {firestoreLive ? 'Cloud Firestore 동기화 중' : 'Cloud Firestore 연결 중'}
+                        </span>
                     </div>
                 </div>
 
@@ -1740,7 +1794,16 @@ const FieldGoodsProgramPage: React.FC = () => {
                                     {teams.length ? (
                                         teams.map((team) => (
                                             <tr key={team.id} className={team.active ? 'bg-white' : 'bg-slate-50 text-slate-400'}>
-                                                <td className="px-3 py-2 font-bold text-slate-800">{team.name}</td>
+                                                <td className="px-3 py-2 font-bold text-slate-800">
+                                                    <div className="flex items-center gap-2">
+                                                        <span
+                                                            className="h-3 w-3 flex-shrink-0 rounded-full border border-white shadow ring-1 ring-slate-200"
+                                                            style={{ backgroundColor: team.color || '#64748b' }}
+                                                            aria-hidden="true"
+                                                        />
+                                                        <span className="min-w-0 truncate">{team.name}</span>
+                                                    </div>
+                                                </td>
                                                 <td className="px-3 py-2 text-slate-500">{team.companyName || '-'}</td>
                                                 <td className="px-3 py-2 text-center">
                                                     <span

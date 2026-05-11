@@ -17,7 +17,7 @@ import SidebarSkeleton from './SidebarSkeleton';
 import { menuServiceV11 } from '../../services/menuServiceV11';
 import { SiteData, SiteDataType, MenuItem } from '../../types/menu';
 import { MENU_PATHS } from '../../constants/menuPaths';
-import { ErrorBoundary } from 'react-error-boundary';
+import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTriangleExclamation, faRotateRight } from '@fortawesome/free-solid-svg-icons';
 import { SiteModeProvider } from '../../contexts/SiteModeContext';
@@ -29,14 +29,16 @@ interface DashboardLayoutProps {
 }
 
 // Error Fallback Component for UI Stability
-const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => {
+const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+
     return (
         <div className="flex flex-col items-center justify-center h-full p-6 text-center bg-slate-50 rounded-lg border border-slate-200 m-4">
             <FontAwesomeIcon icon={faTriangleExclamation} className="text-amber-500 text-3xl mb-3" />
             <h3 className="text-lg font-bold text-slate-700 mb-1">일시적인 오류 발생</h3>
             <p className="text-slate-500 text-sm mb-4">화면을 불러오는 중 문제가 발생했습니다.</p>
             <pre className="text-xs text-red-400 bg-red-50 p-2 rounded mb-4 max-w-xs overflow-auto">
-                {error.message}
+                {message}
             </pre>
             <button
                 onClick={resetErrorBoundary}
@@ -60,7 +62,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         const saved = localStorage.getItem('cy_current_site');
         return saved || 'admin';
     });
-    const [currentPosition, setCurrentPosition] = useState('full');
+    const [currentPosition, setCurrentPosition] = useState(() => {
+        return localStorage.getItem('cy_current_position') || 'full';
+    });
     const [userManuallyChangedSite, setUserManuallyChangedSite] = useState(() => {
         return localStorage.getItem('cy_site_manual') === 'true';
     });
@@ -465,7 +469,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const changePosition = (positionId: string) => {
         setCurrentPosition(positionId);
         setActiveMenuItems({});
-        // TODO: Load position-specific menu when implemented
+        localStorage.setItem('cy_current_position', positionId);
         console.log('Position changed to:', positionId);
     };
 
@@ -505,7 +509,11 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         currentSite,
         effectiveSite,
         currentSiteData: (currentSiteData as SiteData | null),
+        currentPosition,
+        currentPositionData: positions.find(pos => pos.id === currentPosition) || null,
+        positions,
         changeSite,
+        changePosition,
         isDarkMode,
         toggleDarkMode
     };
