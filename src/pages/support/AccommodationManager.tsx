@@ -869,6 +869,21 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             샘플 데이터 생성
                         </button>
                         <button
+                            type="button"
+                            onClick={() => {
+                                setActiveTab('status');
+                                setShowBillingPanel((prev) => !prev);
+                            }}
+                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all border ${
+                                showBillingPanel
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                            }`}
+                        >
+                            <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                            <span>{showBillingPanel ? '청구관리 닫기' : '청구관리'}</span>
+                        </button>
+                        <button
                             onClick={handleAddClick}
                             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95"
                         >
@@ -1159,6 +1174,15 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                         .map((workerId) => `ID:${workerId.slice(0, 8)}`)
                                                                 )
                                                             );
+                                                        const assignedTargetDisplayNames = assignedWorkerDisplayNames.length > 0
+                                                            ? assignedWorkerDisplayNames
+                                                            : Array.from(
+                                                                new Set(
+                                                                    activeList
+                                                                        .map((assignment) => normalizeKey(assignment.teamName))
+                                                                        .filter((teamName) => teamName.length > 0)
+                                                                )
+                                                            );
                                                         const primaryTeamAssign = activeList.find(
                                                             (a) => !!normalizeKey(a.teamId) || !!normalizeKey(a.teamName)
                                                         );
@@ -1282,9 +1306,9 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     {`${getAccommodationDeposit(acc).toLocaleString()}원`}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
-                                                                    {assignedWorkerDisplayNames.length > 0 ? (
+                                                                    {assignedTargetDisplayNames.length > 0 ? (
                                                                         <div className="flex flex-wrap items-center justify-center gap-1">
-                                                                            {assignedWorkerDisplayNames.map((workerName) => (
+                                                                            {assignedTargetDisplayNames.map((workerName) => (
                                                                                 <span
                                                                                     key={workerName}
                                                                                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-100"
@@ -1528,6 +1552,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     {activeList.map(assign => {
                                                                         const assignTeamInfo = getTeamInfo(assign.teamId, assign.teamName);
                                                                         const atc = assignTeamInfo?.color;
+                                                                        const assignmentDisplayName = normalizeKey(assign.workerName) || normalizeKey(assign.teamName) || '배정 대상';
 
                                                                         return (
                                                                             <span key={assign.id}
@@ -1546,7 +1571,7 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                                     icon={faUser}
                                                                                     className="text-[10px]"
                                                                                 />
-                                                                                {assign.workerName}
+                                                                                {assignmentDisplayName}
                                                                             </span>
                                                                         );
                                                                     })}

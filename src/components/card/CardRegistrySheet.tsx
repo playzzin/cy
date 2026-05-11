@@ -4,6 +4,7 @@ import {
     faCreditCard,
     faFilePen,
     faLink,
+    faPenToSquare,
     faUsers
 } from '@fortawesome/free-solid-svg-icons';
 import { Card } from '../../types/card';
@@ -145,9 +146,11 @@ export const CardRegistrySheet: React.FC<CardRegistrySheetProps> = ({
                                         <button
                                             type="button"
                                             onClick={() => onEdit(card)}
-                                            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                            title="카드 정보 수정"
+                                            aria-label="카드 정보 수정"
                                         >
-                                            수정
+                                            <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
                                         </button>
                                         <button
                                             type="button"

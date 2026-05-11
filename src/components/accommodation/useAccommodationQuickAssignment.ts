@@ -29,6 +29,8 @@ interface WorkerOption {
     teamName: string;
 }
 
+type AssignmentTargetType = 'team' | 'worker';
+
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 const getToday = (): string => format(new Date(), 'yyyy-MM-dd');
 
@@ -51,6 +53,7 @@ export const useAccommodationQuickAssignment = ({
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
     const [startDate, setStartDate] = useState(getToday());
     const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+    const [assignmentTargetType, setAssignmentTargetType] = useState<AssignmentTargetType>('team');
 
     const [billingTargetType, setBillingTargetType] = useState<AccommodationBillingTargetType>('team');
     const [billingTeamId, setBillingTeamId] = useState('');
@@ -88,6 +91,34 @@ export const useAccommodationQuickAssignment = ({
         });
         return map;
     }, [workers]);
+
+    const assignmentWorkerOptions = useMemo<WorkerOption[]>(() => {
+        return workers
+            .map((worker: any) => {
+                const workerId = normalizeKey(worker?.id) || normalizeKey(worker?.legacyId);
+                const workerName = normalizeKey(worker?.name);
+                if (!workerId || !workerName) return null;
+
+                const matchedTeam = normalizeKey(worker?.teamId)
+                    ? teamByAnyId.get(normalizeKey(worker?.teamId))
+                    : undefined;
+
+                return {
+                    key: workerId,
+                    workerId,
+                    workerName,
+                    teamName: normalizeKey(matchedTeam?.name ?? worker?.teamName) || '팀 미지정'
+                };
+            })
+            .filter((item): item is WorkerOption => item !== null)
+            .sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko-KR'));
+    }, [teamByAnyId, workers]);
+
+    const selectedAssignmentWorkerId = selectedWorkerIds[0] ?? '';
+
+    const setSelectedAssignmentWorkerId = useCallback((workerId: string) => {
+        setSelectedWorkerIds(workerId ? [workerId] : []);
+    }, []);
 
     const getBillingWorkerKey = useCallback((assignment: AccommodationAssignment): string => {
         const workerId = normalizeKey(assignment.workerId);
@@ -364,6 +395,16 @@ export const useAccommodationQuickAssignment = ({
         workerByAnyId
     ]);
 
+    useEffect(() => {
+        if (!isOpen || selectedTeamId || teams.length === 0) return;
+        setSelectedTeamId(teams.find((team) => Boolean(team.id))?.id ?? '');
+    }, [isOpen, selectedTeamId, teams]);
+
+    useEffect(() => {
+        if (!isOpen || selectedAssignmentWorkerId || assignmentWorkerOptions.length === 0) return;
+        setSelectedAssignmentWorkerId(assignmentWorkerOptions[0].key);
+    }, [assignmentWorkerOptions, isOpen, selectedAssignmentWorkerId, setSelectedAssignmentWorkerId]);
+
     const selectTeamBillingTarget = useCallback(() => {
         setBillingTargetType('team');
         if (!billingTeamId && billingTeamOptions.length > 0) {
@@ -388,77 +429,91 @@ export const useAccommodationQuickAssignment = ({
     const handleEdit = useCallback((assignment: AccommodationAssignment) => {
         if (!assignment.id) return;
         setEditingAssignmentId(assignment.id);
-        setSelectedTeamId(assignment.teamId || '');
-        setSelectedWorkerIds(assignment.workerId ? [assignment.workerId] : []);
+
+        const hasWorker = assignment.source === 'worker' ||
+            (assignment.source !== 'team' && Boolean(normalizeKey(assignment.workerId) || normalizeKey(assignment.workerName)));
+        const rawTeamId = normalizeKey(assignment.teamId);
+        const rawTeamName = normalizeKey(assignment.teamName);
+        const resolvedTeam = rawTeamId ? teamByAnyId.get(rawTeamId) : (rawTeamName ? teamByName.get(rawTeamName) : undefined);
+
+        setAssignmentTargetType(hasWorker ? 'worker' : 'team');
+        setSelectedTeamId(normalizeKey(resolvedTeam?.id ?? rawTeamId));
+        if (hasWorker) {
+            const rawWorkerId = normalizeKey(assignment.workerId);
+            const resolvedWorker = rawWorkerId ? workerByAnyId.get(rawWorkerId) : undefined;
+            setSelectedAssignmentWorkerId(normalizeKey(resolvedWorker?.id ?? rawWorkerId));
+        } else {
+            setSelectedWorkerIds([]);
+        }
+
         setStartDate(assignment.startDate);
         setWorkerSearch('');
-    }, []);
+    }, [setSelectedAssignmentWorkerId, teamByAnyId, teamByName, workerByAnyId]);
 
     const handleCancelEdit = useCallback(() => {
         setEditingAssignmentId(null);
         setSelectedWorkerIds([]);
-        setSelectedTeamId('');
+        setAssignmentTargetType('team');
+        setSelectedTeamId(teams.find((team) => Boolean(team.id))?.id ?? '');
         setStartDate(getToday());
         setWorkerSearch('');
-    }, []);
+    }, [teams]);
 
     const handleAssign = useCallback(async () => {
-        if (selectedWorkerIds.length === 0) {
-            toast.error('작업자를 선택해주세요.');
-            return;
-        }
         if (!startDate) {
-            toast.error('입실일을 선택해주세요.');
+            toast.error('배정 시작일을 선택해주세요.');
             return;
         }
 
-        const selectedTeam = teams.find((team) => team.id === selectedTeamId);
-        if (!selectedTeam) {
-            toast.error('팀을 선택해주세요.');
+        const selectedTeam = teams.find((team) => String(team.id) === String(selectedTeamId));
+        const selectedWorker = workers.find((item) => String(item.id) === String(selectedAssignmentWorkerId));
+
+        if (assignmentTargetType === 'team' && !selectedTeam) {
+            toast.error('배정할 팀을 선택해주세요.');
             return;
         }
+
+        if (assignmentTargetType === 'worker' && !selectedWorker) {
+            toast.error('배정할 개인을 선택해주세요.');
+            return;
+        }
+
+        const endDate = accommodationAssignmentService.buildEndDateAsDayBefore(startDate);
+        const activeIdsToEnd = activeAssignmentsInScope
+            .filter((assignment) => assignment.id && assignment.id !== editingAssignmentId)
+            .map((assignment) => assignment.id)
+            .filter((id): id is string => Boolean(id));
+
+        const workerTeam = selectedWorker?.teamId ? teamByAnyId.get(String(selectedWorker.teamId)) : undefined;
+        const nextAssignment = {
+            workerId: assignmentTargetType === 'worker' ? String(selectedWorker?.id ?? '') : '',
+            workerName: assignmentTargetType === 'worker' ? selectedWorker?.name ?? '' : '',
+            teamId: assignmentTargetType === 'team'
+                ? selectedTeam?.id
+                : (workerTeam?.id ?? selectedWorker?.teamId),
+            teamName: assignmentTargetType === 'team'
+                ? selectedTeam?.name
+                : (workerTeam?.name ?? selectedWorker?.teamName),
+            accommodationId: accommodation.id,
+            accommodationName: accommodation.name,
+            status: 'active' as const,
+            startDate,
+            source: assignmentTargetType
+        };
 
         setSubmitting(true);
         try {
+            if (activeIdsToEnd.length > 0) {
+                await accommodationAssignmentService.endAssignmentsBatch(activeIdsToEnd, endDate);
+            }
+
             if (editingAssignmentId) {
-                if (selectedWorkerIds.length !== 1) {
-                    toast.error('수정 시에는 한 명의 작업자만 선택할 수 있습니다.');
-                    return;
-                }
-
-                const workerId = selectedWorkerIds[0];
-                const worker = workers.find((item) => item.id === workerId);
-
-                await accommodationAssignmentService.updateAssignment(editingAssignmentId, {
-                    workerId,
-                    workerName: worker?.name,
-                    teamId: selectedTeam.id,
-                    teamName: selectedTeam.name,
-                    startDate,
-                    accommodationId: accommodation.id,
-                    accommodationName: accommodation.name
-                });
-
+                await accommodationAssignmentService.updateAssignment(editingAssignmentId, nextAssignment);
                 toast.success('배정 정보가 수정되었습니다.');
                 handleCancelEdit();
             } else {
-                const newAssignments = selectedWorkerIds.map((workerId) => {
-                    const worker = workers.find((item) => item.id === workerId);
-                    return {
-                        workerId,
-                        workerName: worker?.name || '',
-                        teamId: selectedTeam.id,
-                        teamName: selectedTeam.name,
-                        accommodationId: accommodation.id,
-                        accommodationName: accommodation.name,
-                        status: 'active' as const,
-                        startDate
-                    };
-                });
-
-                await accommodationAssignmentService.addAssignmentsBatch(newAssignments);
-                toast.success(`${newAssignments.length}명 배정 완료`);
-                setSelectedWorkerIds([]);
+                await accommodationAssignmentService.addAssignment(nextAssignment);
+                toast.success('배정이 등록되었습니다.');
                 setWorkerSearch('');
             }
 
@@ -472,12 +527,16 @@ export const useAccommodationQuickAssignment = ({
     }, [
         accommodation.id,
         accommodation.name,
+        activeAssignmentsInScope,
+        assignmentTargetType,
         editingAssignmentId,
         handleCancelEdit,
         onSuccess,
+        selectedAssignmentWorkerId,
         selectedTeamId,
         selectedWorkerIds,
         startDate,
+        teamByAnyId,
         teams,
         workers
     ]);
@@ -610,6 +669,11 @@ export const useAccommodationQuickAssignment = ({
         workerSearch,
         setWorkerSearch,
         selectedWorkerIds,
+        selectedAssignmentWorkerId,
+        setSelectedAssignmentWorkerId,
+        assignmentTargetType,
+        setAssignmentTargetType,
+        assignmentWorkerOptions,
         startDate,
         setStartDate,
         editingAssignmentId,

@@ -25,6 +25,9 @@ export const CardSchema = z.object({
     currentAssigneeId: z.string().nullable().optional(),
     currentAssigneeType: CardAssigneeTypeSchema.nullable().optional(),
     currentAssigneeName: z.string().nullable().optional(),
+    billingTargetId: z.string().nullable().optional(),
+    billingTargetType: CardAssigneeTypeSchema.nullable().optional(),
+    billingTargetName: z.string().nullable().optional(),
     memo: z.string().nullable().optional(),
     legacyId: z.string().optional(),
 });

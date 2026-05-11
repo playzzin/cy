@@ -9,7 +9,7 @@ import {
     query,
     where,
     orderBy,
-    Timestamp,
+    serverTimestamp,
     limit as firestoreLimit
 } from 'firebase/firestore';
 import { createConverter } from '../utils/firestoreConverter';
@@ -47,10 +47,11 @@ export const vehicleFirestoreService = {
      * 차량 저장 (생성/수정)
      */
     saveVehicle: async (data: Partial<Vehicle> & { id: string }) => {
-        const ref = doc(db, VEHICLE_COLLECTION, data.id).withConverter(createConverter(vehicleSchema));
+        const { id, ...vehicleData } = data;
+        const ref = doc(db, VEHICLE_COLLECTION, id);
         await setDoc(ref, {
-            ...data,
-            updatedAt: Timestamp.now()
+            ...vehicleData,
+            updatedAt: serverTimestamp()
         }, { merge: true });
     },
 

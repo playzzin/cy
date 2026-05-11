@@ -17,6 +17,9 @@ export interface Card {
     currentAssigneeId?: string;
     currentAssigneeType?: CardAssigneeType;
     currentAssigneeName?: string;
+    billingTargetId?: string | null;
+    billingTargetType?: CardAssigneeType | null;
+    billingTargetName?: string | null;
     memo?: string;
     legacyId?: string;
     createdAt?: Timestamp | null;

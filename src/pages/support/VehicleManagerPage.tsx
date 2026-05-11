@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Vehicle, VehicleAssigneeType } from '../../types/vehicle';
+import { Vehicle } from '../../types/vehicle';
 import { vehicleService } from '../../services/vehicleService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { VehicleForm } from '../../components/vehicle/VehicleForm';
-import { VehicleAssignment } from '../../components/vehicle/VehicleAssignment';
-import { VehicleExpenseLog } from '../../components/vehicle/VehicleExpenseLog';
+import { VehicleAssignmentManager } from '../../components/vehicle/VehicleAssignmentManager';
+import { VehicleBillingTargetManager } from '../../components/vehicle/VehicleBillingTargetManager';
 import { VehicleBillingManager } from '../../components/vehicle/VehicleBillingManager';
 import { VehicleStatusBoard } from '../../components/vehicle/VehicleStatusBoard';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCar, faChartPie, faGasPump, faRotateRight, faCircleExclamation } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCar, faChartPie, faTableCellsLarge, faRotateRight, faCircleExclamation, faFileInvoiceDollar, faTimes } from '@fortawesome/free-solid-svg-icons';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
@@ -18,12 +18,6 @@ import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
 interface VehicleManagerPageProps {
     embedded?: boolean;
 }
-
-type VehicleTargetSelection = {
-    type: VehicleAssigneeType;
-    id: string;
-    name: string;
-} | null;
 
 export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded = false }) => {
     // Data State
@@ -45,8 +39,10 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
     // Modal State
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
-    const [assigningVehicle, setAssigningVehicle] = useState<Vehicle | null>(null);
-    const [expenseVehicle, setExpenseVehicle] = useState<Vehicle | null>(null);
+    const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
+    const [assignmentInitialVehicleId, setAssignmentInitialVehicleId] = useState<string | null>(null);
+    const [isBillingTargetModalOpen, setIsBillingTargetModalOpen] = useState(false);
+    const [billingTargetInitialVehicleId, setBillingTargetInitialVehicleId] = useState<string | null>(null);
 
     // 데이터 로드 함수
     const loadData = async () => {
@@ -103,52 +99,13 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
         setEditingVehicle(vehicle);
         setIsFormOpen(true);
     };
-    const handleManageExpenses = (vehicle: Vehicle) => {
-        setExpenseVehicle(vehicle);
+    const openAssignmentVehicle = (vehicle: Vehicle) => {
+        setAssignmentInitialVehicleId(String(vehicle.id));
+        setIsAssignmentModalOpen(true);
     };
-    const getTodayDateInput = () => new Date().toISOString().slice(0, 10);
-    const handleAssignmentChange = async (vehicle: Vehicle, target: VehicleTargetSelection) => {
-        try {
-            const sameTarget = target
-                && vehicle.currentAssigneeType === target.type
-                && String(vehicle.currentAssigneeId ?? '') === String(target.id);
-            if (sameTarget) return;
-
-            if (!target) {
-                if (vehicle.currentAssigneeId) {
-                    await vehicleService.unassignVehicle(vehicle.id, getTodayDateInput());
-                }
-            } else {
-                if (vehicle.currentAssigneeId) {
-                    await vehicleService.unassignVehicle(vehicle.id, getTodayDateInput());
-                }
-                await vehicleService.assignVehicle(
-                    vehicle.id,
-                    target.id,
-                    target.type,
-                    target.name,
-                    getTodayDateInput()
-                );
-            }
-
-            handleRefresh();
-        } catch (error) {
-            console.error('Failed to update vehicle assignment', error);
-            window.alert('차량 배정 변경 중 오류가 발생했습니다.');
-        }
-    };
-    const handleBillingTargetChange = async (vehicle: Vehicle, target: VehicleTargetSelection) => {
-        try {
-            await vehicleService.updateVehicle(vehicle.id, {
-                billingTargetId: target?.id ?? '',
-                billingTargetType: target?.type,
-                billingTargetName: target?.name ?? ''
-            });
-            handleRefresh();
-        } catch (error) {
-            console.error('Failed to update vehicle billing target', error);
-            window.alert('차량 청구대상 변경 중 오류가 발생했습니다.');
-        }
+    const openBillingTargetVehicle = (vehicle: Vehicle) => {
+        setBillingTargetInitialVehicleId(String(vehicle.id));
+        setIsBillingTargetModalOpen(true);
     };
     const handleDelete = async (vehicle: Vehicle) => {
         const label = vehicle.licensePlate || vehicle.model || '선택한 차량';
@@ -161,8 +118,14 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 setEditingVehicle(null);
                 setIsFormOpen(false);
             }
-            if (assigningVehicle?.id === vehicle.id) setAssigningVehicle(null);
-            if (expenseVehicle?.id === vehicle.id) setExpenseVehicle(null);
+            if (assignmentInitialVehicleId === String(vehicle.id)) {
+                setAssignmentInitialVehicleId(null);
+                setIsAssignmentModalOpen(false);
+            }
+            if (billingTargetInitialVehicleId === String(vehicle.id)) {
+                setBillingTargetInitialVehicleId(null);
+                setIsBillingTargetModalOpen(false);
+            }
             handleRefresh();
         } catch (error) {
             console.error('Failed to delete vehicle', error);
@@ -185,7 +148,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                     </div>
                     <div>
                         <h1 className="text-2xl font-black text-slate-900 tracking-tight">차량 통합관리</h1>
-                        <p className="text-sm text-slate-500 font-medium">실시간 배정 현황 및 유류비/청구 내역을 관리합니다.</p>
+                        <p className="text-sm text-slate-500 font-medium">실시간 배정 현황과 차량 통합관리대장을 관리합니다.</p>
                     </div>
                 </div>
 
@@ -196,6 +159,21 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         title="새로고침"
                     >
                         <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setActiveTab('status');
+                            setShowBillingPanel((prev) => !prev);
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all border ${
+                            showBillingPanel
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                        <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                        <span>{showBillingPanel ? '청구관리 닫기' : '청구관리'}</span>
                     </button>
                     <button
                         onClick={() => {
@@ -224,7 +202,7 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         onClick={() => setActiveTab('ledger')}
                         className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                     >
-                        <FontAwesomeIcon icon={faGasPump} className="mr-2" />
+                        <FontAwesomeIcon icon={faTableCellsLarge} className="mr-2" />
                         차량 통합관리대장
                     </button>
                 </div>
@@ -278,12 +256,8 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                             workers={workers}
                             loading={loading}
                             onEdit={handleEdit}
-                            onManageExpenses={handleManageExpenses}
-                            onAssign={(vehicle) => {
-                                setAssigningVehicle(vehicle);
-                            }}
-                            onAssignmentChange={handleAssignmentChange}
-                            onBillingTargetChange={handleBillingTargetChange}
+                            onAssign={openAssignmentVehicle}
+                            onBillingTargetAssign={openBillingTargetVehicle}
                             onDelete={handleDelete}
                         />
                         
@@ -316,7 +290,6 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                         teams={teams}
                         teamFilterId={selectedTeamId}
                         loadingVehicles={loading}
-                        onOpenExpenseLog={handleManageExpenses}
                     />
                 )}
             </div>
@@ -333,24 +306,58 @@ export const VehicleManagerPage: React.FC<VehicleManagerPageProps> = ({ embedded
                 />
             )}
 
-            {assigningVehicle && (
-                <VehicleAssignment
-                    vehicle={assigningVehicle}
-                    selectableTeams={selectableTeams}
-                    onClose={() => {
-                        setAssigningVehicle(null);
-                        handleRefresh();
-                    }}
-                    onUpdate={handleRefresh}
-                />
+            {isAssignmentModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto relative animate-fade-in-up">
+                        <div className="sticky top-0 z-10 bg-white px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                            <h2 className="text-xl font-bold text-slate-800">차량 배정</h2>
+                            <button
+                                onClick={() => setIsAssignmentModalOpen(false)}
+                                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors"
+                            >
+                                <FontAwesomeIcon icon={faTimes} />
+                            </button>
+                        </div>
+                        <div className="p-6">
+                            <VehicleAssignmentManager
+                                vehicles={vehicles}
+                                workers={workers}
+                                loading={loading}
+                                initialVehicleId={assignmentInitialVehicleId}
+                                selectableTeams={selectableTeams}
+                                onRefresh={handleRefresh}
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
 
-            {expenseVehicle && (
-                <VehicleExpenseLog
-                    vehicle={expenseVehicle}
-                    onClose={() => setExpenseVehicle(null)}
-                />
+            {isBillingTargetModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto relative animate-fade-in-up">
+                        <div className="sticky top-0 z-10 bg-white px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                            <h2 className="text-xl font-bold text-slate-800">차량 청구대상 배정</h2>
+                            <button
+                                onClick={() => setIsBillingTargetModalOpen(false)}
+                                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors"
+                            >
+                                <FontAwesomeIcon icon={faTimes} />
+                            </button>
+                        </div>
+                        <div className="p-6">
+                            <VehicleBillingTargetManager
+                                vehicles={vehicles}
+                                workers={workers}
+                                loading={loading}
+                                initialVehicleId={billingTargetInitialVehicleId}
+                                selectableTeams={selectableTeams}
+                                onRefresh={handleRefresh}
+                            />
+                        </div>
+                    </div>
+                </div>
             )}
+
         </div>
     );
 };

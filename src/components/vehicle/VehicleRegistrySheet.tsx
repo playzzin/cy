@@ -4,7 +4,6 @@ import {
     faCalendarDays,
     faCar,
     faFilePen,
-    faGasPump,
     faUsers
 } from '@fortawesome/free-solid-svg-icons';
 import { Vehicle } from '../../types/vehicle';
@@ -14,7 +13,6 @@ interface VehicleRegistrySheetProps {
     loading: boolean;
     onEdit: (vehicle: Vehicle) => void;
     onAssign: (vehicle: Vehicle) => void;
-    onManageExpenses: (vehicle: Vehicle) => void;
 }
 
 const formatCurrency = (value?: number): string => `${Number(value ?? 0).toLocaleString('ko-KR')}원`;
@@ -72,8 +70,7 @@ export const VehicleRegistrySheet: React.FC<VehicleRegistrySheetProps> = ({
     vehicles,
     loading,
     onEdit,
-    onAssign,
-    onManageExpenses
+    onAssign
 }) => {
     const totals = useMemo(() => {
         return vehicles.reduce(
@@ -199,14 +196,6 @@ export const VehicleRegistrySheet: React.FC<VehicleRegistrySheetProps> = ({
                                                 className="rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100"
                                             >
                                                 배정
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => onManageExpenses(vehicle)}
-                                                className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100"
-                                            >
-                                                <FontAwesomeIcon icon={faGasPump} className="mr-1" />
-                                                지출
                                             </button>
                                         </div>
                                     </td>

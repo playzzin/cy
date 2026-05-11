@@ -36,13 +36,14 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         teams,
         selectedTeamId,
         setSelectedTeamId,
-        workerSearch,
-        setWorkerSearch,
-        selectedWorkerIds,
+        selectedAssignmentWorkerId,
+        setSelectedAssignmentWorkerId,
+        assignmentTargetType,
+        setAssignmentTargetType,
+        assignmentWorkerOptions,
         startDate,
         setStartDate,
         editingAssignmentId,
-        filteredWorkers,
         billingTargetType,
         billingTeamId,
         setBillingTeamId,
@@ -54,7 +55,6 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         currentBillingTargetDisplay,
         selectTeamBillingTarget,
         selectWorkerBillingTarget,
-        handleToggleWorker,
         handleEdit,
         handleCancelEdit,
         handleAssign,
@@ -67,7 +67,9 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         isOpen,
         onSuccess
     });
+    const [assignmentWorkerSearch, setAssignmentWorkerSearch] = React.useState('');
     const [billingWorkerSearch, setBillingWorkerSearch] = React.useState('');
+    const normalizedAssignmentWorkerSearch = assignmentWorkerSearch.trim().toLowerCase();
     const normalizedBillingWorkerSearch = billingWorkerSearch.trim().toLowerCase();
     const handleStartDateChange = (value: string) => {
         setStartDate(formatTypedDateInput(value));
@@ -83,9 +85,33 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
             return workerName.includes(normalizedBillingWorkerSearch) || teamName.includes(normalizedBillingWorkerSearch);
         });
     }, [billingWorkerOptions, normalizedBillingWorkerSearch]);
+    const filteredAssignmentWorkerOptions = React.useMemo(() => {
+        if (!normalizedAssignmentWorkerSearch) return assignmentWorkerOptions;
+        return assignmentWorkerOptions.filter((workerOption) => {
+            const workerName = String(workerOption.workerName ?? '').toLowerCase();
+            const teamName = String(workerOption.teamName ?? '').toLowerCase();
+            return workerName.includes(normalizedAssignmentWorkerSearch) || teamName.includes(normalizedAssignmentWorkerSearch);
+        });
+    }, [assignmentWorkerOptions, normalizedAssignmentWorkerSearch]);
+    const displayActiveAssignments = React.useMemo(() => {
+        return activeAssignments.map((assignment) => {
+            const isTeamAssignment = assignment.source === 'team' ||
+                (!String(assignment.workerId ?? '').trim() && !String(assignment.workerName ?? '').trim());
+            if (!isTeamAssignment || String(assignment.workerName ?? '').trim()) return assignment;
+            return {
+                ...assignment,
+                workerName: assignment.teamName || '팀 이름 없음'
+            };
+        });
+    }, [activeAssignments]);
+
+    const canSaveAssignment = assignmentTargetType === 'team'
+        ? Boolean(selectedTeamId)
+        : Boolean(selectedAssignmentWorkerId);
 
     React.useEffect(() => {
         if (!isOpen) {
+            setAssignmentWorkerSearch('');
             setBillingWorkerSearch('');
         }
     }, [isOpen]);
@@ -136,15 +162,28 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {activeAssignments.map((assign) => (
+                                    {displayActiveAssignments.map((assign) => {
+                                        const isTeamAssignment = assign.source === 'team' ||
+                                            (!String(assign.workerId ?? '').trim() && !String(assign.workerName ?? '').trim());
+                                        const targetName = isTeamAssignment
+                                            ? (assign.teamName || '팀 이름 없음')
+                                            : (assign.workerName || '이름 없음');
+                                        const subLabel = isTeamAssignment
+                                            ? '팀 배정'
+                                            : `개인 배정${assign.teamName ? ` · ${assign.teamName}` : ''}`;
+
+                                        return (
                                         <div
                                             key={assign.id || `${assign.workerId}-${assign.startDate}`}
+                                            title={`${targetName} · ${subLabel}`}
                                             className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-center justify-between group hover:border-emerald-200"
                                         >
                                             <div className="min-w-0">
                                                 <div className="flex items-center gap-2">
-                                                    <span className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs">
-                                                        <FontAwesomeIcon icon={faUser} />
+                                                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${
+                                                        isTeamAssignment ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'
+                                                    }`}>
+                                                        <FontAwesomeIcon icon={isTeamAssignment ? faUsers : faUser} />
                                                     </span>
                                                     <div className="font-bold text-slate-700 truncate">
                                                         {assign.workerName || '이름 없음'}
@@ -176,7 +215,8 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                                 </button>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             )}
 
@@ -184,24 +224,111 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                 <h4 className="text-sm font-bold text-slate-700">
                                     {editingAssignmentId ? '배정 수정' : '배정 등록'}
                                 </h4>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1.5">배정 팀</label>
-                                        <select
-                                            value={selectedTeamId}
-                                            onChange={(event) => setSelectedTeamId(event.target.value)}
-                                            className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
+                                <div className="space-y-4">
+                                    <div className="inline-flex rounded-xl border border-indigo-100 bg-white p-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setAssignmentTargetType('team')}
+                                            className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
+                                                assignmentTargetType === 'team'
+                                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
+                                            }`}
                                         >
-                                            <option value="">팀 선택...</option>
-                                            {teams.map((team) => (
-                                                <option key={team.id} value={team.id}>
-                                                    {team.name}
-                                                </option>
-                                            ))}
-                                        </select>
+                                            <FontAwesomeIcon icon={faUsers} className="mr-2" />
+                                            팀 배정
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setAssignmentTargetType('worker')}
+                                            className={`px-4 py-2 rounded-lg text-sm font-bold transition ${
+                                                assignmentTargetType === 'worker'
+                                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                                    : 'text-slate-600 hover:text-slate-900'
+                                            }`}
+                                        >
+                                            <FontAwesomeIcon icon={faUser} className="mr-2" />
+                                            개인 배정
+                                        </button>
                                     </div>
+
+                                    {assignmentTargetType === 'team' ? (
+                                        <div className="bg-white rounded-xl border border-indigo-100 p-4">
+                                            <div className="text-sm font-bold text-slate-600 mb-2">배정할 팀 선택</div>
+                                            {teams.length === 0 ? (
+                                                <div className="text-xs text-slate-400">선택 가능한 팀이 없습니다.</div>
+                                            ) : (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                    {teams.map((team) => {
+                                                        const isSelected = selectedTeamId === team.id;
+                                                        return (
+                                                            <button
+                                                                key={`assignment-team-${team.id}`}
+                                                                type="button"
+                                                                onClick={() => setSelectedTeamId(team.id ?? '')}
+                                                                className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
+                                                                    isSelected
+                                                                        ? 'border-indigo-400 bg-indigo-50 text-indigo-800'
+                                                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40'
+                                                                }`}
+                                                            >
+                                                                <div className="font-bold">{team.name}</div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="bg-white rounded-xl border border-indigo-100 p-4">
+                                            <div className="text-sm font-bold text-slate-600 mb-2">배정할 개인 선택</div>
+                                            <div className="relative mb-2">
+                                                <input
+                                                    type="text"
+                                                    placeholder="이름/팀명 검색"
+                                                    value={assignmentWorkerSearch}
+                                                    onChange={(event) => setAssignmentWorkerSearch(event.target.value)}
+                                                    className="w-full pl-8 p-2 text-xs bg-slate-100 rounded-lg outline-none"
+                                                />
+                                                <FontAwesomeIcon
+                                                    icon={faSearch}
+                                                    className="absolute left-2.5 top-2.5 text-slate-400 text-xs"
+                                                />
+                                            </div>
+                                            {filteredAssignmentWorkerOptions.length === 0 ? (
+                                                <div className="text-xs text-slate-400">선택 가능한 개인이 없습니다.</div>
+                                            ) : (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-56 overflow-y-auto">
+                                                    {filteredAssignmentWorkerOptions.map((workerOption) => {
+                                                        const isSelected = selectedAssignmentWorkerId === workerOption.key;
+                                                        return (
+                                                            <button
+                                                                key={`assignment-worker-${workerOption.key}`}
+                                                                type="button"
+                                                                onClick={() => setSelectedAssignmentWorkerId(workerOption.key)}
+                                                                className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
+                                                                    isSelected
+                                                                        ? 'border-indigo-400 bg-indigo-50 text-indigo-800'
+                                                                        : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40'
+                                                                }`}
+                                                            >
+                                                                <div className="font-bold flex items-center gap-1.5">
+                                                                    <FontAwesomeIcon icon={faUser} className="text-[11px]" />
+                                                                    {workerOption.workerName}
+                                                                </div>
+                                                                <div className="text-[11px] text-slate-400 mt-0.5">
+                                                                    {workerOption.teamName}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 mb-1.5">입실일</label>
+                                        <label className="block text-xs font-bold text-slate-500 mb-1.5">배정 시작일</label>
                                         <input
                                             type="text"
                                             inputMode="numeric"
@@ -215,69 +342,6 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                     </div>
                                 </div>
 
-                                {selectedTeamId && (
-                                    <div className="bg-white rounded-xl border border-slate-200 p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <h5 className="text-sm font-bold text-slate-600">배정 인원 선택</h5>
-                                            <div className="relative w-52">
-                                                <input
-                                                    type="text"
-                                                    placeholder="이름 검색"
-                                                    value={workerSearch}
-                                                    onChange={(event) => setWorkerSearch(event.target.value)}
-                                                    className="w-full pl-8 p-1.5 text-xs bg-slate-100 rounded-lg outline-none"
-                                                />
-                                                <FontAwesomeIcon
-                                                    icon={faSearch}
-                                                    className="absolute left-2.5 top-2 text-slate-400 text-xs"
-                                                />
-                                            </div>
-                                        </div>
-                                        <div className="max-h-52 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-2">
-                                            {filteredWorkers.map((worker) => {
-                                                const workerId = worker.id || '';
-                                                const isActive = selectedWorkerIds.includes(workerId);
-                                                const isAlreadyHere = activeAssignments.some(
-                                                    (assignment) =>
-                                                        assignment.workerId === worker.id &&
-                                                        assignment.id !== editingAssignmentId
-                                                );
-
-                                                return (
-                                                    <label
-                                                        key={worker.id}
-                                                        className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer border transition-all ${
-                                                            isAlreadyHere
-                                                                ? 'bg-slate-100 border-transparent opacity-50 cursor-not-allowed'
-                                                                : isActive
-                                                                  ? 'bg-indigo-50 border-indigo-200 shadow-sm'
-                                                                  : 'border-slate-100 hover:bg-slate-50'
-                                                        }`}
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={isActive}
-                                                            disabled={isAlreadyHere}
-                                                            onChange={() => worker.id && handleToggleWorker(worker.id)}
-                                                            className="rounded text-indigo-600 focus:ring-indigo-500"
-                                                        />
-                                                        <span className={`text-sm ${isActive ? 'font-bold text-indigo-900' : 'text-slate-600'}`}>
-                                                            {worker.name}
-                                                        </span>
-                                                        {isAlreadyHere && (
-                                                            <span className="text-[10px] text-slate-400 ml-auto">입실중</span>
-                                                        )}
-                                                    </label>
-                                                );
-                                            })}
-                                            {filteredWorkers.length === 0 && (
-                                                <div className="col-span-2 text-center py-4 text-xs text-slate-400">
-                                                    선택 가능한 작업자가 없습니다.
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
                             </div>
                         </div>
                     </section>
@@ -491,9 +555,9 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                     <button
                         type="button"
                         onClick={handleAssign}
-                        disabled={submitting || selectedWorkerIds.length === 0}
+                        disabled={submitting || !canSaveAssignment}
                         className={`px-6 py-2.5 rounded-xl font-bold text-white transition shadow-lg flex items-center gap-2 text-sm ${
-                            submitting || selectedWorkerIds.length === 0
+                            submitting || !canSaveAssignment
                                 ? 'bg-emerald-300 cursor-not-allowed shadow-none'
                                 : editingAssignmentId
                                   ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200'

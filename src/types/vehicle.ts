@@ -46,9 +46,9 @@ export interface Vehicle {
     currentAssigneeName?: string; // Display Name for Grid
 
     // Billing target can differ from physical assignment.
-    billingTargetId?: string;
-    billingTargetType?: VehicleAssigneeType;
-    billingTargetName?: string;
+    billingTargetId?: string | null;
+    billingTargetType?: VehicleAssigneeType | null;
+    billingTargetName?: string | null;
 
     memo?: string;
 

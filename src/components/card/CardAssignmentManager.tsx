@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRightFromBracket, faCreditCard, faPenToSquare, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { faArrowRightFromBracket, faCreditCard, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { format, subDays } from 'date-fns';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { manpowerService, Worker } from '../../services/manpowerService';
@@ -19,7 +19,6 @@ interface CardAssignmentManagerProps {
     initialCardId?: string | null;
     selectableTeams?: Team[]; // Optional: if provided, use this list instead of filtering from context
     onRefresh: () => void;
-    onEditCard: (card: Card) => void;
 }
 
 const toDateInputValue = (d: Date): string => {
@@ -37,8 +36,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     loading,
     initialCardId,
     selectableTeams,
-    onRefresh,
-    onEditCard
+    onRefresh
 }) => {
     const { teams: allTeams } = useMasterData();
 
@@ -101,11 +99,6 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         if (!selectedTeamId) return workers;
         return workers.filter((w) => w.teamId === selectedTeamId);
     }, [workers, selectedTeamId]);
-
-    useEffect(() => {
-        if (!initialCardId) return;
-        setSelectedCardId(String(initialCardId));
-    }, [initialCardId]);
 
     useEffect(() => {
         if (mode !== 'WORKER') return;
@@ -231,8 +224,32 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         }
         if (card.currentAssigneeType === 'WORKER') {
             setMode('WORKER');
+            if (card.currentAssigneeId) {
+                setSelectedWorkerId(card.currentAssigneeId);
+                const assignedWorker = workers.find((worker) => String(worker.id) === String(card.currentAssigneeId));
+                if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
+            }
         }
     };
+
+    const handleCardSelect = (cardId: string) => {
+        const card = cardsById.get(String(cardId));
+        if (card) {
+            handleQuickPick(card);
+            return;
+        }
+        setSelectedCardId(cardId);
+    };
+
+    useEffect(() => {
+        if (!initialCardId) return;
+        const initialCard = cardsById.get(String(initialCardId));
+        if (initialCard) {
+            handleQuickPick(initialCard);
+            return;
+        }
+        setSelectedCardId(String(initialCardId));
+    }, [initialCardId, cardsById, workers]);
 
     if (loading) {
         return (
@@ -293,7 +310,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                 <select
                                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                     value={selectedCardId}
-                                    onChange={(e) => setSelectedCardId(e.target.value)}
+                                    onChange={(e) => handleCardSelect(e.target.value)}
                                 >
                                     <option value="">카드를 선택하세요</option>
                                     {cards
@@ -387,19 +404,12 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
 
                         {selectedCard && (
                             <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <div className="flex items-center justify-between">
+                                <div>
                                     <div>
                                         <div className="text-xs text-slate-500 font-bold">선택 카드</div>
                                         <div className="text-lg font-extrabold text-slate-900">{selectedCard.name} ({selectedCard.last4})</div>
                                         <div className="text-sm text-slate-500 font-medium mt-1">{selectedCard.issuer} · {selectedCard.maskedNumber}</div>
                                     </div>
-                                    <button
-                                        onClick={() => onEditCard(selectedCard)}
-                                        className="px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 flex items-center gap-2"
-                                    >
-                                        <FontAwesomeIcon icon={faPenToSquare} />
-                                        수정
-                                    </button>
                                 </div>
                             </div>
                         )}

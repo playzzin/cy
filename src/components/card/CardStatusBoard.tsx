@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-    faBan, faChartPie, faCheckCircle, faClock, faCreditCard, faLock,
-    faUser, faUsers, faList, faTh, faPlus, faFileInvoiceDollar, faTrash
+    faBan, faCheckCircle, faClock, faCreditCard, faUser, faUsers,
+    faList, faTh, faPlus, faTrash, faPenToSquare, faFileInvoiceDollar
 } from '@fortawesome/free-solid-svg-icons';
 import { Worker, manpowerService } from '../../services/manpowerService';
 
-import { Card } from '../../types/card';
+import { Card, CardAssigneeType } from '../../types/card';
 import { Team } from '../../services/teamService';
 import { iconMap } from '../../constants/iconMap';
 
@@ -21,7 +21,7 @@ interface CardStatusBoardProps {
     loading: boolean;
     onEdit: (card: Card) => void;
     onAssign: (card: Card) => void;
-    onOpenBilling: (card: Card) => void;
+    onBillingTargetAssign?: (card: Card) => void;
     onDelete: (card: Card) => void;
 }
 
@@ -37,7 +37,7 @@ const hexToRgba = (hex: string, alpha: number) => {
     return `rgba(${r},${g},${b},${alpha})`;
 };
 
-export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onOpenBilling, onDelete }) => {
+export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams = [], loading, onEdit, onAssign, onBillingTargetAssign, onDelete }) => {
     const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
     const [workers, setWorkers] = useState<Worker[]>([]);
 
@@ -108,9 +108,42 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return <span className="text-slate-500 text-xs">-</span>;
     };
 
-    const getBillingTargetTypeLabel = (card: Card) => {
-        if (!card.currentAssigneeName) return null;
-        return card.currentAssigneeType === 'TEAM' ? '팀' : '개인';
+    const getResolvedBillingTargetName = (card: Card) => {
+        return card.billingTargetType && card.billingTargetId
+            ? (card.billingTargetName ?? '')
+            : (card.currentAssigneeName ?? '');
+    };
+
+    const getResolvedBillingTargetType = (card: Card) => {
+        return card.billingTargetType && card.billingTargetId
+            ? card.billingTargetType
+            : card.currentAssigneeType;
+    };
+
+    const getResolvedBillingTargetTypeLabel = (card: Card) => {
+        const name = getResolvedBillingTargetName(card);
+        if (!name) return null;
+        return getResolvedBillingTargetType(card) === 'TEAM' ? '팀' : '개인';
+    };
+
+    const getTargetTeamInfo = (type?: CardAssigneeType | null, name?: string | null) => {
+        if (!type || !name) return undefined;
+        return type === 'TEAM' ? teamInfoMap.get(name) : workerTeamMap.get(name);
+    };
+
+    const getTargetBadgeStyle = (type?: CardAssigneeType | null, teamInfo?: TeamInfo) => {
+        const color = teamInfo?.color;
+        if (color) {
+            return {
+                backgroundColor: hexToRgba(color, 0.1),
+                color,
+                border: `1px solid ${hexToRgba(color, 0.2)}`
+            };
+        }
+
+        return type === 'WORKER'
+            ? { backgroundColor: '#eef2ff', color: '#4338ca', border: '1px solid #e0e7ff' }
+            : { backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' };
     };
 
     if (loading) {
@@ -238,7 +271,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">배정</th>
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">청구대상</th>
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">메모</th>
-                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-24"></th>
+                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-32"></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -251,13 +284,16 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             : undefined);
 
                                     const tc = teamInfo?.color;
-                                    const billingTargetTypeLabel = getBillingTargetTypeLabel(card);
+                                    const billingTargetTypeLabel = getResolvedBillingTargetTypeLabel(card);
+                                    const billingTargetName = getResolvedBillingTargetName(card);
+                                    const billingTargetType = getResolvedBillingTargetType(card);
+                                    const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
+                                    const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
 
                                     return (
                                         <tr
                                             key={card.id}
-                                            onClick={() => onEdit(card)}
-                                            className="hover:bg-indigo-50/40 cursor-pointer transition-colors group"
+                                            className="hover:bg-indigo-50/40 transition-colors group"
                                             style={tc ? { borderLeft: `3px solid ${tc}` } : undefined}
                                         >
                                             {/* ... (existing td cells except Assignee) */}
@@ -290,8 +326,10 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
 
                                             <td className="px-4 py-3">
                                                 {card.currentAssigneeName ? (
-                                                    <span
-                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold"
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); onAssign(card); }}
+                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold transition-transform hover:-translate-y-0.5"
                                                         style={tc ? {
                                                             backgroundColor: hexToRgba(tc, 0.1),
                                                             color: tc,
@@ -310,7 +348,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                         />
                                                         {card.currentAssigneeName}
                                                         {/* 개인이지만 소속팀이 있다면 툴팁 등으로 표시 가능 */}
-                                                    </span>
+                                                    </button>
                                                 ) : (
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); onAssign(card); }}
@@ -322,36 +360,46 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                 )}
                                             </td>
                                             <td className="px-4 py-3">
-                                                {card.currentAssigneeName && billingTargetTypeLabel ? (
-                                                    <span
-                                                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-bold"
-                                                        style={card.currentAssigneeType === 'TEAM'
-                                                            ? (tc ? {
-                                                                backgroundColor: hexToRgba(tc, 0.1),
-                                                                color: tc,
-                                                                border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                            } : {
-                                                                backgroundColor: '#f1f5f9',
-                                                                color: '#475569',
-                                                                border: '1px solid #e2e8f0',
-                                                            })
-                                                            : {
-                                                                backgroundColor: '#eef2ff',
-                                                                color: '#4338ca',
-                                                                border: '1px solid #e0e7ff',
+                                                <div className="flex items-center gap-2">
+                                                    {billingTargetName && billingTargetTypeLabel ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                onBillingTargetAssign?.(card);
                                                             }}
+                                                            disabled={!onBillingTargetAssign}
+                                                            className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md px-2 py-1 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                                                            style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
+                                                            title={`${hasExplicitBillingTarget ? '별도 청구대상' : '배정과 동일'} · ${billingTargetName}`}
+                                                        >
+                                                            <FontAwesomeIcon
+                                                                icon={billingTargetType === 'TEAM'
+                                                                    ? getTeamFaIcon(billingTargetTeamInfo?.icon)
+                                                                    : faUser}
+                                                                className="text-[10px]"
+                                                            />
+                                                            <span className="truncate">
+                                                                {hasExplicitBillingTarget ? '' : '동일 · '}{billingTargetTypeLabel} · {billingTargetName}
+                                                            </span>
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-xs font-bold text-slate-300">미지정</span>
+                                                    )}
+                                                    {!hasExplicitBillingTarget && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onBillingTargetAssign?.(card);
+                                                        }}
+                                                        className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        disabled={!onBillingTargetAssign}
                                                     >
-                                                        <FontAwesomeIcon
-                                                            icon={card.currentAssigneeType === 'TEAM'
-                                                                ? getTeamFaIcon(teamInfo?.icon)
-                                                                : faUser}
-                                                            className="text-[10px]"
-                                                        />
-                                                        {billingTargetTypeLabel} · {card.currentAssigneeName}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-xs text-slate-300">-</span>
-                                                )}
+                                                        배정
+                                                    </button>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3 text-xs text-slate-400 max-w-[150px] truncate" title={card.memo}>
                                                 {card.memo || '-'}
@@ -359,18 +407,18 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             <td className="px-4 py-3 text-center">
                                                 <div className="flex items-center justify-center gap-1">
                                                     <button
+                                                        onClick={(e) => { e.stopPropagation(); onEdit(card); }}
+                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                                                        title="카드 정보 수정"
+                                                    >
+                                                        <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
+                                                    </button>
+                                                    <button
                                                         onClick={(e) => { e.stopPropagation(); onAssign(card); }}
                                                         className="w-7 h-7 rounded-md bg-slate-50 hover:bg-green-50 flex items-center justify-center text-slate-400 hover:text-green-500 transition-colors"
                                                         title="배정 관리"
                                                     >
                                                         <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); onOpenBilling(card); }}
-                                                        className="w-7 h-7 rounded-md bg-slate-50 hover:bg-amber-50 flex items-center justify-center text-slate-400 hover:text-amber-600 transition-colors"
-                                                        title="청구 관리"
-                                                    >
-                                                        <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
                                                     </button>
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); onDelete(card); }}
@@ -412,13 +460,16 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                 : undefined);
 
                         const tc = teamInfo?.color;
-                        const billingTargetTypeLabel = getBillingTargetTypeLabel(card);
+                        const billingTargetTypeLabel = getResolvedBillingTargetTypeLabel(card);
+                        const billingTargetName = getResolvedBillingTargetName(card);
+                        const billingTargetType = getResolvedBillingTargetType(card);
+                        const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
+                        const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
 
                         return (
                             <div
                                 key={card.id}
-                                className="group bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-1 transition-all cursor-pointer relative overflow-hidden"
-                                onClick={() => onEdit(card)}
+                                className="group bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-1 transition-all relative overflow-hidden"
                                 style={{
                                     borderLeftWidth: tc ? '4px' : undefined,
                                     borderLeftColor: tc || undefined,
@@ -433,7 +484,17 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                 <div className="p-6">
                                     <div className="flex justify-between items-start mb-3">
                                         {getStatusBadge(card.status)}
-                                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="flex gap-2 opacity-100 transition-opacity">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onEdit(card);
+                                                }}
+                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors"
+                                                title="카드 정보 수정"
+                                            >
+                                                <FontAwesomeIcon icon={faPenToSquare} className="text-xs" />
+                                            </button>
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -444,16 +505,19 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             >
                                                 <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
                                             </button>
+                                            {!hasExplicitBillingTarget && (
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    onOpenBilling(card);
+                                                    onBillingTargetAssign?.(card);
                                                 }}
-                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-amber-100 flex items-center justify-center text-slate-400 hover:text-amber-700 transition-colors"
-                                                title="청구 관리"
+                                                disabled={!onBillingTargetAssign}
+                                                className="w-8 h-8 rounded-full bg-slate-50 hover:bg-emerald-100 flex items-center justify-center text-slate-400 hover:text-emerald-700 transition-colors disabled:opacity-50"
+                                                title="청구대상 배정"
                                             >
                                                 <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
                                             </button>
+                                            )}
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -470,8 +534,10 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     {/* 배정 뱃지 (통합) */}
                                     {card.currentAssigneeName && (
                                         <div className="mb-3">
-                                            <span
-                                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold"
+                                            <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); onAssign(card); }}
+                                                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold transition-transform hover:-translate-y-0.5"
                                                 style={tc ? {
                                                     backgroundColor: hexToRgba(tc, 0.1),
                                                     color: tc,
@@ -489,7 +555,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     className="text-xs"
                                                 />
                                                 {card.currentAssigneeName}
-                                            </span>
+                                            </button>
                                         </div>
                                     )}
 
@@ -502,39 +568,46 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     </p>
 
                                     <div className="space-y-3 pt-4 border-t border-slate-100">
-                                        <div className="flex justify-between items-center text-sm">
+                                        <div className="flex items-center justify-between gap-2 text-sm">
                                             <span className="text-slate-400 font-medium text-xs">청구 대상</span>
-                                            {card.currentAssigneeName && billingTargetTypeLabel ? (
-                                                <span
-                                                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-bold"
-                                                    style={card.currentAssigneeType === 'TEAM'
-                                                        ? (tc ? {
-                                                            backgroundColor: hexToRgba(tc, 0.1),
-                                                            color: tc,
-                                                            border: `1px solid ${hexToRgba(tc, 0.2)}`,
-                                                        } : {
-                                                            backgroundColor: '#f1f5f9',
-                                                            color: '#475569',
-                                                            border: '1px solid #e2e8f0',
-                                                        })
-                                                        : {
-                                                            backgroundColor: '#eef2ff',
-                                                            color: '#4338ca',
-                                                            border: '1px solid #e0e7ff',
-                                                        }}
+                                            {billingTargetName && billingTargetTypeLabel ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onBillingTargetAssign?.(card);
+                                                    }}
+                                                    disabled={!onBillingTargetAssign}
+                                                    className="inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-0.5 text-xs font-bold transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    style={getTargetBadgeStyle(billingTargetType, billingTargetTeamInfo)}
+                                                    title={`${hasExplicitBillingTarget ? '별도 청구대상' : '배정과 동일'} · ${billingTargetName}`}
                                                 >
                                                     <FontAwesomeIcon
-                                                        icon={card.currentAssigneeType === 'TEAM'
-                                                            ? getTeamFaIcon(teamInfo?.icon)
+                                                        icon={billingTargetType === 'TEAM'
+                                                            ? getTeamFaIcon(billingTargetTeamInfo?.icon)
                                                             : faUser}
                                                         className="text-[10px]"
                                                     />
-                                                    {billingTargetTypeLabel} · {card.currentAssigneeName}
-                                                </span>
+                                                    <span className="truncate">{hasExplicitBillingTarget ? '' : '동일 · '}{billingTargetTypeLabel} · {billingTargetName}</span>
+                                                </button>
                                             ) : (
                                                 <span className="text-xs text-slate-300">미지정</span>
                                             )}
                                         </div>
+
+                                        {!hasExplicitBillingTarget && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onBillingTargetAssign?.(card);
+                                            }}
+                                            disabled={!onBillingTargetAssign}
+                                            className="w-full rounded-lg border border-emerald-100 bg-emerald-50 py-2 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                            청구대상 배정
+                                        </button>
+                                        )}
 
                                         <div className="flex justify-between items-center text-sm">
                                             <span className="text-slate-400 font-medium text-xs">번호</span>

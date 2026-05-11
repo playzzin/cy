@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faGasPump, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { vehicleService } from '../../services/vehicleService';
 import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
 import { Team } from '../../services/teamService';
@@ -170,15 +170,13 @@ interface VehicleMonthlyLedgerProps {
     teams?: Team[];
     teamFilterId?: string;
     loadingVehicles: boolean;
-    onOpenExpenseLog: (vehicle: Vehicle) => void;
 }
 
 export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     vehicles,
     teams = [],
     teamFilterId = '',
-    loadingVehicles,
-    onOpenExpenseLog
+    loadingVehicles
 }) => {
     const [currentDate, setCurrentDate] = useState(new Date());
     const [yearMonth, setYearMonth] = useState('');
@@ -867,7 +865,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <tr>
                                         <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
-                                                <FontAwesomeIcon icon={faGasPump} className="text-4xl text-slate-300" />
+                                                <FontAwesomeIcon icon={faCar} className="text-4xl text-slate-300" />
                                                 <p>차량 목록이 없거나 불러올 수 없습니다.</p>
                                             </div>
                                         </td>

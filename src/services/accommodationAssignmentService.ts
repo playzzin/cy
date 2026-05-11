@@ -209,7 +209,7 @@ const SourceSchema = z.string().refine(
 );
 
 const AssignmentSchema = z.object({
-    workerId: z.string().min(1),
+    workerId: z.string().optional().default(''),
     workerName: z.string().optional(),
 
     teamId: z.string().optional(),
@@ -237,6 +237,23 @@ const isActive = (item: AccommodationAssignment): boolean => {
     return (item.status || 'active') === 'active' && !item.endDate;
 };
 
+const shouldStoreWithoutWorker = (item: AssignmentInput): boolean => {
+    return item.source === 'team' && !String(item.workerId ?? '').trim();
+};
+
+const validateAssignmentTarget = (item: AssignmentInput): void => {
+    if (shouldStoreWithoutWorker(item)) {
+        if (!String(item.teamId ?? '').trim() && !String(item.teamName ?? '').trim()) {
+            throw new Error('팀 배정에는 팀 정보가 필요합니다.');
+        }
+        return;
+    }
+
+    if (!String(item.workerId ?? '').trim()) {
+        throw new Error('개인 배정에는 작업자 정보가 필요합니다.');
+    }
+};
+
 const buildEndDateAsDayBefore = (startDate: string): string => {
     const dayBefore = subDays(parseISO(startDate), 1);
     return format(dayBefore, 'yyyy-MM-dd');
@@ -253,8 +270,10 @@ export const accommodationAssignmentService = {
             status: assignment.status ?? 'active'
         });
 
-        const workerUuid = await resolveWorkerUuid(String(parsed.workerId));
-        if (!workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
+        validateAssignmentTarget(parsed);
+        const storeWithoutWorker = shouldStoreWithoutWorker(parsed);
+        const workerUuid = storeWithoutWorker ? null : await resolveWorkerUuid(String(parsed.workerId));
+        if (!storeWithoutWorker && !workerUuid) throw new Error('작업자를 찾을 수 없습니다.');
         const teamUuid = parsed.teamId ? await resolveTeamUuid(String(parsed.teamId)) : null;
         const accommodationUuid = await resolveAccommodationUuid(String(parsed.accommodationId));
         if (!accommodationUuid) throw new Error('?숈냼瑜?李얠쓣 ???놁뒿?덈떎.');
@@ -262,10 +281,10 @@ export const accommodationAssignmentService = {
         const legacyId = (assignment as any)?.legacyId;
         const res = await createAccommodationAssignment({
             legacyId: legacyId ? String(legacyId) : null,
-            workerId: workerUuid,
+            workerId: storeWithoutWorker ? null : workerUuid,
             teamId: teamUuid ?? null,
             accommodationId: accommodationUuid,
-            workerName: parsed.workerName ?? null,
+            workerName: storeWithoutWorker ? null : (parsed.workerName ?? null),
             teamName: parsed.teamName ?? null,
             accommodationName: parsed.accommodationName ?? null,
             status: parsed.status ?? 'active',
@@ -295,6 +314,10 @@ export const accommodationAssignmentService = {
                     status: a.status ?? 'active'
                 })
             )
+            .map((item) => {
+                validateAssignmentTarget(item);
+                return item;
+            })
             .map((item) => omitUndefined(item as unknown as Record<string, unknown>));
 
         const ids: string[] = [];
@@ -310,8 +333,9 @@ export const accommodationAssignmentService = {
         for (let i = 0; i < parsed.length; i += chunkSize) {
             const chunk = parsed.slice(i, i + chunkSize);
             const results = await Promise.all(chunk.map(async (item) => {
-                const workerUuid = await resolveWorkerUuid(String(item.workerId));
-                if (!workerUuid) return null;
+                const storeWithoutWorker = item.source === 'team' && !String(item.workerId ?? '').trim();
+                const workerUuid = storeWithoutWorker ? null : await resolveWorkerUuid(String(item.workerId));
+                if (!storeWithoutWorker && !workerUuid) return null;
                 const teamUuid = item.teamId ? await resolveTeamUuid(String(item.teamId)) : null;
                 const accommodationUuid = await resolveAccommodationUuid(String(item.accommodationId));
                 if (!accommodationUuid) return null;
@@ -321,7 +345,7 @@ export const accommodationAssignmentService = {
                     workerId: workerUuid,
                     teamId: teamUuid ?? null,
                     accommodationId: accommodationUuid,
-                    workerName: item.workerName ?? null,
+                    workerName: storeWithoutWorker ? null : (item.workerName ?? null),
                     teamName: item.teamName ?? null,
                     accommodationName: item.accommodationName ?? null,
                     status: item.status ?? 'active',

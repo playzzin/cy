@@ -24,7 +24,6 @@ import { vehicleService } from '../../services/vehicleService';
 import { cardService } from '../../services/cardService';
 import { VehicleForm } from '../../components/vehicle/VehicleForm';
 import { VehicleAssignment } from '../../components/vehicle/VehicleAssignment';
-import { VehicleExpenseLog } from '../../components/vehicle/VehicleExpenseLog';
 import { VehicleBillingManager } from '../../components/vehicle/VehicleBillingManager';
 import { VehicleMonthlyLedger } from '../../components/vehicle/VehicleMonthlyLedger';
 import { VehicleRegistrySheet } from '../../components/vehicle/VehicleRegistrySheet';
@@ -92,7 +91,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
     const [isVehicleFormOpen, setIsVehicleFormOpen] = useState<boolean>(false);
     const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
     const [assigningVehicle, setAssigningVehicle] = useState<Vehicle | null>(null);
-    const [expenseVehicle, setExpenseVehicle] = useState<Vehicle | null>(null);
 
     const [isCardFormOpen, setIsCardFormOpen] = useState<boolean>(false);
     const [editingCard, setEditingCard] = useState<Card | null>(null);
@@ -522,7 +520,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                         teams={teams}
                         teamFilterId={selectedTeamId}
                         loadingVehicles={loadingMaster}
-                        onOpenExpenseLog={(vehicle) => setExpenseVehicle(vehicle)}
                     />
                 )}
 
@@ -532,7 +529,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                         loading={loadingMaster}
                         onEdit={openVehicleEdit}
                         onAssign={(vehicle) => setAssigningVehicle(vehicle)}
-                        onManageExpenses={(vehicle) => setExpenseVehicle(vehicle)}
                     />
                 )}
 
@@ -613,16 +609,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                 />
             )}
 
-            {expenseVehicle && (
-                <VehicleExpenseLog
-                    vehicle={expenseVehicle}
-                    onClose={() => {
-                        setExpenseVehicle(null);
-                        refreshAll();
-                    }}
-                />
-            )}
-
             {isCardAssignmentModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
                     <div className="relative max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
@@ -646,11 +632,6 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                                 initialCardId={assignmentInitialCardId}
                                 selectableTeams={selectableTeams}
                                 onRefresh={refreshAll}
-                                onEditCard={(card) => {
-                                    setIsCardAssignmentModalOpen(false);
-                                    setAssignmentInitialCardId(null);
-                                    openCardEdit(card);
-                                }}
                             />
                         </div>
                     </div>

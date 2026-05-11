@@ -5,11 +5,12 @@ import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { CardForm } from '../../components/card/CardForm';
 import { CardAssignmentManager } from '../../components/card/CardAssignmentManager';
+import { CardBillingTargetManager } from '../../components/card/CardBillingTargetManager';
 import { CardBillingManager } from '../../components/card/CardBillingManager';
 import { CardStatusBoard } from '../../components/card/CardStatusBoard';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes, faFileInvoiceDollar } from '@fortawesome/free-solid-svg-icons';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 
 interface CardManagerPageProps {
@@ -37,6 +38,8 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     const [editingCard, setEditingCard] = useState<Card | null>(null);
     const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
     const [assignmentInitialCardId, setAssignmentInitialCardId] = useState<string | null>(null);
+    const [isBillingTargetModalOpen, setIsBillingTargetModalOpen] = useState(false);
+    const [billingTargetInitialCardId, setBillingTargetInitialCardId] = useState<string | null>(null);
 
     // 데이터 로드 함수
     const loadData = async () => {
@@ -111,6 +114,11 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
         setIsAssignmentModalOpen(true);
     };
 
+    const openBillingTargetCard = (card: Card) => {
+        setBillingTargetInitialCardId(String(card.id));
+        setIsBillingTargetModalOpen(true);
+    };
+
     const handleDeleteCard = async (card: Card) => {
         const label = card.name || card.maskedNumber || '선택한 카드';
         const ok = window.confirm(`${label} 카드를 삭제하시겠습니까?\n사용/청구 이력 보존을 위해 카드 상태는 폐쇄로 변경됩니다.`);
@@ -125,6 +133,10 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
             if (assignmentInitialCardId === String(card.id)) {
                 setAssignmentInitialCardId(null);
                 setIsAssignmentModalOpen(false);
+            }
+            if (billingTargetInitialCardId === String(card.id)) {
+                setBillingTargetInitialCardId(null);
+                setIsBillingTargetModalOpen(false);
             }
             handleRefresh();
         } catch (error) {
@@ -164,6 +176,21 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                         title="새로고침"
                     >
                         <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setActiveTab('status');
+                            setShowBillingPanel((prev) => !prev);
+                        }}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all border ${
+                            showBillingPanel
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                        <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                        <span>{showBillingPanel ? '청구관리 닫기' : '청구관리'}</span>
                     </button>
                     <button
                         onClick={openCreateCard}
@@ -243,9 +270,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                             loading={loading}
                             onEdit={openEditCard}
                             onAssign={openAssignCard}
-                            onOpenBilling={() => {
-                                setShowBillingPanel(true);
-                            }}
+                            onBillingTargetAssign={openBillingTargetCard}
                             onDelete={handleDeleteCard}
                         />
 
@@ -297,10 +322,31 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                                 initialCardId={assignmentInitialCardId}
                                 selectableTeams={selectableTeams}
                                 onRefresh={handleRefresh}
-                                onEditCard={(card) => {
-                                    setIsAssignmentModalOpen(false);
-                                    openEditCard(card);
-                                }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isBillingTargetModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-y-auto relative animate-fade-in-up">
+                        <div className="sticky top-0 z-10 bg-white px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                            <h2 className="text-xl font-bold text-slate-800">카드 청구대상 배정</h2>
+                            <button
+                                onClick={() => setIsBillingTargetModalOpen(false)}
+                                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors"
+                            >
+                                <FontAwesomeIcon icon={faTimes} />
+                            </button>
+                        </div>
+                        <div className="p-6">
+                            <CardBillingTargetManager
+                                cards={cards}
+                                loading={loading}
+                                initialCardId={billingTargetInitialCardId}
+                                selectableTeams={selectableTeams}
+                                onRefresh={handleRefresh}
                             />
                         </div>
                     </div>

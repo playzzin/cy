@@ -35,14 +35,25 @@ export const cardBillingService = {
 
         let assignedTeamId = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeId : undefined;
         let assignedTeamName = card.currentAssigneeType === 'TEAM' ? card.currentAssigneeName : undefined;
+        let workers: Awaited<ReturnType<typeof manpowerService.getWorkers>> = [];
+
+        try {
+            workers = await manpowerService.getWorkers();
+        } catch (error) {
+            console.warn('Failed to resolve card worker data for billing:', error);
+        }
+
+        const findWorker = (workerId?: string) => {
+            if (!workerId) return undefined;
+            return workers.find((w) => (
+                String(w.id ?? '') === String(workerId) ||
+                String(w.legacyId ?? '') === String(workerId)
+            ));
+        };
 
         if (card.currentAssigneeType === 'WORKER' && card.currentAssigneeId) {
             try {
-                const workers = await manpowerService.getWorkers();
-                const worker = workers.find((w) => (
-                    String(w.id ?? '') === String(card.currentAssigneeId) ||
-                    String(w.legacyId ?? '') === String(card.currentAssigneeId)
-                ));
+                const worker = findWorker(card.currentAssigneeId);
                 assignedTeamId = worker?.teamId || assignedTeamId;
                 assignedTeamName = worker?.teamName || assignedTeamName;
             } catch (error) {
@@ -50,18 +61,30 @@ export const cardBillingService = {
             }
         }
 
+        const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
+        const targetType = hasExplicitBillingTarget ? card.billingTargetType : card.currentAssigneeType;
+        const targetId = (hasExplicitBillingTarget ? card.billingTargetId : card.currentAssigneeId) ?? undefined;
+        const targetName = (hasExplicitBillingTarget ? card.billingTargetName : card.currentAssigneeName) ?? undefined;
+        const targetWorker = targetType === 'WORKER' ? findWorker(targetId) : undefined;
+
         const issuedToType: CardBillingIssuedToType | undefined =
-            card.currentAssigneeType === 'TEAM'
+            targetType === 'TEAM'
                 ? 'team'
-                : card.currentAssigneeType === 'WORKER'
+                : targetType === 'WORKER'
                     ? 'worker'
                     : undefined;
+        const billingTeamId = targetType === 'TEAM'
+            ? (targetId ?? undefined)
+            : (targetWorker?.teamId || assignedTeamId);
+        const billingTeamName = targetType === 'TEAM'
+            ? (targetName ?? undefined)
+            : (targetWorker?.teamName || assignedTeamName);
 
         const billingId = cardBillingService.buildBillingDocumentId({
             cardId: card.id,
-            teamId: assignedTeamId || 'unassigned',
+            teamId: billingTeamId || 'unassigned',
             issuedToType: issuedToType || 'team',
-            workerId: issuedToType === 'worker' ? card.currentAssigneeId : undefined,
+            workerId: issuedToType === 'worker' ? targetId : undefined,
             yearMonth
         });
 
@@ -72,14 +95,14 @@ export const cardBillingService = {
             cardLabel: `${card.name} (${card.last4})`,
             assignedTeamId,
             assignedTeamName,
-            teamId: assignedTeamId,
-            teamName: assignedTeamName,
+            teamId: billingTeamId,
+            teamName: billingTeamName,
             issuedToType,
-            issuedToWorkerId: issuedToType === 'worker' ? (card.currentAssigneeId ?? undefined) : undefined,
+            issuedToWorkerId: issuedToType === 'worker' ? (targetId ?? undefined) : undefined,
             issuedToWorkerName: issuedToType === 'team'
-                ? (assignedTeamName ?? undefined)
+                ? (billingTeamName ?? undefined)
                 : issuedToType === 'worker'
-                    ? (card.currentAssigneeName ?? undefined)
+                    ? (targetName ?? targetWorker?.name ?? undefined)
                     : undefined,
             variableCost,
             totalAmount: variableCost,
