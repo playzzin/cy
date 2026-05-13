@@ -86,6 +86,26 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
     // Add mappings for parent menus if needed, or handle logic to show parent if any child is visible
 };
 
+const PATH_PERMISSION_MAP: { [key: string]: string } = {
+    '/memos': 'smart-memo',
+};
+
+const normalizeRole = (role: unknown): string => String(role || '').trim();
+
+const isAdminRole = (role: unknown): boolean => {
+    const normalized = normalizeRole(role).toLowerCase();
+    return ['admin', 'super_admin', 'administrator', 'owner'].includes(normalized)
+        || [UserRole.ADMIN, '사장', '실장'].includes(normalizeRole(role));
+};
+
+const getPermissionId = (itemText: string, itemPath?: string): string | undefined => {
+    const textPermission = MENU_PERMISSION_MAP[itemText];
+    if (textPermission) return textPermission;
+
+    const normalizedPath = typeof itemPath === 'string' ? itemPath.split('?')[0] : '';
+    return normalizedPath ? PATH_PERMISSION_MAP[normalizedPath] : undefined;
+};
+
 const DEFAULT_SUBMENU_ICON = 'fa-circle';
 
 const getMenuDisplayText = (text: string): string => {
@@ -194,16 +214,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         };
     }, [currentUser]);
 
-    const hasPermission = (itemText: string, itemRoles?: string[]): boolean => {
+    const hasPermission = (itemText: string, itemRoles?: string[], itemPath?: string): boolean => {
+        if (isAdminRole(userRole)) return true;
+
         // 1. Dynamic Check (Priority 1)
         if (itemRoles && itemRoles.length > 0) {
-            // Admin bypass (optional)
-            if (userRole === 'admin') return true;
             return itemRoles.includes(userRole);
         }
 
         // 2. Legacy Check (Priority 2)
-        const permissionId = MENU_PERMISSION_MAP[itemText];
+        const permissionId = getPermissionId(itemText, itemPath);
         if (!permissionId) return true;
 
         return rolePermissionService.hasAccess(userRole, permissionId);
@@ -275,7 +295,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             // Filter sub-items
             const filteredSub = item.sub.filter((subItem: string | MenuItem) => {
                 if (typeof subItem === 'string') {
-                    return hasPermission(subItem);
+                    return hasPermission(subItem, undefined, menuPaths[subItem]);
                 } else {
                     // Object Item
                     const menuItem = subItem as MenuItem;
@@ -284,10 +304,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                     if (menuItem.sub && menuItem.sub.length > 0) {
                         const filteredNested = menuItem.sub.filter((nested: string | MenuItem) => {
                             if (typeof nested === 'string') {
-                                return hasPermission(nested);
+                                return hasPermission(nested, undefined, menuPaths[nested]);
                             } else {
                                 // Nested Object Item
-                                return hasPermission(nested.text, nested.roles);
+                                return hasPermission(nested.text, nested.roles, nested.path || menuPaths[nested.text]);
                             }
                         });
                         // If children exist, check if any remain
@@ -295,7 +315,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     }
 
                     // If no children (or empty array), treat as Leaf Link (Object format)
-                    return hasPermission(menuItem.text, menuItem.roles);
+                    return hasPermission(menuItem.text, menuItem.roles, menuItem.path || menuPaths[menuItem.text]);
                 }
             });
 
@@ -303,7 +323,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
 
         // Single item
-        return hasPermission(item.text, item.roles) ? item : null;
+        return hasPermission(item.text, item.roles, item.path || menuPaths[item.text]) ? item : null;
     }).filter(Boolean);
 
     const finalMenu = [...filteredMenu];
@@ -629,7 +649,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                             nestedUniqueKey = `nested-leaf-${nestedItem}`;
                                                                             const path = menuPaths[nestedItem];
                                                                             const isSubActive = isActiveCheck(path);
-                                                                            if (!hasPermission(nestedItem)) return null;
+                                                                            if (!hasPermission(nestedItem, undefined, path)) return null;
 
                                                                             return (
                                                                                 <li key={nestedUniqueKey}>
@@ -672,7 +692,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                                             if (!nestedObj.sub || nestedObj.sub.length === 0) {
                                                                                 const linkPath = nestedObj.path || menuPaths[nestedObj.text];
                                                                                 const isSubActive = isActiveCheck(linkPath);
-                                                                                if (!hasPermission(nestedObj.text)) return null;
+                                                                                if (!hasPermission(nestedObj.text, nestedObj.roles, linkPath)) return null;
                                                                                 return (
                                                                                     <li key={nestedUniqueKey}>
                                                                                         <a
@@ -860,7 +880,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                                 deepActiveColor = nested.activeColor || '#1abc9c';
                                             }
 
-                                            if (!hasPermission(deepPermission)) return null;
+                                            if (!hasPermission(deepPermission, typeof nested === 'string' ? undefined : nested.roles, deepPath)) return null;
 
                                             const isNestedActive = isActiveCheck(deepPath);
 

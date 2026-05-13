@@ -6,6 +6,34 @@ import { menuServiceV11 } from './menuServiceV11';
 
 const PERMISSION_DOC_ID = 'permissions';
 
+const normalizeRole = (role: unknown): string => String(role || '').trim();
+
+const isAdminRole = (role: unknown): boolean => {
+    const normalized = normalizeRole(role).toLowerCase();
+    return ['admin', 'super_admin', 'administrator', 'owner'].includes(normalized)
+        || [UserRole.ADMIN, '사장', '실장'].includes(normalizeRole(role));
+};
+
+const getSystemRole = (role: unknown): UserRole => {
+    const value = normalizeRole(role);
+    const normalized = value.toLowerCase();
+
+    if (isAdminRole(value)) return UserRole.ADMIN;
+    if (
+        ['manager', '매니저', '메니저', '대표'].includes(normalized)
+        || normalized.startsWith('manager')
+        || normalized.startsWith('매니저')
+        || normalized.startsWith('메니저')
+    ) {
+        return UserRole.MANAGER;
+    }
+    if (['user', 'general', UserRole.GENERAL].includes(normalized)) return UserRole.GENERAL;
+
+    return UserRole.GENERAL;
+};
+
+const uniqueKeys = (keys: string[]): string[] => Array.from(new Set(keys.filter(Boolean)));
+
 class RolePermissionService {
     private permissions: PermissionConfig = {};
     private listeners: ((permissions: PermissionConfig) => void)[] = [];
@@ -85,8 +113,8 @@ class RolePermissionService {
                 });
 
                 // Always ensure a safe fallback key
-                if (!merged['?쇰컲']) {
-                    merged['?쇰컲'] = {
+                if (!merged[UserRole.GENERAL]) {
+                    merged[UserRole.GENERAL] = {
                         ...(baseBySystemRole[UserRole.GENERAL] || {})
                     };
                 }
@@ -194,13 +222,26 @@ class RolePermissionService {
     }
 
     public hasAccess(userJobTitle: string | undefined, menuId: string): boolean {
-        const positionName = typeof userJobTitle === 'string' ? userJobTitle.trim() : '';
-        const key = positionName || '?쇰컲';
+        const positionName = normalizeRole(userJobTitle);
+        if (isAdminRole(positionName)) return true;
 
-        const roleConfig = this.permissions[key] || this.permissions['?쇰컲'];
-        if (roleConfig) return !!roleConfig[menuId];
+        const systemRole = getSystemRole(positionName);
+        const lookupKeys = uniqueKeys([
+            positionName,
+            systemRole,
+            systemRole === UserRole.MANAGER ? 'manager' : '',
+            systemRole === UserRole.GENERAL ? 'user' : '',
+            UserRole.GENERAL,
+        ]);
 
-        const fallback = DEFAULT_PERMISSIONS[UserRole.GENERAL];
+        for (const key of lookupKeys) {
+            const roleConfig = this.permissions[key];
+            if (roleConfig && Object.prototype.hasOwnProperty.call(roleConfig, menuId)) {
+                return !!roleConfig[menuId];
+            }
+        }
+
+        const fallback = DEFAULT_PERMISSIONS[systemRole] || DEFAULT_PERMISSIONS[UserRole.GENERAL];
         return fallback ? !!fallback[menuId] : false;
     }
 
