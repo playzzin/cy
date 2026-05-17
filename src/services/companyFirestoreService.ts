@@ -22,6 +22,7 @@ import { toast } from '../utils/swal';
 
 const COLLECTION_NAME = 'companies';
 const companyConverter = createConverter(CompanySchema);
+type CompanyManDayField = 'totalManDay' | 'clientTotalManDay' | 'constructorTotalManDay' | 'partnerTotalManDay';
 
 export const companyFirestoreService = {
     // 컬렉션 참조
@@ -107,10 +108,25 @@ export const companyFirestoreService = {
 
     // 누적 공수 증가/감소
     async incrementManDay(id: string, amount: number): Promise<void> {
+        await this.incrementManDayFields(id, {
+            totalManDay: amount,
+            clientTotalManDay: amount,
+        });
+    },
+
+    async incrementManDayFields(id: string, fields: Partial<Record<CompanyManDayField, number>>): Promise<void> {
         const docRef = doc(db, COLLECTION_NAME, id);
-        await updateDoc(docRef, {
-            totalManDay: increment(amount),
+        const updates: Record<string, unknown> = {
             updatedAt: serverTimestamp(),
+        };
+
+        Object.entries(fields).forEach(([field, amount]) => {
+            if (amount) updates[field] = increment(amount);
+        });
+
+        if (Object.keys(updates).length === 1) return;
+        await updateDoc(docRef, {
+            ...updates,
         });
     }
 };

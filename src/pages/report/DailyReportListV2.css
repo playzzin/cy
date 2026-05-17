@@ -322,6 +322,40 @@
     color: #222 !important;
 }
 
+.daily-report-workbook-table thead th.daily-report-col-date.sticky {
+    background: linear-gradient(90deg, #2e75b6 80%, #3b82f6 100%) !important;
+    color: #fff !important;
+}
+
+.daily-report-workbook-table tbody td.daily-report-col-date.sticky {
+    background: inherit !important;
+    color: #1e293b !important;
+}
+
+.daily-report-workbook-table thead th.daily-report-header-purple {
+    background: #581c87 !important;
+    color: #ffffff !important;
+    border-bottom-color: #3b0764 !important;
+}
+
+.daily-report-workbook-table thead th.daily-report-header-navy {
+    background: #172554 !important;
+    color: #ffffff !important;
+    border-bottom-color: #0f172a !important;
+}
+
+.daily-report-workbook-table thead th.daily-report-header-green {
+    background: #14532d !important;
+    color: #ffffff !important;
+    border-bottom-color: #052e16 !important;
+}
+
+.daily-report-workbook-table thead th.daily-report-header-purple,
+.daily-report-workbook-table thead th.daily-report-header-navy,
+.daily-report-workbook-table thead th.daily-report-header-green {
+    box-shadow: inset 1px 0 rgba(255,255,255,0.18), 0 2px 6px rgba(15, 23, 42, 0.08);
+}
+
 /* sticky action cell(오른쪽 관리 컬럼)도 z-index와 배경색 보장 */
 .daily-report-workbook-table th.sticky.right-0,
 .daily-report-workbook-table td.sticky.right-0 {

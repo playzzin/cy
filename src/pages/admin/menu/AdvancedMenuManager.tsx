@@ -23,7 +23,8 @@ import {
     faUsers,
     faGlobe,
     faArrowRight,
-    faArrowLeft
+    faArrowLeft,
+    faCopy
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -35,6 +36,7 @@ import InspectorPanel from './components/InspectorPanel';
 import RoleManager from './components/RoleManager';
 import SiteManager from './components/SiteManager';
 import MenuManagerHeader from './components/MenuManagerHeader';
+import PositionMenuCopyModal from './components/PositionMenuCopyModal';
 
 // --- Recursive Helpers ---
 
@@ -89,9 +91,115 @@ const updateMenuItemInTree = (nodes: (MenuItem | string)[], updatedItem: MenuIte
     });
 };
 
+const getMenuItemLookupId = (item: MenuItem) => String(item.id || item.path || item.text || '');
+
+const findMenuItemsByIds = (nodes: (MenuItem | string)[], ids: string[]): MenuItem[] => {
+    const idSet = new Set(ids);
+    const found: MenuItem[] = [];
+
+    const visit = (items: (MenuItem | string)[]) => {
+        items.forEach((item) => {
+            if (typeof item === 'string') return;
+
+            if (idSet.has(getMenuItemLookupId(item))) {
+                found.push(item);
+            }
+
+            if (Array.isArray(item.sub)) {
+                visit(item.sub);
+            }
+        });
+    };
+
+    visit(nodes);
+    return found;
+};
+
+const collectMenuIds = (nodes: (MenuItem | string)[], ids = new Set<string>()) => {
+    nodes.forEach((item) => {
+        if (typeof item === 'string') return;
+
+        if (item.id) ids.add(item.id);
+        if (Array.isArray(item.sub)) collectMenuIds(item.sub, ids);
+    });
+
+    return ids;
+};
+
+const createIdBase = (value: unknown) => {
+    const base = String(value || 'menu')
+        .trim()
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 48);
+
+    return base || 'menu';
+};
+
+const cloneMenuItemForCopy = (item: MenuItem, existingIds: Set<string>, token: string, path: number[]): MenuItem => {
+    const cloned = JSON.parse(JSON.stringify(item)) as MenuItem;
+
+    const assignIds = (node: MenuItem, currentPath: number[]): MenuItem => {
+        const base = createIdBase(node.id || node.path || node.text);
+        const pathSuffix = currentPath.join('_') || '0';
+        let candidate = `${base}_copy_${token}_${pathSuffix}`;
+        let counter = 1;
+
+        while (existingIds.has(candidate)) {
+            candidate = `${base}_copy_${token}_${pathSuffix}_${counter}`;
+            counter += 1;
+        }
+
+        node.id = candidate;
+        existingIds.add(candidate);
+
+        if (Array.isArray(node.sub)) {
+            node.sub = node.sub.map((child, index) => (
+                typeof child === 'string'
+                    ? child
+                    : assignIds(child, [...currentPath, index])
+            ));
+        }
+
+        return node;
+    };
+
+    return assignIds(cloned, path);
+};
+
+const getPositionSiteKey = (positionId: string | null) => {
+    const id = String(positionId || '').trim();
+    if (!id || id === 'full') return 'admin';
+    return id.startsWith('pos_') ? id : `pos_${id}`;
+};
+
+const getInitialMenuSite = (requestedSite: string | null) => {
+    if (requestedSite) return requestedSite;
+
+    const storedPosition = localStorage.getItem('cy_current_position');
+    if (storedPosition && storedPosition !== 'full') {
+        return getPositionSiteKey(storedPosition);
+    }
+
+    return localStorage.getItem('cy_current_site') || 'admin';
+};
+
+const resolveExistingMenuSite = (data: SiteDataType, desiredSite: string) => {
+    const keys = Object.keys(data);
+    const candidates = [
+        desiredSite,
+        getInitialMenuSite(null),
+        'admin',
+        keys.find(key => !key.startsWith('pos_')),
+        keys[0]
+    ].filter((key): key is string => Boolean(key));
+
+    return candidates.find(key => Boolean(data[key])) || 'admin';
+};
+
 const AdvancedMenuManager: React.FC = () => {
     const [searchParams] = useSearchParams();
-    const initialSite = searchParams.get('site') || 'cheongyeon';
+    const initialSite = getInitialMenuSite(searchParams.get('site'));
 
     // --- State ---
     const [menuData, setMenuData] = useState<SiteDataType | null>(null);
@@ -265,6 +373,7 @@ const AdvancedMenuManager: React.FC = () => {
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [isRoleManagerOpen, setIsRoleManagerOpen] = useState(false);
     const [isSiteManagerOpen, setIsSiteManagerOpen] = useState(false);
+    const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
 
     // History for Undo/Redo
     const [history, setHistory] = useState<{ past: SiteDataType[], future: SiteDataType[] }>({
@@ -320,12 +429,7 @@ const AdvancedMenuManager: React.FC = () => {
                 }
                 */
 
-                // Set default site if not selected or invalid
-                // const keys = Object.keys(syncedData); // syncedData is commented out
-                const keys = Object.keys(data); // Use raw data
-                if (!keys.includes(selectedSite)) {
-                    setSelectedSite(keys[0] || 'admin');
-                }
+                setSelectedSite(previous => resolveExistingMenuSite(data, previous || initialSite));
             }
         };
         loadData();
@@ -376,6 +480,31 @@ const AdvancedMenuManager: React.FC = () => {
         setMenuData(next);
         persistMenuData(next);
     };
+
+    const handleCopyFromPosition = useCallback((sourceSite: string, itemIds: string[]) => {
+        if (!menuData || !menuData[selectedSite]) return;
+
+        const sourceItems = findMenuItemsByIds(menuData[sourceSite]?.menu || [], itemIds);
+        if (sourceItems.length === 0) {
+            alert('복사할 메뉴를 찾지 못했습니다.');
+            return;
+        }
+
+        const newData = JSON.parse(JSON.stringify(menuData)) as SiteDataType;
+        const targetMenu = newData[selectedSite]?.menu || [];
+        const existingIds = collectMenuIds(targetMenu);
+        const token = Date.now().toString(36);
+        const copiedItems = sourceItems.map((item, index) => cloneMenuItemForCopy(item, existingIds, token, [index]));
+
+        newData[selectedSite] = {
+            ...newData[selectedSite],
+            menu: [...targetMenu, ...copiedItems]
+        };
+
+        updateMenuData(newData);
+        setSelectedIds(copiedItems.map((item) => item.id).filter((id): id is string => Boolean(id)));
+        setIsCopyModalOpen(false);
+    }, [menuData, selectedSite, updateMenuData]);
 
     const handleResetDefaults = () => {
         if (window.confirm('정말 초기화하시겠습니까? 기존 메뉴 설정이 모두 사라지고 기본값(한글)으로 복원됩니다.')) {
@@ -620,6 +749,14 @@ const AdvancedMenuManager: React.FC = () => {
                 }}
             />
 
+            <PositionMenuCopyModal
+                isOpen={isCopyModalOpen}
+                onClose={() => setIsCopyModalOpen(false)}
+                menuData={menuData}
+                targetSite={selectedSite}
+                onCopy={handleCopyFromPosition}
+            />
+
             {/* --- Main Content (3-Col Layout) --- */}
             < DndContext
                 sensors={sensors}
@@ -652,6 +789,17 @@ const AdvancedMenuManager: React.FC = () => {
                             onDelete={handleDeleteItem}
                             onIndent={handleIndent}
                             onOutdent={handleOutdent}
+                            headerActions={(
+                                <button
+                                    type="button"
+                                    onClick={() => setIsCopyModalOpen(true)}
+                                    className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
+                                    title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
+                                >
+                                    <FontAwesomeIcon icon={faCopy} />
+                                    다른 직책에서 복사
+                                </button>
+                            )}
                         />
                     </main>
 

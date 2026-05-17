@@ -8,8 +8,6 @@ import { resolveIcon } from '../../constants/iconMap';
 
 interface DashboardHeaderProps {
     user: any;
-    logoUrl: string;
-    logoIsVideo: boolean;
     modeConfig: DashboardModeConfig;
     positions: PositionItem[];
     currentPosition: string;
@@ -39,51 +37,9 @@ const ContentHelper = styled.div`
 const LogoSection = styled.div`
     display: flex;
     align-items: center;
-    gap: 24px;
 
     @media (max-width: 768px) {
         align-items: flex-start;
-        gap: 16px;
-    }
-`;
-
-const LogoWrapper = styled.div`
-    width: 128px;
-    height: 128px;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-`;
-
-const Video = styled.video`
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-`;
-
-const Image = styled.img`
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-`;
-
-const Placeholder = styled.div`
-    width: 100%;
-    height: 100%;
-    background-color: #2563eb;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    
-    span {
-        color: white;
-        font-weight: 700;
-        font-size: 1.875rem;
     }
 `;
 
@@ -166,8 +122,6 @@ const ActionGroup = styled.div`
 
 export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     user,
-    logoUrl,
-    logoIsVideo,
     modeConfig,
     positions,
     currentPosition,
@@ -177,21 +131,6 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
         <HeaderContainer $gradient={modeConfig.gradient}>
             <ContentHelper>
                 <LogoSection>
-                    <LogoWrapper>
-                        {logoUrl ? (
-                            logoIsVideo ? (
-                                <Video autoPlay loop muted playsInline>
-                                    <source src={logoUrl} type="video/mp4" />
-                                </Video>
-                            ) : (
-                                <Image src={logoUrl} alt="Company Logo" />
-                            )
-                        ) : (
-                            <Placeholder>
-                                <span>청연</span>
-                            </Placeholder>
-                        )}
-                    </LogoWrapper>
                     <TextSection>
                         <Title>청연ENG ERP</Title>
                         <Subtitle>{modeConfig.label} · {modeConfig.roleGroup}</Subtitle>

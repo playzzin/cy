@@ -39,3 +39,62 @@
     animation: fadeInUp 0.4s ease-out forwards;
   }
 }
+
+.support-team-font {
+  font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+}
+
+.support-team-font .font-mono {
+  font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.support-compact-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.support-compact-table th,
+.support-compact-table td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.support-compact-ledger th {
+  padding: 0.65rem 0.35rem;
+  line-height: 1.15;
+}
+
+.support-compact-ledger td {
+  padding: 0.35rem;
+  line-height: 1.2;
+}
+
+.support-compact-ledger input,
+.support-compact-ledger select,
+.support-compact-status input,
+.support-compact-status select {
+  min-width: 0;
+}
+
+.support-compact-ledger input {
+  padding: 0.3rem 0.2rem;
+  font-size: inherit;
+}
+
+.support-compact-ledger button,
+.support-compact-status button {
+  white-space: nowrap;
+}
+
+.support-compact-status th {
+  padding: 0.65rem 0.4rem;
+  line-height: 1.15;
+}
+
+.support-compact-status td {
+  padding: 0.55rem 0.4rem;
+  line-height: 1.2;
+}

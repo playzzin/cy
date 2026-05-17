@@ -53,8 +53,8 @@ const SupportManagerPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 xl:p-10">
-      <div className="max-w-[1800px] mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 p-6 xl:p-8">
+      <div className="w-full max-w-none space-y-6">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
@@ -95,7 +95,7 @@ const SupportManagerPage: React.FC = () => {
           </div>
         </div>
 
-        <div>
+        <div className="w-full min-w-0">
           {activeTab === 'vehicle' && <VehicleManagerPage embedded />}
           {activeTab === 'card' && <CardManagerPage embedded />}
           {activeTab === 'accommodation' && <AccommodationManager embedded />}

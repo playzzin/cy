@@ -14,6 +14,7 @@ import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
 import { positionService, Position } from '../../services/positionService';
 import { dailyReportService } from '../../services/dailyReportService';
+import { statisticsService } from '../../services/statisticsService';
 import { geminiService } from '../../services/geminiService';
 import { storage } from '../../config/firebase';
 import { ref, uploadBytes, getDownloadURL, getBlob } from 'firebase/storage';
@@ -46,11 +47,26 @@ const WORKER_COLUMNS = [
     { key: 'accountHolder', label: '예금주' },
     { key: 'signature', label: '서명' },
     { key: 'bloodType', label: '혈액형' },
+    { key: 'totalManDay', label: '누적공수' },
 ];
 
 const QUICK_VIEW_PERSONAL_COLUMNS = ['name', 'idNumber', 'contact', 'address', 'unitPrice', 'bankName', 'accountNumber', 'accountHolder'];
-const QUICK_VIEW_WORK_COLUMNS = ['name', 'role', 'salaryModel', 'teamName', 'companyName', 'status'];
+const QUICK_VIEW_WORK_COLUMNS = ['name', 'role', 'salaryModel', 'teamName', 'companyName', 'status', 'totalManDay'];
 const UNASSIGNED_TEAM_FILTER_ID = '__unassigned_team__';
+const UNASSIGNED_COMPANY_FILTER_ID = '__unassigned_company__';
+const COMPANY_NAME_FILTER_PREFIX = '__company_name__:';
+const TRAILING_WORKER_COLUMNS = new Set(['totalManDay']);
+const moveTrailingWorkerColumns = (keys: string[]) => [
+    ...keys.filter((key) => !TRAILING_WORKER_COLUMNS.has(key)),
+    ...keys.filter((key) => TRAILING_WORKER_COLUMNS.has(key)),
+];
+
+const normalizeCompanyNameKey = (value: unknown): string =>
+    String(value ?? '')
+        .trim()
+        .replace(/\(\s*주\s*\)|㈜|주식회사/g, '')
+        .replace(/\s+/g, '')
+        .toLowerCase();
 
 interface WorkerDatabaseProps {
     hideHeader?: boolean;
@@ -92,15 +108,16 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         { key: 'accountHolder', label: '예금주' },
         { key: 'signature', label: '서명' },
         { key: 'bloodType', label: '혈액형' },
+        { key: 'totalManDay', label: '누적공수' },
     ]);
 
     const [quickColumnView, setQuickColumnView] = useState<'personal' | 'work' | ''>('');
 
-    const orderedVisibleColumnKeys = columnOrder.filter((key) => visibleColumns.includes(key));
+    const orderedVisibleColumnKeys = moveTrailingWorkerColumns(columnOrder.filter((key) => visibleColumns.includes(key)));
     const effectiveVisibleColumnKeys = quickColumnView === 'personal'
-        ? columnOrder.filter((key) => QUICK_VIEW_PERSONAL_COLUMNS.includes(key))
+        ? moveTrailingWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_PERSONAL_COLUMNS.includes(key)))
         : (quickColumnView === 'work'
-            ? columnOrder.filter((key) => QUICK_VIEW_WORK_COLUMNS.includes(key))
+            ? moveTrailingWorkerColumns(columnOrder.filter((key) => QUICK_VIEW_WORK_COLUMNS.includes(key)))
             : orderedVisibleColumnKeys);
     const tableColSpan = effectiveVisibleColumnKeys.length + 2;
 
@@ -124,6 +141,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const [showInactive, setShowInactive] = useState(false); // Default: Hide inactive workers
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
     const [selectedTeamId, setSelectedTeamId] = useState('');
+    const [selectedCompanyFilterId, setSelectedCompanyFilterId] = useState('');
 
     // Highlight scroll control (for Data Integrity "관리" navigation)
     const highlightScrolledRef = useRef(false);
@@ -265,12 +283,13 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [workersData, teamsData, sitesData, companiesData, positionsData] = await Promise.all([
+            const [workersData, teamsData, sitesData, companiesData, positionsData, statsData] = await Promise.all([
                 manpowerService.getWorkers(),
                 teamService.getTeams(),
                 siteService.getSites(),
                 companyService.getCompanies(),
-                positionService.getPositions()
+                positionService.getPositions(),
+                statisticsService.getCumulativeManpower()
             ]);
 
             setWorkers(workersData);
@@ -278,6 +297,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             setSites(sitesData);
             setCompanies(companiesData);
             setPositions(positionsData);
+            setManpowerStats(statsData.workerStats);
         } catch (error) {
             console.error("Failed to fetch data:", error);
         } finally {
@@ -287,8 +307,12 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
     const fetchWorkers = async () => {
         try {
-            const workersData = await manpowerService.getWorkers();
+            const [workersData, statsData] = await Promise.all([
+                manpowerService.getWorkers(),
+                statisticsService.getCumulativeManpower()
+            ]);
             setWorkers(workersData);
+            setManpowerStats(statsData.workerStats);
         } catch (error) {
             console.error("Failed to fetch workers:", error);
         }
@@ -309,6 +333,87 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
     };
 
 
+    const companyById = React.useMemo(() => {
+        const map = new Map<string, Company>();
+        companies.forEach((company) => {
+            if (company.id) map.set(String(company.id).trim(), company);
+            if (company.legacyId) map.set(String(company.legacyId).trim(), company);
+        });
+        return map;
+    }, [companies]);
+
+    const companyByNameKey = React.useMemo(() => {
+        const map = new Map<string, Company>();
+        companies.forEach((company) => {
+            const key = normalizeCompanyNameKey(company.name);
+            if (key && !map.has(key)) map.set(key, company);
+        });
+        return map;
+    }, [companies]);
+
+    const teamById = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            if (team.id) map.set(String(team.id).trim(), team);
+            if (team.legacyId) map.set(String(team.legacyId).trim(), team);
+        });
+        return map;
+    }, [teams]);
+
+    const teamByNameKey = React.useMemo(() => {
+        const map = new Map<string, Team>();
+        teams.forEach((team) => {
+            const key = String(team.name ?? '').trim().toLowerCase();
+            if (key && !map.has(key)) map.set(key, team);
+        });
+        return map;
+    }, [teams]);
+
+    const resolveWorkerCompany = React.useCallback((worker: Worker) => {
+        const workerCompanyId = String(worker.companyId ?? '').trim();
+        const workerCompanyName = String(worker.companyName ?? '').trim();
+        const teamId = String(worker.teamId ?? '').trim();
+        const teamName = String(worker.teamName ?? '').trim();
+        const team = (teamId ? teamById.get(teamId) : undefined) || (teamName ? teamByNameKey.get(teamName.toLowerCase()) : undefined);
+        const teamCompanyId = String(team?.companyId ?? '').trim();
+        const teamCompanyName = String(team?.companyName ?? '').trim();
+        const workerCompany = workerCompanyId ? companyById.get(workerCompanyId) : undefined;
+        const teamCompany = teamCompanyId ? companyById.get(teamCompanyId) : undefined;
+        const nameKey = normalizeCompanyNameKey(workerCompanyName);
+        const nameMatchedCompany = nameKey ? companyByNameKey.get(nameKey) : undefined;
+
+        const company = workerCompany || nameMatchedCompany || (!workerCompanyName ? teamCompany : undefined);
+        const fallbackId = workerCompanyId || (!workerCompanyName ? teamCompanyId : '');
+        const fallbackName = workerCompanyName || teamCompanyName || '';
+        const id = String(company?.id ?? fallbackId).trim();
+        const name = String(company?.name ?? fallbackName).trim();
+
+        return { id, name };
+    }, [companyById, companyByNameKey, teamById, teamByNameKey]);
+
+    const matchesSelectedCompany = React.useCallback((worker: Worker): boolean => {
+        if (!selectedCompanyFilterId) return true;
+
+        const workerCompany = resolveWorkerCompany(worker);
+        const workerCompanyNameKey = normalizeCompanyNameKey(workerCompany.name);
+
+        if (selectedCompanyFilterId === UNASSIGNED_COMPANY_FILTER_ID) {
+            return !workerCompany.id && !workerCompanyNameKey;
+        }
+
+        if (selectedCompanyFilterId.startsWith(COMPANY_NAME_FILTER_PREFIX)) {
+            return workerCompanyNameKey === selectedCompanyFilterId.slice(COMPANY_NAME_FILTER_PREFIX.length);
+        }
+
+        const selectedCompany = companyById.get(selectedCompanyFilterId);
+        const selectedCompanyNameKey = normalizeCompanyNameKey(selectedCompany?.name);
+
+        return (
+            workerCompany.id === selectedCompanyFilterId ||
+            (!!selectedCompanyNameKey && workerCompanyNameKey === selectedCompanyNameKey)
+        );
+    }, [companyById, resolveWorkerCompany, selectedCompanyFilterId]);
+
     // 필터링된 작업자 목록
     const filteredWorkers = workers.filter(worker => {
         const lowerSearch = searchTerm.trim().toLowerCase();
@@ -325,14 +430,18 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
         const isActive = worker.status === '재직' || worker.status === 'active' || worker.status === '미배정' || !worker.status;
         if (!showInactive && !isActive) return false;
         if (!matchesTeam) return false;
+        if (!matchesSelectedCompany(worker)) return false;
 
         if (!lowerSearch) return true;
+
+        const resolvedCompany = resolveWorkerCompany(worker);
 
         return (
             worker.name.toLowerCase().includes(lowerSearch) ||
             String(worker.idNumber ?? '').toLowerCase().includes(lowerSearch) ||
             String(worker.contact ?? '').toLowerCase().includes(lowerSearch) ||
-            String(worker.teamName ?? '').toLowerCase().includes(lowerSearch)
+            String(worker.teamName ?? '').toLowerCase().includes(lowerSearch) ||
+            resolvedCompany.name.toLowerCase().includes(lowerSearch)
         );
     });
 
@@ -388,6 +497,74 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
 
         return options;
     }, [teams, workers]);
+
+    const companyFilterOptions = React.useMemo(() => {
+        const companyCounts = new Map<string, number>();
+        const derivedCompanies = new Map<string, { id: string; name: string; count: number }>();
+        let unassignedCount = 0;
+
+        workers.forEach((worker) => {
+            const workerCompany = resolveWorkerCompany(worker);
+            const nameKey = normalizeCompanyNameKey(workerCompany.name);
+            const matchedCompany = workerCompany.id
+                ? companyById.get(workerCompany.id)
+                : (nameKey ? companyByNameKey.get(nameKey) : undefined);
+
+            if (matchedCompany?.id) {
+                companyCounts.set(matchedCompany.id, (companyCounts.get(matchedCompany.id) ?? 0) + 1);
+                return;
+            }
+
+            if (nameKey) {
+                const optionId = `${COMPANY_NAME_FILTER_PREFIX}${nameKey}`;
+                const existing = derivedCompanies.get(optionId);
+                if (existing) {
+                    existing.count += 1;
+                } else {
+                    derivedCompanies.set(optionId, {
+                        id: optionId,
+                        name: workerCompany.name,
+                        count: 1
+                    });
+                }
+                return;
+            }
+
+            unassignedCount += 1;
+        });
+
+        const options = [...companies]
+            .filter((company) => Boolean(company.id))
+            .map((company) => ({
+                id: company.id!,
+                name: company.name,
+                count: companyCounts.get(company.id!) ?? 0
+            }));
+
+        const companyOptions = [...Array.from(derivedCompanies.values()), ...options]
+            .sort((a, b) => {
+                if (a.count !== b.count) return b.count - a.count;
+                return a.name.localeCompare(b.name, 'ko');
+            })
+            .map((company) => ({
+                id: company.id,
+                name: `${company.name} (${company.count}명)`
+            }));
+
+        if (unassignedCount > 0) {
+            companyOptions.unshift({
+                id: UNASSIGNED_COMPANY_FILTER_ID,
+                name: `소속회사 미지정 (${unassignedCount}명)`
+            });
+        }
+
+        return companyOptions;
+    }, [companies, companyById, companyByNameKey, resolveWorkerCompany, workers]);
+
+    const selectedCompanyFilterName = React.useMemo(
+        () => companyFilterOptions.find((option) => option.id === selectedCompanyFilterId)?.name ?? '',
+        [companyFilterOptions, selectedCompanyFilterId]
+    );
 
     const toggleSelectAll = () => {
         if (selectedWorkerIds.length === filteredWorkers.length && filteredWorkers.length > 0) {
@@ -870,12 +1047,12 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
             {/* 검색 및 목록 - Content Area */}
             <div className={`flex-1 overflow-auto ${!hideHeader ? 'p-6 pb-80' : 'pb-80'}`}>
                 <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-                    <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                    <div className="p-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
                         <h3 className="text-md font-semibold text-gray-800 flex items-center gap-2">
                             <FontAwesomeIcon icon={faUsers} className="text-blue-600" />
                             등록된 작업자 ({filteredWorkers.length}명)
                         </h3>
-                        <div className="flex items-center gap-4">
+                        <div className="flex flex-wrap items-center justify-end gap-3">
                             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
                                 <input
                                     type="checkbox"
@@ -900,7 +1077,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                     type="text"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    placeholder="이름, 주민번호, 연락처 검색"
+                                    placeholder="이름, 주민번호, 연락처, 회사 검색"
                                     className="px-3 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-64"
                                 />
                             </div>
@@ -915,9 +1092,29 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                     />
                                 </div>
                             </div>
-                            {selectedTeamId && (
-                                <div className="text-xs text-slate-500 whitespace-nowrap">
-                                    조회 팀: {teamFilterOptions.find((option) => option.id === selectedTeamId)?.name ?? selectedTeamName}
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-gray-600 whitespace-nowrap">소속회사</span>
+                                <div className="w-60 min-w-[15rem]">
+                                    <SingleSelectPopover
+                                        options={companyFilterOptions}
+                                        selectedId={selectedCompanyFilterId}
+                                        onSelect={(id) => setSelectedCompanyFilterId(id)}
+                                        placeholder="전체 소속회사"
+                                    />
+                                </div>
+                            </div>
+                            {(selectedTeamId || selectedCompanyFilterId) && (
+                                <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
+                                    {selectedTeamId && (
+                                        <span className="whitespace-nowrap">
+                                            조회 팀: {teamFilterOptions.find((option) => option.id === selectedTeamId)?.name ?? selectedTeamName}
+                                        </span>
+                                    )}
+                                    {selectedCompanyFilterId && (
+                                        <span className="whitespace-nowrap">
+                                            소속회사: {selectedCompanyFilterName}
+                                        </span>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -935,7 +1132,7 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                     {effectiveVisibleColumnKeys.map((key) => {
                                         const col = WORKER_COLUMNS.find(c => c.key === key);
                                         if (!col) return null;
-                                        const alignClass = col.key === 'unitPrice'
+                                        const alignClass = col.key === 'unitPrice' || col.key === 'totalManDay'
                                             ? 'text-right'
                                             : col.key === 'signature'
                                                 ? 'text-center'
@@ -1284,6 +1481,17 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                     )}
                                                                 </td>
                                                             );
+                                                        case 'totalManDay': {
+                                                            const workerId = String(worker.id ?? worker.legacyId ?? '').trim();
+                                                            const totalManDay = workerId
+                                                                ? (manpowerStats[workerId] ?? Number(worker.totalManDay ?? 0))
+                                                                : Number(worker.totalManDay ?? 0);
+                                                            return (
+                                                                <td key={key} className="px-4 py-3 text-right font-mono border border-slate-200">
+                                                                    <span className="font-bold text-blue-600">{Number(totalManDay || 0).toFixed(1)}공수</span>
+                                                                </td>
+                                                            );
+                                                        }
                                                         case 'unitPrice':
                                                             return (
                                                                 <td key={key} className="px-4 py-3 text-right font-mono text-gray-600 border border-slate-200">
@@ -1379,8 +1587,28 @@ const WorkerDatabase: React.FC<WorkerDatabaseProps> = ({ hideHeader = false, hig
                                                                     )}
                                                                 </td>
                                                             );
+                                                        case 'bloodType':
+                                                            return (
+                                                                <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
+                                                                    <InputPopover
+                                                                        value={worker.bloodType || ''}
+                                                                        placeholder="혈액형"
+                                                                        onChange={(val) => {
+                                                                            handleWorkerChange(worker.id!, 'bloodType', String(val));
+                                                                            handleWorkerBlur(worker.id!, 'bloodType', String(val));
+                                                                        }}
+                                                                        minimal={!isEditMode}
+                                                                        formatDisplay={(val) => val || '-'}
+                                                                    />
+                                                                </td>
+                                                            );
                                                         default:
-                                                            return null;
+                                                            const value = worker[key as keyof Worker];
+                                                            return (
+                                                                <td key={key} className="px-4 py-3 text-gray-600 border border-slate-200">
+                                                                    {value === undefined || value === null ? '-' : String(value)}
+                                                                </td>
+                                                            );
                                                     }
                                                 })}
 

@@ -1,9 +1,31 @@
 import { teamFirestoreService } from './teamFirestoreService';
+import { databaseLogService } from './databaseLogService';
 import { TeamZod as Team } from '../types/zod/teamSchema';
 import { db } from '../config/firebase';
 import { doc, updateDoc, Timestamp, writeBatch } from 'firebase/firestore';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type { Team };
+
+const snapshotTeam = (id: string, data: Record<string, unknown>): Record<string, unknown> => ({
+    id,
+    ...stripUndefinedFields(data),
+});
+
+const logTeamChange = async (
+    action: 'created' | 'updated' | 'deleted',
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+    source = 'teamService'
+): Promise<void> => {
+    await databaseLogService.safeCreateLog({
+        action,
+        entityType: 'team',
+        before,
+        after,
+        source,
+    });
+};
 
 export const teamService = {
     addTeam: async (team: Team): Promise<string> => {
@@ -15,7 +37,9 @@ export const teamService = {
             normalizedTeam.iconKey = (normalizedTeam as any).icon;
         }
 
-        return teamFirestoreService.addTeam(normalizedTeam as any);
+        const id = await teamFirestoreService.addTeam(normalizedTeam as any);
+        await logTeamChange('created', null, snapshotTeam(id, normalizedTeam as Record<string, unknown>), 'teamService.addTeam');
+        return id;
     },
 
     updateTeam: async (id: string, team: Partial<Team>): Promise<void> => {
@@ -32,6 +56,12 @@ export const teamService = {
         }
 
         await teamFirestoreService.updateTeam(id, normalizedUpdates);
+        await logTeamChange(
+            'updated',
+            existing ? snapshotTeam(id, existing as Record<string, unknown>) : null,
+            snapshotTeam(id, { ...(existing ? existing as Record<string, unknown> : {}), ...stripUndefinedFields(normalizedUpdates as Record<string, unknown>) }),
+            'teamService.updateTeam'
+        );
 
         // Sync team name to workers
         if (nameChanged && team.name) {
@@ -60,7 +90,14 @@ export const teamService = {
     },
 
     deleteTeam: async (id: string): Promise<void> => {
-        return teamFirestoreService.deleteTeam(id);
+        const existing = await teamFirestoreService.getTeam(id);
+        await teamFirestoreService.deleteTeam(id);
+        await logTeamChange(
+            'deleted',
+            existing ? snapshotTeam(id, existing as Record<string, unknown>) : null,
+            null,
+            'teamService.deleteTeam'
+        );
     },
 
     getTeams: async (): Promise<Team[]> => {
@@ -94,14 +131,30 @@ export const teamService = {
     },
 
     updateTeamsBatch: async (ids: string[], updates: Partial<Team>): Promise<void> => {
+        const beforeRows = await Promise.all(ids.map(async (id) => {
+            const team = await teamFirestoreService.getTeam(id);
+            return team ? snapshotTeam(id, team as Record<string, unknown>) : null;
+        }));
+        const cleanedUpdates = stripUndefinedFields(updates as Record<string, unknown>);
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         ids.forEach(id => {
             const docRef = doc(db, 'teams', id);
             batch.update(docRef, {
-                ...updates,
-                updatedAt: Timestamp.now()
+                ...cleanedUpdates,
+                updatedAt
             });
         });
         await batch.commit();
+        await Promise.all(beforeRows.map((before) =>
+            before
+                ? logTeamChange(
+                    'updated',
+                    before,
+                    { ...before, ...cleanedUpdates, updatedAt },
+                    'teamService.updateTeamsBatch'
+                )
+                : Promise.resolve()
+        ));
     }
 };

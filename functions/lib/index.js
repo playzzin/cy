@@ -19,7 +19,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTaxInvoiceListApi = exports.getTaxInvoiceStatusApi = exports.issueTaxInvoiceApi = void 0;
+exports.upsertWelfareCategory = exports.seedWelfareAssetMasters = exports.saveWelfareGameConfig = exports.saveWelfareAdminPermissions = exports.playWelfarePointGame = exports.getWelfareGameConfig = exports.deleteWelfareCategory = exports.createWelfareLedgerTransaction = exports.getTaxInvoiceListApi = exports.getTaxInvoiceStatusApi = exports.issueTaxInvoiceApi = void 0;
 const admin = require("firebase-admin");
 const taxInvoiceService_1 = require("./services/taxInvoiceService");
 const auth_1 = require("./auth");
@@ -173,4 +173,13 @@ exports.getTaxInvoiceListApi = auth_1.protectedRegion.https.onRequest(async (req
 // 카카오톡 알림톡 Functions (SOLAPI)
 // ============================================
 __exportStar(require("./kakao"), exports);
+var welfareAssetLedger_1 = require("./services/welfareAssetLedger");
+Object.defineProperty(exports, "createWelfareLedgerTransaction", { enumerable: true, get: function () { return welfareAssetLedger_1.createWelfareLedgerTransaction; } });
+Object.defineProperty(exports, "deleteWelfareCategory", { enumerable: true, get: function () { return welfareAssetLedger_1.deleteWelfareCategory; } });
+Object.defineProperty(exports, "getWelfareGameConfig", { enumerable: true, get: function () { return welfareAssetLedger_1.getWelfareGameConfig; } });
+Object.defineProperty(exports, "playWelfarePointGame", { enumerable: true, get: function () { return welfareAssetLedger_1.playWelfarePointGame; } });
+Object.defineProperty(exports, "saveWelfareAdminPermissions", { enumerable: true, get: function () { return welfareAssetLedger_1.saveWelfareAdminPermissions; } });
+Object.defineProperty(exports, "saveWelfareGameConfig", { enumerable: true, get: function () { return welfareAssetLedger_1.saveWelfareGameConfig; } });
+Object.defineProperty(exports, "seedWelfareAssetMasters", { enumerable: true, get: function () { return welfareAssetLedger_1.seedWelfareAssetMasters; } });
+Object.defineProperty(exports, "upsertWelfareCategory", { enumerable: true, get: function () { return welfareAssetLedger_1.upsertWelfareCategory; } });
 //# sourceMappingURL=index.js.map

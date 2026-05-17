@@ -16,10 +16,43 @@ import {
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { InboundTransaction, Material, OutboundTransaction } from '../../types/materials';
-import * as XLSX from 'xlsx';
-import { createSiteIdSet, filterCheongyeonMaterialSites } from './materialSiteFilters';
+import * as XLSX from 'xlsx-js-style';
+import {
+    createSiteIdSet,
+    filterCheongyeonMaterialSites,
+    filterSitesByMaterialStatus,
+    getSiteStatusLabel,
+    MaterialSiteStatusFilter
+} from './materialSiteFilters';
 
-type Transaction = (InboundTransaction | OutboundTransaction) & { type: 'inbound' | 'outbound' };
+type Transaction = (InboundTransaction | OutboundTransaction) & {
+    type: 'inbound' | 'outbound';
+    siteStatus?: Site['status'];
+    siteStatusLabel?: string;
+};
+
+type ExcelCellValue = string | number;
+
+const excelRgb = (color: string): string => color.replace('#', '').toUpperCase();
+
+const excelFill = (color: string) => ({
+    fgColor: { rgb: excelRgb(color) },
+    patternType: 'solid' as const,
+});
+
+const excelBorder = {
+    top: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+    bottom: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+    left: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+    right: { style: 'thin' as const, color: { rgb: 'CBD5E1' } },
+};
+
+const sanitizeExcelFileName = (value: string): string => (
+    value
+        .trim()
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '_')
+);
 
 const MaterialTransactionsPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -28,8 +61,7 @@ const MaterialTransactionsPage: React.FC = () => {
     const [materials, setMaterials] = useState<Material[]>([]);
 
     // Filters
-    const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+    const [siteStatusFilter, setSiteStatusFilter] = useState<MaterialSiteStatusFilter>('active');
     const [siteId, setSiteId] = useState('');
     const [siteKeyword, setSiteKeyword] = useState('');
     const [transactionType, setTransactionType] = useState<'all' | 'inbound' | 'outbound'>('all');
@@ -46,6 +78,7 @@ const MaterialTransactionsPage: React.FC = () => {
         siteId: '',
         vehicleNumber: '',
         quantity: 0,
+        counterparty: '',
         notes: ''
     });
 
@@ -85,34 +118,33 @@ const MaterialTransactionsPage: React.FC = () => {
                 siteService.getSites(),
                 materialService.getUniqueMaterialsForSelection(),
             ]);
-            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows);
+            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all');
             setSites(cheongyeonSites);
             setMaterials(materialRows);
-            await handleSearch(cheongyeonSites, materialRows);
+            await handleSearch(cheongyeonSites, materialRows, siteStatusFilter);
         } catch (error) {
             console.error('Failed to load transaction master data:', error);
         }
     };
 
+    const statusFilteredSites = filterSitesByMaterialStatus(sites, siteStatusFilter);
     const filteredSites = sites.filter((site) => {
+        if (!statusFilteredSites.some((row) => row.id === site.id)) return false;
         if (!siteKeyword.trim()) return true;
         return normalizeSearchText(site.name).includes(normalizeSearchText(siteKeyword));
     });
 
-    const handleSearch = async (siteRows: Site[] = sites, materialRows: Material[] = materials) => {
-        if (!isValidDateText(startDate) || !isValidDateText(endDate)) {
-            alert('날짜는 YYYY-MM-DD 형식으로 입력해 주세요.');
-            return;
-        }
-
+    const handleSearch = async (
+        siteRows: Site[] = sites,
+        materialRows: Material[] = materials,
+        statusFilter: MaterialSiteStatusFilter = siteStatusFilter
+    ) => {
         setLoading(true);
         try {
             let fetchedInbound: InboundTransaction[] = [];
             let fetchedOutbound: OutboundTransaction[] = [];
 
             const filters = {
-                startDate,
-                endDate,
                 siteId: siteId || undefined,
                 vehicleNumber: vehicleNumber || undefined,
             };
@@ -128,7 +160,9 @@ const MaterialTransactionsPage: React.FC = () => {
             const labeledInbound = fetchedInbound.map(t => ({ ...t, type: 'inbound' as const }));
             const labeledOutbound = fetchedOutbound.map(t => ({ ...t, type: 'outbound' as const }));
 
-            const allowedSiteIds = createSiteIdSet(siteRows);
+            const allowedSites = filterSitesByMaterialStatus(siteRows, statusFilter);
+            const allowedSiteIds = createSiteIdSet(allowedSites);
+            const siteById = new Map(allowedSites.map((site) => [site.id, site]));
             let all = [...labeledInbound, ...labeledOutbound].filter((tx) => allowedSiteIds.has(tx.siteId));
 
             // Client-side filtering for Material Name
@@ -147,9 +181,12 @@ const MaterialTransactionsPage: React.FC = () => {
             );
             const normalized = all.map((t) => {
                 const master = materialById.get(t.materialId) || materialById.get(t.materialKey || '');
+                const site = siteById.get(t.siteId);
                 return {
                     ...t,
                     materialKey: t.materialKey || master?.materialKey,
+                    siteStatus: site?.status,
+                    siteStatusLabel: getSiteStatusLabel(site?.status),
                     category: trimText(master?.category) || trimText(t.category),
                     itemName: trimText(master?.itemName) || trimText(t.itemName),
                     spec: trimText(master?.spec) || trimText(t.spec),
@@ -169,6 +206,7 @@ const MaterialTransactionsPage: React.FC = () => {
     const handleDelete = async (tx: Transaction) => {
         if (!window.confirm(`${tx.transactionDate} ${tx.itemName} 내역을 삭제하시겠습니까?`)) return;
 
+        setLoading(true);
         try {
             if (tx.type === 'inbound') {
                 await materialService.deleteInboundTransaction(tx.id);
@@ -176,10 +214,12 @@ const MaterialTransactionsPage: React.FC = () => {
                 await materialService.deleteOutboundTransaction(tx.id);
             }
             alert('삭제되었습니다.');
-            handleSearch(); // Refresh list
+            await handleSearch(); // Refresh list
         } catch (error) {
             console.error('Deletion failed:', error);
             alert('삭제에 실패했습니다.');
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -190,6 +230,9 @@ const MaterialTransactionsPage: React.FC = () => {
             siteId: tx.siteId,
             vehicleNumber: tx.vehicleNumber || '',
             quantity: tx.quantity,
+            counterparty: tx.type === 'inbound'
+                ? trimText((tx as InboundTransaction).supplier)
+                : trimText((tx as OutboundTransaction).recipient),
             notes: tx.notes || ''
         });
         setIsEditModalOpen(true);
@@ -202,8 +245,9 @@ const MaterialTransactionsPage: React.FC = () => {
             return;
         }
 
+        setLoading(true);
         try {
-            const updates = {
+            const updates: any = {
                 transactionDate: editForm.transactionDate,
                 siteId: editForm.siteId,
                 siteName: sites.find(s => s.id === editForm.siteId)?.name || '',
@@ -213,39 +257,139 @@ const MaterialTransactionsPage: React.FC = () => {
             };
 
             if (editingTx.type === 'inbound') {
+                updates.supplier = editForm.counterparty;
                 await materialService.updateInboundTransaction(editingTx.id, updates);
             } else {
+                updates.recipient = editForm.counterparty;
                 await materialService.updateOutboundTransaction(editingTx.id, updates);
             }
 
             alert('수정되었습니다.');
             setIsEditModalOpen(false);
             setEditingTx(null);
-            handleSearch(); // Refresh list
+            await handleSearch(); // Refresh list
         } catch (error) {
             console.error('Update failed:', error);
             alert('수정에 실패했습니다.');
+        } finally {
+            setLoading(false);
         }
     };
 
     const handleDownloadExcel = () => {
-        const data = visibleTransactions.map(t => ({
-            '일자': t.transactionDate,
-            '구분': t.type === 'inbound' ? '입고' : '출고',
-            '현장': t.siteName,
-            '품명': t.itemName,
-            '규격': t.spec,
-            '수량': t.quantity,
-            '단위': t.unit,
-            '차량번호': t.vehicleNumber || '-',
-            '담당자': t.registeredByName,
-            '비고': t.notes || ''
-        }));
+        const headers = [
+            '일자',
+            '구분',
+            '현장',
+            '품명',
+            '규격',
+            '수량',
+            '단위',
+            '차량번호',
+            '입고처/출고자',
+            '비고',
+        ];
+        const toExcelQuantity = (value: unknown): number => {
+            const quantity = Number(value || 0);
+            return Number.isFinite(quantity) ? Math.round(quantity) : 0;
+        };
+        const rows: ExcelCellValue[][] = [
+            headers,
+            ...visibleTransactions.map((t) => [
+                t.transactionDate,
+                t.type === 'inbound' ? '입고' : '출고',
+                t.siteName,
+                t.itemName,
+                t.spec,
+                toExcelQuantity(t.quantity),
+                t.unit,
+                t.vehicleNumber || '',
+                t.type === 'inbound'
+                    ? ((t as InboundTransaction).supplier || '')
+                    : ((t as OutboundTransaction).recipient || ''),
+                t.notes || '',
+            ]),
+        ];
 
-        const ws = XLSX.utils.json_to_sheet(data);
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols'] = [
+            { wch: 12 },
+            { wch: 10 },
+            { wch: 24 },
+            { wch: 22 },
+            { wch: 18 },
+            { wch: 10 },
+            { wch: 8 },
+            { wch: 16 },
+            { wch: 20 },
+            { wch: 34 },
+        ];
+        ws['!rows'] = rows.map((_, index) => ({
+            hpt: index === 0 ? 24 : 21,
+        }));
+        ws['!autofilter'] = {
+            ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}${Math.max(rows.length, 1)}`,
+        };
+
+        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+        const centerColumns = new Set([0, 1, 6, 7]);
+        const rightColumns = new Set([5]);
+        for (let r = range.s.r; r <= range.e.r; r += 1) {
+            for (let c = range.s.c; c <= range.e.c; c += 1) {
+                const address = XLSX.utils.encode_cell({ r, c });
+                if (!ws[address]) ws[address] = { t: 's', v: '' };
+                const cell = ws[address] as XLSX.CellObject & { s?: unknown };
+                const isHeader = r === 0;
+                const isData = r > 0;
+                const isInboundType = isData && c === 1 && cell.v === '입고';
+                const isOutboundType = isData && c === 1 && cell.v === '출고';
+                const isQuantity = c === 5;
+                const isTextLong = c === 9;
+                const isAltRow = isData && r % 2 === 0;
+
+                cell.s = {
+                    fill: isHeader
+                        ? excelFill('#1E293B')
+                        : isInboundType
+                            ? excelFill('#ECFDF5')
+                            : isOutboundType
+                                ? excelFill('#FFF7ED')
+                                : isAltRow
+                                    ? excelFill('#F8FAFC')
+                                    : undefined,
+                    font: {
+                        name: '맑은 고딕',
+                        sz: isHeader ? 10 : 9,
+                        bold: isHeader || isInboundType || isOutboundType,
+                        color: isHeader
+                            ? { rgb: 'FFFFFF' }
+                            : isInboundType
+                                ? { rgb: '047857' }
+                                : isOutboundType
+                                    ? { rgb: 'C2410C' }
+                                    : undefined,
+                    },
+                    alignment: {
+                        horizontal: rightColumns.has(c)
+                            ? 'right'
+                            : centerColumns.has(c) || isHeader
+                                ? 'center'
+                                : 'left',
+                        vertical: 'center',
+                        wrapText: isTextLong,
+                    },
+                    border: excelBorder,
+                    numFmt: isQuantity ? '0' : undefined,
+                };
+                if (typeof cell.v === 'number') {
+                    cell.t = 'n';
+                }
+            }
+        }
+
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "입출고내역");
-        XLSX.writeFile(wb, `자재입출고내역_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, '입출고내역');
+        XLSX.writeFile(wb, `${sanitizeExcelFileName(`자재입출고내역_${new Date().toISOString().slice(0, 10)}`)}.xlsx`);
     };
 
     const visibleTransactions = transactions.filter((t) => {
@@ -261,7 +405,7 @@ const MaterialTransactionsPage: React.FC = () => {
                         <FontAwesomeIcon icon={faClipboardList} className="text-indigo-600" />
                         자재 입출고 내역
                     </h1>
-                    <p className="text-slate-500 mt-1 text-sm">기간별, 차량별, 현장별 자재 이동 내역을 조회합니다.</p>
+                    <p className="text-slate-500 mt-1 text-sm">차량별, 현장별 자재 이동 내역을 조회합니다.</p>
                 </div>
                 <button
                     onClick={handleDownloadExcel}
@@ -274,32 +418,21 @@ const MaterialTransactionsPage: React.FC = () => {
 
             {/* Filter Section */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-1 md:grid-cols-7 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                     <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">시작일</label>
-                        <input
-                            type="text"
-                            value={startDate}
-                            onChange={(e) => setStartDate(normalizeDateInput(e.target.value))}
-                            onBlur={(e) => setStartDate(normalizeDateInput(e.target.value))}
-                            placeholder="YYYY-MM-DD"
-                            inputMode="numeric"
-                            autoComplete="off"
+                        <label className="block text-xs font-bold text-slate-500 mb-1">현장구분</label>
+                        <select
+                            value={siteStatusFilter}
+                            onChange={(e) => {
+                                setSiteStatusFilter(e.target.value as MaterialSiteStatusFilter);
+                                setSiteId('');
+                            }}
                             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-                        />
-                    </div>
-                    <div className="md:col-span-1">
-                        <label className="block text-xs font-bold text-slate-500 mb-1">종료일</label>
-                        <input
-                            type="text"
-                            value={endDate}
-                            onChange={(e) => setEndDate(normalizeDateInput(e.target.value))}
-                            onBlur={(e) => setEndDate(normalizeDateInput(e.target.value))}
-                            placeholder="YYYY-MM-DD"
-                            inputMode="numeric"
-                            autoComplete="off"
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 outline-none"
-                        />
+                        >
+                            <option value="active">진행현장</option>
+                            <option value="completed">마감현장</option>
+                            <option value="all">전체현장</option>
+                        </select>
                     </div>
                     <div className="md:col-span-1">
                         <label className="block text-xs font-bold text-slate-500 mb-1">현장</label>
@@ -310,7 +443,7 @@ const MaterialTransactionsPage: React.FC = () => {
                         >
                             <option value="">전체 현장</option>
                             {filteredSites.map(site => (
-                                <option key={site.id} value={site.id}>{site.name}</option>
+                                <option key={site.id} value={site.id}>[{getSiteStatusLabel(site.status)}] {site.name}</option>
                             ))}
                         </select>
                     </div>
@@ -364,20 +497,20 @@ const MaterialTransactionsPage: React.FC = () => {
             {/* Data Table */}
             <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                 <div className="flex-1 overflow-auto min-h-[780px] max-h-[calc(100vh-220px)]">
-                    <table className="w-full min-w-[1680px] text-sm">
+                    <table className="w-full min-w-[1780px] text-sm">
                         <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
                             <tr>
-                                <th className="p-4 text-left font-bold text-slate-600 w-32 sticky left-0 z-20 bg-slate-50">일자</th>
-                                <th className="p-4 text-center font-bold text-slate-600 w-24 sticky left-[128px] z-20 bg-slate-50">구분</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px] sticky left-[224px] z-20 bg-slate-50">현장</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px] sticky left-[444px] z-20 bg-slate-50">품명</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[180px]">규격</th>
-                                <th className="p-4 text-right font-bold text-slate-600 w-24">수량</th>
-                                <th className="p-4 text-left font-bold text-slate-600 w-20">단위</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[160px]">차량번호</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[120px]">등록자</th>
-                                <th className="p-4 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
-                                <th className="p-4 text-center font-bold text-slate-600 w-24">관리</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-32 sticky left-0 z-20 bg-slate-50">일자</th>
+                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24 sticky left-[128px] z-20 bg-slate-50">구분</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[224px] z-20 bg-slate-50">현장</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px] sticky left-[444px] z-20 bg-slate-50">품명</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">규격</th>
+                                <th className="px-4 py-3 text-right font-bold text-slate-600 w-24">수량</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 w-20">단위</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[150px]">차량번호</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[160px]">입고처/출고자</th>
+                                <th className="px-4 py-3 text-left font-bold text-slate-600 min-w-[220px]">비고</th>
+                                <th className="px-4 py-3 text-center font-bold text-slate-600 w-24">관리</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -391,8 +524,8 @@ const MaterialTransactionsPage: React.FC = () => {
                             ) : visibleTransactions.length > 0 ? (
                                 visibleTransactions.map((t, index) => (
                                     <tr key={`${t.id}-${index}`} className="hover:bg-slate-50 transition-colors">
-                                        <td className="p-4 text-slate-600 sticky left-0 z-10 bg-white">{t.transactionDate}</td>
-                                        <td className="p-4 text-center sticky left-[128px] z-10 bg-white">
+                                        <td className="px-4 py-2.5 text-slate-600 sticky left-0 z-10 bg-white">{t.transactionDate}</td>
+                                        <td className="px-4 py-2.5 text-center sticky left-[128px] z-10 bg-white">
                                             <span className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5
                                                 ${t.type === 'inbound'
                                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
@@ -403,14 +536,17 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 {t.type === 'inbound' ? '입고' : '출고'}
                                             </span>
                                         </td>
-                                        <td className="p-4 font-medium text-slate-800 sticky left-[224px] z-10 bg-white">{t.siteName}</td>
-                                        <td className="p-4 font-medium text-slate-800 sticky left-[444px] z-10 bg-white">{t.itemName}</td>
-                                        <td className="p-4 text-slate-500">{t.spec}</td>
-                                        <td className={`p-4 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                                        <td className="px-4 py-2.5 font-medium text-slate-800 sticky left-[224px] z-10 bg-white">
+                                            <div>{t.siteName}</div>
+                                            <div className="text-[11px] font-semibold text-slate-400">{t.siteStatusLabel}</div>
+                                        </td>
+                                        <td className="px-4 py-2.5 font-medium text-slate-800 sticky left-[444px] z-10 bg-white">{t.itemName}</td>
+                                        <td className="px-4 py-2.5 text-slate-500">{t.spec}</td>
+                                        <td className={`px-4 py-2.5 text-right font-bold ${t.type === 'inbound' ? 'text-emerald-600' : 'text-orange-600'}`}>
                                             {t.quantity.toLocaleString()}
                                         </td>
-                                        <td className="p-4 text-slate-500">{t.unit}</td>
-                                        <td className="p-4 text-slate-600">
+                                        <td className="px-4 py-2.5 text-slate-500">{t.unit}</td>
+                                        <td className="px-4 py-2.5 text-slate-600">
                                             {(t.vehicleNumber != null && String(t.vehicleNumber).trim()) ? (
                                                 <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-mono">
                                                     {String(t.vehicleNumber).trim()}
@@ -419,9 +555,13 @@ const MaterialTransactionsPage: React.FC = () => {
                                                 <span className="text-slate-300">-</span>
                                             )}
                                         </td>
-                                        <td className="p-4 text-slate-500 text-xs">{t.registeredByName}</td>
-                                        <td className="p-4 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
-                                        <td className="p-4 text-center">
+                                        <td className="px-4 py-2.5 text-slate-600 text-xs">
+                                            {t.type === 'inbound'
+                                                ? ((t as InboundTransaction).supplier || '-')
+                                                : ((t as OutboundTransaction).recipient || '-')}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-slate-500 whitespace-pre-wrap break-words">{t.notes || '-'}</td>
+                                        <td className="px-4 py-2.5 text-center">
                                             <div className="flex justify-center gap-2">
                                                 <button
                                                     onClick={() => openEditModal(t)}
@@ -529,6 +669,19 @@ const MaterialTransactionsPage: React.FC = () => {
                                         value={editForm.vehicleNumber}
                                         onChange={(e) => setEditForm(prev => ({ ...prev, vehicleNumber: e.target.value }))}
                                         placeholder="차량번호 입력"
+                                        className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                                        {editingTx?.type === 'inbound' ? '공급업체(입고처)' : '출고자'}
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={editForm.counterparty}
+                                        onChange={(e) => setEditForm(prev => ({ ...prev, counterparty: e.target.value }))}
+                                        placeholder={editingTx?.type === 'inbound' ? '공급업체 입력' : '출고자 입력'}
                                         className="w-full border border-slate-300 rounded-lg px-3 py-2"
                                     />
                                 </div>

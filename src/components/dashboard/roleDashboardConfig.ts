@@ -215,7 +215,7 @@ const MODE_BY_ID = DASHBOARD_MODES.reduce<Record<DashboardModeId, DashboardModeC
 
 const ROLE_MATCHERS: Array<{ mode: DashboardModeId; keywords: string[] }> = [
     { mode: 'executive', keywords: ['사장', '대표', '최고관리자', '관리자', 'admin', 'owner'] },
-    { mode: 'manager', keywords: ['실장', '매니저', '관리', 'manager'] },
+    { mode: 'manager', keywords: ['실장', '매니저', '관리', '사무', 'manager', 'office', 'staff', 'office_staff'] },
     { mode: 'teamLead', keywords: ['팀장', '대장', '소장', '시공', 'leader'] },
     { mode: 'foreman', keywords: ['반장', 'foreman'] },
     { mode: 'worker', keywords: ['기공', '기능공', '준기공', '조공', '일반', '일반공', '신규', '작업자', 'worker', 'user'] },
@@ -251,6 +251,7 @@ export const getDashboardModeForPosition = (
     if (id === 'full') return 'executive';
     if (['ceo', 'owner', 'president', 'executive', 'admin'].includes(id)) return 'executive';
     if (id.startsWith('manager') || id === 'manager') return 'manager';
+    if (['office', 'office_staff', 'office-staff', 'staff', 'clerk'].includes(id)) return 'manager';
     if (['teamlead', 'team_lead', 'team-lead', 'leader', 'sitelead', 'site_lead'].includes(id)) return 'teamLead';
     if (['foreman', 'banjang'].includes(id)) return 'foreman';
     if (['general', 'newbie', 'worker', 'skilled', 'assistant'].includes(id)) return 'worker';

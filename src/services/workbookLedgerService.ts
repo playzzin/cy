@@ -14,6 +14,11 @@ import { db } from '../config/firebase';
 
 export type WorkbookTransactionType = '매출' | '매입';
 export type WorkbookLedgerTenant = 'cheongyeon' | 'dawon';
+export type WorkbookLedgerSourceType =
+    | 'taxInvoiceIssue'
+    | 'expenseLedger'
+    | 'manual'
+    | 'manualSettlement';
 
 export interface WorkbookLedgerEntry {
     id?: string;
@@ -30,6 +35,9 @@ export interface WorkbookLedgerEntry {
     appliedYear?: number | null;
     appliedMonth?: number | null;
     matchedEntryId?: string;
+    sourceType?: WorkbookLedgerSourceType | string;
+    sourceId?: string;
+    sourceMonth?: string;
     note?: string;
     teamName?: string;
     createdAt?: string;
@@ -82,6 +90,10 @@ const normalizeText = (value: unknown): string => {
     return typeof value === 'string' ? value.trim() : '';
 };
 
+const normalizeTransactionType = (value: unknown): WorkbookTransactionType => {
+    return normalizeText(value).includes('매입') ? '매입' : '매출';
+};
+
 const normalizeFirstText = (...values: unknown[]): string => {
     for (const value of values) {
         const normalized = normalizeText(value);
@@ -124,7 +136,7 @@ const buildCacheKey = (options: GetEntriesOptions) => {
 };
 
 const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
-    transactionType: entry.transactionType,
+    transactionType: normalizeTransactionType(entry.transactionType),
     date: normalizeText(entry.date),
     partnerName: normalizeText(entry.partnerName),
     siteName: normalizeText(entry.siteName),
@@ -137,6 +149,9 @@ const sanitizeEntry = (entry: WorkbookLedgerEntryInput, timestamp: string) => ({
     appliedYear: normalizeInteger(entry.appliedYear),
     appliedMonth: normalizeInteger(entry.appliedMonth),
     matchedEntryId: normalizeText(entry.matchedEntryId) || null,
+    sourceType: normalizeText(entry.sourceType) || null,
+    sourceId: normalizeText(entry.sourceId) || null,
+    sourceMonth: normalizeText(entry.sourceMonth) || null,
     note: normalizeText(entry.note),
     teamName: normalizeText(entry.teamName),
     createdBy: normalizeText(entry.createdBy) || null,
@@ -150,7 +165,7 @@ const sanitizeUpdate = (entry: WorkbookLedgerEntryUpdate, timestamp: string) => 
         updatedAt: timestamp
     };
 
-    if (entry.transactionType !== undefined) payload.transactionType = entry.transactionType;
+    if (entry.transactionType !== undefined) payload.transactionType = normalizeTransactionType(entry.transactionType);
     if (entry.date !== undefined) payload.date = normalizeText(entry.date);
     if (entry.partnerName !== undefined) payload.partnerName = normalizeText(entry.partnerName);
     if (entry.siteName !== undefined) payload.siteName = normalizeText(entry.siteName);
@@ -163,6 +178,9 @@ const sanitizeUpdate = (entry: WorkbookLedgerEntryUpdate, timestamp: string) => 
     if (entry.appliedYear !== undefined) payload.appliedYear = entry.appliedYear === null ? null : normalizeInteger(entry.appliedYear);
     if (entry.appliedMonth !== undefined) payload.appliedMonth = entry.appliedMonth === null ? null : normalizeInteger(entry.appliedMonth);
     if (entry.matchedEntryId !== undefined) payload.matchedEntryId = normalizeText(entry.matchedEntryId) || null;
+    if (entry.sourceType !== undefined) payload.sourceType = normalizeText(entry.sourceType) || null;
+    if (entry.sourceId !== undefined) payload.sourceId = normalizeText(entry.sourceId) || null;
+    if (entry.sourceMonth !== undefined) payload.sourceMonth = normalizeText(entry.sourceMonth) || null;
     if (entry.note !== undefined) payload.note = normalizeText(entry.note);
     if (entry.teamName !== undefined) payload.teamName = normalizeText(entry.teamName);
     if (entry.updatedBy !== undefined) payload.updatedBy = normalizeText(entry.updatedBy) || null;
@@ -240,7 +258,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
                 return {
                     id: entryDoc.id,
-                    transactionType: (data.transactionType === '매입' ? '매입' : '매출') as WorkbookTransactionType,
+                    transactionType: normalizeTransactionType(data.transactionType),
                     date: normalizeText(data.date),
                     partnerName: normalizeText(data.partnerName),
                     siteName: normalizeText(data.siteName),
@@ -253,6 +271,9 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
                     appliedYear: normalizeInteger(data.appliedYear),
                     appliedMonth: normalizeInteger(data.appliedMonth),
                     matchedEntryId: normalizeText(data.matchedEntryId),
+                    sourceType: normalizeText(data.sourceType),
+                    sourceId: normalizeText(data.sourceId),
+                    sourceMonth: normalizeText(data.sourceMonth),
                     note: normalizeFirstText(data.note, data.memo, data.remark, data.remarks, data.notes),
                     teamName: normalizeText(data.teamName),
                     createdAt: normalizeText(data.createdAt),

@@ -176,6 +176,8 @@ const DB_PAGE_SIZE = 100;
 const DB_INITIAL_LOAD_LIMIT = 300;
 const INPUT_GRID_DERIVED_SOURCE = 'workbook-input-derived';
 const INPUT_GRID_MOUSE_COMMIT_SOURCE = 'workbook-input-mouse-commit';
+const INPUT_GRID_NUMERIC_COLUMNS = new Set([5, 6, 7, 8, 9, 10, 11]);
+const isInputGridNumericColumn = (columnIndex: number) => INPUT_GRID_NUMERIC_COLUMNS.has(columnIndex);
 type EntryLoadScope = 'none' | 'recent' | 'range' | 'all';
 interface EntryLoadQuery {
     scope: EntryLoadScope;
@@ -962,6 +964,12 @@ const sortSummaryRowsByDate = (left: SummaryRow, right: SummaryRow) => {
     const dateCompare = (left.issueDate ?? '').localeCompare(right.issueDate ?? '', 'en');
     if (dateCompare !== 0) return dateCompare;
 
+    const partnerCompare = (left.partnerName ?? '').localeCompare(right.partnerName ?? '', 'ko-KR', {
+        numeric: true,
+        sensitivity: 'base'
+    });
+    if (partnerCompare !== 0) return partnerCompare;
+
     return (left.id ?? '').localeCompare(right.id ?? '', 'en');
 };
 
@@ -1103,39 +1111,15 @@ const buildLedgerRows = (entries: WorkbookLedgerEntry[], filter: LedgerFilter): 
 
 const buildReceiptHistorySettlementEntries = (
     entries: WorkbookLedgerEntry[],
-    filter: SummaryFilter,
+    _filter: SummaryFilter,
     targetId: string | null
 ) => {
     if (!targetId) return [];
 
-    const transactionType: WorkbookTransactionType = filter.mode === '매입' || filter.mode === '미지급금' ? '매입' : '매출';
-    const startDate = normalizeDate(filter.startDate);
-    const endDate = normalizeDate(filter.endDate);
-
-    if (!startDate || !endDate) return [];
-
-    const candidates: LegacyMatchCandidate[] = entries
-        .filter((entry) => entry.transactionType === transactionType)
-        .filter(isInvoiceEntry)
-        .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
-        .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
-        .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
-        .map((entry) => ({
-            id: getWorkbookEntryKey(entry),
-            partnerName: entry.partnerName,
-            siteName: entry.siteName ?? '',
-            issueDate: entry.date,
-            appliedYear: entry.appliedYear ?? getYearFromDate(entry.date),
-            appliedMonth: entry.appliedMonth ?? getMonthFromDate(entry.date),
-            teamName: entry.teamName ?? ''
-        }));
-
     return entries
         .filter((entry) => {
             if (!isPaymentEntry(entry)) return false;
-            if (entry.matchedEntryId === targetId) return true;
-            if (entry.matchedEntryId) return false;
-            return findLegacyMatchedCandidateId(entry, candidates) === targetId;
+            return entry.matchedEntryId === targetId;
         })
         .sort(sortWorkbookEntries);
 };
@@ -1218,7 +1202,10 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
     const paymentEntries = entries
         .filter((entry) => entry.transactionType === transactionType)
         .filter(isPaymentEntry)
-        .filter((entry) => entry.date <= endDate)
+        .filter((entry) => {
+            const paymentDate = normalizeDate(entry.date);
+            return Boolean(paymentDate && paymentDate <= endDate);
+        })
         .filter((entry) => matchesFilter(entry.teamName, filter.teamName))
         .filter((entry) => matchesFilter(entry.partnerName, filter.partnerName))
         .filter((entry) => matchesFilter(entry.siteName, filter.siteName))
@@ -1235,17 +1222,17 @@ const buildSummaryRows = (entries: WorkbookLedgerEntry[], filter: SummaryFilter)
         const appliedAmount = invoice.remainingAmount > 0
             ? Math.min(invoice.remainingAmount, paymentAmount)
             : 0;
-        const overpaidAmount = paymentAmount - appliedAmount;
+        if (appliedAmount <= 0) return paymentAmount;
 
-        invoice.settledAmount += appliedAmount + overpaidAmount;
-        invoice.remainingAmount -= appliedAmount + overpaidAmount;
+        invoice.settledAmount += appliedAmount;
+        invoice.remainingAmount = Math.max(invoice.remainingAmount - appliedAmount, 0);
         invoice.outstandingAmount = invoice.remainingAmount;
         if ((options?.recordDate ?? true) && paymentDate && !invoice.paymentDates.includes(paymentDate)) {
             invoice.paymentDates = [...invoice.paymentDates, paymentDate].sort((left, right) => left.localeCompare(right, 'en'));
         }
         invoice.note = appendSummaryNote(invoice.note, options?.note);
 
-        return 0;
+        return paymentAmount - appliedAmount;
     };
 
     const findDirectOffsetInvoice = (adjustmentEntry: WorkbookLedgerEntry) => {
@@ -1762,10 +1749,20 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     const handleInputGridBeforeKeyDown = useCallback((event: KeyboardEvent) => {
         if (event.ctrlKey || event.metaKey || event.altKey) return;
         if (event.key.length !== 1 && event.key !== 'Process') return;
+
+        const hotInstance = hotRef.current?.hotInstance;
+        const selectedCell = hotInstance?.getSelectedLast?.();
+        const columnIndex = Array.isArray(selectedCell) ? Number(selectedCell[1]) : -1;
+        if (isInputGridNumericColumn(columnIndex)) return;
+
         refocusInputGridEditor();
     }, [refocusInputGridEditor]);
 
-    const handleInputGridModifyFocusedElement = useCallback((_row: number, _column: number, focusedElement: HTMLElement) => {
+    const handleInputGridModifyFocusedElement = useCallback((_row: number, column: number, focusedElement: HTMLElement) => {
+        if (isInputGridNumericColumn(column)) {
+            return focusedElement;
+        }
+
         const hotInstance = hotRef.current?.hotInstance;
         const activeElement = hotInstance?.rootDocument?.activeElement as HTMLElement | null | undefined;
 
@@ -3324,9 +3321,14 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
         return receiptHistoryInvoice.paymentAmount ?? 0;
     }, [receiptHistoryInvoice]);
 
-    const receiptHistoryTotal = useMemo(
+    const directReceiptHistoryTotal = useMemo(
         () => receiptHistoryOriginalPaymentAmount + receiptHistoryEntries.reduce((sum, entry) => sum + (entry.paymentAmount ?? 0), 0),
         [receiptHistoryEntries, receiptHistoryOriginalPaymentAmount]
+    );
+
+    const receiptHistoryTotal = useMemo(
+        () => receiptHistorySummaryRow ? receiptHistorySummaryRow.settledAmount : directReceiptHistoryTotal,
+        [directReceiptHistoryTotal, receiptHistorySummaryRow]
     );
 
     const receiptHistoryOutstanding = useMemo(() => {
@@ -3335,9 +3337,8 @@ const WorkbookLedgerPage: React.FC<WorkbookLedgerPageProps> = ({
     }, [receiptHistoryInvoice, receiptHistoryTotal]);
 
     const legacyMatchedGap = useMemo(() => {
-        if (!receiptHistorySummaryRow) return 0;
-        return Math.max(receiptHistorySummaryRow.settledAmount - receiptHistoryTotal, 0);
-    }, [receiptHistorySummaryRow, receiptHistoryTotal]);
+        return Math.max(receiptHistoryTotal - directReceiptHistoryTotal, 0);
+    }, [directReceiptHistoryTotal, receiptHistoryTotal]);
 
     const receiptHistoryLabels = useMemo(
         () => getSettlementLabels(receiptHistoryInvoice?.transactionType ?? receiptHistorySummaryRow?.transactionType),

@@ -177,4 +177,14 @@ export const getTaxInvoiceListApi = protectedRegion.https.onRequest(async (req, 
 // 카카오톡 알림톡 Functions (SOLAPI)
 // ============================================
 export * from './kakao';
+export {
+    createWelfareLedgerTransaction,
+    deleteWelfareCategory,
+    getWelfareGameConfig,
+    playWelfarePointGame,
+    saveWelfareAdminPermissions,
+    saveWelfareGameConfig,
+    seedWelfareAssetMasters,
+    upsertWelfareCategory,
+} from './services/welfareAssetLedger';
 

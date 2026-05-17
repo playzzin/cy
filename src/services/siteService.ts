@@ -1,23 +1,66 @@
 import { siteFirestoreService } from './siteFirestoreService';
+import { databaseLogService } from './databaseLogService';
 import { SiteZod as Site } from '../types/zod/siteSchema';
 import { db } from '../config/firebase';
-import { doc, updateDoc, arrayUnion, Timestamp, collection, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, Timestamp, collection, getDoc, getDocs, query, where, writeBatch } from 'firebase/firestore';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 
 export type { Site };
+
+const snapshotRecord = (id: string, data: Record<string, unknown>): Record<string, unknown> => ({
+    id,
+    ...stripUndefinedFields(data),
+});
+
+const logDatabaseChange = async (
+    action: 'created' | 'updated' | 'deleted',
+    entityType: 'site' | 'company',
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+    source = 'siteService'
+): Promise<void> => {
+    await databaseLogService.safeCreateLog({
+        action,
+        entityType,
+        before,
+        after,
+        source,
+    });
+};
 
 export const siteService = {
     addSite: async (site: Partial<Site> & Pick<Site, 'name' | 'code' | 'address' | 'status'>): Promise<string> => {
         const id = await siteFirestoreService.addSite(site as any);
+        await logDatabaseChange('created', 'site', null, snapshotRecord(id, site as Record<string, unknown>), 'siteService.addSite');
 
         // Sync: Add Site ID to Client Company (발주사) if selected
         if (site.clientCompanyId) {
             try {
                 const clientCompanyRef = doc(db, 'companies', site.clientCompanyId);
+                const beforeSnap = await getDoc(clientCompanyRef);
+                const beforeCompany = beforeSnap.exists() ? snapshotRecord(beforeSnap.id, beforeSnap.data()) : null;
                 await updateDoc(clientCompanyRef, {
                     siteIds: arrayUnion(id),
                     siteNames: arrayUnion(site.name),
                     updatedAt: Timestamp.now()
                 });
+                if (beforeCompany) {
+                    const nextSiteIds = Array.from(new Set([
+                        ...((Array.isArray(beforeCompany.siteIds) ? beforeCompany.siteIds : []) as unknown[]).map(String),
+                        id,
+                    ]));
+                    const nextSiteNames = Array.from(new Set([
+                        ...((Array.isArray(beforeCompany.siteNames) ? beforeCompany.siteNames : []) as unknown[]).map(String),
+                        site.name,
+                    ].filter(Boolean)));
+                    await logDatabaseChange(
+                        'updated',
+                        'company',
+                        beforeCompany,
+                        { ...beforeCompany, siteIds: nextSiteIds, siteNames: nextSiteNames, updatedAt: Timestamp.now() },
+                        'siteService.addSite.syncClientCompany'
+                    );
+                }
             } catch (err) {
                 console.error("Failed to sync site to client company:", err);
             }
@@ -28,8 +71,16 @@ export const siteService = {
     updateSite: async (id: string, site: Partial<Site>): Promise<void> => {
         const existing = await siteFirestoreService.getSite(id);
         const nameChanged = site.name && existing && existing.name !== site.name;
+        const cleanedUpdates = stripUndefinedFields(site as Record<string, unknown>);
 
-        await siteFirestoreService.updateSite(id, site);
+        await siteFirestoreService.updateSite(id, cleanedUpdates as Partial<Site>);
+        await logDatabaseChange(
+            'updated',
+            'site',
+            existing ? snapshotRecord(id, existing as Record<string, unknown>) : null,
+            snapshotRecord(id, { ...(existing ? existing as Record<string, unknown> : {}), ...cleanedUpdates }),
+            'siteService.updateSite'
+        );
 
         if (nameChanged && site.name) {
             try {
@@ -42,20 +93,45 @@ export const siteService = {
     },
 
     deleteSite: async (id: string): Promise<void> => {
-        return siteFirestoreService.deleteSite(id);
+        const existing = await siteFirestoreService.getSite(id);
+        await siteFirestoreService.deleteSite(id);
+        await logDatabaseChange(
+            'deleted',
+            'site',
+            existing ? snapshotRecord(id, existing as Record<string, unknown>) : null,
+            null,
+            'siteService.deleteSite'
+        );
     },
 
     updateSitesBatch: async (ids: string[], updates: Partial<Site>): Promise<void> => {
         const { writeBatch } = await import('firebase/firestore');
+        const beforeRows = await Promise.all(ids.map(async (id) => {
+            const site = await siteFirestoreService.getSite(id);
+            return site ? snapshotRecord(id, site as Record<string, unknown>) : null;
+        }));
+        const cleanedUpdates = stripUndefinedFields(updates as Record<string, unknown>);
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         ids.forEach(id => {
             const docRef = doc(db, 'sites', id);
             batch.update(docRef, {
-                ...updates,
-                updatedAt: Timestamp.now()
+                ...cleanedUpdates,
+                updatedAt
             });
         });
         await batch.commit();
+        await Promise.all(beforeRows.map((before) =>
+            before
+                ? logDatabaseChange(
+                    'updated',
+                    'site',
+                    before,
+                    { ...before, ...cleanedUpdates, updatedAt },
+                    'siteService.updateSitesBatch'
+                )
+                : Promise.resolve()
+        ));
     },
 
     getSite: async (id: string): Promise<Site | null> => {
@@ -109,13 +185,29 @@ export const siteService = {
 
         if (siteRefs.size === 0) return;
 
+        const beforeRows = await Promise.all(Array.from(siteRefs.values()).map(async (siteRef) => {
+            const snap = await getDoc(siteRef);
+            return snap.exists() ? snapshotRecord(snap.id, snap.data()) : null;
+        }));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         siteRefs.forEach((siteRef) => {
             batch.update(siteRef, {
                 color,
-                updatedAt: Timestamp.now()
+                updatedAt
             });
         });
         await batch.commit();
+        await Promise.all(beforeRows.map((before) =>
+            before
+                ? logDatabaseChange(
+                    'updated',
+                    'site',
+                    before,
+                    { ...before, color, updatedAt },
+                    'siteService.updateSitesColorByResponsibleTeam'
+                )
+                : Promise.resolve()
+        ));
     }
 };

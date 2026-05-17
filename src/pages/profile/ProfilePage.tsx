@@ -1,15 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService, UserData } from '../../services/userService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { accountLinkService } from '../../services/accountLinkService';
+import { AccountLink, ACCOUNT_RELATION_ROLE_LABELS, ACCOUNT_TYPE_LABELS } from '../../types/accountLink';
 import AccountLinkingModal from '../../components/manpower/AccountLinkingModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faCalendar, faShieldAlt } from '@fortawesome/free-solid-svg-icons';
+
+const getWorkerTeamName = (worker: Worker): string => {
+    const teamName = String(worker.teamName || '').trim();
+    if (teamName) return teamName;
+
+    const teamId = String(worker.teamId || '').trim();
+    return teamId || '팀 미배정';
+};
 
 const ProfilePage: React.FC = () => {
     const { currentUser } = useAuth();
     const [userData, setUserData] = useState<UserData | null>(null);
     const [linkedWorkers, setLinkedWorkers] = useState<Worker[]>([]);
+    const [accountLinks, setAccountLinks] = useState<AccountLink[]>([]);
     const handleUnlink = async (workerId: string) => {
         if (!currentUser || !window.confirm('정말로 이 작업자와의 연결을 해제하시겠습니까?')) return;
 
@@ -30,18 +41,27 @@ const ProfilePage: React.FC = () => {
     const [success, setSuccess] = useState<string | null>(null);
 
     const [formData, setFormData] = useState({
-        displayName: '',
-        phoneNumber: '',
-        department: '',
-        position: ''
+        displayName: ''
     });
 
     // Extended form data for profile fields
     const [profileData, setProfileData] = useState({
         phoneNumber: '',
-        department: '',
         position: ''
     });
+
+    const linkedWorkerTeamName = useMemo(() => {
+        const teamNames = Array.from(
+            new Set(linkedWorkers.map(getWorkerTeamName).filter(Boolean))
+        );
+
+        return teamNames.length > 0 ? teamNames.join(', ') : '연결된 작업자 없음';
+    }, [linkedWorkers]);
+
+    const visibleAccountLinks = useMemo(
+        () => accountLinks.filter((link) => link.status !== 'inactive' && link.status !== 'rejected'),
+        [accountLinks]
+    );
 
     useEffect(() => {
         loadUserData();
@@ -54,6 +74,7 @@ const ProfilePage: React.FC = () => {
         try {
             const user = await userService.getUser(currentUser.uid);
             setUserData(user);
+            setAccountLinks(await accountLinkService.getLinksByUid(currentUser.uid));
 
             // Load linked workers
             if (user?.linkedWorkerIds && user.linkedWorkerIds.length > 0) {
@@ -68,20 +89,18 @@ const ProfilePage: React.FC = () => {
                     })
                 );
                 setLinkedWorkers(workers.filter((w: Worker | null): w is Worker => w !== null));
+            } else {
+                setLinkedWorkers([]);
             }
 
             // Set form data
             setFormData({
-                displayName: user?.displayName || '',
-                phoneNumber: '',
-                department: '',
-                position: ''
+                displayName: user?.displayName || ''
             });
 
             // Set profile data
             setProfileData({
                 phoneNumber: user?.phoneNumber || '',
-                department: user?.department || '',
                 position: user?.position || ''
             });
         } catch (err) {
@@ -99,7 +118,6 @@ const ProfilePage: React.FC = () => {
             await userService.updateUserProfile(currentUser.uid, {
                 displayName: formData.displayName,
                 phoneNumber: profileData.phoneNumber,
-                department: profileData.department,
                 position: profileData.position
             });
 
@@ -125,14 +143,10 @@ const ProfilePage: React.FC = () => {
     const handleCancel = () => {
         if (userData) {
             setFormData({
-                displayName: userData.displayName || '',
-                phoneNumber: '',
-                department: '',
-                position: ''
+                displayName: userData.displayName || ''
             });
             setProfileData({
                 phoneNumber: userData.phoneNumber || '',
-                department: userData.department || '',
                 position: userData.position || ''
             });
         }
@@ -217,14 +231,20 @@ const ProfilePage: React.FC = () => {
                                             <FontAwesomeIcon icon={faShieldAlt} className="text-slate-500 text-xs" />
                                             <span className="text-xs font-semibold text-slate-600">권한: {userData?.role === 'admin' ? '최고 관리자' : (userData?.role === 'manager' ? '관리자' : '사용자')}</span>
                                         </div>
+                                        {userData?.accountType && (
+                                            <div className="flex items-center gap-1 px-3 py-1 bg-cyan-50 rounded-full">
+                                                <FontAwesomeIcon icon={faLink} className="text-cyan-500 text-xs" />
+                                                <span className="text-xs font-semibold text-cyan-700">유형: {ACCOUNT_TYPE_LABELS[userData.accountType]}</span>
+                                            </div>
+                                        )}
                                         {userData?.position && (
                                             <div className="flex items-center gap-1 px-3 py-1 bg-blue-50 rounded-full">
                                                 <FontAwesomeIcon icon={faUser} className="text-blue-500 text-xs" />
                                                 <span className="text-xs font-semibold text-blue-600">직책: {userData.position}</span>
                                             </div>
                                         )}
-                                        <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                                            계정 활성
+                                        <span className={`text-xs px-2 py-1 rounded-full ${userData?.status === 'pending' ? 'bg-amber-100 text-amber-700' : userData?.status === 'rejected' ? 'bg-rose-100 text-rose-700' : 'bg-green-100 text-green-700'}`}>
+                                            {userData?.status === 'pending' ? '승인 대기' : userData?.status === 'rejected' ? '반려' : '계정 활성'}
                                         </span>
                                     </div>
                                 </div>
@@ -288,15 +308,13 @@ const ProfilePage: React.FC = () => {
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">
                                             <FontAwesomeIcon icon={faBuilding} className="mr-2" />
-                                            부서
+                                            팀
                                         </label>
                                         <input
                                             type="text"
-                                            value={profileData.department}
-                                            onChange={(e) => setProfileData({ ...profileData, department: e.target.value })}
-                                            disabled={!editing}
-                                            className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${editing ? 'border-slate-300 bg-white' : 'border-slate-200 bg-slate-50'
-                                                }`}
+                                            value={linkedWorkerTeamName}
+                                            disabled
+                                            className="w-full px-4 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
                                         />
                                     </div>
                                     <div>
@@ -335,7 +353,7 @@ const ProfilePage: React.FC = () => {
                                 </div>
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm text-slate-600">계정 상태</span>
-                                    <span className="text-sm font-medium text-green-600">활성</span>
+                                    <span className="text-sm font-medium text-green-600">{userData?.status || 'active'}</span>
                                 </div>
                             </div>
                         </div>
@@ -384,7 +402,37 @@ const ProfilePage: React.FC = () => {
                                 <div className="text-center py-8">
                                     <FontAwesomeIcon icon={faHardHat} className="text-4xl text-slate-300 mb-4" />
                                     <p className="text-slate-500 mb-4">연결된 작업자가 없습니다</p>
-                                    <p className="text-slate-500 mb-4">연결된 작업자가 없습니다</p>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-lg border border-slate-200 p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold text-slate-800">연결된 계정 대상</h3>
+                            </div>
+
+                            {visibleAccountLinks.length > 0 ? (
+                                <div className="space-y-3">
+                                    {visibleAccountLinks.map((link) => (
+                                        <div key={link.id || `${link.entityType}-${link.entityId}`} className="p-3 bg-slate-50 rounded-lg">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div>
+                                                    <p className="font-medium text-slate-800">{link.entityName}</p>
+                                                    <p className="text-xs text-slate-500 mt-0.5">
+                                                        {link.entitySubType} · {ACCOUNT_RELATION_ROLE_LABELS[link.relationRole] || link.relationRole}
+                                                    </p>
+                                                </div>
+                                                <span className={`text-xs px-2 py-1 rounded-full ${link.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                    {link.status === 'active' ? '활성' : '승인 대기'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <FontAwesomeIcon icon={faBuilding} className="text-4xl text-slate-300 mb-4" />
+                                    <p className="text-slate-500">연결된 회사/사무실 대상이 없습니다</p>
                                 </div>
                             )}
                         </div>
@@ -409,7 +457,7 @@ const ProfilePage: React.FC = () => {
                 <AccountLinkingModal onClose={() => {
                     setShowLinkingModal(false);
                     loadUserData(); // 데이터 새로고침
-                }} />
+                }} lockedUserId={currentUser?.uid} actorEmail={currentUser?.email || 'system'} />
             )}
         </div>
     );

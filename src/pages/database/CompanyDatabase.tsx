@@ -25,7 +25,10 @@ const COMPANY_COLUMNS = [
     { key: 'accountHolder', label: '예금주' },
     { key: 'siteCount', label: '현장배정' },
     { key: 'status', label: '상태' },
-    { key: 'manage', label: '관리' }
+    { key: 'manage', label: '관리' },
+    { key: 'totalManDay', label: '발주 누적공수' },
+    { key: 'constructorTotalManDay', label: '시공 누적공수' },
+    { key: 'partnerTotalManDay', label: '협력 누적공수' }
 ];
 
 interface CompanyDatabaseProps {
@@ -56,6 +59,8 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [companyStats, setCompanyStats] = useState<{ [id: string]: number }>({});
+    const [companyConstructorStats, setCompanyConstructorStats] = useState<{ [id: string]: number }>({});
+    const [companyPartnerStats, setCompanyPartnerStats] = useState<{ [id: string]: number }>({});
     const [loading, setLoading] = useState(false);
 
     // View State
@@ -112,6 +117,8 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
             setTeams(teamsData);
             setWorkers(workersData);
             setCompanyStats(statsData.companyStats);
+            setCompanyConstructorStats(statsData.companyConstructorStats);
+            setCompanyPartnerStats(statsData.companyPartnerStats);
         } catch (error) {
             console.error("Failed to load company data:", error);
         } finally {
@@ -219,10 +226,25 @@ const CompanyDatabase: React.FC<CompanyDatabaseProps> = ({
         }
     };
 
+    const getCompanyManDay = (company: Company, statsMap: { [id: string]: number }, fieldKey: keyof Company): number => {
+        const companyId = String(company.id ?? '').trim();
+        if (companyId && statsMap[companyId] !== undefined) return statsMap[companyId];
+        const stored = Number(company[fieldKey] ?? 0);
+        return Number.isFinite(stored) ? stored : 0;
+    };
+
     const renderCellValue = (company: Company, key: string) => {
-        if (key === 'totalGongsu') {
-            const gongsu = companyStats[company.id!] || 0;
+        if (key === 'totalManDay' || key === 'totalGongsu') {
+            const gongsu = getCompanyManDay(company, companyStats, 'totalManDay');
             return <span className="font-bold text-blue-600">{gongsu.toFixed(1)}공수</span>;
+        }
+        if (key === 'constructorTotalManDay') {
+            const gongsu = getCompanyManDay(company, companyConstructorStats, 'constructorTotalManDay');
+            return <span className="font-bold text-indigo-600">{gongsu.toFixed(1)}공수</span>;
+        }
+        if (key === 'partnerTotalManDay') {
+            const gongsu = getCompanyManDay(company, companyPartnerStats, 'partnerTotalManDay');
+            return <span className="font-bold text-emerald-600">{gongsu.toFixed(1)}공수</span>;
         }
         if (key === 'ceoResidentNumber') {
             return company.ceoResidentNumber ? company.ceoResidentNumber.substring(0, 8) + '******' : '-';

@@ -60,6 +60,7 @@ const CompanyTable: React.FC<CompanyTableProps> = ({
                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${company.type === '시공사' ? 'bg-blue-100 text-blue-800' :
                                             company.type === '협력사' ? 'bg-green-100 text-green-800' :
                                                 company.type === '건설사' ? 'bg-indigo-100 text-indigo-800' :
+                                                    company.type === '임대사' ? 'bg-amber-100 text-amber-800' :
                                                     'bg-slate-100 text-slate-800'
                                         }`}>
                                         {company.type}

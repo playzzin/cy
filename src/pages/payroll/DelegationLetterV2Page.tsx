@@ -31,6 +31,15 @@ const DEFAULT_DELEGATION_BODY_TEXT = [
     '또한 수임인에게 지급된 금액은 위임인에게 직접 지급된 것으로 간주하며, 위임인은 이에 대하여 어떠한 이의도 제기하지 않겠습니다.'
 ].join('\n');
 
+const MAX_WORKERS_PER_PAGE = 24;
+const DEFAULT_WORKERS_PER_PAGE = 24;
+const FIRST_PAGE_RESERVED_ROWS = 7;
+
+const clampWorkersPerPage = (value: number): number => {
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    return Math.min(Math.floor(value), MAX_WORKERS_PER_PAGE);
+};
+
 const DelegationLetterV2Page: React.FC = () => {
     // --- State: Selections ---
     const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
@@ -46,7 +55,7 @@ const DelegationLetterV2Page: React.FC = () => {
     });
     const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().slice(0, 10));
     const [showManDays, setShowManDays] = useState<boolean>(false);
-    const [workersPerPage, setWorkersPerPage] = useState<number>(18);
+    const [workersPerPage, setWorkersPerPage] = useState<number>(DEFAULT_WORKERS_PER_PAGE);
 
     // --- State: Data ---
     const [allReports, setAllReports] = useState<DailyReport[]>([]);
@@ -498,13 +507,13 @@ const DelegationLetterV2Page: React.FC = () => {
     const pagedDelegators = useMemo(() => {
         if (finalDelegators.length === 0) return [] as DelegationWorker[][];
 
-        const cappedWorkersPerPage = Math.min(Math.max(1, Math.floor(workersPerPage)), 18);
+        const cappedWorkersPerPage = clampWorkersPerPage(workersPerPage);
         const mandataryAddress = String(mandataryInfo?.address || '');
         const firstPageReserve = Math.min(
-            3,
-            1 +
+            cappedWorkersPerPage - 1,
+            FIRST_PAGE_RESERVED_ROWS +
             (showManDays ? 1 : 0) +
-            (mandataryAddress.length > 35 || delegationText.length > 90 ? 1 : 0)
+            (mandataryAddress.length > 35 || delegationText.length > 90 ? 2 : 0)
         );
         const firstPageWorkers = Math.max(1, cappedWorkersPerPage - firstPageReserve);
 
@@ -537,7 +546,7 @@ const DelegationLetterV2Page: React.FC = () => {
             {/* Print-only styles */}
             <style>{`
                 @media print {
-                    @page { size: A4 portrait; margin: 7mm; }
+                    @page { size: A4 portrait; margin: 0; }
                     #main-header,
                     #sidebar,
                     #bottom-panel,
@@ -565,6 +574,8 @@ const DelegationLetterV2Page: React.FC = () => {
                         left: 0 !important;
                         width: 100% !important;
                         min-height: auto !important;
+                        overflow: visible !important;
+                        position: static !important;
                     }
                     .app > * {
                         display: none !important;
@@ -586,9 +597,15 @@ const DelegationLetterV2Page: React.FC = () => {
                         visibility: visible !important;
                     }
                     html, body, #root {
-                        width: 100% !important;
+                        width: auto !important;
                         min-height: 100% !important;
                         height: auto !important;
+                        overflow: visible !important;
+                    }
+                    .app {
+                        display: block !important;
+                        min-height: auto !important;
+                        overflow: visible !important;
                     }
                     body {
                         margin: 0;
@@ -610,12 +627,13 @@ const DelegationLetterV2Page: React.FC = () => {
                         display: none !important;
                     }
                     .delegation-page-root .print-area-wrapper {
-                        display: flex !important;
+                        display: block !important;
                     }
                     .print-area-wrapper {
-                        width: 100% !important;
+                        width: 210mm !important;
+                        max-width: 210mm !important;
                         padding: 0 !important;
-                        margin: 0 !important;
+                        margin: 0 auto !important;
                         background: white !important;
                         border: none !important;
                         border-radius: 0 !important;
@@ -627,19 +645,20 @@ const DelegationLetterV2Page: React.FC = () => {
                     }
 
                     .print-only-region {
-                        position: fixed !important;
-                        inset: 0 !important;
-                        width: 100% !important;
+                        position: static !important;
+                        inset: auto !important;
+                        width: 210mm !important;
+                        max-width: 210mm !important;
                         margin: 0 !important;
                         padding: 0 !important;
                         background: white !important;
-                        z-index: 2147483647 !important;
+                        z-index: auto !important;
                         overflow: visible !important;
                     }
 
                     .delegation-letter {
-                        width: 100% !important;
-                        max-width: none !important;
+                        width: 210mm !important;
+                        max-width: 210mm !important;
                         min-height: auto !important;
                         padding: 0 !important;
                         margin: 0 auto !important;
@@ -650,21 +669,24 @@ const DelegationLetterV2Page: React.FC = () => {
 
                     .delegation-letter-page {
                         box-sizing: border-box;
-                        width: 100% !important;
-                        height: calc(297mm - 14mm) !important;
-                        min-height: calc(297mm - 14mm) !important;
+                        width: 210mm !important;
+                        height: 297mm !important;
+                        min-height: 297mm !important;
                         padding: 12mm 12mm 10mm !important;
+                        margin: 0 !important;
                         overflow: hidden !important;
                         background: white !important;
                         display: flex !important;
                         flex-direction: column !important;
                         justify-content: space-between !important;
+                        break-after: page;
                         break-inside: avoid-page;
                         page-break-inside: avoid;
                         page-break-after: always;
                     }
 
                     .delegation-letter-page:last-child {
+                        break-after: auto;
                         page-break-after: auto;
                     }
 
@@ -1072,16 +1094,16 @@ const DelegationLetterV2Page: React.FC = () => {
                                 <div className="flex items-center justify-between gap-3">
                                     <div>
                                         <p className="text-white font-medium text-sm">페이지당 작업자 수</p>
-                                        <p className="text-slate-500 text-xs">A4 한 장에 들어갈 작업자 수(상단 포함). 인쇄 결과에 맞춰 조절하세요.</p>
+                                        <p className="text-slate-500 text-xs">2페이지 이후 기준입니다. 첫 페이지는 상단 정보 높이에 맞춰 자동으로 줄어듭니다.</p>
                                     </div>
                                     <input
                                         type="number"
                                         min={1}
+                                        max={MAX_WORKERS_PER_PAGE}
                                         value={workersPerPage}
                                         onChange={(e) => {
                                             const next = Number(e.target.value);
-                                            const safe = Number.isFinite(next) && next > 0 ? Math.floor(next) : 1;
-                                            setWorkersPerPage(Math.min(safe, 18));
+                                            setWorkersPerPage(clampWorkersPerPage(next));
                                         }}
                                         className="w-24 px-3 py-2 text-sm bg-slate-700/50 border border-slate-600/50 rounded-lg text-white text-right focus:border-purple-500 outline-none"
                                     />
@@ -1309,7 +1331,7 @@ const DelegationLetterV2Page: React.FC = () => {
                             min-height: 297mm;
                             position: relative;
                             background-color: white;
-                            padding: 14mm 14mm 12mm;
+                            padding: 12mm 12mm 10mm;
                             box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
                             margin: 0 auto 20px auto;
                             box-sizing: border-box;
@@ -1317,6 +1339,7 @@ const DelegationLetterV2Page: React.FC = () => {
                             display: flex;
                             flex-direction: column;
                             justify-content: space-between;
+                            break-after: page;
                             page-break-after: always;
                         }
 
@@ -1418,7 +1441,7 @@ const DelegationLetterV2Page: React.FC = () => {
 
                         .delegation-signature-cell {
                             position: relative;
-                            height: 38px;
+                            height: 10mm;
                             padding: 0 !important;
                             overflow: hidden;
                         }
@@ -1433,6 +1456,10 @@ const DelegationLetterV2Page: React.FC = () => {
                             .delegation-letter-page {
                                 margin: 0 auto;
                                 box-shadow: none;
+                            }
+                            .delegation-letter-page:last-child {
+                                break-after: auto;
+                                page-break-after: auto;
                             }
                             .print-gap { display: none !important; }
                         }

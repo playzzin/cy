@@ -12,11 +12,33 @@ import {
     MaterialInboundZod,
     MaterialOutboundZod
 } from '../types/zod/materialSchema';
+import type { MaterialLogAction, MaterialLogEntityType } from '../types/materialLog';
 import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
 
 // Helper to generate IDs
 const generateId = (prefix: string = 'mat'): string => {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+};
+
+const logMaterialChange = async (
+    action: MaterialLogAction,
+    entityType: MaterialLogEntityType,
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+    source = 'materialService'
+): Promise<void> => {
+    try {
+        const { materialLogService } = await import('./materialLogService');
+        await materialLogService.safeCreateLog({
+            action,
+            entityType,
+            before,
+            after,
+            source,
+        });
+    } catch (error) {
+        console.warn('[materialService] material log failed:', error);
+    }
 };
 
 const trimText = (value: unknown): string => String(value ?? '').trim();
@@ -125,6 +147,12 @@ const createCatalogMaterials = (): Material[] => {
 const getCatalogDocumentId = (materialKey: string): string =>
     `catalog_${encodeURIComponent(materialKey)}`;
 
+const getMaterialKey = (material: Pick<Material, 'category' | 'itemName' | 'spec'> & { materialKey?: string }): string =>
+    material.materialKey || buildMaterialBusinessKey(material);
+
+const isCatalogMaterial = (material: Partial<Material>): boolean =>
+    material.isCatalogDefault === true || String(material.id || '').startsWith('catalog_');
+
 const normalizeMaterialForSelection = (material: Material): Material => {
     const normalized = {
         ...material,
@@ -142,21 +170,24 @@ const normalizeMaterialForSelection = (material: Material): Material => {
 const mergeMaterialsForSelection = (rows: Material[]): Material[] => {
     const deduped = new Map<string, Material>();
 
-    rows.map(normalizeMaterialForSelection).forEach((row) => {
-        const key = row.materialKey || buildMaterialBusinessKey(row);
-        const existing = deduped.get(key);
-        if (!existing) {
-            deduped.set(key, row);
-            return;
-        }
-        if (existing.isCatalogDefault && !row.isCatalogDefault) {
-            deduped.set(key, row);
-            return;
-        }
-        if (existing.isCatalogDefault === row.isCatalogDefault && compareMaterialPreference(row, existing) > 0) {
-            deduped.set(key, row);
-        }
-    });
+    rows
+        .filter((row) => row.hiddenCatalogDefault !== true)
+        .map(normalizeMaterialForSelection)
+        .forEach((row) => {
+            const key = row.materialKey || buildMaterialBusinessKey(row);
+            const existing = deduped.get(key);
+            if (!existing) {
+                deduped.set(key, row);
+                return;
+            }
+            if (existing.isCatalogDefault && !row.isCatalogDefault) {
+                deduped.set(key, row);
+                return;
+            }
+            if (existing.isCatalogDefault === row.isCatalogDefault && compareMaterialPreference(row, existing) > 0) {
+                deduped.set(key, row);
+            }
+        });
 
     return sortMaterialsForSelection(Array.from(deduped.values()));
 };
@@ -202,15 +233,16 @@ const ensureCatalogMaterialsPersisted = async (rows: Material[]): Promise<Materi
 const getSelectableMaterials = async (): Promise<Material[]> => {
     const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
     const persistedCatalogRows = await ensureCatalogMaterialsPersisted(masterRows);
-    const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false);
+    const rows = [...masterRows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true);
 
     return mergeMaterialsForSelection(rows);
 };
 
 const normalizeMaterialSnapshot = async () => {
-    const rows = await getSelectableMaterials();
+    const masterRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
+    const rows = [...masterRows, ...createCatalogMaterials()].map(normalizeMaterialForSelection);
     return new Map(rows.flatMap((m) => {
-        const materialKey = m.materialKey || buildMaterialBusinessKey(m);
+        const materialKey = getMaterialKey(m);
         return [
             [m.id, m],
             [materialKey, m],
@@ -233,7 +265,7 @@ const normalizeTransactionWithMaster = <T extends { materialId: string; material
     return {
         ...row,
         ...normalized,
-        materialKey: row.materialKey || buildMaterialBusinessKey(normalized),
+        materialKey: buildMaterialBusinessKey(normalized),
     };
 };
 
@@ -254,7 +286,7 @@ const getMaterialFilterKey = (materialId: string | undefined, materialById: Map<
 export const getAllMaterials = async (): Promise<Material[]> => {
     const rows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
     const persistedCatalogRows = await ensureCatalogMaterialsPersisted(rows);
-    return [...rows, ...persistedCatalogRows].filter((row) => row.isActive !== false) as any[];
+    return [...rows, ...persistedCatalogRows].filter((row) => row.isActive !== false && row.hiddenCatalogDefault !== true) as any[];
 };
 
 export const getUniqueMaterialsForSelection = async (): Promise<Material[]> => {
@@ -282,6 +314,7 @@ export const addMaterial = async (material: Omit<Material, 'id' | 'createdAt' | 
         updatedAt: now
     };
     await materialFirestoreService.saveMaterial(id, data);
+    await logMaterialChange('created', 'material', null, data as any);
     return id;
 };
 
@@ -290,7 +323,9 @@ export const updateMaterial = async (
     updates: Partial<Omit<Material, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> => {
     const current = await materialFirestoreService.getMaterial(id);
-    if (!current) return;
+    if (!current) {
+        throw new Error('수정할 자재를 찾을 수 없습니다.');
+    }
 
     const data: MaterialZod = {
         ...current,
@@ -304,35 +339,54 @@ export const updateMaterial = async (
             itemName: (updates as any).itemName ?? current.itemName,
             spec: (updates as any).spec ?? current.spec,
         }),
+        isCatalogDefault: isCatalogMaterial(current as any) ? false : (updates as any).isCatalogDefault ?? (current as any).isCatalogDefault,
+        hiddenCatalogDefault: isCatalogMaterial(current as any) ? false : (updates as any).hiddenCatalogDefault ?? (current as any).hiddenCatalogDefault,
         updatedAt: new Date()
     };
     await materialFirestoreService.saveMaterial(id, data);
+    await logMaterialChange('updated', 'material', current as any, data as any);
 };
 
 export const deleteMaterial = async (materialOrId: string | Material): Promise<void> => {
     const id = typeof materialOrId === 'string' ? materialOrId : materialOrId.id;
     const current = id ? await materialFirestoreService.getMaterial(id) as any : null;
+    const target = current || (typeof materialOrId === 'string' ? null : materialOrId);
 
-    if (current) {
-        await updateMaterial(id, { isActive: false } as any);
-        return;
+    if (!target) {
+        throw new Error('삭제할 자재를 찾을 수 없습니다.');
     }
 
-    if (typeof materialOrId !== 'string') {
-        const now = new Date();
-        const normalized = normalizeMaterialForSelection(materialOrId);
-        const materialKey = normalized.materialKey || buildMaterialBusinessKey(normalized);
-        const fallbackId = materialOrId.id || getCatalogDocumentId(materialKey);
-        await materialFirestoreService.saveMaterial(fallbackId, {
-            ...normalized,
-            id: fallbackId,
-            materialKey,
-            unitPrice: normalized.unitPrice ?? 0,
+    const now = new Date();
+    const normalized = normalizeMaterialForSelection(target as Material);
+    const materialKey = getMaterialKey(normalized);
+    const fallbackId = id || getCatalogDocumentId(materialKey);
+    const allRows = await materialFirestoreService.getAllMaterials({ includeInactive: true }) as any[];
+    const rowsToHide = allRows.filter((row) => {
+        if (row.id === fallbackId) return false;
+        if (getMaterialKey(row) !== materialKey) return false;
+        return isCatalogMaterial(row);
+    });
+    const deletedSnapshot = {
+        ...normalized,
+        id: fallbackId,
+        materialKey,
+        unitPrice: normalized.unitPrice ?? 0,
+        isActive: false,
+        hiddenCatalogDefault: isCatalogMaterial(normalized) || normalized.hiddenCatalogDefault === true,
+        createdAt: normalized.createdAt ?? now,
+        updatedAt: now,
+    };
+
+    await Promise.all([
+        materialFirestoreService.saveMaterial(fallbackId, deletedSnapshot as any),
+        ...rowsToHide.map((row) => materialFirestoreService.saveMaterial(row.id, {
+            ...row,
             isActive: false,
-            createdAt: now,
+            hiddenCatalogDefault: true,
             updatedAt: now,
-        } as any);
-    }
+        } as any)),
+    ]);
+    await logMaterialChange('deleted', 'material', target as any, deletedSnapshot as any);
 };
 
 export const getMaterialsByCategory = async (category: string): Promise<Material[]> => {
@@ -355,6 +409,7 @@ export const addInboundTransaction = async (
         updatedAt: now
     } as any;
     await materialFirestoreService.saveInbound(id, data);
+    await logMaterialChange('created', 'inbound', null, data as any);
     return id;
 };
 
@@ -370,6 +425,9 @@ export const addInboundTransactionsBatch = async (
         updatedAt: now
     } as any));
     await materialFirestoreService.saveInboundsBatch(data);
+    for (const row of data) {
+        await logMaterialChange('created', 'inbound', null, row as any, 'materialInboundBatch');
+    }
 };
 
 export const getInboundTransactions = async (filters?: TransactionFilters): Promise<InboundTransaction[]> => {
@@ -400,22 +458,28 @@ export const updateInboundTransaction = async (
     id: string,
     updates: Partial<Omit<InboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> => {
-    // Implementation for update if needed. Currently no direct firestore method for specific inbound edit but saveInbound handles merge.
-    // Fetch and update
-    const snap = await materialFirestoreService.getInboundsByRange('1900-01-01', '2100-01-01'); // Inefficient, but keep for compatibility
-    const current = snap.find(t => t.id === id);
-    if (!current) return;
+    const current = await materialFirestoreService.getInbound(id);
+    if (!current) {
+        throw new Error('수정할 입고 내역을 찾을 수 없습니다.');
+    }
 
     const next = { ...current, ...updates as any };
-    await materialFirestoreService.saveInbound(id, {
+    const payload = {
         ...next,
         materialKey: buildMaterialBusinessKey(next as any),
         updatedAt: new Date()
-    });
+    };
+    await materialFirestoreService.saveInbound(id, payload);
+    await logMaterialChange('updated', 'inbound', current as any, payload as any);
 };
 
 export const deleteInboundTransaction = async (id: string): Promise<void> => {
+    const current = await materialFirestoreService.getInbound(id);
+    if (!current) {
+        throw new Error('삭제할 입고 내역을 찾을 수 없습니다.');
+    }
     await materialFirestoreService.deleteInbound(id);
+    await logMaterialChange('deleted', 'inbound', current as any, null);
 };
 
 // --- Outbound Transactions ---
@@ -433,6 +497,7 @@ export const addOutboundTransaction = async (
         updatedAt: now
     } as any;
     await materialFirestoreService.saveOutbound(id, data);
+    await logMaterialChange('created', 'outbound', null, data as any);
     return id;
 };
 
@@ -448,6 +513,9 @@ export const addOutboundTransactionsBatch = async (
         updatedAt: now
     } as any));
     await materialFirestoreService.saveOutboundsBatch(data);
+    for (const row of data) {
+        await logMaterialChange('created', 'outbound', null, row as any, 'materialOutboundBatch');
+    }
 };
 
 export const getOutboundTransactions = async (filters?: TransactionFilters): Promise<OutboundTransaction[]> => {
@@ -478,18 +546,27 @@ export const updateOutboundTransaction = async (
     updates: Partial<Omit<OutboundTransaction, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<void> => {
     const current = await materialFirestoreService.getOutbound(id);
-    if (!current) return;
+    if (!current) {
+        throw new Error('수정할 출고 내역을 찾을 수 없습니다.');
+    }
 
     const next = { ...current, ...updates as any };
-    await materialFirestoreService.saveOutbound(id, {
+    const payload = {
         ...next,
         materialKey: buildMaterialBusinessKey(next as any),
         updatedAt: new Date()
-    });
+    };
+    await materialFirestoreService.saveOutbound(id, payload);
+    await logMaterialChange('updated', 'outbound', current as any, payload as any);
 };
 
 export const deleteOutboundTransaction = async (id: string): Promise<void> => {
+    const current = await materialFirestoreService.getOutbound(id);
+    if (!current) {
+        throw new Error('삭제할 출고 내역을 찾을 수 없습니다.');
+    }
     await materialFirestoreService.deleteOutbound(id);
+    await logMaterialChange('deleted', 'outbound', current as any, null);
 };
 
 // --- Inventory Calculations ---

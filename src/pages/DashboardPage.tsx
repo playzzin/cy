@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { manpowerService } from '../services/manpowerService';
-import { storage } from '../config/firebase';
-import { ref, getDownloadURL, getMetadata } from 'firebase/storage';
 import { DashboardHeader } from '../components/dashboard/DashboardHeader';
 import { DashboardExecutiveView } from '../components/dashboard/DashboardExecutiveView';
 import { DashboardFieldView } from '../components/dashboard/DashboardFieldView';
+import { DashboardMessageWidget } from '../components/messages/DashboardMessageWidget';
+import { TomorrowScheduleWidget } from '../components/dashboard/widgets/TomorrowScheduleWidget';
+import { DashboardPersonalWidgets } from '../components/dashboard/DashboardPersonalWidgets';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -19,8 +20,6 @@ const DashboardPage: React.FC = () => {
     const { currentPosition, currentPositionData, positions, changePosition } = useSiteMode();
     const [loading, setLoading] = useState(true);
     const [linkedWorker, setLinkedWorker] = useState<any>(null);
-    const [logoUrl, setLogoUrl] = useState<string>('');
-    const [logoIsVideo, setLogoIsVideo] = useState<boolean>(false);
 
     useEffect(() => {
         const initDashboard = async () => {
@@ -30,31 +29,6 @@ const DashboardPage: React.FC = () => {
             }
 
             try {
-                // 1. Load Logo Video/Image
-                try {
-                    const customLogoRef = ref(storage, 'settings/company_logo');
-                    const customUrl = await getDownloadURL(customLogoRef);
-
-                    try {
-                        const metadata = await getMetadata(customLogoRef);
-                        setLogoIsVideo(metadata.contentType?.startsWith('video/') || false);
-                    } catch (metaError) {
-                        setLogoIsVideo(customUrl.toLowerCase().includes('.mp4'));
-                    }
-                    setLogoUrl(customUrl);
-                } catch (error) {
-                    try {
-                        const logoRef = ref(storage, 'logo_cy.mp4');
-                        const url = await getDownloadURL(logoRef);
-                        setLogoUrl(url);
-                        setLogoIsVideo(true);
-                    } catch (defaultError) {
-                        console.log("Default logo not found.");
-                        setLogoUrl('');
-                    }
-                }
-
-                // 2. Fetch Linked Worker
                 const worker = await manpowerService.getWorkerByUid(currentUser.uid);
                 setLinkedWorker(worker);
 
@@ -96,8 +70,6 @@ const DashboardPage: React.FC = () => {
         <div className="min-h-screen bg-slate-50 font-['Pretendard']">
             <DashboardHeader
                 user={linkedWorker || { name: '관리자', role: '최고관리자' }}
-                logoUrl={logoUrl}
-                logoIsVideo={logoIsVideo}
                 modeConfig={modeConfig}
                 positions={positions}
                 currentPosition={currentPosition}
@@ -105,6 +77,12 @@ const DashboardPage: React.FC = () => {
             />
 
             <main className="max-w-7xl mx-auto px-6 -mt-16 pb-12 relative z-10 w-full overflow-hidden">
+                <DashboardMessageWidget />
+                <div className="mb-6">
+                    <TomorrowScheduleWidget />
+                </div>
+                <DashboardPersonalWidgets modeConfig={modeConfig} />
+
                 <AnimatePresence mode="wait">
                     {modeConfig.layout === 'executive' ? (
                         <motion.div

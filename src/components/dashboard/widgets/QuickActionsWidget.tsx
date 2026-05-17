@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBolt } from '@fortawesome/free-solid-svg-icons';
+import { faBolt, faCog } from '@fortawesome/free-solid-svg-icons';
 import { DASHBOARD_MODES, DashboardModeConfig } from '../roleDashboardConfig';
-import { useQuickMenuActions } from '../useQuickMenuActions';
+import { QuickMenuSettingsModal } from '../QuickMenuSettingsModal';
+import { useQuickMenuActionSettings } from '../useQuickMenuActions';
 
 const WidgetContainer = styled.div`
     background: #ffffff;
@@ -19,6 +20,8 @@ const Header = styled.div`
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+    gap: 12px;
+    flex-wrap: wrap;
 `;
 
 const Title = styled.h3`
@@ -31,6 +34,32 @@ const Title = styled.h3`
 
     svg {
         color: #f59e0b;
+    }
+`;
+
+const SettingsButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    color: #475569;
+    font-size: 0.82rem;
+    font-weight: 800;
+    transition: all 0.2s ease;
+
+    &:hover {
+        border-color: #c7d2fe;
+        background: #eef2ff;
+        color: #4338ca;
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
     }
 `;
 
@@ -96,6 +125,16 @@ const Label = styled.h4`
     transition: color 0.2s ease;
 `;
 
+const EmptyState = styled.div`
+    grid-column: 1 / -1;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 28px;
+    text-align: center;
+    color: #64748b;
+    font-size: 0.9rem;
+`;
+
 interface QuickActionsWidgetProps {
     modeConfig?: DashboardModeConfig;
 }
@@ -120,7 +159,9 @@ const actionThemeMap: Record<string, { color: string; bg: string }> = {
 
 export const QuickActionsWidget: React.FC<QuickActionsWidgetProps> = ({ modeConfig = DASHBOARD_MODES[2] }) => {
     const navigate = useNavigate();
-    const actions = useQuickMenuActions(modeConfig);
+    const quickMenu = useQuickMenuActionSettings(modeConfig);
+    const actions = quickMenu.actions;
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     const handleActionClick = (path: string, openInNewTab?: boolean) => {
         if (openInNewTab) {
@@ -137,13 +178,26 @@ export const QuickActionsWidget: React.FC<QuickActionsWidgetProps> = ({ modeConf
                     <FontAwesomeIcon icon={faBolt} />
                     {modeConfig.shortLabel} 빠른 실행
                 </Title>
+                <SettingsButton
+                    type="button"
+                    onClick={() => setIsSettingsOpen(true)}
+                    disabled={quickMenu.loading}
+                >
+                    <FontAwesomeIcon icon={faCog} />
+                    설정
+                </SettingsButton>
             </Header>
             <Grid>
-                {actions.map((action, index) => {
+                {actions.length === 0 && (
+                    <EmptyState>
+                        등록된 빠른 실행 메뉴가 없습니다. 설정에서 메뉴를 선택하세요.
+                    </EmptyState>
+                )}
+                {actions.map((action) => {
                     const theme = actionThemeMap[action.color] || actionThemeMap.slate;
                     return (
                         <ActionButton
-                            key={`${action.path}-${index}`}
+                            key={action.key}
                             onClick={() => handleActionClick(action.path, action.openInNewTab)}
                             $color={theme.color}
                             $bg={theme.bg}
@@ -160,6 +214,19 @@ export const QuickActionsWidget: React.FC<QuickActionsWidgetProps> = ({ modeConf
                     );
                 })}
             </Grid>
+            <QuickMenuSettingsModal
+                isOpen={isSettingsOpen}
+                modeLabel={modeConfig.shortLabel}
+                actions={quickMenu.availableActions}
+                selectedKeys={quickMenu.selectedKeys}
+                defaultSelectedKeys={quickMenu.defaultSelectedKeys}
+                hasPersonalSelection={quickMenu.hasPersonalSelection}
+                saving={quickMenu.saving}
+                maxActions={quickMenu.maxActions}
+                onClose={() => setIsSettingsOpen(false)}
+                onSave={quickMenu.saveSelection}
+                onReset={quickMenu.resetSelection}
+            />
         </WidgetContainer>
     );
 };

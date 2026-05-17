@@ -1,6 +1,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faBuilding,
@@ -188,14 +188,116 @@ const sanitizeFileName = (value: string): string =>
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
 
+type ExcelCellValue = string | number;
+
+type ExcelStyleOptions = {
+  headerRowIndex?: number;
+  totalRowIndex?: number;
+  headerFill?: string;
+  totalFill?: string;
+  bodyAlternateFill?: string;
+  specialHeaderFills?: Record<number, string>;
+  specialColumnFills?: Record<number, string>;
+  highlightedCells?: Set<string>;
+  highlightedCellFill?: string;
+  centerColumns?: Set<number>;
+  rightColumns?: Set<number>;
+  moneyColumns?: Set<number>;
+  manDayColumns?: Set<number>;
+  headerHeight?: number;
+  rowHeight?: number;
+  merges?: XLSX.Range[];
+};
+
+const excelRgb = (color: string): string => color.replace('#', '').toUpperCase();
+
+const makeExcelFill = (color: string) => ({
+  fgColor: { rgb: excelRgb(color) },
+  patternType: 'solid' as const,
+});
+
 const downloadAoaAsExcel = (
   fileName: string,
   sheetName: string,
-  rows: Array<Array<string | number>>,
-  columnWidths: number[]
+  rows: Array<Array<ExcelCellValue>>,
+  columnWidths: number[],
+  options: ExcelStyleOptions = {}
 ) => {
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
   worksheet['!cols'] = columnWidths.map((width) => ({ wch: width }));
+  if (options.merges?.length) {
+    worksheet['!merges'] = options.merges;
+  }
+  worksheet['!rows'] = rows.map((_, index) => ({
+    hpt: index === (options.headerRowIndex ?? 0) ? options.headerHeight ?? 24 : options.rowHeight ?? 22,
+  }));
+
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+  const border = {
+    top: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
+    bottom: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
+    left: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
+    right: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
+  };
+  const headerRowIndex = options.headerRowIndex ?? 0;
+
+  for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+    for (let columnIndex = range.s.c; columnIndex <= range.e.c; columnIndex += 1) {
+      const address = XLSX.utils.encode_cell({ r: rowIndex, c: columnIndex });
+      if (!worksheet[address]) {
+        worksheet[address] = { t: 's', v: '' };
+      }
+
+      const cell = worksheet[address] as XLSX.CellObject & { s?: unknown };
+      const isHeader = rowIndex === headerRowIndex;
+      const isTotal = rowIndex === options.totalRowIndex;
+      const horizontal = isTotal && columnIndex === 0
+        ? 'left'
+        : options.rightColumns?.has(columnIndex)
+        ? 'right'
+        : options.centerColumns?.has(columnIndex)
+          ? 'center'
+          : 'left';
+
+      const fillColor = isHeader
+        ? options.specialHeaderFills?.[columnIndex] ?? options.headerFill
+        : isTotal
+          ? options.totalFill
+          : options.highlightedCells?.has(`${rowIndex}:${columnIndex}`)
+            ? options.highlightedCellFill
+            : options.specialColumnFills?.[columnIndex] ??
+              (
+                options.bodyAlternateFill && rowIndex > headerRowIndex && (rowIndex - headerRowIndex) % 2 === 0
+                  ? options.bodyAlternateFill
+                  : undefined
+              );
+
+      cell.s = {
+        fill: fillColor ? makeExcelFill(fillColor) : undefined,
+        font: {
+          name: '맑은 고딕',
+          sz: isHeader || isTotal ? 10 : 9,
+          bold: isHeader || isTotal || options.highlightedCells?.has(`${rowIndex}:${columnIndex}`),
+          color: isHeader ? { rgb: 'FFFFFF' } : undefined,
+        },
+        alignment: {
+          horizontal,
+          vertical: 'center',
+          wrapText: true,
+        },
+        border,
+        numFmt: options.moneyColumns?.has(columnIndex)
+          ? '#,##0'
+          : options.manDayColumns?.has(columnIndex)
+            ? '#,##0.##'
+            : undefined,
+      };
+
+      if (typeof cell.v === 'number') {
+        cell.t = 'n';
+      }
+    }
+  }
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.slice(0, 31));
@@ -1061,9 +1163,15 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       return;
     }
 
-    const dayHeaders = statementDayNumbers.map((day) => `${day}일`);
-    const amountHeader = '청구금액(소개비포함)';
-    const rows: Array<Array<string | number>> = [
+    const dayHeaders = statementDayNumbers.map((day) => `${day}`);
+    const dayStartColumn = 5;
+    const totalManDayColumn = dayStartColumn + statementDayNumbers.length;
+    const recruiterFeeColumn = totalManDayColumn + 1;
+    const amountColumn = recruiterFeeColumn + 1;
+    const dayColumns = statementDayNumbers.map((_, index) => dayStartColumn + index);
+    const centerColumns = new Set([0, 2, 3, ...dayColumns]);
+    const rightColumns = new Set([totalManDayColumn, recruiterFeeColumn, amountColumn]);
+    const rows: Array<Array<ExcelCellValue>> = [
       [
         '번호',
         '이름',
@@ -1073,7 +1181,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         ...dayHeaders,
         '출역',
         '인력소개비',
-        amountHeader,
+        '청구금액',
       ],
       ...statementRows.map((row, index) => {
         const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
@@ -1085,12 +1193,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         return [
           index + 1,
           row.workerName,
-          row.idNumber || '',
-          row.salaryType || '',
-          row.address || '',
-          ...row.days.map((value) => (value ? Number(value.toFixed(1)) : '')),
+          row.idNumber || '-',
+          row.salaryType || '-',
+          row.address || '-',
+          ...row.days.map((value) => (value ? Number(value.toFixed(1)) : '-')),
           Number(row.totalManDay.toFixed(1)),
-          Math.round(recruiterFee),
+          recruiterFee ? Math.round(recruiterFee) : '',
           Math.round(row.selectedAmount + recruiterFee),
         ];
       }),
@@ -1100,7 +1208,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         '',
         '',
         '',
-        ...statementDailyTotals.map((value) => (value ? Number(value.toFixed(1)) : '')),
+        ...statementDailyTotals.map((value) => (value ? Number(value.toFixed(1)) : '-')),
         Number(statementRows.reduce((sum, row) => sum + row.totalManDay, 0).toFixed(1)),
         Math.round(statementRows.reduce((sum, row) => {
           const storageKey = buildStatementRecruiterFeeKey(month, statementTeamKey, row.workerId);
@@ -1125,7 +1233,27 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       `${month}_${statementTeamOption?.name || '청구서'}_청구서_${getTodayStamp()}`,
       '청구서',
       rows,
-      [8, 16, 18, 14, 30, ...statementDayNumbers.map(() => 7), 10, 14, 18]
+      [8, 16, 18, 14, 30, ...statementDayNumbers.map(() => 7), 10, 14, 18],
+      {
+        headerFill: COLORS.darkBrown,
+        totalFill: COLORS.pink,
+        bodyAlternateFill: '#FAF8EF',
+        specialHeaderFills: {
+          [recruiterFeeColumn]: COLORS.aqua,
+          [amountColumn]: COLORS.wine,
+        },
+        centerColumns,
+        rightColumns,
+        moneyColumns: new Set([recruiterFeeColumn, amountColumn]),
+        manDayColumns: new Set([...dayColumns, totalManDayColumn]),
+        totalRowIndex: rows.length - 1,
+        merges: [
+          {
+            s: { r: rows.length - 1, c: 0 },
+            e: { r: rows.length - 1, c: 4 },
+          },
+        ],
+      }
     );
   }, [
     month,
@@ -1143,38 +1271,53 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       return;
     }
 
-    const dayHeaders = statementDayNumbers.map((day) => `${day}일`);
-    const dailyTotals = statementDayNumbers.map((day) =>
-      serviceRows.reduce((sum, row) => sum + (row.entriesByDay[day]?.manDay || 0), 0)
-    );
-    const rows: Array<Array<string | number>> = [
+    const dayHeaders = statementDayNumbers.map((day) => `${day}`);
+    const dayStartColumn = 2;
+    const totalManDayColumn = dayStartColumn + statementDayNumbers.length;
+    const recruiterFeeColumn = totalManDayColumn + 1;
+    const dayColumns = statementDayNumbers.map((_, index) => dayStartColumn + index);
+    const highlightedCells = new Set<string>();
+    const rows: Array<Array<ExcelCellValue>> = [
       ['팀명', '이름', ...dayHeaders, '총공수', '인력소개비', '비고'],
-      ...serviceRows.map((row) => [
+      ...serviceRows.map((row, rowIndex) => [
         row.teamName,
         row.workerName,
-        ...statementDayNumbers.map((day) => {
-          const value = row.entriesByDay[day]?.manDay || 0;
-          return value ? Number(value.toFixed(1)) : '';
+        ...statementDayNumbers.map((day, dayIndex) => {
+          const entry = row.entriesByDay[day];
+          if (entry?.recruiterFee && entry.recruiterFee > 0) {
+            highlightedCells.add(`${rowIndex + 1}:${dayStartColumn + dayIndex}`);
+          }
+          const value = entry?.manDay || 0;
+          return value ? Number(value.toFixed(1)) : '-';
         }),
         Number(row.totalManDay.toFixed(1)),
         Math.round(row.totalRecruiterFee),
-        row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / SERVICE_RECRUITER_FEE_PER_DAY)}일분 포함` : '',
+        row.totalRecruiterFee > 0 ? `소개비 ${Math.round(row.totalRecruiterFee / SERVICE_RECRUITER_FEE_PER_DAY)}일분 포함` : '-',
       ]),
-      [
-        '합계',
-        '',
-        ...dailyTotals.map((value) => (value ? Number(value.toFixed(1)) : '')),
-        Number(serviceRows.reduce((sum, row) => sum + row.totalManDay, 0).toFixed(1)),
-        Math.round(serviceRows.reduce((sum, row) => sum + row.totalRecruiterFee, 0)),
-        '',
-      ],
     ];
 
     downloadAoaAsExcel(
       `${month}_용역팀_정산_${getTodayStamp()}`,
       '용역팀',
       rows,
-      [16, 16, ...statementDayNumbers.map(() => 7), 10, 14, 22]
+      [16, 16, ...statementDayNumbers.map(() => 7), 10, 14, 22],
+      {
+        headerFill: COLORS.blue,
+        specialHeaderFills: {
+          [recruiterFeeColumn]: COLORS.orange,
+        },
+        specialColumnFills: {
+          0: '#FAF8EF',
+          [recruiterFeeColumn]: '#FFF7ED',
+        },
+        highlightedCells,
+        highlightedCellFill: '#DBEAFE',
+        centerColumns: new Set(dayColumns),
+        rightColumns: new Set([totalManDayColumn, recruiterFeeColumn]),
+        moneyColumns: new Set([recruiterFeeColumn]),
+        manDayColumns: new Set([...dayColumns, totalManDayColumn]),
+        rowHeight: 30,
+      }
     );
   }, [month, serviceRows, statementDayNumbers]);
 

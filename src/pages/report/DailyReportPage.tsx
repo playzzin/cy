@@ -73,7 +73,10 @@ const DailyReportPage: React.FC = () => {
                     <DailyReportBoardInput />
                 ) : (
                     <div className="h-full min-h-0 px-3 pt-3 pb-1 md:px-4 md:pt-4 md:pb-1">
-                        <DailyReportListV2 initialDate={searchParams.get('date') || undefined} />
+                        <DailyReportListV2
+                            initialDate={searchParams.get('date') || undefined}
+                            targetReportId={searchParams.get('reportId') || undefined}
+                        />
                     </div>
                 )}
             </div>

@@ -540,6 +540,7 @@ export const usePayrollData = (
       // 4. 집계 로직
       type WorkerAggregate = {
         workerId: string;
+        workerName: string;
         companyId: string;
         companyName: string;
         salaryModel: '월급제' | '일급제' | '용역팀';
@@ -563,6 +564,7 @@ export const usePayrollData = (
         if (!bucket[key]) {
           bucket[key] = {
             workerId: params.workerId,
+            workerName: params.workerName,
             companyId: params.companyId,
             companyName: params.companyName,
             salaryModel: params.salaryModel,
@@ -580,6 +582,9 @@ export const usePayrollData = (
           };
         }
         const target = bucket[key];
+        if (!target.workerName && params.workerName) {
+          target.workerName = params.workerName;
+        }
         const entryAmount = params.manDay * params.unitPrice;
         target.manDay += params.manDay;
         target.totalAmount += entryAmount;
@@ -626,11 +631,18 @@ export const usePayrollData = (
           const isService = salaryModel === '용역팀';
           if (!isMonthly && !isDaily && !isService) return;
 
+          // A worker row can belong to a different team than the report header.
+          const rowTeamId = resolveTeamCanonicalId(rw.teamId);
+          const rowTeamName = String((rw as { workerTeamName?: string | null }).workerTeamName ?? '').trim();
+          const rowTeamIdByName = rowTeamName
+            ? resolveTeamCanonicalId(allTeams.find(t => normalizeTeamName(t.name) === normalizeTeamName(rowTeamName))?.id)
+            : '';
           const workerTeamId = resolveTeamCanonicalId(w.teamId);
-          const resolvedTeamId = reportTeamId || workerTeamId || '';
+          const resolvedTeamId = rowTeamId || rowTeamIdByName || reportTeamId || workerTeamId || '';
           const resolvedTeamName =
-            reportTeamName
-            || (teamMap.get(resolvedTeamId)?.name ?? '').trim()
+            (teamMap.get(resolvedTeamId)?.name ?? '').trim()
+            || rowTeamName
+            || reportTeamName
             || (w.teamName ?? '').trim()
             || '';
 
@@ -646,6 +658,7 @@ export const usePayrollData = (
 
           const baseParams = {
             workerId: canonicalWorkerId || String(rw.workerId ?? '').trim(),
+            workerName: String(rw.name ?? '').trim() || w.name || '',
             companyId: w.companyId || teamMap.get(resolvedTeamId)?.companyId || report.companyId || '',
             companyName: w.companyName || teamMap.get(resolvedTeamId)?.companyName || report.companyName || '',
             teamId: safeTeamKey,
@@ -719,7 +732,7 @@ export const usePayrollData = (
         processedPaymentData.push({
           id: `${agg.month}__${agg.workerId}__${agg.teamId}__${agg.salaryModel}`,
           workerId: agg.workerId,
-          workerName: w.name || '',
+          workerName: agg.workerName || w.name || '',
           idNumber: w.idNumber || '',
           companyId: agg.companyId,
           companyName: agg.companyName,
@@ -790,7 +803,7 @@ export const usePayrollData = (
           teamId: agg.teamId,
           teamName: agg.teamName,
           workerId: agg.workerId,
-          workerName: w?.name || '',
+          workerName: agg.workerName || w?.name || '',
           salaryModel: agg.salaryModel,
           invoiceManDay: agg.invoiceManDay,
           laborManDay: agg.laborManDay,

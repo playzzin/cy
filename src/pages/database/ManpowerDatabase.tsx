@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { siteService, Site } from '../../services/siteService';
 import { companyService, Company } from '../../services/companyService';
+import { officeStaffService, OfficeStaff } from '../../services/officeStaffService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
+import { statisticsService } from '../../services/statisticsService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faDatabase, faUsers, faBuilding, faHardHat, faCalendar, faChartBar,
@@ -17,7 +19,28 @@ import WorkerDatabase from './WorkerDatabase';
 import TeamDatabase from './TeamDatabase';
 import SiteDatabase from './SiteDatabase';
 import CompanyDatabase from './CompanyDatabase';
+import OfficeStaffDatabase from './OfficeStaffDatabase';
 import AccountManagementPage from './AccountManagementPage';
+
+type IntegratedDatabaseTab = 'overview' | 'workers' | 'offices' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports';
+
+const parseIntegratedDatabaseTab = (value: string | null): IntegratedDatabaseTab | null => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'workers') return 'workers';
+    if (normalized === 'offices' || normalized === 'office' || normalized === 'office-staff' || normalized === 'office_staff') return 'offices';
+    if (normalized === 'teams') return 'teams';
+    if (normalized === 'sites') return 'sites';
+    if (normalized === 'companies') return 'companies';
+    if (normalized === 'accounts') return 'accounts';
+    if (normalized === 'reports') return 'reports';
+    if (normalized === 'overview') return 'overview';
+    return null;
+};
+
+const isDatabaseLogTabValue = (value: string | null): boolean => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized === 'logs' || normalized === 'database-logs' || normalized === 'db-logs';
+};
 
 interface DatabaseStats {
     workers: {
@@ -25,6 +48,12 @@ interface DatabaseStats {
         active: number;
         inactive: number;
         unassigned: number;
+    };
+    offices: {
+        total: number;
+        active: number;
+        pending: number;
+        linked: number;
     };
     teams: {
         total: number;
@@ -71,6 +100,7 @@ interface IssueStats {
     reportMissingWorkers: DailyReportIntegrityIssue[];
     reportEmptyWorkers: DailyReportIntegrityIssue[];
     reportMissingSiteSnapshots: DailyReportIntegrityIssue[];
+    reportSiteResponsibleTeamMismatches: DailyReportIntegrityIssue[];
 }
 
 interface DailyReportIntegrityIssue {
@@ -91,10 +121,61 @@ const DAILY_REPORT_ISSUE_KEYS: Array<keyof IssueStats> = [
     'reportMissingTeams',
     'reportMissingWorkers',
     'reportEmptyWorkers',
-    'reportMissingSiteSnapshots'
+    'reportMissingSiteSnapshots',
+    'reportSiteResponsibleTeamMismatches'
 ];
 
 const toText = (value: unknown): string => String(value ?? '').trim();
+
+const normalizeNameKey = (value: unknown): string => toText(value).replace(/\s+/g, '').toLowerCase();
+
+const extractTrailingTeamName = (siteName: unknown): string => {
+    const match = toText(siteName).match(/\(([^()]*)\)\s*$/);
+    return match?.[1]?.trim() || '';
+};
+
+const findTeamByNameHint = (teams: Team[], rawName: string): Team | undefined => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return undefined;
+
+    const candidates = new Set([
+        normalizeNameKey(trimmed),
+        normalizeNameKey(trimmed.endsWith('팀') ? trimmed.slice(0, -1) : `${trimmed}팀`)
+    ]);
+
+    return teams.find((team) => candidates.has(normalizeNameKey(team.name)));
+};
+
+const normalizeCompanyKey = (value: unknown): string =>
+    toText(value).replace(/\(\s*주\s*\)|㈜/g, '').replace(/\s+/g, '').toLowerCase();
+
+const isCheongyeonCompanyName = (value: unknown): boolean =>
+    normalizeCompanyKey(value).includes('청연이엔지');
+
+const findTeamByIdentity = (teams: Team[], ids: string[], names: string[]): Team | undefined => {
+    const idSet = new Set(ids.map(toText).filter(Boolean));
+    if (idSet.size > 0) {
+        const team = teams.find((candidate) => idSet.has(toText(candidate.id)) || idSet.has(toText(candidate.legacyId)));
+        if (team) return team;
+    }
+
+    const nameSet = new Set(names.map(normalizeNameKey).filter(Boolean));
+    if (nameSet.size === 0) return undefined;
+
+    return teams.find((team) => nameSet.has(normalizeNameKey(team.name)));
+};
+
+const resolveTeamCompanyName = (team: Team | undefined, companies: Company[]): string => {
+    if (!team) return '';
+
+    const ownCompanyName = toText(team.companyName);
+    if (ownCompanyName) return ownCompanyName;
+
+    const companyId = toText(team.companyId);
+    if (!companyId) return '';
+
+    return toText(companies.find((company) => toText(company.id) === companyId || toText(company.legacyId) === companyId)?.name);
+};
 
 const collectEntityIds = <T extends { id?: string | null; legacyId?: string | null }>(items: T[]): Set<string> =>
     new Set(items.flatMap(item => [toText(item.id), toText(item.legacyId)]).filter(Boolean));
@@ -123,12 +204,14 @@ const isTeamBackedReportWorker = (worker: DailyReport['workers'][number], teamId
 
 function IntegratedDatabase() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const [loading, setLoading] = useState(false);
-    const [activeTab, setActiveTab] = useState<'overview' | 'workers' | 'teams' | 'sites' | 'companies' | 'accounts' | 'reports'>('overview');
+    const [activeTab, setActiveTab] = useState<IntegratedDatabaseTab>(() => parseIntegratedDatabaseTab(searchParams.get('tab')) || 'overview');
 
     // Stats State
     const [stats, setStats] = useState<DatabaseStats>({
         workers: { total: 0, active: 0, inactive: 0, unassigned: 0 },
+        offices: { total: 0, active: 0, pending: 0, linked: 0 },
         teams: { total: 0, active: 0, inactive: 0 },
         sites: { total: 0, active: 0, completed: 0 },
         companies: { total: 0, contractor: 0, partner: 0, builder: 0 },
@@ -153,11 +236,13 @@ function IntegratedDatabase() {
         reportMissingTeams: [],
         reportMissingWorkers: [],
         reportEmptyWorkers: [],
-        reportMissingSiteSnapshots: []
+        reportMissingSiteSnapshots: [],
+        reportSiteResponsibleTeamMismatches: []
     });
 
     const [expandedIssue, setExpandedIssue] = useState<keyof IssueStats | null>(null);
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
+    const [isRebuildingManDay, setIsRebuildingManDay] = useState(false);
 
     const loadStats = async () => {
         setLoading(true);
@@ -170,8 +255,9 @@ function IntegratedDatabase() {
             const startDateStr = startDate.toISOString().split('T')[0];
             const endDateStr = endDate.toISOString().split('T')[0];
 
-            const [workersData, teamsData, sitesData, companiesData, reportStats, recentReports, allReports] = await Promise.all([
+            const [workersData, officeStaffData, teamsData, sitesData, companiesData, reportStats, recentReports, allReports] = await Promise.all([
                 manpowerService.getWorkers(),
+                officeStaffService.getOfficeStaff(),
                 teamService.getTeams(),
                 siteService.getSites(),
                 companyService.getCompanies(),
@@ -180,7 +266,7 @@ function IntegratedDatabase() {
                 dailyReportService.getAllReports()
             ]);
 
-            calculateStats(workersData, teamsData, sitesData, companiesData, reportStats);
+            calculateStats(workersData, officeStaffData, teamsData, sitesData, companiesData, reportStats);
             calculateIssues(workersData, teamsData, sitesData, companiesData, recentReports, allReports);
         } catch (error) {
             console.error('Failed to load stats:', error);
@@ -193,9 +279,44 @@ function IntegratedDatabase() {
         loadStats();
     }, []);
 
+    useEffect(() => {
+        const tabParam = searchParams.get('tab');
+        if (isDatabaseLogTabValue(tabParam)) {
+            navigate('/database/logs', { replace: true });
+            return;
+        }
+        const requestedTab = parseIntegratedDatabaseTab(tabParam);
+        if (requestedTab) setActiveTab(requestedTab);
+    }, [navigate, searchParams]);
+
+    const handleRebuildManDays = async () => {
+        const ok = window.confirm(
+            '출력일보 전체를 기준으로 작업자/팀/현장/발주사/시공사/협력사 누적공수를 다시 계산합니다.\n기존 누적공수 값은 정확한 계산값으로 덮어씁니다. 계속할까요?'
+        );
+        if (!ok) return;
+
+        setIsRebuildingManDay(true);
+        try {
+            const result = await statisticsService.rebuildCumulativeManDays();
+            await loadStats();
+            alert(
+                `누적공수 재계산 완료\n` +
+                `일보 ${result.reportsProcessed}건 기준\n` +
+                `작업자 ${result.workersUpdated}명, 팀 ${result.teamsUpdated}개, 현장 ${result.sitesUpdated}곳, 회사 ${result.companiesUpdated}개 반영\n` +
+                `발주사 미연결 일보 ${result.reportsWithoutClientCompany}건, 시공사 미연결 일보 ${result.reportsWithoutConstructorCompany}건, 협력사 미연결 일보 ${result.reportsWithoutPartnerCompany}건`
+            );
+        } catch (error) {
+            console.error('Failed to rebuild cumulative man-days:', error);
+            alert('누적공수 재계산 중 오류가 발생했습니다. 콘솔 로그를 확인해 주세요.');
+        } finally {
+            setIsRebuildingManDay(false);
+        }
+    };
+
 
     const calculateStats = (
         workers: Worker[],
+        officeStaff: OfficeStaff[],
         teams: Team[],
         sites: Site[],
         companies: Company[],
@@ -207,6 +328,12 @@ function IntegratedDatabase() {
                 active: workers.filter(w => w.status === '재직').length,
                 inactive: workers.filter(w => w.status === '퇴사' || w.status === '휴직').length,
                 unassigned: workers.filter(w => !w.teamId).length
+            },
+            offices: {
+                total: officeStaff.length,
+                active: officeStaff.filter((staff) => (staff.status || '재직') !== '퇴사').length,
+                pending: officeStaff.filter((staff) => staff.status === '승인대기').length,
+                linked: officeStaff.filter((staff) => !!staff.uid).length,
             },
             teams: {
                 total: teams.length,
@@ -257,7 +384,8 @@ function IntegratedDatabase() {
             reportMissingTeams: [],
             reportMissingWorkers: [],
             reportEmptyWorkers: [],
-            reportMissingSiteSnapshots: []
+            reportMissingSiteSnapshots: [],
+            reportSiteResponsibleTeamMismatches: []
         };
 
         // Helper sets
@@ -339,8 +467,8 @@ function IntegratedDatabase() {
             const reportKey = report.id || report.legacyId || `${report.date}-${report.siteId}-${report.teamId}-${reportIndex}`;
             const reportSiteId = toText(report.siteId);
             const reportSiteName = toText(report.siteName);
-            const reportTeamIds = [toText(report.teamId), toText(report.responsibleTeamId)].filter(Boolean);
-            const reportTeamNames = [toText(report.teamName), toText(report.responsibleTeamName)].filter(Boolean);
+            const reportTeamIds = [toText(report.responsibleTeamId), toText(report.teamId)].filter(Boolean);
+            const reportTeamNames = [toText(report.responsibleTeamName), toText(report.teamName)].filter(Boolean);
             const reportTeamId = reportTeamIds[0] || '';
             const reportTeamName = reportTeamNames[0] || '';
             const baseIssue = {
@@ -371,6 +499,41 @@ function IntegratedDatabase() {
             }
 
             const reportWorkers = Array.isArray(report.workers) ? report.workers : [];
+            const expectedResponsibleTeamHint = extractTrailingTeamName(reportSiteName);
+            const savedResponsibleIds = [toText(report.responsibleTeamId), toText(report.teamId)].filter(Boolean);
+            const savedResponsibleNames = [toText(report.responsibleTeamName), toText(report.teamName)].filter(Boolean);
+            const savedResponsibleTeam = findTeamByIdentity(teams, savedResponsibleIds, savedResponsibleNames);
+            const savedResponsibleDisplayName = savedResponsibleNames[0] || savedResponsibleTeam?.name || savedResponsibleIds[0] || '';
+            const responsibleTeamCompanyName = resolveTeamCompanyName(savedResponsibleTeam, companies);
+            const responsibleMismatchDetails: string[] = [];
+
+            if (expectedResponsibleTeamHint) {
+                const expectedTeam = findTeamByNameHint(teams, expectedResponsibleTeamHint);
+                const expectedTeamName = expectedTeam?.name || expectedResponsibleTeamHint;
+                const expectedNameKeys = new Set([
+                    normalizeNameKey(expectedTeamName),
+                    normalizeNameKey(expectedResponsibleTeamHint)
+                ]);
+                const hasExpectedName = expectedNameKeys.has(normalizeNameKey(savedResponsibleDisplayName));
+
+                if (!hasExpectedName) {
+                    const currentTeam = savedResponsibleDisplayName || savedResponsibleIds[0] || '없음';
+                    responsibleMismatchDetails.push(`현장명 기준 현장소속팀 불일치: 현재 ${currentTeam}, 기대 ${expectedTeamName}`);
+                }
+            }
+
+            if (toText(report.siteType) === '지원' && isCheongyeonCompanyName(responsibleTeamCompanyName)) {
+                responsibleMismatchDetails.push(`지원 현장 담당팀 소속 불일치: ${savedResponsibleDisplayName || '팀 정보 없음'} 소속 ${responsibleTeamCompanyName}`);
+            }
+
+            if (responsibleMismatchDetails.length > 0) {
+                newIssues.reportSiteResponsibleTeamMismatches.push({
+                    id: `${reportKey}-site-responsible-team`,
+                    ...baseIssue,
+                    detail: responsibleMismatchDetails.join(' / ')
+                });
+            }
+
             if (reportWorkers.length === 0) {
                 newIssues.reportEmptyWorkers.push({
                     id: `${reportKey}-empty-workers`,
@@ -430,6 +593,7 @@ function IntegratedDatabase() {
     const openDailyReportFromIssue = (issue: DailyReportIntegrityIssue) => {
         const params = new URLSearchParams({ tab: 'list-v2' });
         if (issue.date) params.set('date', issue.date);
+        if (issue.reportId) params.set('reportId', issue.reportId);
         navigate(`/reports/daily?${params.toString()}`);
     };
 
@@ -500,6 +664,22 @@ function IntegratedDatabase() {
                         </div>
                     </div>
 
+                    <div className="mb-4 flex justify-end">
+                        <button
+                            type="button"
+                            onClick={handleRebuildManDays}
+                            disabled={isRebuildingManDay || loading}
+                            className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-bold shadow-sm transition-colors ${
+                                isRebuildingManDay
+                                    ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : 'border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                            }`}
+                        >
+                            <FontAwesomeIcon icon={faChartBar} />
+                            {isRebuildingManDay ? '누적공수 재계산 중...' : '누적공수 재계산'}
+                        </button>
+                    </div>
+
                     {/* Main Stats Cards */}
                     <div className="flex flex-wrap gap-4 mb-4">
                         <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('workers')}>
@@ -516,6 +696,23 @@ function IntegratedDatabase() {
                             <div className="mt-2 text-xs text-slate-400 flex justify-between">
                                 <span>재직 {stats.workers.active}</span>
                                 <span>미배정 {stats.workers.unassigned}</span>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 min-w-[200px] bg-white p-4 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-indigo-300 transition-colors" onClick={() => setActiveTab('offices')}>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-slate-500 font-medium text-sm">사무실 직원</span>
+                                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs">
+                                    <FontAwesomeIcon icon={faIdBadge} />
+                                </div>
+                            </div>
+                            <div className="flex items-end gap-2">
+                                <h3 className="text-2xl font-bold text-slate-800">{stats.offices.total}</h3>
+                                <span className="text-xs text-slate-500 mb-1">명</span>
+                            </div>
+                            <div className="mt-2 text-xs text-slate-400 flex justify-between">
+                                <span>재직 {stats.offices.active}</span>
+                                <span>연동 {stats.offices.linked}</span>
                             </div>
                         </div>
 
@@ -615,6 +812,12 @@ function IntegratedDatabase() {
                             작업자 목록
                         </button>
                         <button
+                            onClick={() => setActiveTab('offices')}
+                            className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'offices' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+                        >
+                            사무실 목록
+                        </button>
+                        <button
                             onClick={() => setActiveTab('teams')}
                             className={`px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors ${activeTab === 'teams' ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
                         >
@@ -669,12 +872,13 @@ function IntegratedDatabase() {
                                         <FontAwesomeIcon icon={faCalendar} className="text-indigo-500" />
                                         출력일보 무결성
                                     </div>
-                                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-3">
                                         {renderIssueCard('reportMissingSites', '일보 현장 미연결', issues.reportMissingSites.length, faBuilding, 'text-rose-500', '건')}
                                         {renderIssueCard('reportMissingTeams', '일보 팀 미연결', issues.reportMissingTeams.length, faUsers, 'text-orange-500', '건')}
                                         {renderIssueCard('reportMissingWorkers', '일보 작업자 미연결', issues.reportMissingWorkers.length, faUserSlash, 'text-amber-600', '줄')}
                                         {renderIssueCard('reportEmptyWorkers', '빈 일보', issues.reportEmptyWorkers.length, faChartBar, 'text-slate-500', '건')}
                                         {renderIssueCard('reportMissingSiteSnapshots', '구분/결제 누락', issues.reportMissingSiteSnapshots.length, faExclamationTriangle, 'text-purple-600', '줄')}
+                                        {renderIssueCard('reportSiteResponsibleTeamMismatches', '현장소속팀 불일치', issues.reportSiteResponsibleTeamMismatches.length, faHardHat, 'text-blue-600', '건')}
                                     </div>
                                 </div>
 
@@ -699,6 +903,7 @@ function IntegratedDatabase() {
                                                 {expandedIssue === 'reportMissingWorkers' && '출력일보 작업자 연결 누락'}
                                                 {expandedIssue === 'reportEmptyWorkers' && '작업자 행이 없는 출력일보'}
                                                 {expandedIssue === 'reportMissingSiteSnapshots' && '출력일보 구분/결제방식 저장 누락'}
+                                                {expandedIssue === 'reportSiteResponsibleTeamMismatches' && '출력일보 현장소속팀 불일치'}
                                             </h4>
                                             <button onClick={() => setExpandedIssue(null)} className="text-slate-400 hover:text-slate-600">
                                                 닫기
@@ -823,6 +1028,9 @@ function IntegratedDatabase() {
 
                     {activeTab === 'workers' && (
                         <WorkerDatabase hideHeader={true} highlightedId={highlightedId} />
+                    )}
+                    {activeTab === 'offices' && (
+                        <OfficeStaffDatabase hideHeader={true} highlightedId={highlightedId} />
                     )}
                     {activeTab === 'teams' && (
                         <TeamDatabase hideHeader={false} highlightedId={highlightedId} />

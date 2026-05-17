@@ -1,0 +1,1268 @@
+.erp-message-indicator {
+  position: relative;
+}
+
+.erp-message-button {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 9px;
+}
+
+.erp-message-button.has-unread {
+  color: #0f766e;
+  background: #ccfbf1;
+}
+
+.cheongyeon-header .erp-message-button.has-unread {
+  color: #67e8f9;
+  background: rgba(8, 145, 178, 0.18);
+}
+
+.erp-message-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.cheongyeon-header .erp-message-badge {
+  border-color: #0f172a;
+}
+
+.erp-message-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: -44px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 88px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.16);
+  z-index: var(--z-modal, 1000);
+  animation: erpMessageDrop 0.18s ease-out;
+}
+
+.erp-message-popover-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #eef2f7;
+  background: #f8fafc;
+}
+
+.erp-message-popover-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.erp-message-popover-subtitle {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.erp-message-popover-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.erp-message-text-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.erp-message-text-button:hover {
+  background: #f1f5f9;
+}
+
+.erp-message-popover-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.erp-message-empty {
+  padding: 32px 18px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.erp-message-preview {
+  width: 100%;
+  padding: 13px 16px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  background: #fff;
+  transition: background-color 0.18s ease;
+}
+
+.erp-message-preview:hover {
+  background: #f8fafc;
+}
+
+.erp-message-preview.active {
+  background: #e0f2fe;
+  box-shadow: inset 3px 0 0 #0284c7;
+}
+
+.erp-message-preview.unread {
+  background: #f0fdfa;
+}
+
+.erp-message-preview-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.erp-message-preview-title {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-message-preview-time {
+  flex-shrink: 0;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.erp-message-preview-body {
+  display: -webkit-box;
+  min-height: 34px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.erp-message-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.erp-message-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #14b8a6;
+}
+
+.erp-message-popover-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #eef2f7;
+  background: #fff;
+}
+
+.erp-message-open-all {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.erp-message-open-all:hover {
+  background: #1e293b;
+}
+
+.erp-message-shell {
+  min-height: calc(100vh - 120px);
+  color: #0f172a;
+}
+
+.erp-message-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.erp-message-page-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+.erp-message-page-description {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.erp-message-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.erp-message-page-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(118px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.erp-message-page-tab {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.erp-message-page-tab:hover {
+  background: #fff;
+  color: #0f172a;
+}
+
+.erp-message-page-tab.active {
+  background: #0f172a;
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.14);
+}
+
+.erp-message-primary-button,
+.erp-message-secondary-button,
+.erp-message-danger-button {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.erp-message-primary-button {
+  background: #0f766e;
+  color: #fff;
+}
+
+.erp-message-primary-button:hover {
+  background: #115e59;
+}
+
+.erp-message-secondary-button {
+  border: 1px solid #dbe3ef;
+  background: #fff;
+  color: #334155;
+}
+
+.erp-message-secondary-button:hover {
+  background: #f8fafc;
+}
+
+.erp-message-danger-button {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.erp-message-dashboard-card,
+.erp-message-panel,
+.erp-message-compose-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.07);
+}
+
+.erp-message-dashboard-card {
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.erp-message-dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.erp-message-dashboard-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.erp-message-dashboard-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.erp-message-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.erp-message-summary-pill.urgent {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.erp-message-dashboard-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+}
+
+.erp-message-dashboard-item {
+  min-width: 0;
+  padding: 15px 16px;
+  border-right: 1px solid #eef2f7;
+  text-align: left;
+  background: #fff;
+}
+
+.erp-message-dashboard-item:last-child {
+  border-right: 0;
+}
+
+.erp-message-dashboard-item:hover {
+  background: #f8fafc;
+}
+
+.erp-message-dashboard-item.unread {
+  background: #f0fdfa;
+}
+
+.erp-message-dashboard-empty {
+  padding: 22px 18px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.erp-message-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.erp-message-panel {
+  overflow: hidden;
+}
+
+.erp-message-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 12px;
+  overflow: visible;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.erp-message-tab {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.erp-message-tab.active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.erp-message-list {
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+}
+
+.erp-message-detail {
+  min-height: 560px;
+  padding: 22px;
+}
+
+.erp-message-detail-empty {
+  min-height: 560px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  color: #64748b;
+  font-weight: 800;
+  text-align: center;
+}
+
+.erp-message-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.erp-message-detail-title {
+  margin: 10px 0 0;
+  color: #0f172a;
+  font-size: 24px;
+  font-weight: 850;
+}
+
+.erp-message-tag-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.erp-message-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.erp-message-tag.high,
+.erp-message-tag.urgent {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.erp-message-detail-meta {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.erp-message-body {
+  margin-top: 22px;
+  padding: 20px;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #1e293b;
+  font-size: 15px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+}
+
+.erp-message-receipts {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #eef2f7;
+}
+
+.erp-message-receipts-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.erp-message-receipt-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.erp-message-receipt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.erp-message-receipt.read {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.erp-message-receipt-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.erp-message-recipient-team-icon.small {
+  width: 26px;
+  height: 26px;
+  flex-basis: 26px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.erp-message-receipt-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-message-receipt-name,
+.erp-message-receipt-worker {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-message-receipt-name {
+  color: #0f172a;
+  font-weight: 850;
+}
+
+.erp-message-receipt-worker {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.erp-message-receipt-state {
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.erp-message-compose-panel {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.erp-message-compose-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.25fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.erp-message-compose-column {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  align-content: start;
+}
+
+.erp-message-compose-column .erp-message-form-actions {
+  margin-top: 0;
+}
+
+.erp-message-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.erp-message-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.erp-message-field.full {
+  grid-column: 1 / -1;
+}
+
+.erp-message-label {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.erp-message-input,
+.erp-message-select,
+.erp-message-textarea {
+  width: 100%;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+  outline: none;
+}
+
+.erp-message-input,
+.erp-message-select {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.erp-message-textarea {
+  min-height: 130px;
+  resize: vertical;
+  padding: 11px;
+  line-height: 1.5;
+}
+
+.erp-message-textarea.compose-body {
+  min-height: 360px;
+}
+
+.erp-message-input:focus,
+.erp-message-select:focus,
+.erp-message-textarea:focus {
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
+}
+
+.erp-message-recipient-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 178px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.erp-message-recipient-grid.compose-recipient-list,
+.erp-message-team-grid.compose-recipient-list {
+  grid-template-columns: 1fr;
+  max-height: min(520px, calc(100vh - 360px));
+}
+
+.erp-message-recipient-grid.settings-user-list {
+  grid-template-columns: 1fr;
+  max-height: 320px;
+}
+
+.erp-message-recipient-grid.settings-user-list .erp-message-recipient-option {
+  min-height: 42px;
+}
+
+.erp-message-recipient-grid.settings-user-list .erp-message-recipient-copy {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.erp-message-recipient-grid.settings-user-list .erp-message-recipient-name {
+  flex: 0 0 auto;
+  max-width: 140px;
+}
+
+.erp-message-recipient-grid.settings-user-list .erp-message-recipient-worker,
+.erp-message-recipient-grid.settings-user-list .erp-message-recipient-team {
+  flex: 1 1 0;
+}
+
+.erp-message-recipient-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.erp-message-recipient-option:hover,
+.erp-message-recipient-option.selected {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.erp-message-recipient-option input {
+  flex: 0 0 auto;
+}
+
+.erp-message-recipient-team-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 8px;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.erp-message-recipient-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-message-recipient-name,
+.erp-message-recipient-worker,
+.erp-message-recipient-team {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-message-recipient-name {
+  color: #0f172a;
+  font-weight: 850;
+}
+
+.erp-message-recipient-worker {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.erp-message-recipient-team {
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.erp-message-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.erp-system-settings-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.erp-system-event-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.erp-system-event-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.erp-system-event-group-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.erp-system-event-group-header strong,
+.erp-system-event-group-header small {
+  display: block;
+}
+
+.erp-system-event-group-header strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.erp-system-event-group-header small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.erp-system-event-group-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.erp-system-event-group-actions button {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #dbe3ef;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.erp-system-event-group-actions button:hover {
+  background: #f1f5f9;
+}
+
+.erp-system-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.erp-system-toggle-row input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.erp-system-toggle-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.erp-system-toggle-row strong {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.erp-system-toggle-row small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.erp-system-event-row,
+.erp-system-scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.erp-message-check-pill,
+.erp-message-scope-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 8px 11px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.erp-message-check-pill {
+  cursor: pointer;
+}
+
+.erp-message-scope-button.active {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.erp-message-status-text {
+  margin-right: auto;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.erp-message-status-text.error {
+  color: #be123c;
+}
+
+.erp-message-recipient-summary {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.erp-message-mode-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.erp-message-compose-layout .erp-message-mode-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.erp-message-mode-button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.erp-message-mode-button:hover,
+.erp-message-mode-button.active {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.erp-message-team-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 208px;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.erp-message-team-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 180px;
+}
+
+.erp-message-team-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.erp-message-team-option:hover,
+.erp-message-team-option.selected {
+  border-color: #14b8a6;
+  background: #f0fdfa;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.erp-message-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.erp-message-settings-side {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 16px;
+}
+
+.erp-message-settings-side .erp-message-compose-panel {
+  margin-top: 0;
+}
+
+.erp-message-settings-main {
+  min-width: 0;
+}
+
+.erp-message-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.erp-message-picker-stack {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.erp-system-event-group.automation {
+  border-radius: 8px;
+}
+
+.erp-message-automation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.erp-message-automation-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(260px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.erp-message-automation-row.enabled {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+}
+
+.erp-message-automation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.erp-message-automation-toggle input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.erp-message-automation-toggle span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-message-automation-controls {
+  display: grid;
+  grid-template-columns: minmax(130px, 170px) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.erp-message-rule-preview {
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erp-message-automation-details {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.erp-message-automation-details summary {
+  width: fit-content;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.erp-message-automation-details[open] summary {
+  margin-bottom: 8px;
+  border-color: #14b8a6;
+  color: #0f766e;
+}
+
+.erp-message-primary-button:disabled,
+.erp-message-secondary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes erpMessageDrop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1080px) {
+  .erp-message-dashboard-list {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-dashboard-item {
+    border-right: 0;
+    border-bottom: 1px solid #eef2f7;
+  }
+
+  .erp-message-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-compose-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-settings-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-settings-side {
+    position: static;
+  }
+
+  .erp-message-list {
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 768px) {
+  .erp-message-page-header,
+  .erp-message-detail-header,
+  .erp-message-dashboard-header,
+  .erp-system-event-group-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .erp-message-page-header-actions {
+    justify-content: stretch;
+  }
+
+  .erp-message-page-tabs {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-page-tab {
+    justify-content: flex-start;
+  }
+
+  .erp-message-form-grid,
+  .erp-message-receipt-list,
+  .erp-message-recipient-grid,
+  .erp-message-team-grid,
+  .erp-message-team-grid.compact,
+  .erp-message-mode-row,
+  .erp-message-automation-row,
+  .erp-message-automation-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .erp-message-popover {
+    right: -56px;
+  }
+}

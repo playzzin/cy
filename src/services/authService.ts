@@ -47,6 +47,8 @@ export const authService = {
 
         const workerId = await manpowerService.addWorker(workerData);
         worker = { ...workerData, id: workerId };
+        const { userService } = await import('./userService');
+        await userService.linkUserToWorker(user.uid, workerId, user.email || 'system');
         isNewUser = true;
         needsApproval = true; // 새로 생성된 사용자는 승인 필요
       } else if (worker.uid && worker.uid !== user.uid) {
@@ -54,9 +56,19 @@ export const authService = {
         throw new Error('이미 다른 계정에 등록된 이메일입니다.');
       } else if (!worker.uid) {
         // 5. 기존 Worker에 UID 연결
-        await manpowerService.updateWorker(worker.id!, { uid: user.uid });
+        const { userService } = await import('./userService');
+        await userService.linkUserToWorker(user.uid, worker.id!, user.email || 'system');
         worker.uid = user.uid;
       }
+
+      const { loginLogService } = await import('./loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_success',
+        provider: 'google',
+        method: 'popup',
+        user,
+        email: user.email,
+      });
 
       return {
         user,
@@ -65,6 +77,14 @@ export const authService = {
         needsApproval: needsApproval || (worker?.needsApproval ?? false)
       };
     } catch (error) {
+      const { loginLogService } = await import('./loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_failed',
+        provider: 'google',
+        method: 'popup',
+        errorCode: (error as { code?: string })?.code || null,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       console.error('로그인 실패:', error);
       throw error;
     }
@@ -73,6 +93,15 @@ export const authService = {
   // 로그아웃
   signOut: async (): Promise<void> => {
     try {
+      const user = auth.currentUser;
+      const { loginLogService } = await import('./loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'logout',
+        provider: 'firebase',
+        method: 'manual',
+        user,
+        email: user?.email || null,
+      });
       await firebaseSignOut(auth);
     } catch (error) {
       console.error('로그아웃 실패:', error);
@@ -100,7 +129,8 @@ export const authService = {
 
         // 3. 이메일로 찾은 경우 UID 업데이트
         if (worker) {
-          await manpowerService.updateWorker(worker.id!, { uid: user.uid });
+          const { userService } = await import('./userService');
+          await userService.linkUserToWorker(user.uid, worker.id!, user.email || 'system');
         }
       }
 

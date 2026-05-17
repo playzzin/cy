@@ -19,9 +19,12 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                 text: "통합DB", icon: "fa-circle-info", path: "/database/manpower-db"
             },
             {
+                text: "통합DB 로그", icon: "fa-clock-rotate-left", path: "/database/logs"
+            },
+            {
                 text: "출력 관리",
                 icon: "fa-clipboard-list",
-                sub: ["일보작성", "보드입력", "일보목록", "일보목록v2", "통합 일괄 등록", "일보 통계"]
+                sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그", "통합 일괄 등록", "일보 통계"]
             },
             {
                 text: "지원 관리",
@@ -55,7 +58,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -65,7 +68,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "시스템 관리",
                 icon: "fa-gears",
-                sub: ["메뉴관리", "시스템 메시지 설정", "데이터 연결 점검", { text: "현장 관리", path: "/site/management" }]
+                sub: ["메뉴관리", "시스템 메시지 설정", "로그인 로그", "데이터 연결 점검", { text: "현장 관리", path: "/site/management" }]
             },
             {
                 text: "클라우드 저장소",
@@ -127,7 +130,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -159,7 +162,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -178,7 +181,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
             {
                 text: "자재관리",
                 icon: "fa-boxes-stacked",
-                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고"]
+                sub: ["자재 통합관리", "자재 마스터", "입고 등록", "출고 등록", "입출고 내역", "현장물품", "재고 현황", "현장별 재고", "자재관리 로그"]
             },
             {
                 text: "지원 관리",
@@ -193,7 +196,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -207,7 +210,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -221,7 +224,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -235,7 +238,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -249,7 +252,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -263,7 +266,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",
@@ -277,7 +280,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
         menu: [
             { text: "현황관리", icon: "fa-chart-simple", sub: ["통합 현황판", "인원전체내역조회"] },
             { text: "통합DB", icon: "fa-circle-info" },
-            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일보목록", "일보목록v2"] },
+            { text: "출력 관리", icon: "fa-clipboard-list", sub: ["일보작성", "보드입력", "일정확정보드", "일보목록", "일보목록v2", "출력일보 로그"] },
             {
                 text: "급여관리",
                 icon: "fa-money-bill-wave",

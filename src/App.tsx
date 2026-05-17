@@ -21,6 +21,7 @@ const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'
 const TestSettingsPage = React.lazy(() => import('./pages/settings/TestSettingsPage'));
 const DailyDispatchPage = React.lazy(() => import('./pages/assignment/DailyDispatchPage'));
 const FieldSchedulePlannerPage = React.lazy(() => import('./pages/assignment/FieldSchedulePlannerPage'));
+const ScheduleConfirmationBoardPage = React.lazy(() => import('./pages/assignment/ScheduleConfirmationBoardPage'));
 const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
 const SiteAssignmentPage = React.lazy(() => import('./pages/assignment/SiteAssignmentPage'));
 const SupportAssignmentPage = React.lazy(() => import('./pages/assignment/SupportAssignmentPage'));
@@ -38,6 +39,7 @@ const MaterialOutboundPage = React.lazy(() => import('./pages/materials/Material
 const MaterialTransactionsPage = React.lazy(() => import('./pages/materials/MaterialTransactionsPage'));
 const MaterialInventoryPage = React.lazy(() => import('./pages/materials/MaterialInventoryPage'));
 const MaterialInventoryBySitePage = React.lazy(() => import('./pages/materials/MaterialInventoryBySitePage'));
+const MaterialLogPage = React.lazy(() => import('./pages/materials/MaterialLogPage'));
 const FieldGoodsProgramPage = React.lazy(() => import('./pages/materials/FieldGoodsProgramPage'));
 const CompanyDatabase = React.lazy(() => import('./pages/database/CompanyDatabase'));
 const ManpowerInputPage = React.lazy(() => import('./pages/manpower/ManpowerInputPage'));
@@ -76,6 +78,9 @@ const TeamSettlementPage = React.lazy(() => import('./pages/payroll/TeamSettleme
 const SupportRateManagementPage = React.lazy(() => import('./pages/support/SupportRateManagementPage'));
 const SupportManagerPage = React.lazy(() => import('./pages/support/SupportManagerPage'));
 const ExpenseLedgerPage = React.lazy(() => import('./pages/support/ExpenseLedgerPage'));
+const VehicleBillingLogPage = React.lazy(() => import('./pages/support/VehicleBillingLogPage'));
+const CardBillingLogPage = React.lazy(() => import('./pages/support/CardBillingLogPage'));
+const AccommodationBillingLogPage = React.lazy(() => import('./pages/support/AccommodationBillingLogPage'));
 const ExpenseClaimManagementPage = React.lazy(() => import('./pages/support/ExpenseClaimManagementPage'));
 const TeamResourceDetailPage = React.lazy(() => import('./pages/support/TeamResourceDetailPage'));
 const TeamBasedPaymentDraftPage = React.lazy(() => import('./pages/payroll/TeamBasedPaymentDraftPage'));
@@ -83,10 +88,14 @@ const TeamBasedPaymentDraftPageV2 = React.lazy(() => import('./pages/payroll/Tea
 const EmploymentCertificatePage = React.lazy(() => import('./pages/hr/EmploymentCertificatePage'));
 const TerminationCertificatePage = React.lazy(() => import('./pages/hr/TerminationCertificatePage'));
 const DailyReportStatisticsPage = React.lazy(() => import('./pages/report/DailyReportStatisticsPage'));
+const DailyReportLogPage = React.lazy(() => import('./pages/report/DailyReportLogPage'));
 const OfficeManagementPage = React.lazy(() => import('./pages/office/OfficeManagementPage'));
 const IntegratedDatabase = React.lazy(() => import('./pages/database/ManpowerDatabase'));
+const DatabaseLogPage = React.lazy(() => import('./pages/database/DatabaseLogPage'));
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
+const MessageCenterPage = React.lazy(() => import('./pages/messages/MessageCenterPage'));
+const MessageAutomationSettingsPage = React.lazy(() => import('./pages/messages/MessageAutomationSettingsPage'));
 const StorageManagerPage = React.lazy(() => import('./pages/storage/StorageManagerPage'));
 const GoogleDriveManagerPage = lazyNamed(() => import('./pages/storage/GoogleDriveManagerPage'), 'GoogleDriveManagerPage');
 const SchemaDesignViewer = React.lazy(() => import('./pages/structure/SchemaDesignViewer'));
@@ -125,6 +134,8 @@ const NationwidePartnersPage = React.lazy(() => import('./pages/jeonkuk/Nationwi
 const SalaryModelUpdater = React.lazy(() => import('./pages/admin/SalaryModelUpdater'));
 const AdminDataIntegrityPage = React.lazy(() => import('./pages/admin/AdminDataIntegrityPage'));
 const UserManagementPage = React.lazy(() => import('./pages/admin/UserManagementPage'));
+const LoginLogPage = React.lazy(() => import('./pages/admin/LoginLogPage'));
+const WelfareAssetPlatformPage = React.lazy(() => import('./pages/admin/WelfareAssetPlatformPage'));
 const AgentPlayground = React.lazy(() => import('./pages/developer/AgentPlayground'));
 const AgentDashboard = React.lazy(() => import('./pages/developer/AgentDashboard'));
 const AdvancedMenuManager = React.lazy(() => import('./pages/admin/menu/AdvancedMenuManager'));
@@ -158,6 +169,7 @@ const EstimateRequestPage = React.lazy(() => import('./pages/estimate/EstimateRe
 const AccountManagementPage = React.lazy(() => import('./pages/database/AccountManagementPage'));
 const ConstructionCompanyDatabase = React.lazy(() => import('./pages/database/ConstructionCompanyDatabase'));
 const WorkerDatabaseInput = React.lazy(() => import('./pages/database/WorkerDatabaseInput'));
+const OfficeStaffDatabase = React.lazy(() => import('./pages/database/OfficeStaffDatabase'));
 const HomepageClientProgressPage = React.lazy(() => import('./pages/homepage/HomepageClientProgressPage'));
 const HomepageRequestListPage = React.lazy(() => import('./pages/homepage/HomepageRequestListPage'));
 const KakaoTestPage = lazyNamed(() => import('./pages/kakao/KakaoTestPage'), 'KakaoTestPage');
@@ -169,6 +181,7 @@ const TaxInvoiceIssueListPage = React.lazy(() => import('./pages/taxinvoice/TaxI
 const ReceivablesManagerPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesManagerPage'));
 const ReceivablesDashboardPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesDashboardPage'));
 const WorkbookLedgerPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerPage'));
+const WorkbookLedgerUpgradePage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerUpgradePage'));
 const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
 const KakaoNotificationPage = React.lazy(() => import('./pages/taxinvoice/KakaoNotificationPage'));
 const AccountInquiryPage = React.lazy(() => import('./pages/taxinvoice/AccountInquiryPage'));
@@ -220,6 +233,7 @@ const App: React.FC = () => {
             {/* Daily Reports */}
             <Route path="/reports/daily" element={<DailyReportPage />} />
             <Route path="/reports/daily-v2" element={<DailyReportV2Page />} />
+            <Route path="/reports/daily-logs" element={<DailyReportLogPage />} />
             <Route path="/reports/team-personnel-status" element={<TeamPersonnelStatusReportPage />} />
             <Route path="/reports/statistics" element={<DailyReportStatisticsPage />} />
             <Route path="/reports/list" element={<div>보고서 목록</div>} />
@@ -266,6 +280,8 @@ const App: React.FC = () => {
               <Route path="company-db" element={<CompanyDatabase />} />
               <Route path="company-db-construction" element={<ConstructionCompanyDatabase />} />
               <Route path="manpower-db" element={<IntegratedDatabase />} />
+              <Route path="logs" element={<DatabaseLogPage />} />
+              <Route path="office-staff-db" element={<OfficeStaffDatabase />} />
               <Route path="account-management" element={<AccountManagementPage />} />
               <Route path="worker-input" element={<WorkerDatabaseInput />} />
               <Route path="smart-company-registration" element={<SmartCompanyRegistrationPage />} />
@@ -313,6 +329,7 @@ const App: React.FC = () => {
 
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="workbook-ledger" element={<WorkbookLedgerPage key="cheongyeon" tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger-upgrade" element={<WorkbookLedgerUpgradePage key="cheongyeon-upgrade" tenantKey="cheongyeon" companyLabel="청연" />} />
               <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage key="dawon" tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
               <Route path="kakao-notification" element={<KakaoNotificationPage />} />
@@ -361,6 +378,9 @@ const App: React.FC = () => {
 
             {/* Profile Settings */}
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/messages" element={<MessageCenterPage />} />
+            <Route path="/messages/compose" element={<MessageCenterPage mode="compose" />} />
+            <Route path="/messages/settings" element={<MessageAutomationSettingsPage />} />
 
             {/* Storage Management */}
             <Route path="/storage" element={<StorageManagerPage />} />
@@ -375,6 +395,8 @@ const App: React.FC = () => {
             {/* Assignment Management */}
             <Route path="/assignment/daily-dispatch" element={<DailyDispatchPage />} />
             <Route path="/assignment/field-schedule" element={<FieldSchedulePlannerPage />} />
+            <Route path="/assignment/schedule-confirmation" element={<ScheduleConfirmationBoardPage />} />
+            <Route path="/assignment/schedule-confirmation-board" element={<ScheduleConfirmationBoardPage />} />
             <Route path="/assignment/team-assignment" element={<TeamAssignmentPage />} />
             <Route path="/assignment/site-assignment" element={<SiteAssignmentPage />} />
 
@@ -387,8 +409,11 @@ const App: React.FC = () => {
             <Route path="/support/settings" element={<SupportSettingsPage />} />
             <Route path="/support/status" element={<SupportStatusPage />} />
             <Route path="/support/accommodation" element={<SupportManagerPage />} />
+            <Route path="/support/accommodation/logs" element={<AccommodationBillingLogPage />} />
             <Route path="/support/vehicles" element={<SupportManagerPage />} />
+            <Route path="/support/vehicles/logs" element={<VehicleBillingLogPage />} />
             <Route path="/support/cards" element={<SupportManagerPage />} />
+            <Route path="/support/cards/logs" element={<CardBillingLogPage />} />
             <Route path="/support/expense-ledger" element={<ExpenseLedgerPage />} />
             <Route path="/support/expense-claims" element={<ExpenseClaimManagementPage />} />
             <Route path="/support/expense-claim-input" element={<ExpenseClaimManagementPage />} />
@@ -409,6 +434,7 @@ const App: React.FC = () => {
               <Route path="transactions" element={<MaterialTransactionsPage />} />
               <Route path="inventory" element={<MaterialInventoryPage />} />
               <Route path="inventory-by-site" element={<MaterialInventoryBySitePage />} />
+              <Route path="logs" element={<MaterialLogPage />} />
               <Route path="field-goods" element={<FieldGoodsProgramPage />} />
             </Route>
 
@@ -443,6 +469,8 @@ const App: React.FC = () => {
             {/* Admin Routes */}
             <Route path="/admin">
               <Route path="user-management" element={<UserManagementPage />} />
+              <Route path="login-logs" element={<LoginLogPage />} />
+              <Route path="welfare-assets" element={<WelfareAssetPlatformPage />} />
               <Route path="component-management" element={<ComponentManagementPage />} />
               <Route path="activity-logs" element={<ActivityLogPage />} />
 

@@ -20,6 +20,11 @@ import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyRe
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
+import {
+    useWorkerAccessScope,
+    workerAccessMatchesReportRow,
+    workerAccessMatchesTeamRef,
+} from '../../hooks/useWorkerAccessScope';
 import { resolveReportPayType } from '../../utils/payType';
 import { toast } from '../../utils/swal';
 import './TeamWorkerDetailPage.css';
@@ -277,6 +282,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const [loadingOutput, setLoadingOutput] = useState(false);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+    const accessScope = useWorkerAccessScope(workers, teams);
 
     useEffect(() => {
         let mounted = true;
@@ -382,6 +388,30 @@ const SiteResponsibleDetailPage: React.FC = () => {
         return map;
     }, [workers]);
 
+    const scopedOutputRows = useMemo(
+        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)),
+        [accessScope, outputRows]
+    );
+
+    const scopedOutputSiteKeys = useMemo(
+        () => new Set(scopedOutputRows.map(row => makeSiteKey(row.siteId, row.siteName)).filter(Boolean)),
+        [scopedOutputRows]
+    );
+
+    const visibleSites = useMemo(() => {
+        if (accessScope.loading) return [];
+        if (accessScope.mode === 'all') return sites;
+
+        if (accessScope.mode === 'team') {
+            return sites.filter(site =>
+                workerAccessMatchesTeamRef(accessScope, site.responsibleTeamId, site.responsibleTeamName) ||
+                scopedOutputSiteKeys.has(getSitePrimaryKey(site))
+            );
+        }
+
+        return sites.filter(site => scopedOutputSiteKeys.has(getSitePrimaryKey(site)));
+    }, [accessScope, scopedOutputSiteKeys, sites]);
+
     const responsibleGroups = useMemo<ResponsibleGroup[]>(() => {
         const groupMap = new Map<string, {
             key: string;
@@ -410,7 +440,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
             return next;
         };
 
-        sites.forEach(site => {
+        visibleSites.forEach(site => {
             if (!isCheongyeonResponsible(site.responsibleTeamId, site.responsibleTeamName, teamByKey)) return;
             const key = siteResponsibleKey(site);
             const name = getResponsibleName(site.responsibleTeamId, site.responsibleTeamName, teamByKey);
@@ -420,7 +450,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
             if (siteKey) group.siteKeys.add(siteKey);
         });
 
-        outputRows.forEach(row => {
+        scopedOutputRows.forEach(row => {
             if (!isCheongyeonResponsible(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey)) return;
             const key = rowResponsibleKey(row);
             const name = getResponsibleName(row.responsibleTeamId ?? row.teamId, row.responsibleTeamName ?? row.teamName, teamByKey);
@@ -447,7 +477,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                 if (leftUnassigned !== rightUnassigned) return leftUnassigned ? 1 : -1;
                 return left.name.localeCompare(right.name, 'ko-KR');
             });
-    }, [outputRows, sites, teamByKey]);
+    }, [scopedOutputRows, teamByKey, visibleSites]);
 
     useEffect(() => {
         if (responsibleGroups.length === 0) {
@@ -468,8 +498,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
     );
 
     const selectedResponsibleRows = useMemo(
-        () => outputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey),
-        [outputRows, selectedResponsibleKey]
+        () => scopedOutputRows.filter(row => rowResponsibleKey(row) === selectedResponsibleKey),
+        [scopedOutputRows, selectedResponsibleKey]
     );
 
     const selectedResponsibleSiteKeys = useMemo(
@@ -480,13 +510,13 @@ const SiteResponsibleDetailPage: React.FC = () => {
     const selectedResponsibleAllSites = useMemo(() => {
         if (!selectedResponsibleKey) return [];
 
-        return sites
+        return visibleSites
             .filter(site => (
                 siteResponsibleKey(site) === selectedResponsibleKey
                 || selectedResponsibleSiteKeys.has(getSitePrimaryKey(site))
             ))
             .sort((left, right) => String(left.name ?? '').localeCompare(String(right.name ?? ''), 'ko-KR'));
-    }, [selectedResponsibleKey, selectedResponsibleSiteKeys, sites]);
+    }, [selectedResponsibleKey, selectedResponsibleSiteKeys, visibleSites]);
 
     const selectedResponsibleStatusCounts = useMemo(() => ({
         all: selectedResponsibleAllSites.length,
@@ -534,11 +564,11 @@ const SiteResponsibleDetailPage: React.FC = () => {
 
     const selectedSiteRows = useMemo(() => (
         selectedSite
-            ? outputRows
+            ? scopedOutputRows
                 .filter(row => rowMatchesSite(row, selectedSite))
                 .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')))
             : []
-    ), [outputRows, selectedSite]);
+    ), [scopedOutputRows, selectedSite]);
 
     const selectedSiteStatsByKey = useMemo(() => {
         const map = new Map<string, SiteListStats>();
@@ -759,8 +789,8 @@ const SiteResponsibleDetailPage: React.FC = () => {
                         <Printer size={18} />
                         <span>인쇄</span>
                     </button>
-                    <button type="button" className="tw-primary-button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput}>
-                        <RefreshCw size={18} className={loadingMaster || loadingOutput ? 'tw-spin' : ''} />
+                    <button type="button" className="tw-primary-button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput || accessScope.loading}>
+                        <RefreshCw size={18} className={loadingMaster || loadingOutput || accessScope.loading ? 'tw-spin' : ''} />
                         새로고침
                     </button>
                 </div>
@@ -847,7 +877,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 className="tw-team-picker-button"
                                 onClick={() => setIsResponsiblePickerOpen(prev => !prev)}
                                 aria-expanded={isResponsiblePickerOpen}
-                                disabled={loadingMaster || responsibleGroups.length === 0}
+                                disabled={loadingMaster || accessScope.loading || responsibleGroups.length === 0}
                             >
                                 <span className="tw-team-item__color" style={{ background: selectedResponsible?.color || DEFAULT_COLOR }} />
                                 <span className="tw-team-picker-button__body">
@@ -859,7 +889,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                                 </span>
                                 <ChevronDown size={18} className={isResponsiblePickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
-                            {loadingMaster ? (
+                            {loadingMaster || accessScope.loading ? (
                                 <div className="tw-empty-state">현장담당 데이터를 불러오는 중입니다.</div>
                             ) : responsibleGroups.length === 0 ? (
                                 <div className="tw-empty-state">청연이엔지 소속 현장담당 팀이 없습니다.</div>
@@ -871,7 +901,7 @@ const SiteResponsibleDetailPage: React.FC = () => {
                         </div>
 
                         <div className="tw-list-block-title tw-list-block-title--workers">현장 목록</div>
-                        {loadingMaster ? (
+                        {loadingMaster || accessScope.loading ? (
                             <div className="tw-empty-state">현장 데이터를 불러오는 중입니다.</div>
                         ) : selectedResponsibleSites.length === 0 ? (
                             <div className="tw-empty-state">조건에 맞는 현장이 없습니다.</div>

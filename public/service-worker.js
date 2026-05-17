@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'cy-erp-pwa-v1';
+const CACHE_VERSION = 'cy-erp-pwa-v2';
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const APP_SHELL_URLS = ['/', '/index.html'];

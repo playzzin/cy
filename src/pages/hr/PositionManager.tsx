@@ -6,9 +6,27 @@ import {
     faCrown, faUserTie, faUserShield, faHardHat, faUser, faUserPlus,
     faUserGear, faUserCog, faUserNurse, faUserSecret, faUserPen,
     faHelmetSafety, faPersonDigging, faWrench, faScrewdriverWrench,
-    IconDefinition, faList, faEdit, faInfoCircle, faUsers
+    IconDefinition, faList, faEdit, faInfoCircle, faUsers, faGripVertical,
+    faChevronUp, faChevronDown
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragEndEvent
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { positionService, Position } from '../../services/positionService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { UserRole } from '../../types/roles';
@@ -42,6 +60,155 @@ const ROLES = [
 // Helper to get color style safely
 const getColorStyle = (colorId: string) => COLORS.find(c => c.id === colorId) || COLORS.find(c => c.id === 'gray')!;
 
+type SortablePositionCardProps = {
+    position: Position;
+    index: number;
+    totalCount: number;
+    memberCount: number;
+    isReordering: boolean;
+    onOpenIconPicker: (id: string) => void;
+    onEdit: (position: Position) => void;
+    onOpenMenuSettings: (position: Position) => void;
+    onDelete: (id: string, name: string) => void;
+    onRoleChange: (positionId: string, newRole: UserRole) => void;
+    onMove: (positionId: string, direction: -1 | 1) => void;
+};
+
+const SortablePositionCard: React.FC<SortablePositionCardProps> = ({
+    position,
+    index,
+    totalCount,
+    memberCount,
+    isReordering,
+    onOpenIconPicker,
+    onEdit,
+    onOpenMenuSettings,
+    onDelete,
+    onRoleChange,
+    onMove,
+}) => {
+    const sortableId = position.id || position.name;
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: sortableId, disabled: !position.id || isReordering });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 20 : 'auto',
+        position: 'relative' as const,
+    };
+    const colorStyle = getColorStyle(position.color);
+    const canMoveUp = index > 0 && Boolean(position.id) && !isReordering;
+    const canMoveDown = index < totalCount - 1 && Boolean(position.id) && !isReordering;
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`group bg-white p-3 rounded-xl border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all ${isDragging ? 'shadow-lg border-blue-400 opacity-95' : ''}`}
+        >
+            <div className="flex items-center gap-3">
+                <div className="w-8 h-14 flex-shrink-0 flex flex-col items-center justify-center">
+                    <button
+                        type="button"
+                        onClick={() => position.id && onMove(position.id, -1)}
+                        disabled={!canMoveUp}
+                        className="w-7 h-4 rounded-md hover:bg-gray-100 text-gray-300 hover:text-blue-600 flex items-center justify-center transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-300"
+                        title="위로 이동"
+                    >
+                        <FontAwesomeIcon icon={faChevronUp} className="text-[10px]" />
+                    </button>
+                    <button
+                        type="button"
+                        {...attributes}
+                        {...listeners}
+                        disabled={!position.id || isReordering}
+                        className="w-7 h-6 rounded-md text-gray-300 hover:text-gray-600 hover:bg-gray-50 flex items-center justify-center cursor-grab active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                        title="드래그해서 위치 변경"
+                        aria-label={`${position.name} 위치 변경`}
+                    >
+                        <FontAwesomeIcon icon={faGripVertical} />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => position.id && onMove(position.id, 1)}
+                        disabled={!canMoveDown}
+                        className="w-7 h-4 rounded-md hover:bg-gray-100 text-gray-300 hover:text-blue-600 flex items-center justify-center transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-300"
+                        title="아래로 이동"
+                    >
+                        <FontAwesomeIcon icon={faChevronDown} className="text-[10px]" />
+                    </button>
+                </div>
+
+                {/* Icon */}
+                <button
+                    onClick={() => position.id && onOpenIconPicker(position.id)}
+                    className={`w-12 h-12 rounded-lg flex-shrink-0 flex items-center justify-center ${colorStyle.bg} text-white shadow-sm transition-transform hover:scale-105 active:scale-95`}
+                    title="아이콘 변경"
+                >
+                    <FontAwesomeIcon icon={resolveIcon(position.icon, faUser)} size="lg" />
+                </button>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-bold text-gray-800 truncate">{position.name}</span>
+                        {/* Member Count Badge */}
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1 ${memberCount > 0 ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <FontAwesomeIcon icon={faUsers} className="text-[9px]" />
+                            {memberCount}
+                        </span>
+                    </div>
+
+                    {/* Role Selector (Inline) */}
+                    <div className="flex items-center gap-2">
+                        <select
+                            value={position.systemRole}
+                            onChange={(e) => position.id && onRoleChange(position.id, e.target.value as UserRole)}
+                            className="text-xs text-gray-500 bg-transparent border-none p-0 focus:ring-0 cursor-pointer hover:text-blue-600 font-medium"
+                        >
+                            {ROLES.map(r => (
+                                <option key={r.id} value={r.id}>{r.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-1 opacity-100 overflow-hidden sm:w-0 sm:opacity-0 sm:group-hover:w-auto sm:group-hover:opacity-100 transition-opacity">
+                    <button
+                        onClick={() => onEdit(position)}
+                        className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
+                        title="직책명/색상 수정"
+                    >
+                        <FontAwesomeIcon icon={faEdit} />
+                    </button>
+                    <button
+                        onClick={() => onOpenMenuSettings(position)}
+                        className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
+                        title="메뉴 설정"
+                    >
+                        <FontAwesomeIcon icon={faList} />
+                    </button>
+                    <button
+                        onClick={() => position.id && onDelete(position.id, position.name)}
+                        className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors"
+                        title="삭제"
+                    >
+                        <FontAwesomeIcon icon={faTrash} />
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ----------------------------------------------------------------------
 // Main Component
 // ----------------------------------------------------------------------
@@ -57,6 +224,7 @@ const PositionManager: React.FC = () => {
     // -- UI State --
     const [searchTerm, setSearchTerm] = useState('');
     const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
+    const [isReordering, setIsReordering] = useState(false);
 
     // -- Form State --
     // "New Position" form
@@ -73,6 +241,15 @@ const PositionManager: React.FC = () => {
     const [editPosName, setEditPosName] = useState('');
     const [editPosColor, setEditPosColor] = useState('');
     const [editPosIcon, setEditPosIcon] = useState('');
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, {
+            activationConstraint: { distance: 6 },
+        }),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
 
     // --- 1. Load Data ---
     useEffect(() => {
@@ -304,6 +481,68 @@ const PositionManager: React.FC = () => {
         }
     };
 
+    const persistPositionOrder = async (nextPositions: Position[], previousPositions: Position[]) => {
+        if (nextPositions.some(pos => !pos.id)) {
+            Swal.fire('오류', '저장된 직책만 위치를 변경할 수 있습니다. 새로고침 후 다시 시도해주세요.', 'error');
+            return;
+        }
+
+        const rankedPositions = nextPositions.map((pos, index) => ({
+            ...pos,
+            rank: index + 1,
+        }));
+
+        setIsReordering(true);
+        setPositions(rankedPositions);
+
+        try {
+            await positionService.updatePositionRanks(
+                rankedPositions.map(pos => ({ id: pos.id!, rank: pos.rank }))
+            );
+            setPositions(await positionService.getPositions(true));
+            Swal.fire({
+                icon: 'success',
+                title: '직책 순서 저장됨',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 1200
+            });
+        } catch (error) {
+            console.error("Position reorder failed:", error);
+            setPositions(previousPositions);
+            Swal.fire('오류', '직책 순서 저장에 실패했습니다.', 'error');
+        } finally {
+            setIsReordering(false);
+        }
+    };
+
+    const handlePositionDragEnd = async (event: DragEndEvent) => {
+        const { active, over } = event;
+        if (!over || active.id === over.id || isReordering) return;
+
+        const oldIndex = positions.findIndex(pos => (pos.id || pos.name) === String(active.id));
+        const newIndex = positions.findIndex(pos => (pos.id || pos.name) === String(over.id));
+        if (oldIndex < 0 || newIndex < 0) return;
+
+        await persistPositionOrder(arrayMove(positions, oldIndex, newIndex), positions);
+    };
+
+    const handleMovePosition = async (positionId: string, direction: -1 | 1) => {
+        if (isReordering) return;
+
+        const oldIndex = positions.findIndex(pos => pos.id === positionId);
+        const newIndex = oldIndex + direction;
+        if (oldIndex < 0 || newIndex < 0 || newIndex >= positions.length) return;
+
+        await persistPositionOrder(arrayMove(positions, oldIndex, newIndex), positions);
+    };
+
+    const handleOpenMenuSettings = (pos: Position) => {
+        if (!pos.id) return;
+        navigate(`/admin/menu-manager?site=${pos.id.startsWith('pos_') ? pos.id : `pos_${pos.id}`}`);
+    };
+
     // --- Render Helpers ---
 
     const filteredWorkers = workers.filter(w =>
@@ -415,75 +654,33 @@ const PositionManager: React.FC = () => {
                             <h3 className="font-bold text-gray-700">등록된 직책 목록 ({positions.length})</h3>
                         </div>
                         <div className="overflow-y-auto p-3 space-y-3 custom-scrollbar flex-1">
-                            {positions.map(pos => {
-                                const style = getColorStyle(pos.color);
-                                const memberCount = workers.filter(w => w.role === pos.name).length;
-
-                                return (
-                                    <div key={pos.id} className="group bg-white p-3 rounded-xl border border-gray-100 hover:border-blue-300 hover:shadow-md transition-all">
-                                        <div className="flex items-center gap-3">
-                                            {/* Icon */}
-                                            <button
-                                                onClick={() => openIconPicker(pos.id!)}
-                                                className={`w-12 h-12 rounded-lg flex-shrink-0 flex items-center justify-center ${style.bg} text-white shadow-sm transition-transform hover:scale-105 active:scale-95`}
-                                                title="아이콘 변경"
-                                            >
-                                                <FontAwesomeIcon icon={resolveIcon(pos.icon, faUser)} size="lg" />
-                                            </button>
-
-                                            {/* Info */}
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2 mb-0.5">
-                                                    <span className="font-bold text-gray-800 truncate">{pos.name}</span>
-                                                    {/* Member Count Badge */}
-                                                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1 ${memberCount > 0 ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-400'}`}>
-                                                        <FontAwesomeIcon icon={faUsers} className="text-[9px]" />
-                                                        {memberCount}
-                                                    </span>
-                                                </div>
-
-                                                {/* Role Selector (Inline) */}
-                                                <div className="flex items-center gap-2">
-                                                    <select
-                                                        value={pos.systemRole}
-                                                        onChange={(e) => handleRoleChange(pos.id!, e.target.value as UserRole)}
-                                                        className="text-xs text-gray-500 bg-transparent border-none p-0 focus:ring-0 cursor-pointer hover:text-blue-600 font-medium"
-                                                    >
-                                                        {ROLES.map(r => (
-                                                            <option key={r.id} value={r.id}>{r.label}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-
-                                            {/* Actions */}
-                                            <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                                <button
-                                                    onClick={() => handleEditPosition(pos)}
-                                                    className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
-                                                    title="직책명/색상 수정"
-                                                >
-                                                    <FontAwesomeIcon icon={faEdit} />
-                                                </button>
-                                                <button
-                                                    onClick={() => navigate(`/admin/menu-manager?site=${pos.id!.startsWith('pos_') ? pos.id : `pos_${pos.id}`}`)}
-                                                    className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-blue-600 flex items-center justify-center transition-colors"
-                                                    title="메뉴 설정"
-                                                >
-                                                    <FontAwesomeIcon icon={faList} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeletePosition(pos.id!, pos.name)}
-                                                    className="w-8 h-8 rounded-full hover:bg-gray-100 text-gray-400 hover:text-red-500 flex items-center justify-center transition-colors"
-                                                    title="삭제"
-                                                >
-                                                    <FontAwesomeIcon icon={faTrash} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                            <DndContext
+                                sensors={sensors}
+                                collisionDetection={closestCenter}
+                                onDragEnd={handlePositionDragEnd}
+                            >
+                                <SortableContext
+                                    items={positions.map(pos => pos.id || pos.name)}
+                                    strategy={verticalListSortingStrategy}
+                                >
+                                    {positions.map((pos, index) => (
+                                        <SortablePositionCard
+                                            key={pos.id || pos.name}
+                                            position={pos}
+                                            index={index}
+                                            totalCount={positions.length}
+                                            memberCount={workers.filter(w => w.role === pos.name).length}
+                                            isReordering={isReordering}
+                                            onOpenIconPicker={openIconPicker}
+                                            onEdit={handleEditPosition}
+                                            onOpenMenuSettings={handleOpenMenuSettings}
+                                            onDelete={handleDeletePosition}
+                                            onRoleChange={handleRoleChange}
+                                            onMove={handleMovePosition}
+                                        />
+                                    ))}
+                                </SortableContext>
+                            </DndContext>
                         </div>
                     </div>
                 </div>

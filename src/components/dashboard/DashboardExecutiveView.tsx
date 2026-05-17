@@ -9,19 +9,25 @@ import { companyService } from '../../services/companyService';
 import { taskService } from '../../services/taskService';
 import { Task, STATUS_CONFIG } from '../../types/task';
 import WeatherWidget from '../widgets/WeatherWidget';
-import { RoleFocusPanel } from './RoleFocusPanel';
 import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
-import { useQuickMenuActions } from './useQuickMenuActions';
+import { QuickMenuSettingsModal } from './QuickMenuSettingsModal';
+import { useQuickMenuActionSettings } from './useQuickMenuActions';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faUsers, faBuilding, faClipboardList, faHardHat,
     faArrowRight, faChartLine, faSpinner, faRightLeft,
-    faListCheck
+    faListCheck, faCog
 } from '@fortawesome/free-solid-svg-icons';
 
 interface DashboardExecutiveViewProps {
     modeConfig?: DashboardModeConfig;
 }
+
+const formatManDay = (value: number) =>
+    Number(value || 0).toLocaleString('ko-KR', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+    });
 
 export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = ({ modeConfig = DASHBOARD_MODES[0] }) => {
     const { currentUser } = useAuth();
@@ -168,7 +174,9 @@ export const DashboardExecutiveView: React.FC<DashboardExecutiveViewProps> = ({ 
 // Internal component to handle the displaying using the fetched stats
 const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: DashboardModeConfig }> = ({ stats, modeConfig }) => {
     const navigate = useNavigate();
-    const quickActions = useQuickMenuActions(modeConfig);
+    const quickMenu = useQuickMenuActionSettings(modeConfig);
+    const quickActions = quickMenu.actions;
+    const [isQuickMenuSettingsOpen, setIsQuickMenuSettingsOpen] = useState(false);
 
     const handleQuickActionClick = (path: string, openInNewTab?: boolean) => {
         if (openInNewTab) {
@@ -180,10 +188,6 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
 
     return (
         <div>
-            <div className="mb-8">
-                <RoleFocusPanel modeConfig={modeConfig} />
-            </div>
-
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
                 {/* Workers Card */}
@@ -259,12 +263,12 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
                     </div>
                     <h3 className="text-slate-500 text-sm font-medium mb-1 group-hover:text-orange-600 transition-colors">오늘 총공수</h3>
                     <div className="flex items-baseline gap-2">
-                        <span className="text-3xl font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{stats.reports.todayManDay}</span>
+                        <span className="text-3xl font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{formatManDay(stats.reports.todayManDay)}</span>
                         <span className="text-sm text-slate-400">공</span>
                     </div>
                     <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between text-sm">
                         <span className="text-slate-500">이번 달 누적</span>
-                        <span className="font-medium text-slate-800">{stats.reports.thisMonthManDay}공</span>
+                        <span className="font-medium text-slate-800">{formatManDay(stats.reports.thisMonthManDay)}공</span>
                     </div>
                 </div>
 
@@ -299,10 +303,21 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
                 {/* Quick Actions */}
                 <div className="lg:col-span-2 space-y-8">
                     <section>
-                        <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                            <FontAwesomeIcon icon={faChartLine} className="text-brand-600" />
-                            {modeConfig.shortLabel} 빠른 실행
-                        </h2>
+                        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                <FontAwesomeIcon icon={faChartLine} className="text-brand-600" />
+                                {modeConfig.shortLabel} 빠른 실행
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => setIsQuickMenuSettingsOpen(true)}
+                                disabled={quickMenu.loading}
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <FontAwesomeIcon icon={faCog} />
+                                설정
+                            </button>
+                        </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {(() => {
                                 const colorMap: Record<string, { bg: string, text: string, hover: string, iconBg: string }> = {
@@ -323,12 +338,20 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
                                     gray: { bg: 'bg-gray-100', text: 'text-gray-600', hover: 'hover:border-gray-500', iconBg: 'group-hover:bg-gray-200' }
                                 };
 
+                                if (quickActions.length === 0) {
+                                    return (
+                                        <div className="col-span-full rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+                                            등록된 빠른 실행 메뉴가 없습니다. 설정에서 메뉴를 선택하세요.
+                                        </div>
+                                    );
+                                }
+
                                 return quickActions
-                                    .map((action, idx) => {
+                                    .map((action) => {
                                         const theme = colorMap[action.color] || colorMap.slate;
                                         return (
                                             <button
-                                                key={idx}
+                                                key={action.key}
                                                 onClick={() => handleQuickActionClick(action.path, action.openInNewTab)}
                                                 className={`p-6 bg-white rounded-xl border border-slate-200 ${theme.hover} hover:shadow-md transition-all text-left group`}
                                             >
@@ -433,6 +456,20 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
                     </div>
                 </div>
             </div>
+
+            <QuickMenuSettingsModal
+                isOpen={isQuickMenuSettingsOpen}
+                modeLabel={modeConfig.shortLabel}
+                actions={quickMenu.availableActions}
+                selectedKeys={quickMenu.selectedKeys}
+                defaultSelectedKeys={quickMenu.defaultSelectedKeys}
+                hasPersonalSelection={quickMenu.hasPersonalSelection}
+                saving={quickMenu.saving}
+                maxActions={quickMenu.maxActions}
+                onClose={() => setIsQuickMenuSettingsOpen(false)}
+                onSave={quickMenu.saveSelection}
+                onReset={quickMenu.resetSelection}
+            />
         </div>
     );
 }

@@ -234,9 +234,6 @@ const TeamDatabase: React.FC<TeamDatabaseProps> = ({ hideHeader = false, highlig
     const handleTeamBlur = async (id: string, field: keyof Team, value: any) => {
         try {
             await teamService.updateTeam(id, { [field]: value });
-            if (field === 'name') {
-                await manpowerService.updateWorkersTeamName(id, value);
-            }
         } catch (error) {
             console.error("Failed to update team", error);
             loadData();

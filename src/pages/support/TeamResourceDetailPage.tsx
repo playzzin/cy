@@ -21,10 +21,20 @@ import { cardService } from '../../services/cardService';
 import { vehicleService } from '../../services/vehicleService';
 import type { Accommodation } from '../../types/accommodation';
 import type { AccommodationAssignment } from '../../types/accommodationAssignment';
+import type { AccommodationBillingDocument } from '../../types/accommodationBilling';
 import type { Card, CardAssignmentRecord } from '../../types/card';
+import type { CardBillingDocument } from '../../types/cardBilling';
 import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 import type { Vehicle, VehicleAssignmentRecord } from '../../types/vehicle';
+import type { VehicleBillingDocument } from '../../types/vehicleBilling';
+import { manpowerService, type Worker } from '../../services/manpowerService';
 import type { Team } from '../../services/teamService';
+import {
+    useWorkerAccessScope,
+    workerAccessCanViewWholeTeam,
+    workerAccessMatchesTeam,
+    workerAccessMatchesWorkerRef,
+} from '../../hooks/useWorkerAccessScope';
 import { toast } from '../../utils/swal';
 import {
     type BillingScope,
@@ -181,6 +191,59 @@ const getExpenseDirection = (claim: TeamExpenseClaim, selectedTeam: Team | null)
     return '받을 후청구';
 };
 
+const buildSummaryFromDocs = (
+    team: Team | null,
+    docs: {
+        accommodationDocs: AccommodationBillingDocument[];
+        vehicleDocs: VehicleBillingDocument[];
+        cardDocs: CardBillingDocument[];
+        claims: TeamExpenseClaim[];
+    }
+): LedgerSummary => {
+    const summary = buildEmptySummary(team);
+
+    docs.accommodationDocs.forEach(doc => {
+        (doc.lineItems ?? []).forEach(item => {
+            const amount = asNumber(item.amount);
+            if (item.targetField === 'accommodation') summary.accommodation += amount;
+            else if (item.targetField === 'privateRoom') summary.privateRoom += amount;
+            else if (item.targetField === 'electricity') summary.electricity += amount;
+            else if (item.targetField === 'gas') summary.gas += amount;
+            else if (item.targetField === 'water') summary.water += amount;
+            else if (item.targetField === 'internet') summary.internet += amount;
+            else summary.accommodationOther += amount;
+        });
+    });
+
+    docs.vehicleDocs.forEach(doc => {
+        const breakdown = summarizeVehicleBillingCosts(doc);
+        summary.vehicleRent += breakdown.rent;
+        summary.vehicleFine += breakdown.fine;
+        summary.vehicleRepair += breakdown.repair;
+        summary.vehicleOther += breakdown.other;
+    });
+
+    docs.cardDocs.forEach(doc => {
+        const lineTotal = (doc.lineItems ?? []).reduce((sum, item) => sum + asNumber(item.amount), 0);
+        summary.card += lineTotal > 0 ? lineTotal : asNumber(doc.totalAmount);
+    });
+
+    docs.claims.forEach(claim => {
+        const amount = asNumber(claim.amount);
+        const isOther = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+
+        if (isOther) {
+            summary.otherClaim += amount;
+            return;
+        }
+
+        if (valueMatchesTeam(team, claim.payerTeamId, claim.payerTeamName)) summary.receivable += amount;
+        if (valueMatchesTeam(team, claim.chargeToTeamId, claim.chargeToTeamName)) summary.payable += amount;
+    });
+
+    return summary;
+};
+
 const downloadCsv = (filename: string, rows: Array<Record<string, string | number>>) => {
     if (rows.length === 0) {
         toast.warning('내보낼 월별 경비 데이터가 없습니다.');
@@ -228,6 +291,7 @@ const TeamResourceDetailPage: React.FC = () => {
     const [vehicleAssignments, setVehicleAssignments] = useState<VehicleAssignmentRecord[]>([]);
     const [cards, setCards] = useState<Card[]>([]);
     const [cardAssignments, setCardAssignments] = useState<CardAssignmentRecord[]>([]);
+    const [workers, setWorkers] = useState<Worker[]>([]);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
 
@@ -239,6 +303,8 @@ const TeamResourceDetailPage: React.FC = () => {
         resolveTeam,
         loadData,
     } = useExpenseLedgerData(selectedMonth, 'all', billingScope);
+    const accessScope = useWorkerAccessScope(workers, teamOptions);
+    const canViewWholeTeam = workerAccessCanViewWholeTeam(accessScope);
 
     const loadResourceData = useCallback(async () => {
         setLoadingResources(true);
@@ -250,6 +316,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 nextVehicleAssignments,
                 nextCards,
                 nextCardAssignments,
+                nextWorkers,
             ] = await Promise.all([
                 accommodationService.getAccommodations(),
                 accommodationService.getAssignments(),
@@ -257,6 +324,7 @@ const TeamResourceDetailPage: React.FC = () => {
                 vehicleService.listAllVehicleAssignments(),
                 cardService.getCards(),
                 cardService.listAllCardAssignments(),
+                manpowerService.getWorkers(),
             ]);
 
             setAccommodations(nextAccommodations);
@@ -265,6 +333,7 @@ const TeamResourceDetailPage: React.FC = () => {
             setVehicleAssignments(nextVehicleAssignments);
             setCards(nextCards);
             setCardAssignments(nextCardAssignments);
+            setWorkers(nextWorkers);
         } catch (error) {
             console.error(error);
             toast.error('팀별 지원 배정 데이터를 불러오지 못했습니다.');
@@ -277,23 +346,30 @@ const TeamResourceDetailPage: React.FC = () => {
         void loadResourceData();
     }, [loadResourceData]);
 
+    const visibleTeamOptions = useMemo(
+        () => accessScope.loading ? [] : teamOptions.filter(team => workerAccessMatchesTeam(accessScope, team)),
+        [accessScope, teamOptions]
+    );
+
     useEffect(() => {
-        if (teamOptions.length === 0) {
+        if (accessScope.loading) return;
+
+        if (visibleTeamOptions.length === 0) {
             setSelectedTeamId('');
             setMobileView('list');
             return;
         }
 
         setSelectedTeamId(current =>
-            teamOptions.some(team => getTeamStableId(team) === current)
+            visibleTeamOptions.some(team => getTeamStableId(team) === current)
                 ? current
-                : getTeamStableId(teamOptions[0])
+                : getTeamStableId(visibleTeamOptions[0])
         );
-    }, [teamOptions]);
+    }, [accessScope.loading, visibleTeamOptions]);
 
     const selectedTeam = useMemo(
-        () => teamOptions.find(team => getTeamStableId(team) === selectedTeamId) ?? null,
-        [selectedTeamId, teamOptions]
+        () => visibleTeamOptions.find(team => getTeamStableId(team) === selectedTeamId) ?? null,
+        [selectedTeamId, visibleTeamOptions]
     );
 
     const accommodationByKey = useMemo(() => {
@@ -355,32 +431,84 @@ const TeamResourceDetailPage: React.FC = () => {
         return map;
     }, [getResolvedTeamStableId, summaries]);
 
-    const selectedSummary = useMemo(
-        () => summaryByTeamId.get(selectedTeamId) ?? buildEmptySummary(selectedTeam),
-        [selectedTeam, selectedTeamId, summaryByTeamId]
+    const matchesCurrentWorker = useCallback(
+        (workerId?: unknown, workerName?: unknown) =>
+            workerAccessMatchesWorkerRef(accessScope, workerId, workerName),
+        [accessScope]
+    );
+
+    const matchesBillingTarget = useCallback(
+        (issuedToType?: unknown, workerId?: unknown, workerName?: unknown) => {
+            if (canViewWholeTeam) return true;
+            const targetType = String(issuedToType ?? '').trim().toLowerCase();
+            if (targetType && targetType !== 'worker') return false;
+            return matchesCurrentWorker(workerId, workerName);
+        },
+        [canViewWholeTeam, matchesCurrentWorker]
+    );
+
+    const matchesResourceAssignee = useCallback(
+        (assigneeType?: unknown, assigneeId?: unknown, assigneeName?: unknown) => {
+            const type = String(assigneeType ?? '').trim().toUpperCase();
+            if (canViewWholeTeam) return type === 'TEAM' && matchesSelectedTeam(assigneeId, assigneeName);
+            return type === 'WORKER' && matchesCurrentWorker(assigneeId, assigneeName);
+        },
+        [canViewWholeTeam, matchesCurrentWorker, matchesSelectedTeam]
     );
 
     const selectedAccommodationDocs = useMemo(
-        () => rawDocs.accommodationDocs.filter(doc => matchesSelectedTeam(doc.teamId, doc.teamName)),
-        [matchesSelectedTeam, rawDocs.accommodationDocs]
+        () => rawDocs.accommodationDocs.filter(doc =>
+            matchesSelectedTeam(doc.teamId, doc.teamName) &&
+            matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+        ),
+        [matchesBillingTarget, matchesSelectedTeam, rawDocs.accommodationDocs]
     );
 
     const selectedVehicleDocs = useMemo(
-        () => rawDocs.vehicleDocs.filter(doc => matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName)),
-        [matchesSelectedTeam, rawDocs.vehicleDocs]
+        () => rawDocs.vehicleDocs.filter(doc =>
+            matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
+            matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+        ),
+        [matchesBillingTarget, matchesSelectedTeam, rawDocs.vehicleDocs]
     );
 
     const selectedCardDocs = useMemo(
-        () => rawDocs.cardDocs.filter(doc => matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName)),
-        [matchesSelectedTeam, rawDocs.cardDocs]
+        () => rawDocs.cardDocs.filter(doc =>
+            matchesSelectedTeam(doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
+            matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+        ),
+        [matchesBillingTarget, matchesSelectedTeam, rawDocs.cardDocs]
     );
 
     const selectedClaims = useMemo(
-        () => rawDocs.claims.filter(claim => (
-            matchesSelectedTeam(claim.payerTeamId, claim.payerTeamName) ||
-            matchesSelectedTeam(claim.chargeToTeamId, claim.chargeToTeamName)
-        )),
-        [matchesSelectedTeam, rawDocs.claims]
+        () => canViewWholeTeam
+            ? rawDocs.claims.filter(claim => (
+                matchesSelectedTeam(claim.payerTeamId, claim.payerTeamName) ||
+                matchesSelectedTeam(claim.chargeToTeamId, claim.chargeToTeamName)
+            ))
+            : [],
+        [canViewWholeTeam, matchesSelectedTeam, rawDocs.claims]
+    );
+
+    const selectedSummary = useMemo(
+        () => canViewWholeTeam
+            ? summaryByTeamId.get(selectedTeamId) ?? buildEmptySummary(selectedTeam)
+            : buildSummaryFromDocs(selectedTeam, {
+                accommodationDocs: selectedAccommodationDocs,
+                vehicleDocs: selectedVehicleDocs,
+                cardDocs: selectedCardDocs,
+                claims: selectedClaims,
+            }),
+        [
+            canViewWholeTeam,
+            selectedAccommodationDocs,
+            selectedCardDocs,
+            selectedClaims,
+            selectedTeam,
+            selectedTeamId,
+            selectedVehicleDocs,
+            summaryByTeamId,
+        ]
     );
 
     const selectedAccommodationAssignments = useMemo(() => {
@@ -388,9 +516,12 @@ const TeamResourceDetailPage: React.FC = () => {
         return accommodationAssignments
             .filter(assignment => assignment.status !== 'ended')
             .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-            .filter(assignment => matchesSelectedTeam(assignment.teamId, assignment.teamName))
+            .filter(assignment => canViewWholeTeam
+                ? matchesSelectedTeam(assignment.teamId, assignment.teamName)
+                : matchesCurrentWorker(assignment.workerId, assignment.workerName)
+            )
             .sort((left, right) => String(left.accommodationName ?? '').localeCompare(String(right.accommodationName ?? ''), 'ko-KR'));
-    }, [accommodationAssignments, endDate, matchesSelectedTeam, selectedTeam, startDate]);
+    }, [accommodationAssignments, canViewWholeTeam, endDate, matchesCurrentWorker, matchesSelectedTeam, selectedTeam, startDate]);
 
     const selectedAccommodationResources = useMemo(() => {
         const map = new Map<string, {
@@ -429,7 +560,7 @@ const TeamResourceDetailPage: React.FC = () => {
         }>();
 
         vehicles
-            .filter(vehicle => vehicle.currentAssigneeType === 'TEAM' && matchesSelectedTeam(vehicle.currentAssigneeId, vehicle.currentAssigneeName))
+            .filter(vehicle => matchesResourceAssignee(vehicle.currentAssigneeType, vehicle.currentAssigneeId, vehicle.currentAssigneeName))
             .forEach(vehicle => {
                 map.set(vehicle.id, {
                     vehicle,
@@ -439,9 +570,8 @@ const TeamResourceDetailPage: React.FC = () => {
             });
 
         vehicleAssignments
-            .filter(assignment => assignment.assigneeType === 'TEAM')
             .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-            .filter(assignment => matchesSelectedTeam(assignment.assigneeId, assignment.assigneeName))
+            .filter(assignment => matchesResourceAssignee(assignment.assigneeType, assignment.assigneeId, assignment.assigneeName))
             .forEach(assignment => {
                 const key = String(assignment.vehicleId || assignment.vehiclePlate || assignment.id).trim();
                 const vehicle = vehicleByKey.get(String(assignment.vehicleId ?? '').trim())
@@ -466,7 +596,7 @@ const TeamResourceDetailPage: React.FC = () => {
 
         return Array.from(map.values())
             .sort((left, right) => String(left.vehicle?.licensePlate ?? '').localeCompare(String(right.vehicle?.licensePlate ?? ''), 'ko-KR'));
-    }, [endDate, matchesSelectedTeam, selectedVehicleDocs, startDate, vehicleAssignments, vehicleByKey, vehicles]);
+    }, [endDate, matchesResourceAssignee, selectedVehicleDocs, startDate, vehicleAssignments, vehicleByKey, vehicles]);
 
     const selectedCardResources = useMemo(() => {
         const map = new Map<string, {
@@ -476,7 +606,7 @@ const TeamResourceDetailPage: React.FC = () => {
         }>();
 
         cards
-            .filter(card => card.currentAssigneeType === 'TEAM' && matchesSelectedTeam(card.currentAssigneeId, card.currentAssigneeName))
+            .filter(card => matchesResourceAssignee(card.currentAssigneeType, card.currentAssigneeId, card.currentAssigneeName))
             .forEach(card => {
                 map.set(card.id, {
                     card,
@@ -486,9 +616,8 @@ const TeamResourceDetailPage: React.FC = () => {
             });
 
         cardAssignments
-            .filter(assignment => assignment.assigneeType === 'TEAM')
             .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-            .filter(assignment => matchesSelectedTeam(assignment.assigneeId, assignment.assigneeName))
+            .filter(assignment => matchesResourceAssignee(assignment.assigneeType, assignment.assigneeId, assignment.assigneeName))
             .forEach(assignment => {
                 const key = String(assignment.cardId || assignment.cardLabel || assignment.id).trim();
                 const card = cardByKey.get(String(assignment.cardId ?? '').trim())
@@ -513,7 +642,7 @@ const TeamResourceDetailPage: React.FC = () => {
 
         return Array.from(map.values())
             .sort((left, right) => String(left.card?.name ?? '').localeCompare(String(right.card?.name ?? ''), 'ko-KR'));
-    }, [cardAssignments, cardByKey, cards, endDate, matchesSelectedTeam, selectedCardDocs, startDate]);
+    }, [cardAssignments, cardByKey, cards, endDate, matchesResourceAssignee, selectedCardDocs, startDate]);
 
     const selectedCostLines = useMemo<ResourceCostLine[]>(() => {
         const accommodationLines: ResourceCostLine[] = selectedAccommodationDocs.flatMap(doc =>
@@ -568,41 +697,79 @@ const TeamResourceDetailPage: React.FC = () => {
     }, [selectedAccommodationDocs, selectedCardDocs, selectedClaims, selectedTeam, selectedVehicleDocs]);
 
     const teamRows = useMemo<TeamResourceRow[]>(() => {
-        return teamOptions.map(team => {
+        return visibleTeamOptions.map(team => {
             const teamId = getTeamStableId(team);
-            const summary = summaryByTeamId.get(teamId) ?? buildEmptySummary(team);
+            const teamAccommodationDocs = rawDocs.accommodationDocs.filter(doc =>
+                valueMatchesTeam(team, doc.teamId, doc.teamName) &&
+                matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+            );
+            const teamVehicleDocs = rawDocs.vehicleDocs.filter(doc =>
+                valueMatchesTeam(team, doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
+                matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+            );
+            const teamCardDocs = rawDocs.cardDocs.filter(doc =>
+                valueMatchesTeam(team, doc.teamId ?? doc.assignedTeamId, doc.teamName ?? doc.assignedTeamName) &&
+                matchesBillingTarget(doc.issuedToType, doc.issuedToWorkerId, doc.issuedToWorkerName)
+            );
+            const teamClaims = canViewWholeTeam
+                ? rawDocs.claims.filter(claim => (
+                    valueMatchesTeam(team, claim.payerTeamId, claim.payerTeamName) ||
+                    valueMatchesTeam(team, claim.chargeToTeamId, claim.chargeToTeamName)
+                ))
+                : [];
+            const summary = canViewWholeTeam
+                ? summaryByTeamId.get(teamId) ?? buildEmptySummary(team)
+                : buildSummaryFromDocs(team, {
+                    accommodationDocs: teamAccommodationDocs,
+                    vehicleDocs: teamVehicleDocs,
+                    cardDocs: teamCardDocs,
+                    claims: teamClaims,
+                });
 
             const accommodationCount = accommodationAssignments
                 .filter(assignment => assignment.status !== 'ended')
                 .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-                .filter(assignment => valueMatchesTeam(team, assignment.teamId, assignment.teamName))
+                .filter(assignment => canViewWholeTeam
+                    ? valueMatchesTeam(team, assignment.teamId, assignment.teamName)
+                    : matchesCurrentWorker(assignment.workerId, assignment.workerName)
+                )
                 .reduce((set, assignment) => set.add(String(assignment.accommodationId || assignment.accommodationName || assignment.id)), new Set<string>())
                 .size;
 
             const vehicleKeys = new Set<string>();
             vehicles
-                .filter(vehicle => vehicle.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, vehicle.currentAssigneeId, vehicle.currentAssigneeName))
+                .filter(vehicle => canViewWholeTeam
+                    ? vehicle.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, vehicle.currentAssigneeId, vehicle.currentAssigneeName)
+                    : vehicle.currentAssigneeType === 'WORKER' && matchesCurrentWorker(vehicle.currentAssigneeId, vehicle.currentAssigneeName)
+                )
                 .forEach(vehicle => vehicleKeys.add(vehicle.id));
             vehicleAssignments
-                .filter(assignment => assignment.assigneeType === 'TEAM')
                 .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-                .filter(assignment => valueMatchesTeam(team, assignment.assigneeId, assignment.assigneeName))
+                .filter(assignment => canViewWholeTeam
+                    ? assignment.assigneeType === 'TEAM' && valueMatchesTeam(team, assignment.assigneeId, assignment.assigneeName)
+                    : assignment.assigneeType === 'WORKER' && matchesCurrentWorker(assignment.assigneeId, assignment.assigneeName)
+                )
                 .forEach(assignment => vehicleKeys.add(String(assignment.vehicleId || assignment.vehiclePlate || assignment.id)));
 
             const cardKeys = new Set<string>();
             cards
-                .filter(card => card.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, card.currentAssigneeId, card.currentAssigneeName))
+                .filter(card => canViewWholeTeam
+                    ? card.currentAssigneeType === 'TEAM' && valueMatchesTeam(team, card.currentAssigneeId, card.currentAssigneeName)
+                    : card.currentAssigneeType === 'WORKER' && matchesCurrentWorker(card.currentAssigneeId, card.currentAssigneeName)
+                )
                 .forEach(card => cardKeys.add(card.id));
             cardAssignments
-                .filter(assignment => assignment.assigneeType === 'TEAM')
                 .filter(assignment => overlapsMonth(assignment.startDate, assignment.endDate, startDate, endDate))
-                .filter(assignment => valueMatchesTeam(team, assignment.assigneeId, assignment.assigneeName))
+                .filter(assignment => canViewWholeTeam
+                    ? assignment.assigneeType === 'TEAM' && valueMatchesTeam(team, assignment.assigneeId, assignment.assigneeName)
+                    : assignment.assigneeType === 'WORKER' && matchesCurrentWorker(assignment.assigneeId, assignment.assigneeName)
+                )
                 .forEach(assignment => cardKeys.add(String(assignment.cardId || assignment.cardLabel || assignment.id)));
 
-            const expenseCount = rawDocs.claims.filter(claim => (
+            const expenseCount = canViewWholeTeam ? rawDocs.claims.filter(claim => (
                 valueMatchesTeam(team, claim.payerTeamId, claim.payerTeamName) ||
                 valueMatchesTeam(team, claim.chargeToTeamId, claim.chargeToTeamName)
-            )).length;
+            )).length : 0;
 
             return {
                 team,
@@ -621,13 +788,19 @@ const TeamResourceDetailPage: React.FC = () => {
         accommodationAssignments,
         cardAssignments,
         cards,
+        canViewWholeTeam,
         endDate,
+        matchesBillingTarget,
+        matchesCurrentWorker,
         rawDocs.claims,
+        rawDocs.accommodationDocs,
+        rawDocs.cardDocs,
+        rawDocs.vehicleDocs,
         startDate,
         summaryByTeamId,
-        teamOptions,
         vehicleAssignments,
         vehicles,
+        visibleTeamOptions,
     ]);
 
     const filteredTeamRows = useMemo(() => {
@@ -810,7 +983,7 @@ const TeamResourceDetailPage: React.FC = () => {
     );
 
     const teamColor = selectedTeamRow?.color || getTeamColor(selectedTeam);
-    const isBusy = loading || loadingResources;
+    const isBusy = loading || loadingResources || accessScope.loading;
     const detailMenuItems: Array<{
         id: DetailView;
         label: string;

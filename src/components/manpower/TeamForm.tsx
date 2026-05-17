@@ -192,11 +192,6 @@ const TeamForm: React.FC<TeamFormProps> = ({ initialData, teams, workers, compan
             if (currentTeam.id) {
                 await teamService.updateTeam(currentTeam.id, teamData);
 
-                // Sync Name Change if needed
-                if (initialData?.name && currentTeam.name && initialData.name !== currentTeam.name) {
-                    await manpowerService.updateWorkersTeamName(currentTeam.id, currentTeam.name);
-                }
-
                 const prevDefaultSalaryModel = initialData?.defaultSalaryModel ?? '';
                 const nextDefaultSalaryModel = currentTeam.defaultSalaryModel ?? '';
                 if (prevDefaultSalaryModel !== nextDefaultSalaryModel && nextDefaultSalaryModel) {

@@ -332,7 +332,10 @@ const Login: React.FC = () => {
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-300">이메일</label>
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="admin@example.com"

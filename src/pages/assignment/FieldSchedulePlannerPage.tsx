@@ -37,20 +37,29 @@ import {
     X,
 } from 'lucide-react';
 import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
+import { scheduleConfirmationBoardService } from '../../services/scheduleConfirmationBoardService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { AnalyzedDailyReport, geminiService, KakaoAnalyzeContext } from '../../services/geminiService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { teamService, Team } from '../../services/teamService';
+import { companyService, Company } from '../../services/companyService';
 import { vehicleService } from '../../services/vehicleService';
+import { userService } from '../../services/userService';
+import type { UserData } from '../../services/userService';
 import { useAuth } from '../../contexts/AuthContext';
 import { Vehicle } from '../../types/vehicle';
+import {
+    applyDailyReportSiteSnapshotToReport,
+    buildDailyReportSiteSnapshot,
+    DailyReportSiteSnapshot,
+} from '../../utils/dailyReportSiteSnapshot';
 
 type ScheduleStatus = 'draft' | 'confirmed' | 'working' | 'done';
 type DragKind = 'team' | 'worker' | 'vehicle' | 'site' | 'schedule';
 type LeftPanelTab = 'sites' | 'teams' | 'support' | 'vehicles';
 type RosterKind = 'team' | 'support' | 'unassigned';
-type PlannerMode = 'dispatch' | 'daily-report';
+type PlannerMode = 'dispatch' | 'daily-report' | 'schedule-confirmation';
 
 interface FieldSchedulePlannerPageProps {
     mode?: PlannerMode;
@@ -66,6 +75,9 @@ interface ScheduleItem {
     siteName: string;
     siteAddress: string;
     siteColor: string;
+    clientCompanyName?: string;
+    constructorCompanyName?: string;
+    partnerName?: string;
     siteType?: string;
     paymentType?: string;
     responsibleTeamId?: string;
@@ -122,16 +134,39 @@ interface DragPayload {
     sourceRosterName?: string;
 }
 
+interface ViewerTeamScope {
+    enabled: boolean;
+    teamIds: string[];
+    teamNames: string[];
+    teamNameKeys: string[];
+    label: string;
+}
+
 const UNASSIGNED_TEAM_ID = 'unassigned';
+const EMPTY_VIEWER_TEAM_SCOPE: ViewerTeamScope = {
+    enabled: false,
+    teamIds: [],
+    teamNames: [],
+    teamNameKeys: [],
+    label: '',
+};
 const DEFAULT_RESOURCE_COLOR = '#64748b';
 const TEMP_DRAFT_STORAGE_PREFIX = 'fieldSchedulePlannerDraft';
 const DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX = 'dailyReportBoardInputDraft';
+const SCHEDULE_CONFIRMATION_BOARD_DRAFT_STORAGE_PREFIX = 'scheduleConfirmationBoardDraft';
 const DAILY_PAY_TYPE_OPTIONS = ['일급제', '월급제', '용역팀', '지원팀'];
 const DAILY_PAY_TYPE_SET = new Set(DAILY_PAY_TYPE_OPTIONS);
 const BOARD_WORKERS_PER_COLUMN = 6;
+const BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD = 18;
+
+const isPersonnelBoardMode = (mode: PlannerMode) => mode === 'daily-report' || mode === 'schedule-confirmation';
 
 const getTempDraftStorageKey = (date: string, mode: PlannerMode = 'dispatch') =>
-    `${mode === 'daily-report' ? DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX : TEMP_DRAFT_STORAGE_PREFIX}:${date}`;
+    `${mode === 'daily-report'
+        ? DAILY_REPORT_BOARD_DRAFT_STORAGE_PREFIX
+        : mode === 'schedule-confirmation'
+            ? SCHEDULE_CONFIRMATION_BOARD_DRAFT_STORAGE_PREFIX
+            : TEMP_DRAFT_STORAGE_PREFIX}:${date}`;
 
 const getTodayInputValue = () => {
     const now = new Date();
@@ -199,12 +234,12 @@ const formatWon = (value: unknown) => {
 };
 
 const getSiteType = (site?: Site | null, fallback?: unknown) => {
-    const value = toTrimmedText(fallback) || toTrimmedText(site?.siteType);
+    const value = toTrimmedText(site?.siteType) || toTrimmedText(fallback);
     return value;
 };
 
 const getPaymentType = (site?: Site | null, fallback?: unknown) => {
-    const value = toTrimmedText(fallback) || toTrimmedText(site?.paymentMethod);
+    const value = toTrimmedText(site?.paymentMethod) || toTrimmedText(fallback);
     return value;
 };
 
@@ -272,6 +307,9 @@ const mergeScheduleEntries = (base: ScheduleItem, incoming: ScheduleItem): Sched
         siteName: base.siteName || incoming.siteName,
         siteAddress: base.siteAddress || incoming.siteAddress,
         siteColor: base.siteColor || incoming.siteColor,
+        clientCompanyName: base.clientCompanyName || incoming.clientCompanyName,
+        constructorCompanyName: base.constructorCompanyName || incoming.constructorCompanyName,
+        partnerName: base.partnerName || incoming.partnerName,
         siteType: base.siteType || incoming.siteType,
         paymentType: base.paymentType || incoming.paymentType,
         responsibleTeamId: base.responsibleTeamId || incoming.responsibleTeamId,
@@ -523,14 +561,23 @@ const mapDailyReportsToSchedules = (
     workersById: Map<string, Worker>,
     teamsById: Map<string, Team>,
     sites: Site[],
-    teams: Team[]
+    teams: Team[],
+    companies: Company[] = []
 ) => {
     const rows: ScheduleItem[] = [];
 
     reports.forEach((report, index) => {
         const site = findSiteInRows(sites, report.siteId, report.siteName);
-        const siteId = toTrimmedText(site?.id) || toTrimmedText(report.siteId);
-        const siteName = toTrimmedText(site?.name) || toTrimmedText(report.siteName);
+        const siteSnapshot = buildDailyReportSiteSnapshot({
+            site,
+            siteId: report.siteId,
+            siteName: report.siteName,
+            teams,
+            companies,
+            fallback: report,
+        });
+        const siteId = siteSnapshot.siteId;
+        const siteName = siteSnapshot.siteName;
         if (!siteId && !siteName) return;
 
         const reportWorkers = Array.isArray(report.workers) ? report.workers : [];
@@ -592,9 +639,9 @@ const mapDailyReportsToSchedules = (
 
         const firstWorkerTeamId = workerIds.map((workerId) => workerTeamIds[workerId] || toTrimmedText(workersById.get(workerId)?.teamId)).find(Boolean);
         const reportTeamId = toTrimmedText(report.teamId);
-        const responsibleTeamId = toTrimmedText(report.responsibleTeamId);
+        const responsibleTeamId = siteSnapshot.responsibleTeamId;
         const teamId = reportTeamId || firstWorkerTeamId || responsibleTeamId || UNASSIGNED_TEAM_ID;
-        const team = findTeamInRows(teams, teamId, report.teamName || report.responsibleTeamName);
+        const team = findTeamInRows(teams, teamId, report.teamName || siteSnapshot.responsibleTeamName);
         const teamColor = getTeamColor(team);
         const siteColor = getSiteColorFromRows(site, teams, teamsById, teamColor);
 
@@ -602,16 +649,19 @@ const mapDailyReportsToSchedules = (
             id: `${targetDate}_daily_${siteId || siteName}_${index}`,
             date: targetDate,
             teamId,
-            teamName: toTrimmedText(team?.name) || toTrimmedText(report.teamName) || toTrimmedText(report.responsibleTeamName) || '미배정',
+            teamName: toTrimmedText(team?.name) || toTrimmedText(report.teamName) || siteSnapshot.responsibleTeamName || '미배정',
             teamColor,
             siteId,
             siteName,
             siteAddress: toTrimmedText(site?.address),
             siteColor,
-            siteType: getSiteType(site, report.siteType),
-            paymentType: getPaymentType(site, report.paymentType),
-            responsibleTeamId: responsibleTeamId || toTrimmedText(site?.responsibleTeamId),
-            responsibleTeamName: toTrimmedText(report.responsibleTeamName) || toTrimmedText(site?.responsibleTeamName),
+            clientCompanyName: siteSnapshot.clientCompanyName,
+            constructorCompanyName: siteSnapshot.constructorCompanyName,
+            partnerName: siteSnapshot.partnerName,
+            siteType: siteSnapshot.siteType,
+            paymentType: siteSnapshot.paymentType,
+            responsibleTeamId,
+            responsibleTeamName: siteSnapshot.responsibleTeamName,
             workerIds: cleanWorkerIds,
             workerManDays,
             workerUnitPrices,
@@ -675,6 +725,161 @@ const getWorkerAssignedTeam = (worker: Worker | undefined, teamsById: Map<string
     }
 
     return teams.find((team) => sameText(team.name, worker.teamName));
+};
+
+const parseLinkedIds = (raw: unknown): string[] => {
+    if (Array.isArray(raw)) return cleanIds(raw.map((value) => toTrimmedText(value)));
+    const text = toTrimmedText(raw);
+    if (!text) return [];
+    try {
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? cleanIds(parsed.map((value) => toTrimmedText(value))) : [text];
+    } catch {
+        return [text];
+    }
+};
+
+const userBypassesViewerTeamScope = (userData?: UserData | null) => {
+    const accountType = normalizeComparableText(userData?.accountType);
+    if (accountType === 'office') return true;
+
+    const role = normalizeComparableText(userData?.role);
+    return ['admin', 'administrator', '관리자', '본사', '사무'].some((keyword) =>
+        role.includes(normalizeComparableText(keyword))
+    );
+};
+
+const findViewerWorker = (uid: string, workerRows: Worker[], userData?: UserData | null) => {
+    const normalizedUid = toTrimmedText(uid);
+    if (!normalizedUid) return undefined;
+
+    const directWorker = workerRows.find((worker) => toTrimmedText(worker.uid) === normalizedUid);
+    if (directWorker) return directWorker;
+
+    const linkedWorkerIds = parseLinkedIds(userData?.linkedWorkerIds);
+    if (linkedWorkerIds.length === 0) return undefined;
+
+    return workerRows.find((worker) => {
+        const workerKeys = cleanIds([toTrimmedText(worker.id), toTrimmedText(worker.legacyId)]);
+        return linkedWorkerIds.some((linkedId) => workerKeys.includes(linkedId));
+    });
+};
+
+const buildViewerTeamScope = (
+    worker: Worker | undefined,
+    teamsById: Map<string, Team>,
+    teams: Team[]
+): ViewerTeamScope => {
+    if (!worker) return EMPTY_VIEWER_TEAM_SCOPE;
+
+    const team = getWorkerAssignedTeam(worker, teamsById, teams);
+    const teamIds = cleanIds([
+        toTrimmedText(worker.teamId),
+        toTrimmedText(team?.id),
+        toTrimmedText(team?.legacyId),
+    ]);
+    const teamNames = cleanIds([
+        toTrimmedText(worker.teamName),
+        toTrimmedText(team?.name),
+    ]);
+
+    if (teamIds.length === 0 && teamNames.length === 0) return EMPTY_VIEWER_TEAM_SCOPE;
+
+    return {
+        enabled: true,
+        teamIds,
+        teamNames,
+        teamNameKeys: cleanIds(teamNames.map((name) => normalizeComparableText(name))),
+        label: teamNames[0] || teamIds[0] || '내 팀',
+    };
+};
+
+const matchesViewerTeamScope = (scope: ViewerTeamScope, teamId?: unknown, teamName?: unknown) => {
+    if (!scope.enabled) return false;
+
+    const normalizedTeamId = toTrimmedText(teamId);
+    if (normalizedTeamId && scope.teamIds.includes(normalizedTeamId)) return true;
+
+    const teamNameKey = normalizeComparableText(teamName);
+    return Boolean(teamNameKey && scope.teamNameKeys.includes(teamNameKey));
+};
+
+const siteBelongsToViewerTeamScope = (site: Site | undefined, scope: ViewerTeamScope) =>
+    Boolean(site && matchesViewerTeamScope(scope, site.responsibleTeamId, site.responsibleTeamName));
+
+const hasSupportSiteMarker = (...values: unknown[]) =>
+    values.some((value) => {
+        const text = normalizeComparableText(value);
+        return Boolean(text && (text.includes('지원') || text.includes('용역')));
+    });
+
+const siteIsSupportSite = (
+    site: Site | undefined,
+    teamsById: Map<string, Team>,
+    teams: Team[]
+) => {
+    if (!site) return false;
+    if (hasSupportSiteMarker(site.siteType)) return true;
+
+    const responsibleTeam =
+        (site.responsibleTeamId ? teamsById.get(site.responsibleTeamId) : undefined) ||
+        findTeamInRows(teams, site.responsibleTeamId, site.responsibleTeamName);
+
+    return hasSupportSiteMarker(
+        site.responsibleTeamName,
+        responsibleTeam?.name,
+        responsibleTeam?.type,
+        responsibleTeam?.role
+    );
+};
+
+const getSiteViewerScopePriority = (
+    site: Site | undefined,
+    scope: ViewerTeamScope,
+    teamsById: Map<string, Team>,
+    teams: Team[]
+) => {
+    if (!scope.enabled) return 0;
+    if (siteBelongsToViewerTeamScope(site, scope)) return 0;
+    if (siteIsSupportSite(site, teamsById, teams)) return 1;
+    return 2;
+};
+
+const getScheduleViewerScopePriority = (
+    schedule: ScheduleItem,
+    scope: ViewerTeamScope,
+    sitesById: Map<string, Site>,
+    teamsById: Map<string, Team>,
+    teams: Team[]
+) => {
+    if (!scope.enabled) return 0;
+
+    const scheduleSite = schedule.siteId ? sitesById.get(schedule.siteId) : undefined;
+    if (
+        siteBelongsToViewerTeamScope(scheduleSite, scope) ||
+        matchesViewerTeamScope(scope, schedule.responsibleTeamId, schedule.responsibleTeamName)
+    ) {
+        return 0;
+    }
+
+    if (
+        siteIsSupportSite(scheduleSite, teamsById, teams) ||
+        hasSupportSiteMarker(schedule.siteType, schedule.responsibleTeamName)
+    ) {
+        return 1;
+    }
+
+    return 2;
+};
+
+const scheduleBelongsToViewerTeamScope = (
+    schedule: ScheduleItem,
+    scope: ViewerTeamScope,
+    sitesById: Map<string, Site>,
+    teamsById: Map<string, Team>,
+    teams: Team[]
+) => {
+    return getScheduleViewerScopePriority(schedule, scope, sitesById, teamsById, teams) < 2;
 };
 
 const getVehicleAssignedTeam = (vehicle: Vehicle | undefined, teamsById: Map<string, Team>, teams: Team[]) => {
@@ -788,6 +993,12 @@ const groupUnassignedWorkers = (workers: Worker[], kind: RosterKind, fallbackNam
         ...group,
         workers: [...group.workers].sort((left, right) => compareKoreanName(left.name, right.name)),
     }));
+};
+
+const compareRosterPanelOrder = (left: TeamRoster, right: TeamRoster) => {
+    if (left.kind === 'unassigned' && right.kind !== 'unassigned') return 1;
+    if (left.kind !== 'unassigned' && right.kind === 'unassigned') return -1;
+    return compareKoreanName(left.name, right.name);
 };
 
 const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number) => {
@@ -1088,6 +1299,7 @@ const TeamRosterCard: React.FC<{
     selectedWorkerIds: Set<string>;
     supportSelected: boolean;
     forceWorkerSelection?: boolean;
+    showSupportTeamToggle?: boolean;
     onToggleSupportTeam: () => void;
     onToggleWorker: (workerId: string) => void;
     onToggleAllWorkers: () => void;
@@ -1098,6 +1310,7 @@ const TeamRosterCard: React.FC<{
     selectedWorkerIds,
     supportSelected,
     forceWorkerSelection = false,
+    showSupportTeamToggle = false,
     onToggleSupportTeam,
     onToggleWorker,
     onToggleAllWorkers,
@@ -1116,6 +1329,7 @@ const TeamRosterCard: React.FC<{
     const allWorkersSelected = useWorkerSelection && roster.workers.length > 0 && selectedCount === roster.workers.length;
     const someWorkersSelected = useWorkerSelection && selectedCount > 0;
     const rosterSelected = selected || supportSelected;
+    const showSupportTeamNameToggle = isSupportRoster && useWorkerSelection && showSupportTeamToggle;
     const cardStyle: React.CSSProperties = {
         ...style,
         borderColor: rosterSelected ? roster.color : hexToRgba(roster.color, 0.55),
@@ -1168,6 +1382,7 @@ const TeamRosterCard: React.FC<{
             </div>
 
             {useWorkerSelection ? (
+                <>
                 <div
                     className="mt-3 flex flex-wrap gap-1.5 rounded-md p-2"
                     style={{ backgroundColor: hexToRgba(roster.color, 0.06) }}
@@ -1209,6 +1424,30 @@ const TeamRosterCard: React.FC<{
                         <span className="text-xs font-semibold text-slate-400">등록된 작업자가 없습니다.</span>
                     )}
                 </div>
+                {showSupportTeamNameToggle ? (
+                    <button
+                        type="button"
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onToggleSupportTeam();
+                        }}
+                        className={`mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-md border text-xs font-black ${
+                            supportSelected
+                                ? 'border-blue-300 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50'
+                        }`}
+                    >
+                        <span
+                            className={`flex h-4 w-4 items-center justify-center rounded border ${
+                                supportSelected ? 'border-blue-500 bg-blue-500 text-white' : 'border-slate-300 bg-white'
+                            }`}
+                        >
+                            {supportSelected ? <Check size={11} /> : null}
+                        </span>
+                        지원팀명으로 추가
+                    </button>
+                ) : null}
+                </>
             ) : (
                 <button
                     type="button"
@@ -1293,7 +1532,16 @@ const ScheduleCard: React.FC<{
     });
 
     const scheduleVehicleIds = getScheduleVehicleIds(schedule);
-    const isDailyReportCard = mode === 'daily-report';
+    const isDailyReportCard = isPersonnelBoardMode(mode);
+    const inputTargetLabel = mode === 'schedule-confirmation' ? '일정확정' : '출력일보';
+    const dailyReportSiteFields = [
+        { label: '발주', value: schedule.clientCompanyName },
+        { label: '시공', value: schedule.constructorCompanyName },
+        { label: '협력', value: schedule.partnerName },
+        { label: '구분', value: schedule.siteType },
+        { label: '결제방식', value: schedule.paymentType },
+        { label: '현장담당팀', value: schedule.responsibleTeamName },
+    ];
 
     const setRefs = (node: HTMLDivElement | null) => {
         setDropNodeRef(node);
@@ -1347,17 +1595,17 @@ const ScheduleCard: React.FC<{
                     </div>
                     {isDailyReportCard ? (
                         <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-black">
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
-                                현장구분 {schedule.siteType || '미지정'}
-                            </span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
-                                결제 {schedule.paymentType || '미지정'}
-                            </span>
-                            {schedule.responsibleTeamName ? (
-                                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">
-                                    담당 {schedule.responsibleTeamName}
-                                </span>
-                            ) : null}
+                            {dailyReportSiteFields.map((field) => {
+                                const value = toTrimmedText(field.value);
+                                return (
+                                    <span
+                                        key={field.label}
+                                        className={`rounded-full px-2 py-0.5 ${value ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400'}`}
+                                    >
+                                        {field.label} {value || '미지정'}
+                                    </span>
+                                );
+                            })}
                         </div>
                     ) : null}
                 </div>
@@ -1472,7 +1720,7 @@ const ScheduleCard: React.FC<{
                 </div>
             ) : isDailyReportCard && schedule.supportTeams.length > 0 ? null : (
                 <div className="mt-3 rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
-                    {isDailyReportCard ? '출력일보 작업자 또는 지원팀 없음' : '작업자 없음'}
+                    {isDailyReportCard ? `${inputTargetLabel} 작업자 또는 지원팀 없음` : '작업자 없음'}
                 </div>
             )}
 
@@ -1486,7 +1734,7 @@ const ScheduleCard: React.FC<{
                         value={schedule.memo}
                         onClick={(event) => event.stopPropagation()}
                         onChange={(event) => onMemoChange?.(event.target.value)}
-                        placeholder="출력일보에 저장할 작업내용"
+                        placeholder={`${inputTargetLabel}에 저장할 작업내용`}
                         className="min-h-[72px] w-full resize-y rounded-md border border-slate-200 bg-white px-2 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-400"
                     />
                 </div>
@@ -1496,7 +1744,7 @@ const ScheduleCard: React.FC<{
                 <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-2">
                     <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-black text-orange-700">지원팀/용역팀 {schedule.supportTeams.length}건</span>
-                        <span className="text-[11px] font-semibold text-orange-600">일보 입력줄 저장</span>
+                        <span className="text-[11px] font-semibold text-orange-600">{mode === 'schedule-confirmation' ? '확정 입력줄 저장' : '일보 입력줄 저장'}</span>
                     </div>
                     <div className="space-y-1.5">
                         {schedule.supportTeams.map((team) => {
@@ -1707,7 +1955,7 @@ const BoardViewScheduleCard: React.FC<{
     });
     const siteColor = normalizeColor(schedule.siteColor) || normalizeColor(schedule.teamColor) || DEFAULT_RESOURCE_COLOR;
     const scheduleVehicleIds = getScheduleVehicleIds(schedule);
-    const isDailyReportCard = mode === 'daily-report';
+    const isDailyReportCard = isPersonnelBoardMode(mode);
     const setRefs = (node: HTMLElement | null) => {
         setDropNodeRef(node);
         setDragNodeRef(node);
@@ -1773,6 +2021,8 @@ const BoardViewScheduleCard: React.FC<{
         216,
         Math.min(640, workerGridColumnCount * 64 + Math.max(0, workerGridColumnCount - 1) * 6 + 16)
     );
+    const vehicleGridColumnCount =
+        workerNameRows.length > BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD && scheduleVehicleIds.length > 1 ? 2 : 1;
 
     return (
         <article
@@ -1915,7 +2165,12 @@ const BoardViewScheduleCard: React.FC<{
             )}
 
             {!isDailyReportCard && scheduleVehicleIds.length > 0 ? (
-                <div className="divide-y divide-slate-300">
+                <div
+                    className="grid gap-px bg-slate-300"
+                    style={{
+                        gridTemplateColumns: `repeat(${vehicleGridColumnCount}, minmax(0, 1fr))`,
+                    }}
+                >
                     {scheduleVehicleIds.map((vehicleId, index) => {
                         const vehicle = vehiclesById.get(vehicleId);
                         const vehicleColor = normalizeColor(vehicleAssignedTeamColorById.get(vehicleId)) || siteColor;
@@ -1946,12 +2201,15 @@ const BoardViewScheduleCard: React.FC<{
 export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSchedulePlannerPageProps = {}) {
     const { currentUser } = useAuth();
     const isDailyReportInput = mode === 'daily-report';
+    const isScheduleConfirmationInput = mode === 'schedule-confirmation';
+    const isPersonnelInputMode = isPersonnelBoardMode(mode);
     const boardRef = useRef<HTMLDivElement | null>(null);
     const [date, setDate] = useState(getTodayInputValue());
     const [copySourceDate, setCopySourceDate] = useState(() => shiftDate(getTodayInputValue(), -1));
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -1970,6 +2228,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [deletedSchedule, setDeletedSchedule] = useState<ScheduleItem | null>(null);
     const [hasTemporaryDraft, setHasTemporaryDraft] = useState(false);
     const [boardViewMode, setBoardViewMode] = useState(false);
+    const [showAllScheduleConfirmationSites, setShowAllScheduleConfirmationSites] = useState(false);
+    const [viewerTeamScope, setViewerTeamScope] = useState<ViewerTeamScope>(EMPTY_VIEWER_TEAM_SCOPE);
     const [scheduleClipboard, setScheduleClipboard] = useState<ScheduleClipboard | null>(null);
     const [copyingSchedule, setCopyingSchedule] = useState(false);
     const [analyzingSchedule, setAnalyzingSchedule] = useState(false);
@@ -1981,10 +2241,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const kakaoFileInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
-        if (isDailyReportInput && leftPanelTab === 'vehicles') {
+        if (isPersonnelInputMode && leftPanelTab === 'vehicles') {
             setLeftPanelTab('teams');
         }
-    }, [isDailyReportInput, leftPanelTab]);
+    }, [isPersonnelInputMode, leftPanelTab]);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -2044,6 +2304,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const site = findSiteInRows(sites, undefined, report.siteName);
             const siteId = toTrimmedText(site?.id);
             const siteName = toTrimmedText(site?.name) || toTrimmedText(report.siteName);
+            const siteSnapshot = buildDailyReportSiteSnapshot({
+                site,
+                siteId,
+                siteName,
+                teams,
+                companies,
+            });
             const reportWorkers = Array.isArray(report.workers)
                 ? report.workers.filter((worker) => toTrimmedText(worker?.name))
                 : [];
@@ -2120,10 +2387,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 siteName,
                 siteAddress: toTrimmedText(site?.address),
                 siteColor: getSiteColor(site, teamColor),
-                siteType: getSiteType(site),
-                paymentType: getPaymentType(site),
-                responsibleTeamId: toTrimmedText(site?.responsibleTeamId),
-                responsibleTeamName: toTrimmedText(site?.responsibleTeamName),
+                clientCompanyName: siteSnapshot.clientCompanyName,
+                constructorCompanyName: siteSnapshot.constructorCompanyName,
+                partnerName: siteSnapshot.partnerName,
+                siteType: siteSnapshot.siteType,
+                paymentType: siteSnapshot.paymentType,
+                responsibleTeamId: siteSnapshot.responsibleTeamId,
+                responsibleTeamName: siteSnapshot.responsibleTeamName,
                 workerIds: cleanIds(workerIds),
                 supportTeams,
                 vehicleIds: [],
@@ -2147,7 +2417,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             unknownWorkerCount,
             skippedReportCount,
         };
-    }, [date, findWorkerByAnalyzedName, getSiteColor, sites, teams, teamsById, workersById]);
+    }, [companies, date, findWorkerByAnalyzedName, getSiteColor, sites, teams, teamsById, workersById]);
 
     const rosters = useMemo<TeamRoster[]>(() => {
         const activeTeams = teams
@@ -2216,15 +2486,65 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         return set;
     }, [schedules]);
 
+    const hasScheduleConfirmationTeamScope = isScheduleConfirmationInput && viewerTeamScope.enabled;
+    const shouldApplyScheduleConfirmationScope = hasScheduleConfirmationTeamScope && !showAllScheduleConfirmationSites;
+
+    const scheduleMatchesViewerScope = useCallback(
+        (schedule: ScheduleItem) => scheduleBelongsToViewerTeamScope(schedule, viewerTeamScope, sitesById, teamsById, teams),
+        [sitesById, teams, teamsById, viewerTeamScope]
+    );
+
+    const siteMatchesViewerScope = useCallback(
+        (site: Site) => {
+            if (!shouldApplyScheduleConfirmationScope) return true;
+            return getSiteViewerScopePriority(site, viewerTeamScope, teamsById, teams) < 2;
+        },
+        [shouldApplyScheduleConfirmationScope, teams, teamsById, viewerTeamScope]
+    );
+
+    const displaySchedules = useMemo(() => {
+        const scopedSchedules = shouldApplyScheduleConfirmationScope
+            ? schedules.filter(scheduleMatchesViewerScope)
+            : schedules;
+
+        if (!shouldApplyScheduleConfirmationScope) return scopedSchedules;
+
+        return scopedSchedules
+            .map((schedule, index) => ({ schedule, index }))
+            .sort((left, right) => {
+                const priorityDiff =
+                    getScheduleViewerScopePriority(left.schedule, viewerTeamScope, sitesById, teamsById, teams) -
+                    getScheduleViewerScopePriority(right.schedule, viewerTeamScope, sitesById, teamsById, teams);
+                if (priorityDiff !== 0) return priorityDiff;
+
+                const nameDiff = compareKoreanName(left.schedule.siteName, right.schedule.siteName);
+                return nameDiff || left.index - right.index;
+            })
+            .map(({ schedule }) => schedule);
+    }, [
+        scheduleMatchesViewerScope,
+        schedules,
+        shouldApplyScheduleConfirmationScope,
+        sitesById,
+        teams,
+        teamsById,
+        viewerTeamScope,
+    ]);
+
+    const visibleScheduleCountLabel = shouldApplyScheduleConfirmationScope
+        ? `${displaySchedules.length}/${schedules.length}`
+        : `${schedules.length}`;
+
     const availableRosters = useMemo(
         () =>
             rosters
                 .map((roster) => {
                     if (roster.kind === 'support') {
-                        return isDailyReportInput
+                        const availableWorkers = roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id));
+                        return isPersonnelInputMode || roster.workers.length > 0
                             ? {
                                 ...roster,
-                                workers: roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id)),
+                                workers: availableWorkers,
                             }
                             : roster;
                     }
@@ -2235,20 +2555,20 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 })
                 .filter((roster) => {
                     if (roster.kind === 'support') {
-                        return isDailyReportInput
+                        return isPersonnelInputMode
                             ? roster.workers.length > 0
                             : !assignedSupportTeamKeySet.has(roster.id || roster.name);
                     }
                     return roster.workers.length > 0;
                 }),
-        [assignedSupportTeamKeySet, assignedWorkerIdSet, isDailyReportInput, rosters]
+        [assignedSupportTeamKeySet, assignedWorkerIdSet, isPersonnelInputMode, rosters]
     );
 
     const panelRosters = useMemo(
         () =>
             availableRosters.filter((roster) =>
                 leftPanelTab === 'support' ? roster.kind === 'support' : roster.kind !== 'support'
-            ).sort((left, right) => compareKoreanName(left.name, right.name)),
+            ).sort(compareRosterPanelOrder),
         [availableRosters, leftPanelTab]
     );
 
@@ -2258,7 +2578,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         return panelRosters.filter((roster) => {
             const workerNames = roster.workers.map((worker) => `${worker.name} ${worker.role || ''}`).join(' ');
             return `${roster.name} ${roster.sourceLabel || ''} ${roster.leaderName || ''} ${workerNames}`.toLowerCase().includes(term);
-        }).sort((left, right) => compareKoreanName(left.name, right.name));
+        }).sort(compareRosterPanelOrder);
     }, [panelRosters, searchTerm]);
 
     const filteredVehicles = useMemo(() => {
@@ -2297,13 +2617,39 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         return sites
             .filter((site) => {
                 if (registeredSiteKeySet.has(makeSiteSelectionKey(site))) return false;
+                if (!siteMatchesViewerScope(site)) return false;
                 if (!term) return true;
                 return `${site.name} ${site.address || ''} ${site.responsibleTeamName || ''} ${site.companyName || ''} ${site.code || ''}`
                     .toLowerCase()
                     .includes(term);
             })
-            .sort((left, right) => compareKoreanName(left.name, right.name));
-    }, [registeredSiteKeySet, searchTerm, sites]);
+            .sort((left, right) => {
+                if (shouldApplyScheduleConfirmationScope) {
+                    const priorityDiff =
+                        getSiteViewerScopePriority(left, viewerTeamScope, teamsById, teams) -
+                        getSiteViewerScopePriority(right, viewerTeamScope, teamsById, teams);
+                    if (priorityDiff !== 0) return priorityDiff;
+                }
+
+                return compareKoreanName(left.name, right.name);
+            });
+    }, [
+        registeredSiteKeySet,
+        searchTerm,
+        shouldApplyScheduleConfirmationScope,
+        siteMatchesViewerScope,
+        sites,
+        teams,
+        teamsById,
+        viewerTeamScope,
+    ]);
+
+    useEffect(() => {
+        if (!shouldApplyScheduleConfirmationScope || !selectedSiteId) return;
+        const selectedSite = sitesById.get(selectedSiteId);
+        if (!selectedSite || siteMatchesViewerScope(selectedSite)) return;
+        setSelectedSiteId('');
+    }, [selectedSiteId, shouldApplyScheduleConfirmationScope, siteMatchesViewerScope, sitesById]);
 
     const selectedRoster = useMemo(
         () => availableRosters.find((roster) => roster.id === selectedTeamId) || availableRosters[0],
@@ -2338,9 +2684,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const isSupportSchedule = isSupportScheduleItem(schedule);
             if (!schedule.siteId && !schedule.siteName.trim()) issues.push('현장이 선택되지 않았습니다.');
 
-            if (isDailyReportInput) {
+            if (isPersonnelInputMode) {
                 if (schedule.workerIds.length === 0 && schedule.supportTeams.length === 0) {
-                    issues.push('출력일보 작업자 또는 지원팀이 없습니다.');
+                    issues.push(isScheduleConfirmationInput ? '확정할 작업자 또는 지원팀이 없습니다.' : '출력일보 작업자 또는 지원팀이 없습니다.');
                 }
                 schedule.workerIds.forEach((workerId) => {
                     const worker = workersById.get(workerId);
@@ -2372,12 +2718,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             return Array.from(new Set(issues));
         },
-        [isDailyReportInput, isSupportScheduleItem, schedules, vehiclesById, workersById]
+        [isPersonnelInputMode, isScheduleConfirmationInput, isSupportScheduleItem, schedules, vehiclesById, workersById]
     );
 
     const totalIssues = useMemo(
-        () => schedules.reduce((count, schedule) => count + getScheduleIssues(schedule).length, 0),
-        [getScheduleIssues, schedules]
+        () => displaySchedules.reduce((count, schedule) => count + getScheduleIssues(schedule).length, 0),
+        [displaySchedules, getScheduleIssues]
     );
 
     const mapAssignmentToSchedule = useCallback(
@@ -2394,7 +2740,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const site = assignment.siteId ? sitesById.get(assignment.siteId) : undefined;
             const teamColor = raw.teamColor || getTeamColor(team);
             const isSupportAssignment = Boolean(team && isSupportTeam(team, []));
-            const workerIds = isSupportAssignment && !isDailyReportInput ? [] : rawWorkerIds;
+            const workerIds = isSupportAssignment && !isPersonnelInputMode ? [] : rawWorkerIds;
             const supportTeams = mergeSupportTeams([
                 ...(raw.supportTeams || []),
                 ...(raw.supportTeamIds || []).map((supportTeamId) => {
@@ -2405,7 +2751,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                         color: getTeamColor(supportTeam),
                     };
                 }),
-                ...(isSupportAssignment && team && (!isDailyReportInput || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
+                ...(isSupportAssignment && team && (!isPersonnelInputMode || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
             ]);
             const vehicleLabels = vehicleIds.map((id) => vehiclesById.get(id)?.licensePlate || raw.vehicleLabel || '');
 
@@ -2419,10 +2765,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 siteName: assignment.siteName || site?.name || '',
                 siteAddress: raw.siteAddress || site?.address || '',
                 siteColor: raw.siteColor || getSiteColor(site, teamColor),
-                siteType: raw.siteType || getSiteType(site),
-                paymentType: raw.paymentType || getPaymentType(site),
-                responsibleTeamId: raw.responsibleTeamId || toTrimmedText(site?.responsibleTeamId),
-                responsibleTeamName: raw.responsibleTeamName || toTrimmedText(site?.responsibleTeamName),
+                clientCompanyName: toTrimmedText(site?.clientCompanyName) || raw.clientCompanyName,
+                constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName) || raw.constructorCompanyName,
+                partnerName: toTrimmedText(site?.partnerName) || raw.partnerName,
+                siteType: getSiteType(site, raw.siteType),
+                paymentType: getPaymentType(site, raw.paymentType),
+                responsibleTeamId: toTrimmedText(site?.responsibleTeamId) || raw.responsibleTeamId,
+                responsibleTeamName: toTrimmedText(site?.responsibleTeamName) || raw.responsibleTeamName,
                 workerIds,
                 supportTeams,
                 vehicleIds,
@@ -2447,25 +2796,23 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 })),
             };
         },
-        [date, getSiteColor, isDailyReportInput, sitesById, teams, teamsById, vehiclesById, workersById]
+        [date, getSiteColor, isPersonnelInputMode, sitesById, teams, teamsById, vehiclesById, workersById]
     );
 
     const buildDailyReportsFromSchedules = useCallback((sourceSchedules: ScheduleItem[]) => {
         const reportGroups = new Map<string, {
             site: Site;
+            siteSnapshot: DailyReportSiteSnapshot;
             teamId: string;
             teamName: string;
             workContent: string;
-            siteType: string;
-            paymentType: string;
-            responsibleTeamId: string;
-            responsibleTeamName: string;
             workers: any[];
         }>();
         let skippedScheduleCount = 0;
         let skippedWorkerCount = 0;
         let supportTeamCount = 0;
         let totalWorkerCount = 0;
+        const involvedTeamIds = new Set<string>();
 
         const appendReportWorker = (
             schedule: ScheduleItem,
@@ -2474,23 +2821,37 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             fallbackTeamName: string,
             workerRow: any
         ) => {
-            const siteId = toTrimmedText(site.id) || toTrimmedText(schedule.siteId);
-            const team = findTeamInRows(teams, resolvedTeamId, fallbackTeamName);
-            const groupKey = `${siteId}:${resolvedTeamId}`;
+            const siteSnapshot = buildDailyReportSiteSnapshot({
+                site,
+                siteId: schedule.siteId,
+                siteName: schedule.siteName,
+                teams,
+                companies,
+                fallback: schedule,
+            });
+            const siteId = siteSnapshot.siteId || toTrimmedText(site.id) || toTrimmedText(schedule.siteId);
+            const responsibleTeam = findTeamInRows(teams, siteSnapshot.responsibleTeamId, siteSnapshot.responsibleTeamName);
+            const reportTeam = responsibleTeam || findTeamInRows(teams, resolvedTeamId, fallbackTeamName);
+            const reportTeamId = toTrimmedText(reportTeam?.id) || siteSnapshot.responsibleTeamId || resolvedTeamId;
+            const reportTeamName = toTrimmedText(reportTeam?.name) || siteSnapshot.responsibleTeamName || fallbackTeamName;
+            const groupKey = `${siteId}:${reportTeamId}`;
             const siteWorkContent = toTrimmedText(schedule.memo);
-            const siteType = getSiteType(site, schedule.siteType);
-            const paymentType = getPaymentType(site, schedule.paymentType);
+            const reportSnapshot = {
+                ...siteSnapshot,
+                responsibleTeamId: reportTeamId,
+                responsibleTeamName: reportTeamName,
+            };
+
+            if (reportTeamId) involvedTeamIds.add(reportTeamId);
+            if (toTrimmedText(workerRow.teamId)) involvedTeamIds.add(toTrimmedText(workerRow.teamId));
 
             if (!reportGroups.has(groupKey)) {
                 reportGroups.set(groupKey, {
                     site,
-                    teamId: resolvedTeamId,
-                    teamName: toTrimmedText(team?.name) || fallbackTeamName,
+                    siteSnapshot: reportSnapshot,
+                    teamId: reportTeamId,
+                    teamName: reportTeamName,
                     workContent: siteWorkContent,
-                    siteType,
-                    paymentType,
-                    responsibleTeamId: toTrimmedText(schedule.responsibleTeamId) || toTrimmedText(site.responsibleTeamId) || resolvedTeamId,
-                    responsibleTeamName: toTrimmedText(schedule.responsibleTeamName) || toTrimmedText(site.responsibleTeamName) || toTrimmedText(team?.name) || fallbackTeamName,
                     workers: [],
                 });
             }
@@ -2501,8 +2862,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             }
             group.workers.push({
                 ...workerRow,
-                siteType,
-                paymentType,
+                siteType: reportSnapshot.siteType,
+                paymentType: reportSnapshot.paymentType,
             });
             totalWorkerCount += 1;
         };
@@ -2610,58 +2971,58 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 (sum, worker) => sum + Number(worker.manDay || 0) * Number(worker.unitPrice || 0),
                 0
             );
-            const responsibleTeamId = group.responsibleTeamId || group.teamId;
-            const responsibleTeamName = group.responsibleTeamName || group.teamName;
+            const responsibleTeamId = group.siteSnapshot.responsibleTeamId || group.teamId;
+            const responsibleTeamName = group.siteSnapshot.responsibleTeamName || group.teamName;
 
-            return {
+            return applyDailyReportSiteSnapshotToReport({
                 date,
                 teamId: group.teamId,
                 teamName: group.teamName,
-                siteId: toTrimmedText(group.site.id),
-                siteName: group.site.name,
+                siteId: group.siteSnapshot.siteId || toTrimmedText(group.site.id),
+                siteName: group.siteSnapshot.siteName || group.site.name,
                 writerId: currentUser?.uid || 'unknown',
                 workers: group.workers,
                 totalManDay,
                 totalAmount,
                 responsibleTeamId,
                 responsibleTeamName,
-                companyId: group.site.clientCompanyId || '',
-                companyName: group.site.clientCompanyName || '',
-                constructorCompanyId: group.site.companyId || '',
-                constructorCompanyName: group.site.companyName || '',
-                partnerId: group.site.partnerId || '',
-                partnerName: group.site.partnerName != null ? String(group.site.partnerName) : '',
                 workContent: group.workContent,
-                siteType: group.siteType,
-                paymentType: group.paymentType,
-            } as Omit<DailyReport, 'id'>;
+                siteType: group.siteSnapshot.siteType,
+                paymentType: group.siteSnapshot.paymentType,
+            }, {
+                ...group.siteSnapshot,
+                responsibleTeamId,
+                responsibleTeamName,
+            }) as Omit<DailyReport, 'id'>;
         });
 
         return {
             reports,
-            involvedTeamIds: Array.from(new Set(reports.map((report) => report.teamId).filter(Boolean))),
+            involvedTeamIds: Array.from(involvedTeamIds),
             skippedScheduleCount,
             skippedWorkerCount,
             supportTeamCount,
             totalWorkerCount,
         };
-    }, [currentUser?.uid, date, sites, teams, teamsById, workersById]);
+    }, [companies, currentUser?.uid, date, sites, teams, teamsById, workersById]);
 
     const loadData = useCallback(async () => {
         setLoading(true);
         setMessage('');
 
         try {
-            const [teamRows, workerRows, siteRows, vehicleRows] = await Promise.all([
+            const [teamRows, workerRows, siteRows, companyRows, vehicleRows] = await Promise.all([
                 teamService.getTeams(),
                 manpowerService.getWorkers(),
                 siteService.getSites(),
+                companyService.getCompanies(),
                 vehicleService.getVehicles(),
             ]);
 
             setTeams(teamRows);
             setWorkers(workerRows);
             setSites(siteRows);
+            setCompanies(companyRows);
             setVehicles(vehicleRows);
 
             const workerMap = new Map<string, Worker>();
@@ -2680,6 +3041,24 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 if (site.legacyId) siteMap.set(String(site.legacyId), site);
             });
             const vehicleMap = new Map(vehicleRows.map((vehicle) => [vehicle.id, vehicle]));
+            let nextViewerTeamScope = EMPTY_VIEWER_TEAM_SCOPE;
+            if (isScheduleConfirmationInput && currentUser?.uid) {
+                let viewerUser: UserData | null = null;
+                try {
+                    viewerUser = await userService.getUser(currentUser.uid);
+                } catch (error) {
+                    console.warn('[FieldSchedulePlanner] Failed to load viewer user profile', error);
+                }
+
+                if (!userBypassesViewerTeamScope(viewerUser)) {
+                    nextViewerTeamScope = buildViewerTeamScope(
+                        findViewerWorker(currentUser.uid, workerRows, viewerUser),
+                        teamMap,
+                        teamRows
+                    );
+                }
+            }
+            setViewerTeamScope(nextViewerTeamScope);
             const getLoadedSiteColor = (site?: Site, fallbackColor = DEFAULT_RESOURCE_COLOR) => {
                 const responsibleTeam =
                     (site?.responsibleTeamId ? teamMap.get(site.responsibleTeamId) : undefined) ||
@@ -2695,7 +3074,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             if (isDailyReportInput) {
                 const reports = await dailyReportService.getReports(date);
-                const dailySchedules = mapDailyReportsToSchedules(reports, date, workerMap, teamMap, siteRows, teamRows);
+                const dailySchedules = mapDailyReportsToSchedules(reports, date, workerMap, teamMap, siteRows, teamRows, companyRows);
                 setSchedules(dailySchedules);
                 setSelectedTeamId((prev) => prev || teamRows[0]?.id || UNASSIGNED_TEAM_ID);
                 setSelectedSiteId((prev) => (prev && siteRows.some((site) => site.id === prev) ? prev : ''));
@@ -2703,8 +3082,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return;
             }
 
-            const dispatch = await dispatchService.getDispatchByDate(date);
-            const nextSchedules = (dispatch?.assignments || []).map((assignment, index) => {
+            const savedAssignments = isScheduleConfirmationInput
+                ? (await scheduleConfirmationBoardService.getBoardByDate(date))?.assignments || []
+                : (await dispatchService.getDispatchByDate(date))?.assignments || [];
+            const nextSchedules = savedAssignments.map((assignment, index) => {
                 const raw = assignment as DispatchAssignment & Partial<ScheduleItem> & { supportTeamIds?: string[] };
                 const rawWorkerIds = cleanIds(assignment.workerIds || []).filter((workerId) => {
                     const worker = workerMap.get(workerId);
@@ -2719,7 +3100,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 const vehicleIds = cleanIds([...(raw.vehicleIds || []), ...(assignment.vehicleIds || []), raw.vehicleId]);
                 const teamColor = raw.teamColor || getTeamColor(team);
                 const isSupportAssignment = Boolean(team && isSupportTeam(team, []));
-                const workerIds = isSupportAssignment && !isDailyReportInput ? [] : rawWorkerIds;
+                const workerIds = isSupportAssignment && !isPersonnelInputMode ? [] : rawWorkerIds;
                 const supportTeams = mergeSupportTeams([
                     ...(raw.supportTeams || []),
                     ...(raw.supportTeamIds || []).map((supportTeamId) => {
@@ -2730,7 +3111,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                             color: getTeamColor(supportTeam),
                         };
                     }),
-                    ...(isSupportAssignment && team && (!isDailyReportInput || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
+                    ...(isSupportAssignment && team && (!isPersonnelInputMode || workerIds.length === 0) ? [{ id: teamId, name: team.name, color: teamColor }] : []),
                 ]);
                 const vehicleLabels = vehicleIds.map((id) => vehicleMap.get(id)?.licensePlate || raw.vehicleLabel || '');
 
@@ -2744,10 +3125,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     siteName: assignment.siteName || site?.name || '',
                     siteAddress: raw.siteAddress || site?.address || '',
                     siteColor: raw.siteColor || getLoadedSiteColor(site, teamColor),
-                    siteType: raw.siteType || getSiteType(site),
-                    paymentType: raw.paymentType || getPaymentType(site),
-                    responsibleTeamId: raw.responsibleTeamId || toTrimmedText(site?.responsibleTeamId),
-                    responsibleTeamName: raw.responsibleTeamName || toTrimmedText(site?.responsibleTeamName),
+                    clientCompanyName: toTrimmedText(site?.clientCompanyName) || raw.clientCompanyName,
+                    constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName) || raw.constructorCompanyName,
+                    partnerName: toTrimmedText(site?.partnerName) || raw.partnerName,
+                    siteType: getSiteType(site, raw.siteType),
+                    paymentType: getPaymentType(site, raw.paymentType),
+                    responsibleTeamId: toTrimmedText(site?.responsibleTeamId) || raw.responsibleTeamId,
+                    responsibleTeamName: toTrimmedText(site?.responsibleTeamName) || raw.responsibleTeamName,
                     workerIds,
                     supportTeams,
                     vehicleIds,
@@ -2774,7 +3158,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             });
 
             setSchedules(mergeSchedulesBySite(nextSchedules));
-            setSelectedTeamId((prev) => prev || teamRows[0]?.id || UNASSIGNED_TEAM_ID);
+            const defaultTeamId = nextViewerTeamScope.teamIds.find((teamId) => teamMap.has(teamId)) || teamRows[0]?.id || UNASSIGNED_TEAM_ID;
+            setSelectedTeamId((prev) => prev || defaultTeamId);
             setSelectedSiteId((prev) => (prev && siteRows.some((site) => site.id === prev) ? prev : ''));
             setDirty(false);
         } catch (error) {
@@ -2783,7 +3168,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         } finally {
             setLoading(false);
         }
-    }, [date, isDailyReportInput]);
+    }, [currentUser?.uid, date, isDailyReportInput, isPersonnelInputMode, isScheduleConfirmationInput]);
 
     useEffect(() => {
         loadData();
@@ -2801,14 +3186,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     }, [rosters, selectedTeamId]);
 
     useEffect(() => {
-        if (!selectedRoster || (selectedRoster.kind === 'support' && !isDailyReportInput)) {
+        if (!selectedRoster) {
             setSelectedWorkerIds([]);
             return;
         }
 
         const availableWorkerIds = new Set(selectedRoster.workers.map((worker) => worker.id).filter(Boolean));
         setSelectedWorkerIds((prev) => prev.filter((workerId) => availableWorkerIds.has(workerId)));
-    }, [isDailyReportInput, selectedRoster]);
+    }, [selectedRoster]);
 
     useEffect(() => {
         setSelectedWorkerIds((prev) => prev.filter((workerId) => !assignedWorkerIdSet.has(workerId)));
@@ -2824,6 +3209,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const toggleWorkerSelection = (rosterId: string, workerId: string) => {
         setSelectedTeamId(rosterId);
+        if (rosters.find((roster) => roster.id === rosterId)?.kind === 'support') {
+            setSelectedSupportTeamIds((prev) => prev.filter((teamId) => teamId !== rosterId));
+        }
         setSelectedWorkerIds((prev) => {
             const base = selectedTeamId === rosterId ? prev : [];
             return base.includes(workerId) ? base.filter((id) => id !== workerId) : [...base, workerId];
@@ -2832,6 +3220,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const toggleAllWorkers = (roster: TeamRoster) => {
         setSelectedTeamId(roster.id);
+        if (roster.kind === 'support') {
+            setSelectedSupportTeamIds((prev) => prev.filter((teamId) => teamId !== roster.id));
+        }
         const workerIds = cleanIds(roster.workers.map((worker) => worker.id));
         setSelectedWorkerIds((prev) => {
             const current = selectedTeamId === roster.id ? prev : [];
@@ -2842,6 +3233,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
     const toggleSupportTeamSelection = (roster: TeamRoster) => {
         setSelectedTeamId(roster.id);
+        if (roster.kind === 'support') {
+            setSelectedWorkerIds([]);
+        }
         setSelectedSupportTeamIds((prev) =>
             prev.includes(roster.id) ? prev.filter((teamId) => teamId !== roster.id) : [...prev, roster.id]
         );
@@ -2864,13 +3258,19 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         );
     };
 
+    const revealInputCardsOnMobile = () => {
+        if ((isScheduleConfirmationInput || !isPersonnelInputMode) && typeof window !== 'undefined' && window.innerWidth < 1024) {
+            setBoardViewMode(true);
+        }
+    };
+
     const makeScheduleFromRoster = (roster: TeamRoster, overrides: Partial<ScheduleItem> = {}): ScheduleItem => {
         const siteId = overrides.siteId ?? selectedSiteId;
         const site = siteId ? sitesById.get(siteId) : undefined;
         const teamColor = overrides.teamColor ?? roster.color;
         const rosterTeam = teamsById.get(roster.id);
         const defaultWorkerIds =
-            roster.kind === 'support' && !isDailyReportInput
+            roster.kind === 'support' && !isPersonnelInputMode
                 ? []
                 : cleanIds(roster.workers.map((worker) => worker.id));
         const workerIds = cleanIds(overrides.workerIds ?? defaultWorkerIds);
@@ -2914,6 +3314,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             siteName: overrides.siteName ?? site?.name ?? '',
             siteAddress: overrides.siteAddress ?? site?.address ?? '',
             siteColor: overrides.siteColor ?? getSiteColor(site, teamColor),
+            clientCompanyName: overrides.clientCompanyName ?? toTrimmedText(site?.clientCompanyName),
+            constructorCompanyName: overrides.constructorCompanyName ?? (toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName)),
+            partnerName: overrides.partnerName ?? toTrimmedText(site?.partnerName),
             siteType: overrides.siteType ?? getSiteType(site),
             paymentType: overrides.paymentType ?? getPaymentType(site),
             responsibleTeamId: overrides.responsibleTeamId ?? toTrimmedText(site?.responsibleTeamId),
@@ -3015,6 +3418,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             siteName: site.name,
             siteAddress: site.address || '',
             siteColor,
+            clientCompanyName: toTrimmedText(site.clientCompanyName),
+            constructorCompanyName: toTrimmedText(site.companyName) || toTrimmedText(site.constructorCompanyName),
+            partnerName: toTrimmedText(site.partnerName),
             siteType: getSiteType(site),
             paymentType: getPaymentType(site),
             responsibleTeamId: toTrimmedText(site.responsibleTeamId),
@@ -3037,17 +3443,18 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
         setSelectedSiteId(site.id || '');
         upsertScheduleForSite(next);
+        revealInputCardsOnMobile();
         boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
         setMessage(
-            isDailyReportInput
+            isPersonnelInputMode
                 ? `${site.name} 현장 카드를 만들었습니다. 작업자와 공수, 작업내용을 입력하세요.`
                 : `${site.name} 현장을 먼저 등록했습니다. 이후 작업자, 지원팀, 차량을 추가하세요.`
         );
     };
 
     const moveVehicleToBoard = (vehicle: Vehicle) => {
-        if (isDailyReportInput) {
-            setMessage('보드입력에서는 차량을 사용하지 않습니다. 작업자를 추가하세요.');
+        if (isPersonnelInputMode) {
+            setMessage(isScheduleConfirmationInput ? '일정확정보드에서는 차량을 사용하지 않습니다. 작업자를 추가하세요.' : '보드입력에서는 차량을 사용하지 않습니다. 작업자를 추가하세요.');
             return;
         }
         if (!selectedSiteId || !selectedSite) {
@@ -3083,6 +3490,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
         upsertScheduleForSite(next);
         setSelectedVehicleIds((prev) => prev.filter((vehicleId) => vehicleId !== vehicle.id));
+        revealInputCardsOnMobile();
         boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
         setMessage(`${selectedSite.name}에 ${vehicle.licensePlate} 차량을 추가했습니다.`);
     };
@@ -3092,16 +3500,16 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         const selectedRosterWorkerIds = cleanIds(overrides.workerIds ?? (selectedTeamId === roster.id ? selectedWorkerIds : []));
         const workerIds =
             roster.kind === 'support'
-                ? isDailyReportInput
-                    ? selectedRosterWorkerIds.length > 0
-                        ? selectedRosterWorkerIds
-                        : cleanIds(roster.workers.map((worker) => worker.id))
-                    : []
+                ? selectedRosterWorkerIds.length > 0
+                    ? selectedRosterWorkerIds
+                    : isPersonnelInputMode
+                        ? cleanIds(roster.workers.map((worker) => worker.id))
+                        : []
                 : selectedRosterWorkerIds;
 
         if (!selectedSiteId && !overrides.siteId) {
             setSelectedTeamId(roster.id);
-            setMessage(isDailyReportInput ? '입력할 현장을 먼저 선택하세요.' : '현장을 먼저 선택한 뒤 보드로 이동하세요.');
+            setMessage(isPersonnelInputMode ? '입력할 현장을 먼저 선택하세요.' : '현장을 먼저 선택한 뒤 보드로 이동하세요.');
             return;
         }
 
@@ -3111,7 +3519,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             return;
         }
 
-        if (isDailyReportInput && roster.kind === 'support' && workerIds.length === 0) {
+        if (isPersonnelInputMode && roster.kind === 'support' && workerIds.length === 0) {
             setSelectedTeamId(roster.id);
             setMessage('지원팀 작업자를 선택한 뒤 보드에 추가하세요.');
             return;
@@ -3119,25 +3527,26 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
         const next = makeScheduleFromRoster(roster, { ...overrides, workerIds });
         upsertScheduleForSite(next);
+        revealInputCardsOnMobile();
         setSelectedTeamId(roster.id);
-        if (roster.kind !== 'support' || isDailyReportInput) {
+        if (roster.kind !== 'support' || isPersonnelInputMode) {
             setSelectedWorkerIds([]);
         }
         boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
         setMessage(
-            isDailyReportInput
-                ? `${next.siteName || '현장'} 일보에 ${roster.kind === 'support' ? roster.name : `${workerIds.length}명의 작업자`}를 추가했습니다.`
+            isPersonnelInputMode
+                ? `${next.siteName || '현장'} ${isScheduleConfirmationInput ? '확정 보드' : '일보'}에 ${roster.kind === 'support' ? roster.name : `${workerIds.length}명의 작업자`}를 추가했습니다.`
                 : `${roster.name} → ${next.siteName || '현장'} 이동 등록되었습니다. 차량은 좌측 차량 목록에서 카드로 드래그해 등록하세요.`
         );
     };
 
     const moveSelectedToBoard = () => {
         if (!selectedSiteId || !selectedSite) {
-            setMessage(isDailyReportInput ? '입력할 현장을 먼저 선택하세요.' : '이동 대상 현장을 먼저 선택하세요.');
+            setMessage(isPersonnelInputMode ? '입력할 현장을 먼저 선택하세요.' : '이동 대상 현장을 먼저 선택하세요.');
             return;
         }
 
-        const supportTeams = isDailyReportInput ? [] : selectedSupportTeams.map((team) => ({
+        const supportTeams = isPersonnelInputMode ? [] : selectedSupportTeams.map((team) => ({
             id: team.id,
             name: team.name,
             color: team.color,
@@ -3149,10 +3558,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             workerId: `unknown_support_${team.id}`,
         }));
         const workerIds = cleanIds(selectedWorkerIds);
-        const vehicleIds = isDailyReportInput ? [] : cleanIds(selectedVehicleIds);
+        const vehicleIds = isPersonnelInputMode ? [] : cleanIds(selectedVehicleIds);
 
         if (workerIds.length === 0 && supportTeams.length === 0 && vehicleIds.length === 0) {
-            setMessage(isDailyReportInput ? '추가할 작업자 또는 지원팀을 선택하세요.' : '추가할 작업자, 지원팀 또는 차량을 선택하세요.');
+            setMessage(isPersonnelInputMode ? '추가할 작업자 또는 지원팀을 선택하세요.' : '추가할 작업자, 지원팀 또는 차량을 선택하세요.');
             return;
         }
 
@@ -3171,11 +3580,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         });
 
         upsertScheduleForSite(next);
+        revealInputCardsOnMobile();
         setSelectedWorkerIds([]);
         setSelectedSupportTeamIds([]);
         setSelectedVehicleIds([]);
         boardRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-        setMessage(isDailyReportInput ? `${selectedSite.name} 일보에 선택한 작업자/지원팀을 추가했습니다.` : `${selectedSite.name}에 선택한 리소스를 추가했습니다.`);
+        setMessage(isPersonnelInputMode ? `${selectedSite.name} ${isScheduleConfirmationInput ? '확정 보드' : '일보'}에 선택한 작업자/지원팀을 추가했습니다.` : `${selectedSite.name}에 선택한 리소스를 추가했습니다.`);
     };
 
     const addSupportTeamToSchedule = (scheduleId: string, teamId: string) => {
@@ -3184,7 +3594,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             setMessage('지원팀은 지원팀 탭에서 팀명만 현장에 배치합니다.');
             return;
         }
-        if (isDailyReportInput) {
+        if (isPersonnelInputMode) {
             const target = schedules.find((entry) => entry.id === scheduleId);
             if (!target) return;
             const sourceRoster = availableRosters.find((entry) => entry.id === roster.id) || roster;
@@ -3265,6 +3675,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 siteName: site?.name || '',
                 siteAddress: site?.address || '',
                 siteColor: site ? getSiteColor(site, target.teamColor) : '',
+                clientCompanyName: toTrimmedText(site?.clientCompanyName),
+                constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName),
+                partnerName: toTrimmedText(site?.partnerName),
                 siteType: getSiteType(site),
                 paymentType: getPaymentType(site),
                 responsibleTeamId: toTrimmedText(site?.responsibleTeamId),
@@ -3653,6 +4066,23 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             const assignments = normalizedSchedules.map(scheduleToDispatchAssignment) as DispatchAssignment[];
 
+            if (isScheduleConfirmationInput) {
+                if (assignments.length === 0) {
+                    setMessage('확정할 현장 카드가 없습니다. 현장과 작업자를 추가한 뒤 저장하세요.');
+                    return;
+                }
+
+                await scheduleConfirmationBoardService.saveBoard(date, assignments);
+                setSchedules(normalizedSchedules);
+                setDirty(false);
+                if (typeof window !== 'undefined') {
+                    window.localStorage.removeItem(getTempDraftStorageKey(date, mode));
+                    setHasTemporaryDraft(false);
+                }
+                setMessage(`일정확정보드 ${assignments.length}개 현장이 저장되었습니다.`);
+                return;
+            }
+
             await dispatchService.saveDispatch(date, assignments);
             setSchedules(normalizedSchedules);
             setDirty(false);
@@ -3678,7 +4108,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     }, []);
 
     const handleScheduleAnalyzeClick = useCallback(async () => {
-        if (!isDailyReportInput) return;
+        if (!isPersonnelInputMode) return;
         if (loading || analyzingSchedule) {
             setMessage('기준 데이터를 불러오는 중입니다. 잠시 후 다시 시도하세요.');
             return;
@@ -3694,13 +4124,23 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return;
             }
 
-            const analyzedSchedules = assignments
+            const mappedSchedules = assignments
                 .map((assignment, index) => ({
                     ...mapAssignmentToSchedule(assignment, index),
                     id: makeScheduleId(),
                     status: 'draft' as ScheduleStatus,
                     supportTeams: [],
-                }))
+                }));
+            const scopedSchedules = hasScheduleConfirmationTeamScope
+                ? mappedSchedules.filter(scheduleMatchesViewerScope)
+                : mappedSchedules;
+
+            if (hasScheduleConfirmationTeamScope && scopedSchedules.length === 0) {
+                setMessage(`${date} 일정 중 ${viewerTeamScope.label} 담당현장 또는 지원팀 현장이 없습니다.`);
+                return;
+            }
+
+            const analyzedSchedules = scopedSchedules
                 .filter((schedule) => schedule.workerIds.length > 0);
 
             if (analyzedSchedules.length === 0) {
@@ -3722,7 +4162,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         } finally {
             setAnalyzingSchedule(false);
         }
-    }, [analyzingSchedule, appendAnalyzedSchedulesToBoard, date, isDailyReportInput, loading, mapAssignmentToSchedule]);
+    }, [
+        analyzingSchedule,
+        appendAnalyzedSchedulesToBoard,
+        date,
+        hasScheduleConfirmationTeamScope,
+        isPersonnelInputMode,
+        loading,
+        mapAssignmentToSchedule,
+        scheduleMatchesViewerScope,
+        viewerTeamScope.label,
+    ]);
 
     const resetKakaoModal = useCallback(() => {
         setKakaoText('');
@@ -3859,7 +4309,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         try {
             if (isDailyReportInput) {
                 const reports = await dailyReportService.getReports(copySourceDate);
-                const copiedSchedules = mapDailyReportsToSchedules(reports, copySourceDate, workersById, teamsById, sites, teams);
+                const copiedSchedules = mapDailyReportsToSchedules(reports, copySourceDate, workersById, teamsById, sites, teams, companies);
                 const assignments = copiedSchedules.map(scheduleToDispatchAssignment);
                 if (assignments.length === 0) {
                     setScheduleClipboard(null);
@@ -3875,11 +4325,13 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 return;
             }
 
-            const source = await dispatchService.getDispatchByDate(copySourceDate);
+            const source = isScheduleConfirmationInput
+                ? await scheduleConfirmationBoardService.getBoardByDate(copySourceDate)
+                : await dispatchService.getDispatchByDate(copySourceDate);
             const assignments = source?.assignments || [];
             if (assignments.length === 0) {
                 setScheduleClipboard(null);
-                setMessage(`${copySourceDate} 일정이 없습니다.`);
+                setMessage(`${copySourceDate} ${isScheduleConfirmationInput ? '일정확정보드' : '일정'}이 없습니다.`);
                 return;
             }
 
@@ -3887,7 +4339,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 sourceDate: copySourceDate,
                 assignments: cloneDispatchAssignments(assignments),
             });
-            setMessage(`${copySourceDate} 일정 ${assignments.length}건을 복사했습니다.`);
+            setMessage(`${copySourceDate} ${isScheduleConfirmationInput ? '일정확정보드' : '일정'} ${assignments.length}건을 복사했습니다.`);
         } catch (error) {
             console.error('[FieldSchedulePlanner] Failed to copy schedule', error);
             setMessage('일정을 복사하지 못했습니다. 잠시 후 다시 시도해주세요.');
@@ -3902,7 +4354,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             return;
         }
 
-        const clipboardLabel = isDailyReportInput ? '일보 보드' : '일정';
+        const clipboardLabel = isDailyReportInput ? '일보 보드' : isScheduleConfirmationInput ? '일정확정보드' : '일정';
         const ok = window.confirm(
             `${scheduleClipboard.sourceDate} ${clipboardLabel}을 ${date}에 붙여넣을까요? 현재 날짜의 ${clipboardLabel}은 대체됩니다.`
         );
@@ -3924,22 +4376,32 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         setMessage(`${scheduleClipboard.sourceDate} ${clipboardLabel}을 ${date}에 붙여넣었습니다. 확인 후 저장하세요.`);
     };
 
-    const pageEyebrow = isDailyReportInput ? '일보 보드 입력' : '현장 이동 일정 등록';
-    const pageTitle = isDailyReportInput ? '보드입력' : '현장 일정 보드';
+    const pageEyebrow = isDailyReportInput
+        ? '일보 보드 입력'
+        : isScheduleConfirmationInput
+            ? ''
+            : '현장 이동 일정 등록';
+    const pageTitle = isDailyReportInput ? '보드입력' : isScheduleConfirmationInput ? '일정확정보드' : '현장 일정 보드';
     const pageDescription = isDailyReportInput
         ? '현장을 선택하고 작업자/지원팀, 공수, 단가, 급여구분, 작업내용을 카드에서 입력한 뒤 출력일보로 저장합니다.'
-        : '현장을 선택하고 작업자 또는 지원팀명을 고른 뒤 하나의 현장 카드에 모아 배치합니다.';
+        : isScheduleConfirmationInput
+            ? ''
+            : '현장을 선택하고 작업자 또는 지원팀명을 고른 뒤 하나의 현장 카드에 모아 배치합니다.';
     const copyInputLabel = '복사일';
     const boardSummaryLabel = isDailyReportInput
-        ? `일보 보드 ${schedules.length}개 현장 · 현장구분/결제와 단가까지 출력일보로 반영합니다.`
-        : `보드보기 ${schedules.length}개 현장 · 현장/팀 색상과 작업자, 지원팀, 차량을 한눈에 확인합니다.`;
+        ? `일보 보드 ${visibleScheduleCountLabel}개 현장 · 현장구분/결제와 단가까지 출력일보로 반영합니다.`
+        : isScheduleConfirmationInput
+            ? `확정보드 ${visibleScheduleCountLabel}개 현장 · 현장별 작업자와 지원팀 입력값을 별도 저장합니다.`
+            : `보드보기 ${visibleScheduleCountLabel}개 현장 · 현장/팀 색상과 작업자, 지원팀, 차량을 한눈에 확인합니다.`;
     const editSummaryLabel = isDailyReportInput
-        ? `현장 카드 ${schedules.length}건 · 작업자와 지원팀을 출력일보 입력줄로 저장합니다.`
-        : `현장 카드 ${schedules.length}건 · 같은 날짜의 같은 현장은 하나의 카드로 합쳐집니다.`;
+        ? `현장 카드 ${visibleScheduleCountLabel}건 · 작업자와 지원팀을 출력일보 입력줄로 저장합니다.`
+        : isScheduleConfirmationInput
+            ? `현장 카드 ${visibleScheduleCountLabel}건 · 모바일에서 공수, 단가, 급여구분, 작업내용을 바로 확정합니다.`
+            : `현장 카드 ${visibleScheduleCountLabel}건 · 같은 날짜의 같은 현장은 하나의 카드로 합쳐집니다.`;
 
     const selectedSite = selectedSiteId ? sitesById.get(selectedSiteId) : undefined;
     const selectedSiteColor = selectedSite ? getSiteColor(selectedSite, selectedRoster?.color) : '';
-    const selectedResourceCount = isDailyReportInput
+    const selectedResourceCount = isPersonnelInputMode
         ? selectedWorkerIds.length
         : selectedWorkerIds.length + selectedSupportTeamIds.length + selectedVehicleIds.length;
     const canMoveSelected =
@@ -3950,7 +4412,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             ? selectedRoster?.name || '팀 선택'
             : selectedSupportTeams.length > 0
                 ? selectedSupportTeams[0].name
-                : !isDailyReportInput && selectedVehicleIds.length > 0
+                : !isPersonnelInputMode && selectedVehicleIds.length > 0
                     ? '차량'
                     : '대상 선택';
     const selectedWorkerNames = selectedWorkers.map((worker) => worker.name);
@@ -3958,46 +4420,95 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         selectedWorkers.length > 0
             ? `${selectedWorkerNames.slice(0, 3).join(', ')}${selectedWorkerNames.length > 3 ? ` 외 ${selectedWorkerNames.length - 3}명` : ''}`
             : '',
-        !isDailyReportInput && selectedSupportTeams.length > 0 ? `지원팀 ${selectedSupportTeams.length}팀` : '',
-        !isDailyReportInput && selectedVehicles.length > 0 ? `차량 ${selectedVehicles.length}대` : '',
+        !isPersonnelInputMode && selectedSupportTeams.length > 0 ? `지원팀 ${selectedSupportTeams.length}팀` : '',
+        !isPersonnelInputMode && selectedVehicles.length > 0 ? `차량 ${selectedVehicles.length}대` : '',
     ].filter(Boolean);
-    const moveWorkerLabel = selectedResourceParts.join(' · ') || (isDailyReportInput ? '작업자/지원팀 선택' : '작업자/지원팀/차량 선택');
+    const moveWorkerLabel = selectedResourceParts.join(' · ') || (isPersonnelInputMode ? '작업자/지원팀 선택' : '작업자/지원팀/차량 선택');
     const addGuideLabel = selectedSite
         ? selectedResourceParts.length > 0
-            ? isDailyReportInput
-                ? `${selectedSite.name} 일보에 ${selectedResourceParts.join(', ')} 추가`
+            ? isPersonnelInputMode
+                ? `${selectedSite.name} ${isScheduleConfirmationInput ? '확정보드' : '일보'}에 ${selectedResourceParts.join(', ')} 추가`
                 : `${selectedSite.name}으로 ${selectedResourceParts.join(', ')} 추가`
-            : isDailyReportInput
+            : isPersonnelInputMode
                 ? `${selectedSite.name} 현장 카드에 작업자를 추가하세요.`
                 : `${selectedSite.name} 현장만 먼저 등록할 수 있습니다.`
-        : isDailyReportInput ? '입력할 현장을 먼저 선택하세요' : '현장 카드를 먼저 선택하세요';
+        : isPersonnelInputMode ? '입력할 현장을 먼저 선택하세요' : '현장 카드를 먼저 선택하세요';
     const selectedDestinationScheduleKey = selectedSite
         ? makeSiteKey({ siteId: selectedSite.id || '', siteName: selectedSite.name } as Pick<ScheduleItem, 'siteId' | 'siteName'>)
         : '';
+    const selectedWorkerPreviewNames = selectedWorkerNames.filter(Boolean);
+    const selectedSupportTeamNames = selectedSupportTeams.map((team) => team.name).filter(Boolean);
+    const selectedVehicleNames = selectedVehicles
+        .map((vehicle) => vehicle.licensePlate || vehicle.model || vehicle.id)
+        .filter(Boolean);
+    const selectedResourcePreviewItems = isPersonnelInputMode
+        ? selectedWorkerPreviewNames
+        : [
+            ...selectedWorkerPreviewNames,
+            ...selectedSupportTeamNames.map((name) => `지원 ${name}`),
+            ...selectedVehicleNames.map((name) => `차량 ${name}`),
+        ];
+    const selectedResourcePreviewLimit = isPersonnelInputMode ? 5 : 6;
+    const selectedResourcePreviewOverflow = Math.max(0, selectedResourcePreviewItems.length - selectedResourcePreviewLimit);
+    const selectedResourceKindLabel = isPersonnelInputMode
+        ? selectedRoster?.kind === 'support' ? '지원팀 인원' : '작업자'
+        : '선택 항목';
+    const selectedResourcePreviewCount = isPersonnelInputMode ? selectedWorkerPreviewNames.length : selectedResourceCount;
+    const selectedGroupLabel = selectedRoster
+        ? `${selectedRoster.name}${selectedRoster.kind === 'support' ? ' · 지원팀' : ''}`
+        : '팀/지원팀 미선택';
+    const mobileSecondaryRowLabel = isPersonnelInputMode ? '팀/지원' : '선택';
+    const mobileSecondaryRowValue = isPersonnelInputMode
+        ? selectedGroupLabel
+        : selectedResourceParts.join(' · ') || '작업자/지원팀/차량 미선택';
+    const mobileSelectionStatusLabel = !selectedSite
+        ? '현장 선택 필요'
+        : selectedResourceCount > 0
+            ? isPersonnelInputMode ? '등록 가능' : '추가 가능'
+            : isPersonnelInputMode ? '인원 선택 필요' : '항목 선택 필요';
+    const mobileSelectionStatusClass = !selectedSite
+        ? 'bg-amber-50 text-amber-700'
+        : selectedResourceCount > 0
+            ? 'bg-emerald-50 text-emerald-700'
+            : 'bg-slate-100 text-slate-500';
+    const mobileSelectionEmptyLabel = isPersonnelInputMode
+        ? '팀/작업자 또는 지원팀 탭에서 인원을 선택하세요.'
+        : '팀/작업자, 지원팀, 차량 탭에서 항목을 선택하세요.';
+    const mobileSelectionButtonLabel = isPersonnelInputMode ? '선택 인원 추가하기' : '선택 항목 추가하기';
+    const showMobileSelectionSummary = isScheduleConfirmationInput || !isPersonnelInputMode;
+    const showDisplayBoardCards = boardViewMode && !isScheduleConfirmationInput;
+    const showCopyControls = !isDailyReportInput && !isScheduleConfirmationInput;
+    const viewToggleLabel = isScheduleConfirmationInput
+        ? boardViewMode ? '선택보기' : '입력보기'
+        : boardViewMode ? '편집보기' : '보드보기';
 
     return (
-        <div className={`${isDailyReportInput ? 'h-full min-h-0 overflow-hidden' : 'min-h-full'} bg-slate-100 text-slate-900`}>
+        <div className={`${isPersonnelInputMode ? 'h-full min-h-0 overflow-hidden' : 'min-h-full'} bg-slate-100 text-slate-900`}>
             <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
             >
-                <div className={isDailyReportInput
+                <div className={isPersonnelInputMode
                     ? 'flex h-full min-h-0 flex-col overflow-hidden'
                     : 'flex min-h-[calc(100vh-72px)] flex-col lg:h-[calc(100vh-72px)] lg:min-h-[760px]'}
                 >
                     <header className="shrink-0 border-b border-slate-200 bg-white px-4 py-4 sm:px-5">
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                             <div>
-                                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-                                    <UsersRound size={14} />
-                                    {pageEyebrow}
-                                </div>
-                                <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">{pageTitle}</h1>
-                                <p className="mt-1 text-sm text-slate-500">
-                                    {pageDescription}
-                                </p>
+                                {pageEyebrow ? (
+                                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+                                        <UsersRound size={14} />
+                                        {pageEyebrow}
+                                    </div>
+                                ) : null}
+                                <h1 className={`${pageEyebrow ? 'mt-1' : ''} text-2xl font-black tracking-tight text-slate-950`}>{pageTitle}</h1>
+                                {pageDescription ? (
+                                    <p className="mt-1 text-sm text-slate-500">
+                                        {pageDescription}
+                                    </p>
+                                ) : null}
                             </div>
 
                             <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
@@ -4032,7 +4543,22 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 >
                                     오늘
                                 </button>
-                                {isDailyReportInput ? (
+                                {hasScheduleConfirmationTeamScope ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAllScheduleConfirmationSites((prev) => !prev)}
+                                        className={`flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold sm:flex-none ${
+                                            showAllScheduleConfirmationSites
+                                                ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                        }`}
+                                        title={showAllScheduleConfirmationSites ? '내 팀 담당현장과 지원팀 현장만 보기' : '전체 현장 보기'}
+                                    >
+                                        <MapPin size={16} />
+                                        {showAllScheduleConfirmationSites ? '내 팀 보기' : '전체보기'}
+                                    </button>
+                                ) : null}
+                                {isPersonnelInputMode ? (
                                     <>
                                         <button
                                             type="button"
@@ -4054,7 +4580,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         </button>
                                     </>
                                 ) : null}
-                                {!isDailyReportInput ? (
+                                {showCopyControls ? (
                                     <>
                                         <div className="flex w-full min-w-0 flex-none items-center rounded-lg border border-slate-200 bg-slate-50 p-1 sm:w-auto">
                                             <span className="hidden px-2 text-xs font-bold text-slate-500 sm:inline">{copyInputLabel}</span>
@@ -4103,7 +4629,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     }`}
                                 >
                                     <Eye size={16} />
-                                    {boardViewMode ? '편집보기' : '보드보기'}
+                                    {viewToggleLabel}
                                 </button>
                                 <button
                                     type="button"
@@ -4130,7 +4656,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 sm:flex-none"
                                 >
                                     <Save size={16} />
-                                    {saving ? '저장 중' : dirty ? (isDailyReportInput ? '일보 저장' : '저장') : '저장됨'}
+                                    {saving ? '저장 중' : dirty ? (isDailyReportInput ? '일보 저장' : isScheduleConfirmationInput ? '확정 저장' : '저장') : '저장됨'}
                                 </button>
                             </div>
                         </div>
@@ -4146,7 +4672,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         value={searchTerm}
                                         onChange={(event) => setSearchTerm(event.target.value)}
                                         placeholder={
-                                            isDailyReportInput
+                                            isPersonnelInputMode
                                                 ? leftPanelTab === 'sites'
                                                     ? '현장명, 주소 검색'
                                                     : leftPanelTab === 'support'
@@ -4162,7 +4688,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     />
                                 </div>
 
-                                <div className={`mt-3 grid ${isDailyReportInput ? 'grid-cols-3' : 'grid-cols-4'} gap-1 rounded-lg bg-slate-100 p-1`}>
+                                <div className={`mt-3 grid ${isPersonnelInputMode ? 'grid-cols-3' : 'grid-cols-4'} gap-1 rounded-lg bg-slate-100 p-1`}>
                                     <button
                                         type="button"
                                         onClick={() => setLeftPanelTab('sites')}
@@ -4193,7 +4719,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         <UserPlus size={14} />
                                         지원팀
                                     </button>
-                                    {!isDailyReportInput ? (
+                                    {!isPersonnelInputMode ? (
                                         <>
                                             <button
                                                 type="button"
@@ -4209,8 +4735,90 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     ) : null}
                                 </div>
 
+                                {hasScheduleConfirmationTeamScope ? (
+                                    <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-800">
+                                        <span className="min-w-0 flex-1 truncate">
+                                            {showAllScheduleConfirmationSites
+                                                ? '전체 현장 표시 중'
+                                                : `${viewerTeamScope.label} 담당현장 + 지원팀 현장`}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAllScheduleConfirmationSites((prev) => !prev)}
+                                            className="shrink-0 rounded-md bg-white px-2 py-1 font-black text-blue-700 hover:bg-blue-100"
+                                        >
+                                            {showAllScheduleConfirmationSites ? '기본보기' : '전체보기'}
+                                        </button>
+                                    </div>
+                                ) : null}
+
+                                {showMobileSelectionSummary ? (
+                                    <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm lg:hidden">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <span className="text-xs font-black text-blue-800">선택 정보</span>
+                                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black ${mobileSelectionStatusClass}`}>
+                                                {mobileSelectionStatusLabel}
+                                            </span>
+                                        </div>
+                                        <div className="mt-2 grid gap-2 text-xs font-bold text-slate-700">
+                                            <div className="flex min-w-0 items-center gap-2 rounded-lg bg-white px-2.5 py-2">
+                                                <MapPin size={14} className="shrink-0 text-blue-600" />
+                                                <span className="shrink-0 text-slate-400">현장</span>
+                                                <span className="min-w-0 flex-1 truncate text-right font-black text-slate-900">
+                                                    {selectedSite?.name || '미선택'}
+                                                </span>
+                                            </div>
+                                            <div className="flex min-w-0 items-center gap-2 rounded-lg bg-white px-2.5 py-2">
+                                                <UsersRound size={14} className="shrink-0 text-blue-600" />
+                                                <span className="shrink-0 text-slate-400">{mobileSecondaryRowLabel}</span>
+                                                <span className="min-w-0 flex-1 truncate text-right font-black text-slate-900">
+                                                    {mobileSecondaryRowValue}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 rounded-lg bg-white px-2.5 py-2">
+                                            <div className="flex items-center justify-between gap-2 text-xs font-black">
+                                                <span className="text-slate-500">{selectedResourceKindLabel}</span>
+                                                <span className="text-blue-700">
+                                                    {isPersonnelInputMode ? `${selectedResourcePreviewCount}명 선택` : `${selectedResourcePreviewCount}개 선택`}
+                                                </span>
+                                            </div>
+                                            {selectedResourcePreviewItems.length > 0 ? (
+                                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                                    {selectedResourcePreviewItems.slice(0, selectedResourcePreviewLimit).map((name, index) => (
+                                                        <span
+                                                            key={`${name}-${index}`}
+                                                            className="max-w-full truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-700"
+                                                        >
+                                                            {name}
+                                                        </span>
+                                                    ))}
+                                                    {selectedResourcePreviewOverflow > 0 ? (
+                                                        <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-black text-blue-700">
+                                                            외 {selectedResourcePreviewOverflow}{isPersonnelInputMode ? '명' : '개'}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                            ) : (
+                                                <p className="mt-1 text-xs font-semibold text-slate-400">
+                                                    {mobileSelectionEmptyLabel}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={moveSelectedToBoard}
+                                            disabled={!canMoveSelected}
+                                            className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-slate-900 text-sm font-black text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                        >
+                                            <Plus size={17} />
+                                            {mobileSelectionButtonLabel}
+                                        </button>
+                                    </div>
+                                ) : null}
+
                                 {leftPanelTab !== 'sites' ? (
-                                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                    <div className={`mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2 ${showMobileSelectionSummary ? 'hidden lg:block' : ''}`}>
                                         <div className="mb-2 flex min-w-0 items-center gap-2 px-1 text-xs font-bold text-slate-600">
                                             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selectedSiteColor || '#cbd5e1' }} />
                                             <span className="min-w-0 flex-1 truncate">{moveTargetLabel}</span>
@@ -4248,7 +4856,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                                         selected={Boolean(selectedSite && siteKey === makeSiteSelectionKey(selectedSite))}
                                                         onSelect={() => {
                                                             setSelectedSiteId(site.id || '');
-                                                            setMessage(isDailyReportInput ? `입력 현장: ${site.name}` : `이동 대상: ${site.name}`);
+                                                            setMessage(isPersonnelInputMode ? `입력 현장: ${site.name}` : `이동 대상: ${site.name}`);
                                                         }}
                                                         onRegister={() => registerSiteToBoard(site.id || site.name)}
                                                     />
@@ -4263,16 +4871,18 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                 ) : leftPanelTab === 'support' ? (
                                     filteredRosters.length > 0 ? (
                                         <div className="space-y-2">
-                                            {filteredRosters.map((roster) => (
-                                                isDailyReportInput ? (
+                                            {filteredRosters.map((roster) => {
+                                                const useSupportWorkerSelection = isPersonnelInputMode || roster.workers.length > 0;
+                                                return useSupportWorkerSelection ? (
                                                     <TeamRosterCard
                                                         key={roster.id}
                                                         roster={roster}
                                                         selected={selectedRoster?.id === roster.id}
                                                         onSelect={() => setSelectedTeamId(roster.id)}
                                                         selectedWorkerIds={selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
-                                                        supportSelected={false}
+                                                        supportSelected={!isPersonnelInputMode && selectedSupportTeamIdSet.has(roster.id)}
                                                         forceWorkerSelection
+                                                        showSupportTeamToggle={!isPersonnelInputMode}
                                                         onToggleSupportTeam={() => toggleSupportTeamSelection(roster)}
                                                         onToggleWorker={(workerId) => toggleWorkerSelection(roster.id, workerId)}
                                                         onToggleAllWorkers={() => toggleAllWorkers(roster)}
@@ -4285,8 +4895,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                                         onSelect={() => toggleSupportTeamSelection(roster)}
                                                         onAdd={() => moveRosterToBoard(roster)}
                                                     />
-                                                )
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
@@ -4340,7 +4950,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                             <div className="shrink-0 border-b border-slate-200 bg-white px-5 py-4">
                                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                                     <div className="min-w-0">
-                                        <div className="mb-2 text-xs font-black text-slate-500">{isDailyReportInput ? '일보 입력' : '이동 경로'}</div>
+                                        <div className="mb-2 text-xs font-black text-slate-500">{isPersonnelInputMode ? (isScheduleConfirmationInput ? '일정확정 입력' : '일보 입력') : '이동 경로'}</div>
                                         <div className="flex flex-wrap items-center gap-2 text-sm font-black text-slate-800">
                                             <span className="inline-flex min-w-0 items-center gap-1.5 rounded-md bg-white px-2.5 py-1">
                                                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selectedRoster?.color || '#cbd5e1' }} />
@@ -4374,8 +4984,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         {selectedSite?.name || '현장 미선택'}
                                     </span>
                                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1">
-                                        {isDailyReportInput ? <Check size={13} /> : <Truck size={13} />}
-                                        {isDailyReportInput ? '공수·작업내용 입력' : '차량 선택 후 추가 가능'}
+                                        {isPersonnelInputMode ? <Check size={13} /> : <Truck size={13} />}
+                                        {isPersonnelInputMode ? '공수·작업내용 입력' : '차량 선택 후 추가 가능'}
                                     </span>
                                     {totalIssues > 0 ? (
                                         <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-red-600">
@@ -4431,24 +5041,24 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
                                 {loading ? (
                                     <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-sm font-bold text-slate-500">
-                                        {isDailyReportInput ? '일보 보드를 불러오는 중입니다.' : '일정을 불러오는 중입니다.'}
+                                        {isPersonnelInputMode ? (isScheduleConfirmationInput ? '일정확정보드를 불러오는 중입니다.' : '일보 보드를 불러오는 중입니다.') : '일정을 불러오는 중입니다.'}
                                     </div>
-                                ) : schedules.length > 0 ? (
+                                ) : displaySchedules.length > 0 ? (
                                     <div
-                                        className={boardViewMode ? 'flex flex-wrap items-start justify-center gap-x-8 gap-y-8 sm:justify-start' : 'grid gap-3'}
+                                        className={showDisplayBoardCards ? 'flex flex-wrap items-start justify-center gap-x-8 gap-y-8 sm:justify-start' : 'grid gap-3'}
                                         style={
-                                            boardViewMode
+                                            showDisplayBoardCards
                                                 ? undefined
                                                 : {
-                                                    gridTemplateColumns: isDailyReportInput
+                                                    gridTemplateColumns: isPersonnelInputMode
                                                         ? 'repeat(auto-fill, minmax(min(360px, 100%), 1fr))'
                                                         : 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))',
                                                 }
                                         }
                                     >
-                                        {schedules.map((schedule) => {
+                                        {displaySchedules.map((schedule) => {
                                             const scheduleKey = makeSiteKey(schedule);
-                                            return boardViewMode ? (
+                                            return showDisplayBoardCards ? (
                                                 <BoardViewScheduleCard
                                                     key={schedule.id}
                                                     schedule={schedule}
@@ -4464,7 +5074,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                                     onSelectDestination={() => {
                                                         if (schedule.siteId) {
                                                             setSelectedSiteId(schedule.siteId);
-                                                            setMessage(isDailyReportInput ? `입력 현장: ${schedule.siteName}` : `이동 대상: ${schedule.siteName}`);
+                                                            setMessage(isPersonnelInputMode ? `입력 현장: ${schedule.siteName}` : `이동 대상: ${schedule.siteName}`);
                                                         }
                                                     }}
                                                 />
@@ -4483,7 +5093,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                                     onSelectDestination={() => {
                                                         if (schedule.siteId) {
                                                             setSelectedSiteId(schedule.siteId);
-                                                            setMessage(isDailyReportInput ? `입력 현장: ${schedule.siteName}` : `이동 대상: ${schedule.siteName}`);
+                                                            setMessage(isPersonnelInputMode ? `입력 현장: ${schedule.siteName}` : `이동 대상: ${schedule.siteName}`);
                                                         }
                                                     }}
                                                     onDelete={() => deleteSchedule(schedule.id)}
@@ -4503,10 +5113,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     <div className="flex min-h-[460px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-center">
                                         <UserPlus size={36} className="text-slate-400" />
                                         <p className="mt-3 text-base font-black text-slate-800">
-                                            {isDailyReportInput ? '아직 작성할 일보 현장이 없습니다.' : '아직 만든 일정이 없습니다.'}
+                                            {shouldApplyScheduleConfirmationScope && schedules.length > 0
+                                                ? '내 팀 담당현장 또는 지원팀 현장이 없습니다.'
+                                                : isPersonnelInputMode ? (isScheduleConfirmationInput ? '아직 확정할 현장이 없습니다.' : '아직 작성할 일보 현장이 없습니다.') : '아직 만든 일정이 없습니다.'}
                                         </p>
                                         <p className="mt-1 max-w-md text-sm leading-6 text-slate-500">
-                                            {isDailyReportInput
+                                            {shouldApplyScheduleConfirmationScope && schedules.length > 0
+                                                ? '전체보기를 켜면 다른 현장까지 확인할 수 있습니다.'
+                                                : isPersonnelInputMode
                                                 ? '좌측 현장에서 현장 카드를 만들고 팀/작업자 또는 지원팀 탭에서 입력줄을 추가하세요.'
                                                 : '좌측 현장 탭에서 현장을 먼저 등록하거나, 현장 선택 후 작업자와 차량을 추가하세요.'}
                                         </p>
@@ -4516,7 +5130,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                         </main>
                     </div>
 
-                    {isDailyReportInput && isKakaoModalOpen ? (
+                    {isPersonnelInputMode && isKakaoModalOpen ? (
                         <div
                             className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-4"
                             onMouseDown={(event) => {

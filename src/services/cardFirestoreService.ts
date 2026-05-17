@@ -77,11 +77,12 @@ export const cardFirestoreService = {
     async getAssignmentHistory(cardId: string): Promise<CardAssignmentRecord[]> {
         const q = query(
             collection(db, ASSIGNMENTS_COLLECTION),
-            where('cardId', '==', cardId),
-            orderBy('startDate', 'desc')
+            where('cardId', '==', cardId)
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord));
+        return snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord))
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
     },
 
     async listAllCardAssignments(): Promise<CardAssignmentRecord[]> {
@@ -157,11 +158,12 @@ export const cardFirestoreService = {
     async getTransactionsByMonth(yearMonth: string): Promise<CardTransaction[]> {
         const q = query(
             collection(db, TRANSACTIONS_COLLECTION),
-            where('yearMonth', '==', yearMonth),
-            orderBy('date', 'desc')
+            where('yearMonth', '==', yearMonth)
         );
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardTransaction));
+        return snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() } as CardTransaction))
+            .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
     },
 
     async addTransaction(data: Omit<CardTransaction, 'id' | 'createdAt'>): Promise<string> {
@@ -186,6 +188,12 @@ export const cardFirestoreService = {
         );
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardBillingDocument));
+    },
+
+    async getBillingById(id: string): Promise<CardBillingDocument | null> {
+        if (!id) return null;
+        const snapshot = await getDoc(doc(db, BILLINGS_COLLECTION, id));
+        return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as CardBillingDocument) : null;
     },
 
     async saveBilling(billing: CardBillingDocument): Promise<void> {

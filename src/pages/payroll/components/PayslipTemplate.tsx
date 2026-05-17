@@ -1,4 +1,5 @@
 import React, { forwardRef } from 'react';
+import { formatPayrollPaymentDate } from '../utils/paymentDate';
 
 interface WorkerWorkEntry {
     date: string;
@@ -261,6 +262,7 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
         return `상세: (단가-${deduction})×${incomeRate}×(1-${taxCredit}), 지방세=갑근세×${residentRate}`;
     };
     const withholdingDetailText = resolveWithholdingDetailText(data.taxRateSnapshot);
+    const paymentDateText = formatPayrollPaymentDate(data.month || month);
 
     return (
         <div ref={ref} className="bg-white border-2 border-slate-200 rounded-xl shadow-sm w-full max-w-none mx-auto text-slate-900 mb-8 page-break-inside-avoid">
@@ -289,6 +291,12 @@ export const PayslipTemplate = forwardRef<HTMLDivElement, Props>(({ data, month,
                     <div className="border-r border-b border-slate-200 p-2 text-center font-mono">{data.idNumber || '-'}</div>
                     <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">시공사</div>
                     <div className="border-b border-slate-200 p-2 text-center">{data.companyName || '-'}</div>
+                </div>
+                <div className="grid grid-cols-4 text-sm">
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">지급월</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center">{data.month || month}</div>
+                    <div className="border-r border-b border-slate-200 p-2 text-center font-medium bg-slate-50">지급일</div>
+                    <div className="border-b border-slate-200 p-2 text-center font-semibold text-emerald-700">{paymentDateText}</div>
                 </div>
             </section>
 

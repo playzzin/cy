@@ -11,6 +11,7 @@ import { companyService } from '../../services/companyService';
 import { dailyReportService, type DailyReportWorkerRow } from '../../services/dailyReportService';
 import { laborExchangeService, type LaborExchangeItem, type TeamExchangeSummary } from '../../services/laborExchangeService';
 import { manpowerService, type Worker as ManpowerWorker } from '../../services/manpowerService';
+import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../services/teamService';
 import { teamSettlementService } from '../../services/teamSettlementService';
 import { vehicleBillingService } from '../../services/vehicleBillingService';
@@ -32,6 +33,7 @@ import type {
 } from '../../types/teamSettlement';
 import type { Vehicle, VehicleExpenseRecord } from '../../types/vehicle';
 import type { VehicleBillingDocument } from '../../types/vehicleBilling';
+import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../../types/teamExpenseLedger';
 
 type LoadState =
   | { status: 'idle' }
@@ -86,6 +88,24 @@ const safeNumber = (value: unknown): number => {
     return Number.isFinite(n) ? n : 0;
   }
   return 0;
+};
+
+const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
+  meal: '식대',
+  parking: '주차',
+  fuel: '유류',
+  toll: '통행료',
+  material: '자재',
+  tool: '공구',
+  deposit: '보증금',
+  marking: '마킹',
+  fieldGoods: '현장물품',
+  equipment: '장비비',
+  etc: '기타'
+};
+
+const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
+  return teamExpenseCategoryLabels[category] ?? '기타';
 };
 
 const parseYmdDate = (value: string): Date | null => {
@@ -206,14 +226,17 @@ const formatPurchaseOrigin = (origin: TeamSettlementPurchaseItem['origin']): str
 };
 
 const formatAdditionOrigin = (origin: TeamSettlementAdditionItem['origin']): string => {
+  if (origin === 'team_expense_claim') return '경비';
   if (origin === 'manual') return '수기';
   return '수기';
 };
 
 const formatDeductionOrigin = (origin: TeamSettlementDeductionItem['origin']): string => {
+  if (origin === 'team_expense_claim') return '경비';
   if (origin === 'office_expense') return '사무실비';
   if (origin === 'daily_wage_payroll') return '일급제 급여';
   if (origin === 'monthly_wage_payroll') return '월급제 급여';
+  if (origin === 'service_team_payroll') return '용역팀 급여';
   if (origin === 'accommodation_billing') return '숙소';
   if (origin === 'vehicle_billing') return '차량';
   if (origin === 'card_billing') return '카드';
@@ -271,6 +294,7 @@ type DeductionSourceData = {
   cardDocs: CardBillingDocument[];
   cards: Card[];
   cardTransactions: CardTransaction[];
+  teamExpenseClaims: TeamExpenseClaim[];
   workers: ManpowerWorker[];
 };
 
@@ -284,6 +308,7 @@ const createEmptyDeductionSourceData = (): DeductionSourceData => ({
   cardDocs: [],
   cards: [],
   cardTransactions: [],
+  teamExpenseClaims: [],
   workers: []
 });
 
@@ -460,6 +485,7 @@ export const TeamSettlementPage: React.FC = () => {
           cardDocs,
           cards,
           cardTransactions,
+          teamExpenseClaims,
           workers
         ] = await Promise.all([
           accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
@@ -471,6 +497,7 @@ export const TeamSettlementPage: React.FC = () => {
           cardBillingService.getBillingsByMonth(yearMonth),
           cardService.getCards(),
           cardService.getTransactionsByMonth(yearMonth),
+          teamExpenseLedgerService.getClaimsByMonth(yearMonth),
           manpowerService.getWorkers()
         ]);
 
@@ -485,6 +512,7 @@ export const TeamSettlementPage: React.FC = () => {
           cardDocs,
           cards,
           cardTransactions,
+          teamExpenseClaims,
           workers
         });
       } catch (error) {
@@ -629,7 +657,11 @@ export const TeamSettlementPage: React.FC = () => {
 
   const avgUnitPrice = useMemo(() => {
     const payrollAmountTotal = (doc?.deductions ?? [])
-      .filter((d) => d.origin === 'daily_wage_payroll' || d.origin === 'monthly_wage_payroll')
+      .filter((d) => (
+        d.origin === 'daily_wage_payroll' ||
+        d.origin === 'monthly_wage_payroll' ||
+        d.origin === 'service_team_payroll'
+      ))
       .reduce((sum, d) => sum + safeNumber(d.amount), 0);
 
     const getWorkerTeamId = (r: DailyReportWorkerRow): string => {
@@ -637,18 +669,36 @@ export const TeamSettlementPage: React.FC = () => {
       return String(v ?? '').trim();
     };
 
+    const getResponsibleTeamId = (r: DailyReportWorkerRow): string => {
+      const v = r.responsibleTeamId ?? r.teamId ?? '';
+      return String(v ?? '').trim();
+    };
+
+    const isDirectWorkKind = (r: DailyReportWorkerRow): boolean => {
+      const raw = String(r.siteType ?? '').trim();
+      const kind = raw === '도급' || raw === '직영' || raw === '지원' ? raw : '직영';
+      return kind === '도급' || kind === '직영';
+    };
+
     const normalizeSalaryModel = (r: DailyReportWorkerRow): string => {
       const raw = typeof r.salaryModel === 'string' ? r.salaryModel : (typeof r.payType === 'string' ? r.payType : '');
       const trimmed = String(raw ?? '').trim();
-      return trimmed || '일급제';
+      if (!trimmed) return '일급제';
+      if (trimmed.includes('용역')) return '용역팀';
+      if (trimmed.includes('월급')) return '월급제';
+      if (trimmed.includes('일급') || trimmed.includes('일당')) return '일급제';
+      return trimmed;
     };
 
     const payrollManDayTotal = detailRows
       .filter((r) => {
-        const workerTeamId = getWorkerTeamId(r);
-        if (!workerTeamId || !matchesTeam(workerTeamId)) return false;
         const model = normalizeSalaryModel(r);
-        return model === '일급제' || model === '월급제';
+        if (model === '용역팀') {
+          const responsibleTeamId = getResponsibleTeamId(r);
+          return Boolean(responsibleTeamId && matchesTeam(responsibleTeamId) && isDirectWorkKind(r));
+        }
+        const workerTeamId = getWorkerTeamId(r);
+        return Boolean(workerTeamId && matchesTeam(workerTeamId) && (model === '일급제' || model === '월급제'));
       })
       .reduce((sum, r) => sum + safeNumber(r.manDay), 0);
 
@@ -972,6 +1022,11 @@ export const TeamSettlementPage: React.FC = () => {
         rows: Array<{ subject: string; label: string; amount: number; date?: string; note?: string }>;
         totalAmount: number;
       }
+      | {
+        kind: 'team_expense_claim';
+        rows: Array<{ date: string; subject: string; label: string; amount: number; note?: string }>;
+        totalAmount: number;
+      }
       | null => {
       if (!doc) return null;
 
@@ -1004,27 +1059,52 @@ export const TeamSettlementPage: React.FC = () => {
         return { kind: 'office_expense', sites, totalManDay, totalAmount };
       }
 
-      if (item.origin === 'daily_wage_payroll' || item.origin === 'monthly_wage_payroll') {
-        const salaryModel = item.origin === 'daily_wage_payroll' ? '일급제' : '월급제';
+      if (
+        item.origin === 'daily_wage_payroll' ||
+        item.origin === 'monthly_wage_payroll' ||
+        item.origin === 'service_team_payroll'
+      ) {
+        const salaryModel =
+          item.origin === 'daily_wage_payroll' ? '일급제' :
+            item.origin === 'monthly_wage_payroll' ? '월급제' : '용역팀';
 
         const getWorkerTeamId = (r: DailyReportWorkerRow): string => {
           const v = r.workerTeamId ?? r.teamId ?? '';
           return String(v ?? '').trim();
         };
 
+        const getResponsibleTeamId = (r: DailyReportWorkerRow): string => {
+          const v = r.responsibleTeamId ?? r.teamId ?? '';
+          return String(v ?? '').trim();
+        };
+
+        const isDirectWorkKind = (r: DailyReportWorkerRow): boolean => {
+          const raw = String(r.siteType ?? '').trim();
+          const kind = raw === '도급' || raw === '직영' || raw === '지원' ? raw : '직영';
+          return kind === '도급' || kind === '직영';
+        };
+
         const normalizeSalaryModel = (r: DailyReportWorkerRow): string => {
           const raw = typeof r.salaryModel === 'string' ? r.salaryModel : (typeof r.payType === 'string' ? r.payType : '');
           const trimmed = String(raw ?? '').trim();
-          return trimmed || '일급제';
+          if (!trimmed) return '일급제';
+          if (trimmed.includes('용역')) return '용역팀';
+          if (trimmed.includes('월급')) return '월급제';
+          if (trimmed.includes('일급') || trimmed.includes('일당')) return '일급제';
+          return trimmed;
         };
 
         const grouped = new Map<string, { workerId: string; workerName: string; manDay: number; amount: number }>();
 
         detailRows
           .filter((r) => {
+            if (normalizeSalaryModel(r) !== salaryModel) return false;
+            if (salaryModel === '용역팀') {
+              const responsibleTeamId = getResponsibleTeamId(r);
+              return Boolean(responsibleTeamId && matchesTeam(responsibleTeamId) && isDirectWorkKind(r));
+            }
             const workerTeamId = getWorkerTeamId(r);
-            if (!workerTeamId || !matchesTeam(workerTeamId)) return false;
-            return normalizeSalaryModel(r) === salaryModel;
+            return Boolean(workerTeamId && matchesTeam(workerTeamId));
           })
           .forEach((r) => {
             const workerId = String(r.workerId ?? '').trim();
@@ -1391,6 +1471,41 @@ export const TeamSettlementPage: React.FC = () => {
 
         const totalAmount = ledgerRows.reduce((sum, row) => sum + row.amount, 0);
         return { kind: 'card_billing', mode: 'ledger', rows: ledgerRows, totalAmount };
+      }
+
+      if (item.origin === 'team_expense_claim') {
+        const itemIdParts = itemIdText.split(':');
+        const targetClaimId = itemIdParts.length >= 3 ? itemIdParts[2] : '';
+        const rows = deductionSourceData.teamExpenseClaims
+          .filter((claim) => claim.status === 'charged' || claim.status === 'settled')
+          .filter((claim) => !targetClaimId || String(claim.id ?? '') === targetClaimId)
+          .filter((claim) => {
+            const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+            if (isOtherExpense) return matchesTeamByIdOrName(claim.payerTeamId, claim.payerTeamName);
+            return matchesTeamByIdOrName(claim.chargeToTeamId, claim.chargeToTeamName);
+          })
+          .map((claim) => {
+            const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+            const subject = isOtherExpense
+              ? (claim.payerTeamName || selectedTeamName || '-')
+              : (claim.payerTeamName || '-');
+            const description = String(claim.description ?? '').trim();
+            return {
+              date: String(claim.date ?? '').trim(),
+              subject,
+              label: `${getTeamExpenseCategoryLabel(claim.category)}${description ? ` - ${description}` : ''}`,
+              amount: safeNumber(claim.amount),
+              note: [
+                isOtherExpense ? '기타청구' : '내야 할 후청구',
+                String(claim.siteName ?? '').trim(),
+                String(claim.cardLabel ?? '').trim()
+              ].filter(Boolean).join(' / ')
+            };
+          })
+          .filter((row) => row.amount > 0);
+
+        const totalAmount = rows.reduce((sum, row) => sum + row.amount, 0);
+        return { kind: 'team_expense_claim', rows, totalAmount };
       }
 
       return null;
@@ -2258,6 +2373,8 @@ export const TeamSettlementPage: React.FC = () => {
                         item.origin === 'office_expense' ||
                         item.origin === 'daily_wage_payroll' ||
                         item.origin === 'monthly_wage_payroll' ||
+                        item.origin === 'service_team_payroll' ||
+                        item.origin === 'team_expense_claim' ||
                         item.origin === 'accommodation_billing' ||
                         item.origin === 'vehicle_billing' ||
                         item.origin === 'card_billing'
@@ -2579,6 +2696,55 @@ export const TeamSettlementPage: React.FC = () => {
                                                 <td className="px-2 py-2 border">{row.label}</td>
                                                 <td className="px-2 py-2 border">{row.note ?? '-'}</td>
                                                 <td className="px-2 py-2 border">{row.date ?? '-'}</td>
+                                                <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
+                                              </tr>
+                                            ))
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+
+                                    <div className="mt-3 text-sm">
+                                      <div className="flex items-center justify-between mt-1">
+                                        <div className="text-slate-600">총금액</div>
+                                        <div className="font-bold text-slate-900">{formatCurrency(detail.totalAmount)}원</div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {detail.kind === 'team_expense_claim' && (
+                                  <div>
+                                    <div className="text-sm font-semibold text-slate-800">경비 차감 상세</div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                      청구완료/정산완료 경비내역 기준
+                                    </div>
+
+                                    <div className="mt-3 overflow-auto">
+                                      <table className="w-full text-xs border-collapse">
+                                        <thead>
+                                          <tr className="bg-slate-50 text-slate-600">
+                                            <th className="text-left px-2 py-2 border">일자</th>
+                                            <th className="text-left px-2 py-2 border">상대/대상</th>
+                                            <th className="text-left px-2 py-2 border">항목</th>
+                                            <th className="text-left px-2 py-2 border">비고</th>
+                                            <th className="text-right px-2 py-2 border">금액</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {detail.rows.length === 0 ? (
+                                            <tr>
+                                              <td className="px-2 py-2 border text-slate-500" colSpan={5}>
+                                                데이터 없음
+                                              </td>
+                                            </tr>
+                                          ) : (
+                                            detail.rows.map((row, idx) => (
+                                              <tr key={`team-expense-row-${idx}`} className="bg-white">
+                                                <td className="px-2 py-2 border">{row.date || '-'}</td>
+                                                <td className="px-2 py-2 border text-slate-800 font-medium">{row.subject}</td>
+                                                <td className="px-2 py-2 border">{row.label}</td>
+                                                <td className="px-2 py-2 border">{row.note || '-'}</td>
                                                 <td className="px-2 py-2 border text-right">{formatCurrency(row.amount)}</td>
                                               </tr>
                                             ))

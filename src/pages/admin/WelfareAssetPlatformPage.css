@@ -1,0 +1,587 @@
+.welfare-game-stage {
+  position: relative;
+  display: flex;
+  min-height: clamp(720px, 78vh, 860px);
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: 8px;
+  background-position: center top;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.28), 0 28px 70px rgba(8, 47, 73, 0.34);
+}
+
+.welfare-game-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(186, 230, 253, 0.36), transparent 28%),
+    linear-gradient(180deg, rgba(8, 47, 73, 0.04), rgba(2, 6, 23, 0.58));
+  pointer-events: none;
+}
+
+.welfare-game-stage::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border: 1px solid rgba(186, 230, 253, 0.22);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.welfare-arcade-shell {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 470px);
+  border: 1px solid rgba(186, 230, 253, 0.38);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(2, 6, 23, 0.92));
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.welfare-ocean-scenic-space {
+  position: relative;
+  z-index: 1;
+  min-height: clamp(230px, 30vw, 360px);
+  flex: 1 1 260px;
+  width: 100%;
+  pointer-events: none;
+}
+
+.welfare-ocean-control-deck {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 100%;
+  gap: 14px;
+  align-items: end;
+}
+
+.welfare-ocean-event-panel {
+  min-width: 0;
+}
+
+.welfare-arcade-shell--compact {
+  width: min(100%, 390px);
+}
+
+.welfare-arcade-shell--compact .welfare-reel-cell {
+  --reel-distance: -504px;
+  height: 126px;
+}
+
+.welfare-arcade-shell--compact .welfare-reel-face {
+  min-height: 126px;
+  padding: 8px;
+}
+
+.welfare-arcade-shell--compact .welfare-reel-token {
+  min-height: 96px;
+}
+
+.welfare-arcade-shell--compact .welfare-reel-prize-sprite {
+  width: 44px;
+}
+
+.welfare-arcade-shell--compact .welfare-stage-badge {
+  height: 34px;
+  width: 34px;
+  font-size: 15px;
+}
+
+@media (min-width: 1536px) {
+  .welfare-ocean-control-deck {
+    grid-template-columns: minmax(286px, 0.86fr) minmax(0, 1fr);
+  }
+}
+
+.welfare-coin-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.welfare-coin-drop {
+  position: absolute;
+  top: -120px;
+  left: var(--coin-left);
+  width: var(--coin-size);
+  max-width: 92px;
+  opacity: 0;
+  filter: drop-shadow(0 18px 22px rgba(2, 6, 23, 0.45));
+  transform-origin: center;
+  animation: welfareCoinFall var(--coin-duration) linear infinite;
+  animation-delay: var(--coin-delay);
+}
+
+.welfare-coin-drop.is-result {
+  filter: drop-shadow(0 18px 22px rgba(2, 6, 23, 0.45)) drop-shadow(0 0 18px rgba(250, 204, 21, 0.48));
+}
+
+.welfare-reel-cell {
+  position: relative;
+  --reel-distance: -640px;
+  height: 160px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.42);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(125, 211, 252, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.96));
+  box-shadow: inset 0 0 28px rgba(8, 145, 178, 0.28), 0 14px 30px rgba(2, 6, 23, 0.26);
+}
+
+.welfare-reel-cell::before,
+.welfare-reel-cell::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 3;
+  height: 40px;
+  pointer-events: none;
+}
+
+.welfare-reel-cell::before {
+  top: 0;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.9), transparent);
+}
+
+.welfare-reel-cell::after {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(2, 6, 23, 0.9), transparent);
+}
+
+.welfare-reel-strip {
+  display: flex;
+  flex-direction: column;
+  animation: welfareReelSpin var(--reel-duration) cubic-bezier(0.18, 0.88, 0.26, 1) 1 both;
+  animation-delay: var(--reel-delay);
+}
+
+.welfare-reel-face {
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.welfare-reel-token {
+  display: flex;
+  min-height: 118px;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+}
+
+.welfare-reel-token.is-hit {
+  border-color: rgba(250, 204, 21, 0.58);
+  background:
+    radial-gradient(circle at 50% 16%, rgba(250, 204, 21, 0.24), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 0 28px rgba(250, 204, 21, 0.24), 0 0 22px rgba(250, 204, 21, 0.16);
+}
+
+.welfare-reel-prize-sprite {
+  width: 58px;
+  aspect-ratio: 1;
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  filter: drop-shadow(0 10px 12px rgba(2, 6, 23, 0.35));
+  transform-origin: center;
+}
+
+.welfare-reel-token.is-hit .welfare-reel-prize-sprite {
+  animation: welfarePrizeSpritePop 900ms cubic-bezier(0.16, 1, 0.3, 1);
+  filter: drop-shadow(0 10px 12px rgba(2, 6, 23, 0.35)) drop-shadow(0 0 16px rgba(250, 204, 21, 0.56));
+}
+
+.welfare-stage-badge {
+  display: inline-flex;
+  height: 42px;
+  width: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 19px;
+  font-weight: 900;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 12px 24px rgba(2, 6, 23, 0.34);
+}
+
+.welfare-reel-result {
+  animation: welfareResultPop 620ms cubic-bezier(0.2, 0.9, 0.24, 1.24);
+}
+
+.welfare-result-coin {
+  width: clamp(58px, 9vw, 88px);
+  filter: drop-shadow(0 16px 24px rgba(120, 53, 15, 0.22));
+  animation: welfareCoinPop 880ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.welfare-dynamic-coin {
+  display: grid;
+  aspect-ratio: 1;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(250, 204, 21, 0.82);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.58), transparent 18%),
+    radial-gradient(circle, #facc15 0%, #f59e0b 52%, #92400e 100%);
+  box-shadow:
+    inset 0 0 0 8px rgba(253, 230, 138, 0.34),
+    inset 0 -14px 22px rgba(120, 53, 15, 0.24),
+    0 16px 24px rgba(120, 53, 15, 0.22);
+}
+
+.welfare-dynamic-coin span {
+  max-width: 78%;
+  color: #451a03;
+  font-size: clamp(11px, 1.7vw, 16px);
+  font-weight: 900;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.welfare-result-prize-sprite {
+  width: clamp(74px, 10vw, 108px);
+  aspect-ratio: 1;
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  filter: drop-shadow(0 18px 24px rgba(2, 6, 23, 0.34)) drop-shadow(0 0 18px rgba(250, 204, 21, 0.48));
+  animation: welfarePrizeSpritePop 900ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.welfare-ocean-win-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.welfare-ocean-win-scene::before {
+  content: "";
+  position: absolute;
+  width: min(62%, 460px);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.28), rgba(34, 211, 238, 0.14) 42%, transparent 68%);
+  animation: welfarePrizeGlow 1.25s ease-in-out infinite;
+}
+
+.welfare-ocean-win-sprite {
+  position: relative;
+  width: min(38vw, 360px);
+  min-width: 180px;
+  aspect-ratio: 1;
+  background-repeat: no-repeat;
+  background-size: 200% 200%;
+  opacity: 0.88;
+  filter: drop-shadow(0 32px 44px rgba(2, 6, 23, 0.42)) drop-shadow(0 0 24px rgba(125, 211, 252, 0.48));
+  animation: welfareOceanPrizeSwim 1.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.welfare-prize-glow {
+  position: absolute;
+  inset: -30%;
+  z-index: 0;
+  background: radial-gradient(circle, rgba(250, 204, 21, 0.18), transparent 56%);
+  animation: welfarePrizeGlow 1.9s ease-in-out infinite;
+}
+
+.welfare-roulette-panel {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(250, 204, 21, 0.12), transparent 26%),
+    linear-gradient(135deg, #ffffff, #f8fafc 52%, #eef6ff);
+}
+
+.dark .welfare-roulette-panel {
+  background:
+    radial-gradient(circle at 14% 12%, rgba(250, 204, 21, 0.14), transparent 28%),
+    linear-gradient(135deg, #0f172a, #111827 54%, #082f49);
+}
+
+.welfare-roulette-machine {
+  position: relative;
+  display: grid;
+  width: min(100%, 340px);
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.78), rgba(226, 232, 240, 0.88) 58%, rgba(15, 23, 42, 0.18) 59%, rgba(15, 23, 42, 0.42) 100%);
+  box-shadow: 0 26px 62px rgba(15, 23, 42, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.dark .welfare-roulette-machine {
+  background:
+    radial-gradient(circle, rgba(30, 41, 59, 0.92), rgba(2, 6, 23, 0.92) 58%, rgba(125, 211, 252, 0.16) 59%, rgba(15, 23, 42, 0.8) 100%);
+  box-shadow: 0 28px 70px rgba(2, 6, 23, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welfare-roulette-pointer {
+  position: absolute;
+  top: -3px;
+  z-index: 5;
+  width: 34px;
+  height: 46px;
+  background: linear-gradient(180deg, #fef3c7, #f59e0b 62%, #92400e);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  filter: drop-shadow(0 10px 10px rgba(120, 53, 15, 0.28));
+}
+
+.welfare-roulette-wheel {
+  position: relative;
+  width: 84%;
+  aspect-ratio: 1;
+  border: 8px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.28), inset 0 0 36px rgba(2, 6, 23, 0.28);
+  transform: rotate(var(--roulette-angle));
+  transition: transform 2.25s cubic-bezier(0.16, 0.92, 0.18, 1);
+}
+
+.welfare-roulette-wheel::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: inherit;
+}
+
+.welfare-roulette-wheel.is-spinning {
+  filter: saturate(1.18) drop-shadow(0 0 18px rgba(124, 58, 237, 0.22));
+}
+
+.welfare-roulette-wheel.is-revealed {
+  filter: drop-shadow(0 0 22px rgba(250, 204, 21, 0.24));
+}
+
+.welfare-roulette-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  width: 74px;
+  margin-top: -24px;
+  margin-left: -37px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-weight: 900;
+  line-height: 1.05;
+  text-align: center;
+  text-shadow: 0 2px 6px rgba(2, 6, 23, 0.42);
+}
+
+.welfare-roulette-label span {
+  font-size: 16px;
+}
+
+.welfare-roulette-label small {
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.welfare-roulette-hub {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  width: 35%;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid rgba(250, 204, 21, 0.72);
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(254, 249, 195, 0.96), rgba(245, 158, 11, 0.9));
+  box-shadow: 0 14px 28px rgba(120, 53, 15, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+.welfare-roulette-hub::before {
+  content: "";
+  position: absolute;
+  inset: 10%;
+  border: 1px solid rgba(146, 64, 14, 0.34);
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.52), transparent 20%),
+    radial-gradient(circle, rgba(251, 191, 36, 0.18), rgba(146, 64, 14, 0.12));
+  box-shadow: inset 0 0 0 6px rgba(253, 230, 138, 0.26);
+}
+
+.welfare-roulette-hub span {
+  position: relative;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgba(120, 53, 15, 0.28);
+  padding: 4px 10px;
+  color: #451a03;
+  font-size: clamp(11px, 2.8vw, 16px);
+  font-weight: 900;
+  line-height: 1.2;
+  max-width: 82%;
+  overflow-wrap: anywhere;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+@keyframes welfareCoinFall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -80px, 0) rotateY(0deg) rotateZ(-10deg) scale(0.58);
+  }
+  10% {
+    opacity: var(--coin-opacity);
+  }
+  72% {
+    opacity: var(--coin-opacity);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--coin-drift), 620px, 0) rotateY(780deg) rotateZ(18deg) scale(1.05);
+  }
+}
+
+@keyframes welfareReelSpin {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(var(--reel-distance));
+  }
+}
+
+@keyframes welfarePrizeSpritePop {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.72) rotate(-8deg);
+  }
+  68% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.08) rotate(3deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes welfareOceanPrizeSwim {
+  0% {
+    opacity: 0;
+    transform: translate3d(-22%, 18%, 0) scale(0.64) rotate(-8deg);
+  }
+  62% {
+    opacity: 0.96;
+    transform: translate3d(4%, -4%, 0) scale(1.08) rotate(2deg);
+  }
+  100% {
+    opacity: 0.88;
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes welfareResultPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes welfareCoinPop {
+  0% {
+    opacity: 0;
+    transform: translateY(-28px) rotateY(0deg) scale(0.72);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotateY(360deg) scale(1);
+  }
+}
+
+@keyframes welfarePrizeGlow {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.95);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@media (max-width: 640px) {
+  .welfare-game-stage {
+    min-height: auto;
+  }
+
+  .welfare-ocean-scenic-space {
+    min-height: 210px;
+    flex-basis: 210px;
+  }
+
+  .welfare-reel-cell {
+    --reel-distance: -544px;
+    height: 136px;
+  }
+
+  .welfare-reel-face {
+    min-height: 136px;
+  }
+
+  .welfare-arcade-shell--compact .welfare-reel-cell {
+    --reel-distance: -448px;
+    height: 112px;
+  }
+
+  .welfare-arcade-shell--compact .welfare-reel-face {
+    min-height: 112px;
+    padding: 7px;
+  }
+
+  .welfare-arcade-shell--compact .welfare-reel-token {
+    min-height: 84px;
+  }
+
+  .welfare-arcade-shell--compact .welfare-reel-prize-sprite {
+    width: 38px;
+  }
+
+  .welfare-arcade-shell--compact .welfare-stage-badge {
+    height: 30px;
+    width: 30px;
+    font-size: 13px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welfare-coin-drop,
+  .welfare-reel-strip,
+  .welfare-reel-result,
+  .welfare-reel-prize-sprite,
+  .welfare-result-prize-sprite,
+  .welfare-ocean-win-sprite,
+  .welfare-result-coin,
+  .welfare-prize-glow {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+  }
+}

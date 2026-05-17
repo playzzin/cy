@@ -23,6 +23,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'payroll-payslip': true,
         'smart-memo': true,
         'test-settings': true,
+        'welfare-assets': true,
         'system-config': true,
         'jeonkuk-dashboard': true,
         'jeonkuk-status': true
@@ -39,6 +40,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'payroll-payslip': true,
         'smart-memo': false,
         'test-settings': false,
+        'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
         'jeonkuk-status': false
@@ -55,6 +57,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
         'payroll-payslip': true, // 본인 명세서만 조회
         'smart-memo': false,
         'test-settings': false,
+        'welfare-assets': false,
         'system-config': false,
         'jeonkuk-dashboard': false,
         'jeonkuk-status': false

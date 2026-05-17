@@ -5,14 +5,12 @@ import {
     faArrowsRotate,
     faCheck,
     faCircleInfo,
-    faLink,
     faShieldHalved,
     faSpinner,
     faSitemap,
     faTag,
     faUserGear,
-    faUserTag,
-    faXmark
+    faUserTag
 } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { useAuth } from '../../contexts/AuthContext';
@@ -24,6 +22,7 @@ import { menuServiceV11 } from '../../services/menuServiceV11';
 import { MenuItem, SiteDataType } from '../../types/menu';
 import { UserRole } from '../../types/roles';
 import { MENU_PATHS } from '../../constants/menuPaths';
+import AccountLinkManager from '../../components/admin/AccountLinkManager';
 
 type CanonicalSystemRole = 'admin' | 'manager' | 'user';
 
@@ -114,8 +113,6 @@ const UserManagementPage: React.FC = () => {
 
     const [search, setSearch] = useState('');
     const [selectedUserId, setSelectedUserId] = useState('');
-    const [workerSearch, setWorkerSearch] = useState('');
-    const [linkWorkerId, setLinkWorkerId] = useState('');
 
     const [draftRole, setDraftRole] = useState<CanonicalSystemRole>('user');
     const [draftPosition, setDraftPosition] = useState('일반');
@@ -170,19 +167,21 @@ const UserManagementPage: React.FC = () => {
         return map;
     }, [workers]);
 
-    const ownerByWorkerId = useMemo(() => {
-        const map = new Map<string, string>();
+    const linkedWorkersByUserId = useMemo(() => {
+        const map = new Map<string, Worker[]>();
         users.forEach((user) => {
+            const linked = new Map<string, Worker>();
             (user.linkedWorkerIds || []).forEach((id) => {
-                const key = String(id);
-                map.set(key, user.uid);
-                const worker = workerById.get(key);
-                if (worker?.id) map.set(String(worker.id), user.uid);
-                if (worker?.legacyId) map.set(String(worker.legacyId), user.uid);
+                const worker = workerById.get(String(id));
+                if (worker?.id) linked.set(String(worker.id), worker);
             });
+            workers.forEach((worker) => {
+                if (worker.uid === user.uid && worker.id) linked.set(String(worker.id), worker);
+            });
+            map.set(user.uid, Array.from(linked.values()));
         });
         return map;
-    }, [users, workerById]);
+    }, [users, workers, workerById]);
 
     const validPositionNames = useMemo(() => {
         return new Set(positions.map((position) => String(position.name).trim()).filter(Boolean));
@@ -190,9 +189,7 @@ const UserManagementPage: React.FC = () => {
 
     const integrityRows = useMemo(() => {
         return users.map((user) => {
-            const linkedWorkers = (user.linkedWorkerIds || [])
-                .map((id) => workerById.get(String(id)))
-                .filter((worker): worker is Worker => Boolean(worker));
+            const linkedWorkers = linkedWorkersByUserId.get(user.uid) || [];
             const primaryLinkedWorker = linkedWorkers[0] || null;
 
             const basePosition = String(user.position || '').trim();
@@ -216,7 +213,7 @@ const UserManagementPage: React.FC = () => {
                 invalidAdditionalPositions
             };
         });
-    }, [users, workerById, userPositionMap, validPositionNames]);
+    }, [users, linkedWorkersByUserId, userPositionMap, validPositionNames]);
 
     const integritySummary = useMemo(() => {
         return {
@@ -253,15 +250,14 @@ const UserManagementPage: React.FC = () => {
     );
     const selectedLinkedWorkers = useMemo(() => {
         if (!selectedUser) return [];
-        return (selectedUser.linkedWorkerIds || []).map((id) => workerById.get(String(id))).filter((worker): worker is Worker => Boolean(worker));
-    }, [selectedUser, workerById]);
+        return linkedWorkersByUserId.get(selectedUser.uid) || [];
+    }, [selectedUser, linkedWorkersByUserId]);
 
     useEffect(() => {
         if (!selectedUser) return;
         setDraftRole(normalizeSystemRole(selectedUser.role));
         setDraftPosition(String(selectedUser.position || selectedLinkedWorkers[0]?.role || '일반'));
         setDraftAdditionalPositions(userPositionMap[selectedUser.uid] || []);
-        setLinkWorkerId('');
     }, [selectedUser, selectedLinkedWorkers, userPositionMap]);
 
     const refreshAll = async () => {
@@ -296,19 +292,6 @@ const UserManagementPage: React.FC = () => {
         return { total, allowed, blocked: total - allowed };
     }, [previewLeaves, previewAliases]);
 
-    const availableWorkers = useMemo(() => {
-        if (!selectedUser) return [];
-        const q = workerSearch.trim().toLowerCase();
-        return workers.filter((worker) => {
-            const workerId = String(worker.id || '');
-            if (!workerId) return false;
-            const owner = ownerByWorkerId.get(workerId);
-            if (owner && owner !== selectedUser.uid) return false;
-            if (!q) return true;
-            return `${worker.name || ''} ${worker.idNumber || ''} ${worker.role || ''}`.toLowerCase().includes(q);
-        });
-    }, [workers, selectedUser, workerSearch, ownerByWorkerId]);
-
     const positionSummary = useMemo(() => {
         return positions.map((position) => ({
             position,
@@ -324,9 +307,7 @@ const UserManagementPage: React.FC = () => {
             let updatedCount = 0;
             for (const user of users) {
                 const basePosition = String(user.position || '').trim();
-                const linkedWorkers = (user.linkedWorkerIds || [])
-                    .map((id) => workerById.get(String(id)))
-                    .filter((worker): worker is Worker => Boolean(worker));
+                const linkedWorkers = linkedWorkersByUserId.get(user.uid) || [];
                 const linkedRole = String(linkedWorkers[0]?.role || '').trim();
                 if (!linkedRole) continue;
                 if (!validPositionNames.has(linkedRole)) continue;
@@ -352,8 +333,7 @@ const UserManagementPage: React.FC = () => {
             for (const user of users) {
                 const basePosition = String(user.position || '').trim();
                 if (!basePosition) continue;
-                for (const linkedWorkerId of user.linkedWorkerIds || []) {
-                    const linkedWorker = workerById.get(String(linkedWorkerId));
+                for (const linkedWorker of linkedWorkersByUserId.get(user.uid) || []) {
                     if (!linkedWorker?.id) continue;
                     if (String(linkedWorker.role || '').trim() === basePosition) continue;
                     await manpowerService.updateWorker(String(linkedWorker.id), { role: basePosition });
@@ -398,7 +378,7 @@ const UserManagementPage: React.FC = () => {
             await userService.updateUserRole(selectedUser.uid, draftRole);
             await userService.updateUserProfile(selectedUser.uid, { position: draftPosition });
             if (syncLinkedWorkerRole && draftPosition) {
-                await Promise.all((selectedUser.linkedWorkerIds || []).map((workerId) => manpowerService.updateWorker(String(workerId), { role: draftPosition })));
+                await Promise.all(selectedLinkedWorkers.map((worker) => worker.id ? manpowerService.updateWorker(String(worker.id), { role: draftPosition }) : Promise.resolve()));
             }
             await loadAll();
             Swal.fire('저장 완료', '사용자 권한과 기본 직책을 저장했습니다.', 'success');
@@ -421,41 +401,6 @@ const UserManagementPage: React.FC = () => {
             Swal.fire('오류', '추가 직책 저장에 실패했습니다.', 'error');
         } finally {
             setSavingAdditional(false);
-        }
-    };
-
-    const handleLinkWorker = async () => {
-        if (!selectedUser || !linkWorkerId) return;
-        try {
-            await userService.linkUserToWorker(selectedUser.uid, linkWorkerId, currentUser?.email || 'system');
-            setLinkWorkerId('');
-            await loadAll();
-            Swal.fire('완료', '작업자를 사용자에 연결했습니다.', 'success');
-        } catch (error) {
-            console.error('[UserManagementPage] link worker failed:', error);
-            Swal.fire('오류', '작업자 연결에 실패했습니다.', 'error');
-        }
-    };
-
-    const handleUnlinkWorker = async (workerId: string) => {
-        if (!selectedUser) return;
-        const confirm = await Swal.fire({
-            title: '연동 해제',
-            text: '선택한 작업자 연동을 해제하시겠습니까?',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: '해제',
-            cancelButtonText: '취소'
-        });
-        if (!confirm.isConfirmed) return;
-
-        try {
-            await userService.unlinkUserFromWorker(selectedUser.uid, workerId);
-            await loadAll();
-            Swal.fire('완료', '작업자 연동을 해제했습니다.', 'success');
-        } catch (error) {
-            console.error('[UserManagementPage] unlink worker failed:', error);
-            Swal.fire('오류', '작업자 연동 해제에 실패했습니다.', 'error');
         }
     };
 
@@ -549,6 +494,17 @@ const UserManagementPage: React.FC = () => {
                 </div>
             </section>
 
+            <AccountLinkManager
+                users={users}
+                workers={workers}
+                loading={refreshing}
+                selectedUserId={selectedUserId}
+                onSelectUser={setSelectedUserId}
+                onChanged={loadAll}
+                actorEmail={currentUser?.email || 'system'}
+                embedded
+            />
+
             <section className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                 <div className="xl:col-span-5 bg-white border border-slate-200 rounded-2xl overflow-hidden">
                     <div className="p-4 border-b border-slate-100"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="사용자 검색" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm" /></div>
@@ -604,19 +560,6 @@ const UserManagementPage: React.FC = () => {
                                             </button>
                                         );
                                     })}
-                                </div>
-                            </section>
-
-                            <section className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
-                                <h2 className="font-extrabold text-slate-800 flex items-center gap-2"><FontAwesomeIcon icon={faLink} className="text-emerald-500" />연동 작업자</h2>
-                                <div className="grid grid-cols-1 md:grid-cols-[1fr_220px_auto] gap-2">
-                                    <input value={workerSearch} onChange={(e) => setWorkerSearch(e.target.value)} placeholder="작업자 검색" className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
-                                    <select value={linkWorkerId} onChange={(e) => setLinkWorkerId(e.target.value)} className="px-3 py-2 border border-slate-200 rounded-lg text-sm"><option value="">작업자 선택</option>{availableWorkers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name} ({worker.role || '직책없음'})</option>)}</select>
-                                    <button onClick={handleLinkWorker} disabled={!linkWorkerId} className="px-3 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold disabled:opacity-50">연결</button>
-                                </div>
-                                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl">
-                                    {selectedLinkedWorkers.length === 0 && <div className="p-3 text-sm text-slate-400">연동 작업자가 없습니다.</div>}
-                                    {selectedLinkedWorkers.map((worker) => <div key={worker.id} className="p-3 flex items-center justify-between gap-2"><div><div className="font-bold text-slate-800">{worker.name}</div><div className="text-xs text-slate-500">직책: {worker.role || '-'} / 식별번호: {worker.idNumber || '-'}</div></div><button onClick={() => handleUnlinkWorker(String(worker.id))} className="px-2 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-bold"><FontAwesomeIcon icon={faXmark} className="mr-1" />해제</button></div>)}
                                 </div>
                             </section>
 

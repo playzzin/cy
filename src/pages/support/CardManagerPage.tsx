@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card } from '../../types/card';
 import { cardService } from '../../services/cardService';
 import { teamService, Team } from '../../services/teamService';
@@ -6,11 +7,10 @@ import { companyService } from '../../services/companyService';
 import { CardForm } from '../../components/card/CardForm';
 import { CardAssignmentManager } from '../../components/card/CardAssignmentManager';
 import { CardBillingTargetManager } from '../../components/card/CardBillingTargetManager';
-import { CardBillingManager } from '../../components/card/CardBillingManager';
 import { CardStatusBoard } from '../../components/card/CardStatusBoard';
 import { CardMonthlyLedger } from '../../components/card/CardMonthlyLedger';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes, faFileInvoiceDollar } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faCreditCard, faChartPie, faTable, faRotateRight, faCircleExclamation, faTimes, faHistory } from '@fortawesome/free-solid-svg-icons';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
 
 interface CardManagerPageProps {
@@ -18,6 +18,7 @@ interface CardManagerPageProps {
 }
 
 export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = false }) => {
+    const navigate = useNavigate();
     // Data State
     const [cards, setCards] = useState<Card[]>([]);
     const [loading, setLoading] = useState(true);
@@ -31,7 +32,6 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
 
     // Tab State
     const [activeTab, setActiveTab] = useState<'status' | 'ledger'>('status');
-    const [showBillingPanel, setShowBillingPanel] = useState(false);
 
     // Modal State
     const [isCardFormOpen, setIsCardFormOpen] = useState(false);
@@ -156,7 +156,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
     };
 
     return (
-        <div className={`${embedded ? 'space-y-6 bg-transparent min-h-full' : 'p-6 space-y-6 bg-slate-50 min-h-full'}`}>
+        <div className={`${embedded ? 'space-y-6 bg-transparent min-h-full w-full min-w-0' : 'p-6 space-y-6 bg-slate-50 min-h-full w-full min-w-0'}`}>
             {/* Header 섹션 */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
@@ -171,26 +171,18 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
 
                 <div className="flex items-center gap-2">
                     <button
+                        onClick={() => navigate('/support/cards/logs')}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm"
+                    >
+                        <FontAwesomeIcon icon={faHistory} />
+                        <span>청구 로그</span>
+                    </button>
+                    <button
                         onClick={handleRefresh}
                         className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
                         title="새로고침"
                     >
                         <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setActiveTab('status');
-                            setShowBillingPanel((prev) => !prev);
-                        }}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold transition-all border ${
-                            showBillingPanel
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                        }`}
-                    >
-                        <FontAwesomeIcon icon={faFileInvoiceDollar} />
-                        <span>{showBillingPanel ? '청구관리 닫기' : '청구관리'}</span>
                     </button>
                     <button
                         onClick={openCreateCard}
@@ -254,7 +246,7 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
             </div>
 
             {/* 메인 콘텐츠 영역 */}
-            <div className="min-h-0 flex-1">
+            <div className="min-h-0 flex-1 w-full min-w-0">
                 {loadError ? (
                     <div className="bg-rose-50 border border-rose-100 p-6 rounded-2xl flex flex-col items-center justify-center text-center">
                         <FontAwesomeIcon icon={faCircleExclamation} className="text-rose-500 text-3xl mb-3" />
@@ -263,40 +255,15 @@ export const CardManagerPage: React.FC<CardManagerPageProps> = ({ embedded = fal
                         <button onClick={handleRefresh} className="mt-4 px-4 py-2 bg-rose-100 text-rose-700 rounded-xl text-sm font-bold hover:bg-rose-200 transition-all">다시 시도</button>
                     </div>
                 ) : activeTab === 'status' ? (
-                    <div className="space-y-6">
-                        <CardStatusBoard
-                            cards={filteredCards}
-                            teams={teams}
-                            loading={loading}
-                            onEdit={openEditCard}
-                            onAssign={openAssignCard}
-                            onBillingTargetAssign={openBillingTargetCard}
-                            onDelete={handleDeleteCard}
-                        />
-
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                                <div>
-                                    <h2 className="text-lg font-extrabold text-slate-900">카드 청구관리</h2>
-                                    <p className="text-sm text-slate-500 font-medium mt-1">
-                                        현황판에서 배정 상태를 확인한 뒤 청구서를 생성/수정하세요.
-                                    </p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setShowBillingPanel((prev) => !prev)}
-                                    className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                                >
-                                    {showBillingPanel ? '청구관리 접기' : '청구관리 열기'}
-                                </button>
-                            </div>
-                            {showBillingPanel && (
-                                <div className="mt-4 pt-4 border-t border-slate-200">
-                                    <CardBillingManager cards={filteredCards} loadingCards={loading} onRefreshCards={handleRefresh} />
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                    <CardStatusBoard
+                        cards={filteredCards}
+                        teams={teams}
+                        loading={loading}
+                        onEdit={openEditCard}
+                        onAssign={openAssignCard}
+                        onBillingTargetAssign={openBillingTargetCard}
+                        onDelete={handleDeleteCard}
+                    />
                 ) : (
                     <CardMonthlyLedger cards={filteredCards} teams={teams} loadingCards={loading} />
                 )}

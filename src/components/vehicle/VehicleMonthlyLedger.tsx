@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
+import { faCar, faChevronLeft, faChevronRight, faFileInvoiceDollar, faSave, faExclamationTriangle, faUsers, faUser, faPen, faRotateRight, faEye, faBan } from '@fortawesome/free-solid-svg-icons';
 import { vehicleService } from '../../services/vehicleService';
+import { vehicleBillingService } from '../../services/vehicleBillingService';
 import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleExpenseRecord, VehicleExpenseType } from '../../types/vehicle';
+import { VehicleBillingCostItem, VehicleBillingDocument } from '../../types/vehicleBilling';
 import { Team } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
 import { iconMap } from '../../constants/iconMap';
+import { Timestamp } from 'firebase/firestore';
+import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 
 // ── 독립 EditableCell 컴포넌트 ──
 interface EditableCellProps {
@@ -172,6 +176,37 @@ interface VehicleMonthlyLedgerProps {
     loadingVehicles: boolean;
 }
 
+type BillingFilter = 'all' | 'unbilled' | 'draft' | 'confirmed' | 'blocked';
+type BillingRowStatus = 'unbilled' | 'draft' | 'confirmed' | 'partial' | 'blocked';
+
+const sanitizeBillingIdPart = (value: unknown): string => {
+    const text = String(value ?? '').trim();
+    return ['/', '#', '[', ']', '?'].reduce((safe, char) => safe.split(char).join('_'), text || 'row');
+};
+
+const BILLING_FILTERS: Array<{ value: BillingFilter; label: string }> = [
+    { value: 'all', label: '전체' },
+    { value: 'unbilled', label: '미청구' },
+    { value: 'draft', label: '작성중' },
+    { value: 'confirmed', label: '확정' },
+    { value: 'blocked', label: '청구불가' }
+];
+
+const getBillingStatusBadge = (status: BillingRowStatus) => {
+    switch (status) {
+        case 'confirmed':
+            return { label: '확정', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+        case 'draft':
+            return { label: '작성중', className: 'bg-amber-50 text-amber-700 border-amber-200' };
+        case 'partial':
+            return { label: '일부청구', className: 'bg-sky-50 text-sky-700 border-sky-200' };
+        case 'blocked':
+            return { label: '청구불가', className: 'bg-slate-100 text-slate-500 border-slate-200' };
+        default:
+            return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
+    }
+};
+
 export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     vehicles,
     teams = [],
@@ -187,6 +222,10 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
     const [rows, setRows] = useState<VehicleLedgerRow[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [billingDocuments, setBillingDocuments] = useState<VehicleBillingDocument[]>([]);
+    const [billingFilter, setBillingFilter] = useState<BillingFilter>('all');
+    const [billingProcessingId, setBillingProcessingId] = useState('');
+    const [billingEditor, setBillingEditor] = useState<{ row: VehicleLedgerRow; document: VehicleBillingDocument } | null>(null);
     const originalExpensesRef = useRef<VehicleExpenseRecord[]>([]);
 
     const normalizeKey = (value: unknown): string => String(value ?? '').trim();
@@ -328,26 +367,6 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
         if (rows.length > 0) return rows;
 
-        if (vehicle.currentAssigneeName && vehicle.currentAssigneeType) {
-            const fallbackAssignment = {
-                assigneeId: vehicle.currentAssigneeId || '',
-                assigneeType: vehicle.currentAssigneeType,
-                assigneeName: vehicle.currentAssigneeName
-            };
-            const team = resolveAssigneeTeam(fallbackAssignment);
-            return [{
-                id: `current-${vehicle.id}`,
-                assigneeId: normalizeKey(vehicle.currentAssigneeId),
-                assigneeType: vehicle.currentAssigneeType,
-                assigneeName: normalizeKey(vehicle.currentAssigneeName),
-                teamId: team.teamId,
-                teamName: team.teamName,
-                startDate: formatYmdDate(monthRange.monthStart),
-                endDate: formatYmdDate(monthRange.monthEnd),
-                overlapDays: monthRange.daysInMonth
-            }];
-        }
-
         return [{
             id: `unassigned-${vehicle.id}`,
             startDate: formatYmdDate(monthRange.monthStart),
@@ -392,11 +411,13 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         if (!yearMonth) return;
         setLoading(true);
         try {
-            const [expenses, assignmentList] = await Promise.all([
+            const [expenses, assignmentList, billings] = await Promise.all([
                 vehicleService.getExpensesByMonth(yearMonth),
-                vehicleService.listAllVehicleAssignments().catch(() => [] as VehicleAssignmentRecord[])
+                vehicleService.listAllVehicleAssignments().catch(() => [] as VehicleAssignmentRecord[]),
+                vehicleBillingService.getBillingsByMonth(yearMonth).catch(() => [] as VehicleBillingDocument[])
             ]);
             originalExpensesRef.current = expenses;
+            setBillingDocuments(billings);
 
             const newRows: VehicleLedgerRow[] = vehicles.flatMap(v => {
                 const fixed = v.contract?.monthlyFee ?? 0;
@@ -504,19 +525,216 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
 
         const assignedTeams = Array.from(teamMap.values());
         const assignedWorkers = Array.from(workerMap.values());
+        const buildTeamBadge = (teamId?: string | null, teamName?: string | null) => {
+            const rawTeamId = normalizeKey(teamId);
+            const rawTeamName = normalizeKey(teamName);
+            const team = rawTeamId ? teamByAnyId.get(rawTeamId) : teamByName.get(rawTeamName);
+            const name = normalizeKey(team?.name ?? rawTeamName);
+            if (!name) return null;
+            return {
+                key: `team:${normalizeKey(team?.id ?? rawTeamId ?? name)}`,
+                name,
+                color: team?.color || '#94a3b8',
+                icon: team?.icon || team?.iconKey || null
+            };
+        };
+
+        let billingTeams = assignedTeams;
+        let billingWorkers = assignedWorkers;
+        if (row.vehicle.billingTargetType === 'TEAM') {
+            const badge = buildTeamBadge(row.vehicle.billingTargetId, row.vehicle.billingTargetName);
+            billingTeams = badge ? [badge] : [];
+            billingWorkers = [];
+        } else if (row.vehicle.billingTargetType === 'WORKER') {
+            const targetId = normalizeKey(row.vehicle.billingTargetId);
+            const targetName = normalizeKey(row.vehicle.billingTargetName);
+            const worker = targetId ? workerByAnyId.get(targetId) : workerByName.get(targetName);
+            const workerName = normalizeKey(worker?.name ?? targetName);
+            const badge = buildTeamBadge(worker?.teamId ?? segment.teamId, worker?.teamName ?? segment.teamName);
+            billingTeams = badge ? [badge] : [];
+            billingWorkers = workerName ? [workerName] : [];
+        }
+
         const periodLabel = segment.startDate === segment.endDate
             ? segment.startDate
             : `${segment.startDate} ~ ${segment.endDate}`;
         return {
             assignedTeams,
             assignedWorkers,
-            billingTeams: assignedTeams,
-            billingWorkers: assignedWorkers,
+            billingTeams,
+            billingWorkers,
             primaryColor: assignedTeams[0]?.color || '#94a3b8',
             periodLabel,
             overlapDays: segment.overlapDays
         };
     };
+
+    const toKeySet = (values: Array<unknown>): Set<string> => {
+        return new Set(values.map((value) => normalizeKey(value)).filter(Boolean));
+    };
+
+    const intersects = (left: Set<string>, right: Set<string>): boolean => {
+        for (const value of left) {
+            if (right.has(value)) return true;
+        }
+        return false;
+    };
+
+    const resolveVehicleBillingIdentity = useCallback((row: VehicleLedgerRow) => {
+        const targetType = row.vehicle.billingTargetType || row.segment.assigneeType;
+        const targetId = normalizeKey(row.vehicle.billingTargetType ? row.vehicle.billingTargetId : row.segment.assigneeId);
+        const targetName = normalizeKey(row.vehicle.billingTargetType ? row.vehicle.billingTargetName : row.segment.assigneeName);
+
+        if (targetType === 'TEAM') {
+            const team = targetId ? teamByAnyId.get(targetId) : teamByName.get(targetName);
+            return {
+                issuedToType: 'team' as const,
+                teamIds: toKeySet([targetId, row.segment.teamId, team?.id, team?.legacyId]),
+                teamNames: toKeySet([targetName, row.segment.teamName, team?.name]),
+                workerIds: new Set<string>(),
+                workerNames: new Set<string>()
+            };
+        }
+
+        if (targetType === 'WORKER') {
+            const worker = targetId ? workerByAnyId.get(targetId) : workerByName.get(targetName);
+            return {
+                issuedToType: 'worker' as const,
+                teamIds: toKeySet([worker?.teamId, row.segment.teamId]),
+                teamNames: toKeySet([worker?.teamName, row.segment.teamName]),
+                workerIds: toKeySet([targetId, worker?.id, worker?.legacyId]),
+                workerNames: toKeySet([targetName, worker?.name])
+            };
+        }
+
+        return null;
+    }, [teamByAnyId, teamByName, workerByAnyId, workerByName]);
+
+    const resolveVehicleBillingTarget = useCallback((row: VehicleLedgerRow) => {
+        const targetType = row.vehicle.billingTargetType || row.segment.assigneeType;
+        const targetId = normalizeKey(row.vehicle.billingTargetType ? row.vehicle.billingTargetId : row.segment.assigneeId);
+        const targetName = normalizeKey(row.vehicle.billingTargetType ? row.vehicle.billingTargetName : row.segment.assigneeName);
+
+        if (targetType === 'TEAM') {
+            const team = targetId ? teamByAnyId.get(targetId) : teamByName.get(targetName);
+            const teamId = normalizeKey(team?.id ?? targetId ?? row.segment.teamId);
+            const teamName = normalizeKey(team?.name ?? targetName ?? row.segment.teamName);
+            if (!teamId) return null;
+            return {
+                issuedToType: 'team' as const,
+                teamId,
+                teamName,
+                assignedTeamId: normalizeKey(row.segment.teamId),
+                assignedTeamName: normalizeKey(row.segment.teamName),
+                issuedToWorkerId: undefined,
+                issuedToWorkerName: undefined
+            };
+        }
+
+        if (targetType === 'WORKER') {
+            const worker = targetId ? workerByAnyId.get(targetId) : workerByName.get(targetName);
+            const workerId = normalizeKey(worker?.id ?? targetId);
+            const workerName = normalizeKey(worker?.name ?? targetName);
+            const team = worker?.teamId
+                ? teamByAnyId.get(String(worker.teamId))
+                : (row.segment.teamId ? teamByAnyId.get(String(row.segment.teamId)) : teamByName.get(normalizeKey(row.segment.teamName)));
+            const teamId = normalizeKey(team?.id ?? worker?.teamId ?? row.segment.teamId);
+            const teamName = normalizeKey(team?.name ?? worker?.teamName ?? row.segment.teamName);
+            if (!workerId || !teamId) return null;
+            return {
+                issuedToType: 'worker' as const,
+                teamId,
+                teamName,
+                assignedTeamId: normalizeKey(row.segment.teamId),
+                assignedTeamName: normalizeKey(row.segment.teamName),
+                issuedToWorkerId: workerId,
+                issuedToWorkerName: workerName
+            };
+        }
+
+        return null;
+    }, [teamByAnyId, teamByName, workerByAnyId, workerByName]);
+
+    const getVehicleLedgerRowDocumentSuffix = useCallback((row: VehicleLedgerRow): string => {
+        return `__row_${sanitizeBillingIdPart(row.segment.id || row.id)}`;
+    }, []);
+
+    const hasVehicleLedgerRowMarker = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow): boolean => {
+        const suffix = getVehicleLedgerRowDocumentSuffix(row);
+        if (normalizeKey(doc.id).endsWith(suffix)) return true;
+        return (doc.lineItems ?? []).some((item) => (
+            normalizeKey(item.sourceLedgerRowId) === normalizeKey(row.id) ||
+            normalizeKey(item.sourceSegmentId) === normalizeKey(row.segment.id)
+        ));
+    }, [getVehicleLedgerRowDocumentSuffix]);
+
+    const matchesVehicleBillingDocument = useCallback((doc: VehicleBillingDocument, row: VehicleLedgerRow) => {
+        if (normalizeKey(doc.vehicleId) !== normalizeKey(row.vehicle.id)) return false;
+        if (normalizeKey(doc.yearMonth) !== normalizeKey(yearMonth)) return false;
+
+        const identity = resolveVehicleBillingIdentity(row);
+        if (!identity) return false;
+        if (normalizeKey(doc.issuedToType) !== identity.issuedToType) return false;
+
+        const docTeamIds = toKeySet([doc.teamId, doc.assignedTeamId]);
+        const docTeamNames = toKeySet([doc.teamName, doc.assignedTeamName]);
+        const teamMatches = intersects(identity.teamIds, docTeamIds) || intersects(identity.teamNames, docTeamNames);
+        if (!teamMatches) return false;
+
+        if (identity.issuedToType === 'worker') {
+            const docWorkerIds = toKeySet([doc.issuedToWorkerId]);
+            const docWorkerNames = toKeySet([doc.issuedToWorkerName]);
+            if (!(intersects(identity.workerIds, docWorkerIds) || intersects(identity.workerNames, docWorkerNames))) return false;
+        }
+
+        const hasLedgerMarkers = normalizeKey(doc.id).includes('__row_') || (doc.lineItems ?? []).some((item) => (
+            item.sourceType === 'vehicle_ledger' ||
+            Boolean(item.sourceLedgerRowId) ||
+            Boolean(item.sourceSegmentId)
+        ));
+
+        if (hasLedgerMarkers) {
+            return hasVehicleLedgerRowMarker(doc, row);
+        }
+
+        return Number(doc.totalAmount ?? 0) === Number(row.total ?? 0);
+    }, [resolveVehicleBillingIdentity, yearMonth, hasVehicleLedgerRowMarker]);
+
+    const getBillingDocumentsForRow = useCallback((row: VehicleLedgerRow) => {
+        return billingDocuments.filter((doc) => matchesVehicleBillingDocument(doc, row));
+    }, [billingDocuments, matchesVehicleBillingDocument]);
+
+    const getRowBillingState = useCallback((row: VehicleLedgerRow): {
+        status: BillingRowStatus;
+        documents: VehicleBillingDocument[];
+        reason?: string;
+    } => {
+        const identity = resolveVehicleBillingIdentity(row);
+        if (!identity || (identity.teamIds.size === 0 && identity.teamNames.size === 0)) {
+            return { status: 'blocked', documents: [], reason: '청구대상 없음' };
+        }
+        if (row.total <= 0) {
+            return { status: 'blocked', documents: [], reason: '금액 없음' };
+        }
+
+        const documents = getBillingDocumentsForRow(row);
+        if (documents.length === 0) return { status: 'unbilled', documents };
+
+        const confirmedCount = documents.filter((doc) => doc.status === 'CONFIRMED').length;
+        if (confirmedCount === documents.length) return { status: 'confirmed', documents };
+        if (confirmedCount > 0) return { status: 'partial', documents };
+        return { status: 'draft', documents };
+    }, [getBillingDocumentsForRow, resolveVehicleBillingIdentity]);
+
+    const billingRows = useMemo(() => {
+        return rows
+            .map((row, index) => ({ row, index, billingState: getRowBillingState(row) }))
+            .filter(({ billingState }) => {
+                if (billingFilter === 'all') return true;
+                if (billingFilter === 'draft') return billingState.status === 'draft' || billingState.status === 'partial';
+                return billingState.status === billingFilter;
+            });
+    }, [rows, billingFilter, getRowBillingState]);
 
     useEffect(() => {
         if (yearMonth) loadData();
@@ -601,6 +819,205 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
         }
     };
 
+    const buildLineItemsForRow = (row: VehicleLedgerRow): VehicleBillingCostItem[] => {
+        const source = {
+            sourceType: 'vehicle_ledger' as const,
+            sourceLedgerRowId: row.id,
+            sourceSegmentId: row.segment.id,
+            sourceStartDate: row.segment.startDate,
+            sourceEndDate: row.segment.endDate
+        };
+        const lineItems: VehicleBillingCostItem[] = [];
+
+        if (row.rentFee > 0) {
+            lineItems.push({
+                id: `rent-${sanitizeBillingIdPart(row.id)}`,
+                label: `렌트비 ${row.segment.startDate}~${row.segment.endDate}`,
+                amount: row.rentFee,
+                type: 'FIXED',
+                category: 'RENT',
+                ...source
+            });
+        }
+
+        if (row.leaseFee > 0) {
+            lineItems.push({
+                id: `lease-${sanitizeBillingIdPart(row.id)}`,
+                label: `리스비 ${row.segment.startDate}~${row.segment.endDate}`,
+                amount: row.leaseFee,
+                type: 'FIXED',
+                category: 'LEASE',
+                ...source
+            });
+        }
+
+        EXPENSE_TYPES.forEach((type) => {
+            const amount = row.amounts[type] ?? 0;
+            if (amount <= 0) return;
+            lineItems.push({
+                id: `${type.toLowerCase()}-${sanitizeBillingIdPart(row.id)}`,
+                label: `${EXPENSE_LABELS[type]} ${row.segment.startDate}~${row.segment.endDate}`,
+                amount,
+                type: 'VARIABLE',
+                category: type,
+                ...source
+            });
+        });
+
+        return lineItems;
+    };
+
+    const buildBillingDocumentForRow = (
+        row: VehicleLedgerRow,
+        existing?: VehicleBillingDocument
+    ): VehicleBillingDocument | null => {
+        const target = resolveVehicleBillingTarget(row);
+        if (!target) return null;
+
+        const lineItems = buildLineItemsForRow(row);
+        if (lineItems.length === 0) return null;
+
+        const fixedCost = lineItems
+            .filter((item) => item.type === 'FIXED')
+            .reduce((sum, item) => sum + item.amount, 0);
+        const variableCost = lineItems
+            .filter((item) => item.type !== 'FIXED')
+            .reduce((sum, item) => sum + item.amount, 0);
+        const baseId = vehicleBillingService.buildBillingDocumentId({
+            vehicleId: row.vehicle.id,
+            teamId: target.teamId,
+            issuedToType: target.issuedToType,
+            workerId: target.issuedToType === 'worker' ? target.issuedToWorkerId : undefined,
+            yearMonth
+        });
+
+        return {
+            id: existing?.id ?? `${baseId}${getVehicleLedgerRowDocumentSuffix(row)}`,
+            yearMonth,
+            vehicleId: row.vehicle.id,
+            vehiclePlate: row.vehicle.licensePlate,
+            assignedTeamId: target.assignedTeamId || undefined,
+            assignedTeamName: target.assignedTeamName || undefined,
+            teamId: target.teamId,
+            teamName: target.teamName,
+            issuedToType: target.issuedToType,
+            issuedToWorkerId: target.issuedToType === 'worker' ? target.issuedToWorkerId : undefined,
+            issuedToWorkerName: target.issuedToType === 'worker' ? target.issuedToWorkerName : target.teamName,
+            fixedCost,
+            variableCost,
+            totalAmount: fixedCost + variableCost,
+            status: 'DRAFT',
+            lineItems,
+            memo: existing?.memo ?? row.note,
+            createdAt: existing?.createdAt ?? Timestamp.now(),
+            updatedAt: Timestamp.now(),
+            confirmedAt: existing?.confirmedAt
+        };
+    };
+
+    const handleCreateOrRecalculateBilling = async (row: VehicleLedgerRow, mode: 'create' | 'recalculate') => {
+        const state = getRowBillingState(row);
+        const existing = state.documents[0];
+        if (isDirty) {
+            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
+            return;
+        }
+        if (state.status === 'blocked') {
+            alert(state.reason || '청구할 수 없는 행입니다.');
+            return;
+        }
+        if (existing?.status === 'CONFIRMED') {
+            alert('확정된 청구서는 대장에서 재계산할 수 없습니다.');
+            return;
+        }
+
+        setBillingProcessingId(row.id);
+        try {
+            const next = buildBillingDocumentForRow(row, existing);
+            if (!next) {
+                alert('배정 이력과 금액 기준으로 생성할 청구 문서를 찾지 못했습니다.');
+                return;
+            }
+
+            await vehicleBillingService.saveBilling(next);
+            await loadData();
+            alert(mode === 'recalculate' ? '청구서가 재계산되었습니다.' : '청구서가 생성되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구 처리에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const handleCancelBilling = async (row: VehicleLedgerRow, document?: VehicleBillingDocument) => {
+        if (!document) return;
+        if (document.status === 'CONFIRMED') {
+            alert('확정된 청구서는 취소할 수 없습니다.');
+            return;
+        }
+        if (!window.confirm('작성중 청구서를 취소할까요?')) return;
+
+        setBillingProcessingId(row.id);
+        try {
+            await vehicleBillingService.deleteBilling(document.id);
+            await loadData();
+            alert('청구가 취소되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구 취소에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const buildVehicleDocumentWithItems = (
+        document: VehicleBillingDocument,
+        lineItems: VehicleBillingCostItem[],
+        memo: string,
+        status: VehicleBillingDocument['status']
+    ): VehicleBillingDocument => {
+        const fixedCost = lineItems
+            .filter((item) => item.type === 'FIXED')
+            .reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+        const variableCost = lineItems
+            .filter((item) => item.type !== 'FIXED')
+            .reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+
+        return {
+            ...document,
+            lineItems,
+            memo,
+            status,
+            fixedCost,
+            variableCost,
+            totalAmount: fixedCost + variableCost,
+            updatedAt: Timestamp.now(),
+            confirmedAt: status === 'CONFIRMED' ? Timestamp.now() : document.confirmedAt
+        };
+    };
+
+    const handleSaveBillingEditor = async (
+        lineItems: VehicleBillingCostItem[],
+        memo: string,
+        status: VehicleBillingDocument['status'] = billingEditor?.document.status ?? 'DRAFT'
+    ) => {
+        if (!billingEditor) return;
+        setBillingProcessingId(billingEditor.row.id);
+        try {
+            const next = buildVehicleDocumentWithItems(billingEditor.document, lineItems, memo, status);
+            await vehicleBillingService.saveBilling(next);
+            await loadData();
+            setBillingEditor(null);
+            alert(status === 'CONFIRMED' ? '청구서가 확정되었습니다.' : '청구서가 저장되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구서 저장에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
     const totals = useMemo(() => {
         const acc = {
             rentFee: 0,
@@ -620,9 +1037,9 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
     }, [rows]);
 
     return (
-        <div className="flex flex-col h-full space-y-5">
+        <div className="flex flex-col h-full w-full min-w-0 space-y-5">
             {/* Toolbar */}
-            <div className="flex justify-between items-center bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
+            <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center bg-slate-100 rounded-full p-1">
                         <button
@@ -653,10 +1070,26 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                     </div>
                 </div>
 
-                <div className="flex gap-4 items-center">
+                <div className="flex flex-wrap gap-3 items-center justify-start lg:justify-end">
                     <div className="text-right mr-4">
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
                         <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+                        {BILLING_FILTERS.map((filter) => (
+                            <button
+                                key={filter.value}
+                                type="button"
+                                onClick={() => setBillingFilter(filter.value)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                                    billingFilter === filter.value
+                                        ? 'bg-white text-indigo-700 shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-700'
+                                }`}
+                            >
+                                {filter.label}
+                            </button>
+                        ))}
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm">
                         <input
@@ -689,7 +1122,24 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="w-full text-sm min-w-[1750px]">
+                        <table className="support-compact-table support-compact-ledger w-full table-fixed text-[11px] lg:text-xs">
+                            <colgroup>
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '6.5%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '6%' }} />
+                                <col style={{ width: '7%' }} />
+                                <col style={{ width: '6.5%' }} />
+                                <col style={{ width: '5%' }} />
+                                <col style={{ width: '5%' }} />
+                                {EXPENSE_TYPES.map((type) => (
+                                    <col key={`vehicle-expense-col-${type}`} style={{ width: '4.2%' }} />
+                                ))}
+                                <col style={{ width: '5.5%' }} />
+                                <col style={{ width: '6.5%' }} />
+                                <col style={{ width: '7%' }} />
+                                <col style={{ width: '8%' }} />
+                            </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
@@ -706,13 +1156,18 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                         </th>
                                     ))}
                                     <th className="px-2 py-4 text-center w-32 border-l border-indigo-400 bg-indigo-500">합계</th>
+                                    <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">청구상태</th>
+                                    <th className="px-2 py-4 text-center w-44 border-l border-indigo-500">청구작업</th>
                                     <th className="px-4 py-4 text-center w-40 border-l border-indigo-500">비고 (메모)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {rows.map((row, idx) => {
+                                {billingRows.map(({ row, index: idx, billingState }) => {
                                     const assignmentSummary = getAssignmentSummary(row);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
+                                    const billingBadge = getBillingStatusBadge(billingState.status);
+                                    const firstBillingDocument = billingState.documents[0];
+                                    const isProcessing = billingProcessingId === row.id;
 
                                     return (
                                     <tr key={row.id} className="group hover:bg-blue-50/40 transition-colors">
@@ -848,6 +1303,66 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                             {row.total.toLocaleString()}
                                         </td>
 
+                                        <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
+                                            <span className={`inline-flex items-center justify-center min-w-[72px] rounded-lg border px-2 py-1 text-[11px] font-extrabold ${billingBadge.className}`}>
+                                                {billingBadge.label}
+                                            </span>
+                                            {billingState.documents.length > 1 && (
+                                                <div className="mt-1 text-[10px] font-bold text-slate-400">{billingState.documents.length}건</div>
+                                            )}
+                                        </td>
+
+                                        <td className="px-2 py-3 border-l border-indigo-50 bg-white">
+                                            <div className="flex items-center justify-center gap-1.5">
+                                                {billingState.status === 'blocked' ? (
+                                                    <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
+                                                ) : billingState.status === 'unbilled' ? (
+                                                    <button
+                                                        type="button"
+                                                        disabled={isProcessing}
+                                                        onClick={() => handleCreateOrRecalculateBilling(row, 'create')}
+                                                        className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300"
+                                                    >
+                                                        {isProcessing ? '처리중' : '청구'}
+                                                    </button>
+                                                ) : (
+                                                    <>
+                                                        <button
+                                                            type="button"
+                                                            disabled={!firstBillingDocument}
+                                                            onClick={() => firstBillingDocument && setBillingEditor({ row, document: firstBillingDocument })}
+                                                            className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:text-slate-300"
+                                                            title={firstBillingDocument?.status === 'CONFIRMED' ? '청구서 보기' : '청구서 수정'}
+                                                        >
+                                                            <FontAwesomeIcon icon={firstBillingDocument?.status === 'CONFIRMED' ? faEye : faPen} />
+                                                        </button>
+                                                        {firstBillingDocument?.status !== 'CONFIRMED' && (
+                                                            <>
+                                                            <button
+                                                                type="button"
+                                                                disabled={isProcessing}
+                                                                onClick={() => handleCreateOrRecalculateBilling(row, 'recalculate')}
+                                                                className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:text-amber-300"
+                                                                title="대장 기준 재계산"
+                                                            >
+                                                                <FontAwesomeIcon icon={faRotateRight} />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={isProcessing}
+                                                                onClick={() => handleCancelBilling(row, firstBillingDocument)}
+                                                                className="w-8 h-8 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:text-rose-300"
+                                                                title="청구 취소"
+                                                            >
+                                                                <FontAwesomeIcon icon={faBan} />
+                                                            </button>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </td>
+
                                         {/* 메모 */}
                                         <td className="p-1 border-l border-indigo-50 bg-white">
                                             <input
@@ -861,12 +1376,12 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     </tr>
                                     );
                                 })}
-                                {rows.length === 0 && (
+                                {billingRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={EXPENSE_TYPES.length + 10} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={EXPENSE_TYPES.length + 12} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faCar} className="text-4xl text-slate-300" />
-                                                <p>차량 목록이 없거나 불러올 수 없습니다.</p>
+                                                <p>조건에 맞는 차량 대장 행이 없습니다.</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -885,7 +1400,7 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                         {totals.total.toLocaleString()}
                                     </td>
-                                    <td className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td colSpan={3} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -907,6 +1422,21 @@ export const VehicleMonthlyLedger: React.FC<VehicleMonthlyLedgerProps> = ({
                     </p>
                 </div>
             </div>
+
+            {billingEditor && (
+                <LedgerBillingEditorModal<VehicleBillingCostItem>
+                    title={`${billingEditor.document.vehiclePlate} 차량 청구서`}
+                    subtitle={`${billingEditor.document.yearMonth} · ${billingEditor.document.teamName || billingEditor.document.issuedToWorkerName || '청구대상'}`}
+                    statusLabel={billingEditor.document.status === 'CONFIRMED' ? '확정' : '작성중'}
+                    readOnly={billingEditor.document.status === 'CONFIRMED'}
+                    lineItems={billingEditor.document.lineItems ?? []}
+                    memo={billingEditor.document.memo ?? ''}
+                    saving={billingProcessingId === billingEditor.row.id}
+                    onClose={() => setBillingEditor(null)}
+                    onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
+                    onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'CONFIRMED')}
+                />
+            )}
         </div>
     );
 };

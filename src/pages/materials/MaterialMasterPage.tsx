@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxesStacked, faPlus, faEdit, faTrash, faSave, faTimes } from '@fortawesome/free-solid-svg-icons';
-import materialService from '../../services/materialService';
+import materialService, { buildMaterialBusinessKey } from '../../services/materialService';
 import { Material } from '../../types/materials';
 
 type MaterialGroupKey = 'dongbari' | 'scaffolding' | 'other';
@@ -63,7 +63,7 @@ const MaterialMasterPage: React.FC = () => {
     // Lock main content scroll
     useEffect(() => {
         const mainContent = document.getElementById('main-content');
-        if (mainContent) {
+        if (mainContent && window.matchMedia('(min-width: 1024px)').matches) {
             const originalOverflow = mainContent.style.overflow;
             mainContent.style.overflow = 'hidden';
             return () => {
@@ -128,7 +128,7 @@ const MaterialMasterPage: React.FC = () => {
             unit: material.unit,
             safetyStock: material.safetyStock || 0,
             description: material.description || '',
-            isActive: true
+            isActive: material.isActive !== false
         });
         setShowForm(true);
     };
@@ -141,13 +141,13 @@ const MaterialMasterPage: React.FC = () => {
 
         // 중복 체크 (신규 등록 시에만)
         if (!editingItem) {
+            const formMaterialKey = buildMaterialBusinessKey(formData);
             const isDuplicate = materials.some(
-                m => m.itemName.trim() === formData.itemName.trim() &&
-                     m.spec.trim() === formData.spec.trim() &&
+                m => (m.materialKey || buildMaterialBusinessKey(m)) === formMaterialKey &&
                      m.isActive !== false
             );
             if (isDuplicate) {
-                alert(`이미 등록된 자재입니다: ${formData.itemName} (${formData.spec})`);
+                alert(`이미 등록된 자재입니다: ${formData.category} / ${formData.itemName} (${formData.spec})`);
                 return;
             }
         }
@@ -162,7 +162,7 @@ const MaterialMasterPage: React.FC = () => {
                 alert('등록되었습니다.');
             }
             setShowForm(false);
-            loadData();
+            await loadData();
         } catch (error) {
             console.error('Failed to save material:', error);
             alert('저장에 실패했습니다.');
@@ -178,7 +178,7 @@ const MaterialMasterPage: React.FC = () => {
         try {
             await materialService.deleteMaterial(material);
             alert('삭제되었습니다.');
-            loadData();
+            await loadData();
         } catch (error) {
             console.error('Failed to delete material:', error);
             alert('삭제에 실패했습니다.');
@@ -212,56 +212,96 @@ const MaterialMasterPage: React.FC = () => {
             </div>
         ) : (
             <div className="flex-1 overflow-auto">
-                <table className="w-full min-w-[760px] text-sm">
-                    <colgroup>
-                        <col className="w-32" />
-                        <col className="w-40" />
-                        <col className="w-32" />
-                        <col className="w-20" />
-                        <col className="w-28" />
-                        <col />
-                        <col className="w-24" />
-                    </colgroup>
-                    <thead className="sticky top-0 z-10 border-b border-slate-300 bg-slate-100">
-                        <tr>
-                            <th className="p-3 text-left font-bold text-slate-700">분류</th>
-                            <th className="p-3 text-left font-bold text-slate-700">품명</th>
-                            <th className="p-3 text-left font-bold text-slate-700">규격</th>
-                            <th className="p-3 text-center font-bold text-slate-700">단위</th>
-                            <th className="p-3 text-right font-bold text-slate-700">안전재고</th>
-                            <th className="p-3 text-left font-bold text-slate-700">설명</th>
-                            <th className="p-3 text-center font-bold text-slate-700">액션</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                        {rows.map(material => (
-                            <tr key={material.id} className="hover:bg-slate-50">
-                                <td className="p-3">{material.category}</td>
-                                <td className="p-3 font-semibold">{material.itemName}</td>
-                                <td className="p-3">{material.spec}</td>
-                                <td className="p-3 text-center">{material.unit}</td>
-                                <td className="p-3 text-right">{material.safetyStock || '-'}</td>
-                                <td className="p-3">{material.description || '-'}</td>
-                                <td className="p-3 text-center">
+                <div className="space-y-2 p-3 md:hidden">
+                    {rows.map(material => (
+                        <div key={material.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="truncate text-sm font-bold text-slate-900">{material.itemName}</div>
+                                    <div className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                                        <span className="font-semibold text-slate-700">{material.spec}</span>
+                                        <span>{material.unit}</span>
+                                        <span className="truncate">· {material.category}</span>
+                                    </div>
+                                    {(material.safetyStock || material.description) && (
+                                        <div className="mt-2 text-xs text-slate-500">
+                                            안전재고 {material.safetyStock || '-'} · {material.description || '설명 없음'}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex shrink-0 gap-1">
                                     <button
                                         onClick={() => handleEdit(material)}
-                                        className="mx-1 text-blue-600 hover:text-blue-800"
+                                        className="flex h-9 w-9 items-center justify-center rounded-md border border-blue-100 bg-blue-50 text-blue-600 hover:bg-blue-100"
                                         title="수정"
                                     >
                                         <FontAwesomeIcon icon={faEdit} />
                                     </button>
                                     <button
                                         onClick={() => handleDelete(material)}
-                                        className="mx-1 text-red-600 hover:text-red-800"
+                                        className="flex h-9 w-9 items-center justify-center rounded-md border border-red-100 bg-red-50 text-red-600 hover:bg-red-100"
                                         title="삭제"
                                     >
                                         <FontAwesomeIcon icon={faTrash} />
                                     </button>
-                                </td>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="hidden h-full overflow-auto md:block">
+                    <table className="w-full min-w-[760px] text-sm">
+                        <colgroup>
+                            <col className="w-32" />
+                            <col className="w-40" />
+                            <col className="w-32" />
+                            <col className="w-20" />
+                            <col className="w-28" />
+                            <col />
+                            <col className="w-24" />
+                        </colgroup>
+                        <thead className="sticky top-0 z-10 border-b border-slate-300 bg-slate-100">
+                            <tr>
+                                <th className="p-3 text-left font-bold text-slate-700">분류</th>
+                                <th className="p-3 text-left font-bold text-slate-700">품명</th>
+                                <th className="p-3 text-left font-bold text-slate-700">규격</th>
+                                <th className="p-3 text-center font-bold text-slate-700">단위</th>
+                                <th className="p-3 text-right font-bold text-slate-700">안전재고</th>
+                                <th className="p-3 text-left font-bold text-slate-700">설명</th>
+                                <th className="p-3 text-center font-bold text-slate-700">액션</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                            {rows.map(material => (
+                                <tr key={material.id} className="hover:bg-slate-50">
+                                    <td className="p-3">{material.category}</td>
+                                    <td className="p-3 font-semibold">{material.itemName}</td>
+                                    <td className="p-3">{material.spec}</td>
+                                    <td className="p-3 text-center">{material.unit}</td>
+                                    <td className="p-3 text-right">{material.safetyStock || '-'}</td>
+                                    <td className="p-3">{material.description || '-'}</td>
+                                    <td className="p-3 text-center">
+                                        <button
+                                            onClick={() => handleEdit(material)}
+                                            className="mx-1 text-blue-600 hover:text-blue-800"
+                                            title="수정"
+                                        >
+                                            <FontAwesomeIcon icon={faEdit} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(material)}
+                                            className="mx-1 text-red-600 hover:text-red-800"
+                                            title="삭제"
+                                        >
+                                            <FontAwesomeIcon icon={faTrash} />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         )
     );
@@ -287,18 +327,18 @@ const MaterialMasterPage: React.FC = () => {
     );
 
     return (
-        <div className="flex-1 min-h-0 flex w-full max-w-none flex-col bg-slate-50 p-6 overflow-hidden">
-            <div className="flex justify-between items-center mb-6 flex-shrink-0">
+        <div className="flex min-h-0 w-full max-w-[calc(100vw-30px)] flex-1 flex-col overflow-auto bg-slate-50 p-2 sm:max-w-none sm:p-6 lg:overflow-hidden">
+            <div className="mb-3 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
                 <div>
-                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-2xl">
                         <FontAwesomeIcon icon={faBoxesStacked} className="text-indigo-600" />
                         자재 마스터 관리
                     </h1>
-                    <p className="text-slate-500 mt-1">자재 정보를 등록하고 관리합니다</p>
+                    <p className="mt-1 hidden text-slate-500 sm:block">자재 정보를 등록하고 관리합니다</p>
                 </div>
                 <button
                     onClick={handleAdd}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 shadow-sm"
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 font-bold text-white shadow-sm transition hover:bg-indigo-700 sm:w-auto sm:py-2"
                 >
                     <FontAwesomeIcon icon={faPlus} />
                     자재 등록
@@ -307,11 +347,11 @@ const MaterialMasterPage: React.FC = () => {
 
             {/* 등록/수정 폼 */}
             {showForm && (
-                <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
+                <div className="mb-4 flex-shrink-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:mb-6 sm:p-6">
                     <h2 className="text-lg font-bold text-slate-800 mb-4">
                         {editingItem ? '자재 수정' : '자재 등록'}
                     </h2>
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         <div>
                             <label className="block text-sm font-bold text-slate-700 mb-2">분류 *</label>
                             <input
@@ -373,10 +413,10 @@ const MaterialMasterPage: React.FC = () => {
                             />
                         </div>
                     </div>
-                    <div className="flex justify-end gap-2 mt-4">
+                    <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                         <button
                             onClick={() => setShowForm(false)}
-                            className="bg-slate-200 text-slate-700 px-4 py-2 rounded-lg hover:bg-slate-300 transition flex items-center gap-2"
+                            className="flex items-center justify-center gap-2 rounded-lg bg-slate-200 px-4 py-3 font-bold text-slate-700 transition hover:bg-slate-300 sm:py-2"
                         >
                             <FontAwesomeIcon icon={faTimes} />
                             취소
@@ -384,7 +424,7 @@ const MaterialMasterPage: React.FC = () => {
                         <button
                             onClick={handleSave}
                             disabled={loading}
-                            className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition flex items-center gap-2 disabled:opacity-50"
+                            className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-3 font-bold text-white transition hover:bg-indigo-700 disabled:opacity-50 sm:py-2"
                         >
                             <FontAwesomeIcon icon={faSave} />
                             저장
@@ -394,28 +434,28 @@ const MaterialMasterPage: React.FC = () => {
             )}
 
             {/* 필터 및 목록 */}
-            <div className="flex-1 min-h-0 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col overflow-hidden">
-                <div className="mb-4 flex gap-4 flex-shrink-0">
+            <div className="flex min-h-0 flex-1 flex-col overflow-visible rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-6 lg:overflow-hidden">
+                <div className="mb-4 grid flex-shrink-0 grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
                     <input
                         type="text"
                         value={categoryFilter}
                         onChange={(e) => setCategoryFilter(e.target.value)}
                         placeholder="분류 검색..."
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:py-2"
                     />
                     <input
                         type="text"
                         value={itemNameFilter}
                         onChange={(e) => setItemNameFilter(e.target.value)}
                         placeholder="품명 검색..."
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm flex-1"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:py-2"
                     />
                     <input
                         type="text"
                         value={specFilter}
                         onChange={(e) => setSpecFilter(e.target.value)}
                         placeholder="규격 검색..."
-                        className="border border-slate-300 rounded-lg px-3 py-2 text-sm w-40"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 sm:py-2"
                     />
                 </div>
 
@@ -430,7 +470,7 @@ const MaterialMasterPage: React.FC = () => {
                         <p className="text-sm mt-2">우측 상단의 '자재 등록' 버튼을 눌러 자재를 추가하세요.</p>
                     </div>
                 ) : (
-                    <div className="flex-1 min-h-0 overflow-auto">
+                    <div className="min-h-0 flex-1 overflow-visible lg:overflow-auto">
                         <div className="grid min-h-full grid-cols-1 gap-4 xl:grid-cols-2">
                             {renderMaterialGroup('동바리', groupedMaterials.dongbari, 'bg-indigo-500', '동바리 자재가 없습니다.')}
                             {renderMaterialGroup('비계', groupedMaterials.scaffolding, 'bg-emerald-500', '비계 자재가 없습니다.')}

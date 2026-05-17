@@ -252,9 +252,10 @@ interface SortableTreeCanvasProps {
     onIndent?: (id: string) => void;
     onOutdent?: (id: string) => void;
     isMultiSelectMode?: boolean;
+    headerActions?: React.ReactNode;
 }
 
-const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode }) => {
+const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode, headerActions }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
 
@@ -273,6 +274,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
                         <span className="w-1.5 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
                         메뉴 구조도 <span className="text-gray-500 text-sm font-normal ml-2">({siteId === 'cheongyeon' ? '청연 본사' : siteId})</span>
                     </h2>
+                    {headerActions && <div className="flex shrink-0 items-center gap-2">{headerActions}</div>}
                 </div>
 
                 <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>

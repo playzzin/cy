@@ -6,6 +6,7 @@ import {
     addDoc,
     updateDoc,
     deleteDoc,
+    writeBatch,
     query,
     orderBy,
     Timestamp as FirestoreTimestamp,
@@ -198,6 +199,26 @@ export const positionService = {
             await positionService.updatePosition(id, { color: newColor });
         } catch (error) {
             console.error("Error updating position color:", error);
+            throw error;
+        }
+    },
+
+    updatePositionRanks: async (rankUpdates: Array<{ id: string; rank: number }>): Promise<void> => {
+        try {
+            const batch = writeBatch(db);
+            const updatedAt = FirestoreTimestamp.now();
+
+            rankUpdates.forEach(({ id, rank }) => {
+                batch.update(doc(db, 'positions', id), {
+                    rank,
+                    updatedAt,
+                });
+            });
+
+            await batch.commit();
+            cachedPositions = null;
+        } catch (error) {
+            console.error("Error updating position ranks:", error);
             throw error;
         }
     },

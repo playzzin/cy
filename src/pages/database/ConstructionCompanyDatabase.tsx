@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { companyService, Company } from '../../services/companyService';
-import { manpowerService } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -201,11 +200,6 @@ const ConstructionCompanyDatabase: React.FC<ConstructionCompanyDatabaseProps> = 
         try {
             await companyService.updateCompany(editingCompany.id, formData);
 
-            // Sync Name Change if updated
-            if (formData.name && editingCompany.name && formData.name !== editingCompany.name) {
-                await manpowerService.updateWorkersCompanyName(editingCompany.id, formData.name);
-            }
-
             await loadConstructionCompanies();
             await refreshCompanies();
             setEditingCompany(null);
@@ -237,10 +231,6 @@ const ConstructionCompanyDatabase: React.FC<ConstructionCompanyDatabaseProps> = 
 
         try {
             await companyService.updateCompany(id, { [field]: value });
-            // Sync Name Change if updated
-            if (field === 'name') {
-                await manpowerService.updateWorkersCompanyName(id, value);
-            }
             // Silent refresh if needed, but optimistic update is usually enough for this view
             // await refreshCompanies(); 
         } catch (error) {

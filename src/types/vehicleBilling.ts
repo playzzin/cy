@@ -9,6 +9,11 @@ export interface VehicleBillingCostItem {
     amount: number;
     type: 'FIXED' | 'VARIABLE';
     category?: string; // 'RENT', 'FUEL', etc.
+    sourceType?: 'vehicle_ledger' | 'manual';
+    sourceLedgerRowId?: string;
+    sourceSegmentId?: string;
+    sourceStartDate?: string;
+    sourceEndDate?: string;
 }
 
 export interface VehicleBillingDocument {

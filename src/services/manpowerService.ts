@@ -1,4 +1,5 @@
 import { workerFirestoreService } from './workerFirestoreService';
+import { databaseLogService } from './databaseLogService';
 import { WorkerZod as Worker } from '../types/zod/workerSchema';
 import { db, storage } from '../config/firebase';
 import {
@@ -44,6 +45,26 @@ const syncWorkerSalaryFields = (updates: Partial<Worker>): Partial<Worker> => {
 
     return syncPayTypeFields(nextUpdates, { returnUndefinedOnEmpty: true, preferTeamType: true });
 };
+
+const logWorkerChange = async (
+    action: 'created' | 'updated' | 'deleted',
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown> | null,
+    source = 'manpowerService'
+): Promise<void> => {
+    await databaseLogService.safeCreateLog({
+        action,
+        entityType: 'worker',
+        before,
+        after,
+        source,
+    });
+};
+
+const snapshotWorker = (id: string, data: Record<string, unknown>): Record<string, unknown> => ({
+    id,
+    ...stripUndefinedFields(data),
+});
 
 export const manpowerService = {
     // Get all workers (Paginated)
@@ -152,11 +173,8 @@ export const manpowerService = {
 
     // Link a worker record to a Firebase Auth UID
     linkWorkerToUid: async (workerId: string, uid: string): Promise<void> => {
-        const existing = await manpowerService.getWorkerByUid(uid);
-        if (existing?.id && existing.id !== workerId) {
-            throw new Error('This account is already linked to another worker.');
-        }
-        await workerFirestoreService.updateWorker(workerId, { uid });
+        const { userService } = await import('./userService');
+        await userService.linkUserToWorker(uid, workerId);
         cachedWorkers = null;
     },
     // Get worker by name
@@ -173,20 +191,31 @@ export const manpowerService = {
 
     // Add a new worker
     addWorker: async (worker: any, _silent?: boolean): Promise<string> => {
-        const id = await workerFirestoreService.addWorker(syncWorkerSalaryFields(worker) as any);
+        const data = syncWorkerSalaryFields(worker) as Record<string, unknown>;
+        const id = await workerFirestoreService.addWorker(data as any);
         cachedWorkers = null;
+        await logWorkerChange('created', null, snapshotWorker(id, data), 'manpowerService.addWorker');
         return id;
     },
 
     // Update a worker
     updateWorker: async (id: string, updates: Partial<Worker>): Promise<void> => {
-        await workerFirestoreService.updateWorker(id, syncWorkerSalaryFields(updates));
+        const before = await manpowerService.getWorker(id);
+        const normalizedUpdates = stripUndefinedFields(syncWorkerSalaryFields(updates) as Record<string, unknown>);
+        await workerFirestoreService.updateWorker(id, normalizedUpdates);
         cachedWorkers = null;
+        await logWorkerChange(
+            'updated',
+            before ? snapshotWorker(id, before as Record<string, unknown>) : null,
+            snapshotWorker(id, { ...(before ? before as Record<string, unknown> : {}), ...normalizedUpdates }),
+            'manpowerService.updateWorker'
+        );
     },
 
     // Delete a worker
     deleteWorker: async (id: string): Promise<void> => {
         const workerSnap = await getDoc(doc(db, 'workers', id));
+        const before = workerSnap.exists() ? snapshotWorker(id, workerSnap.data()) : null;
         if (workerSnap.exists()) {
             const data = workerSnap.data();
             if (data?.fileNameSaved) {
@@ -200,33 +229,57 @@ export const manpowerService = {
         }
         await workerFirestoreService.deleteWorker(id);
         cachedWorkers = null;
+        await logWorkerChange('deleted', before, null, 'manpowerService.deleteWorker');
     },
 
     // Delete multiple workers
     deleteWorkers: async (ids: string[]): Promise<void> => {
+        const beforeRows = await Promise.all(ids.map(async (id) => {
+            const snap = await getDoc(doc(db, 'workers', id));
+            return snap.exists() ? snapshotWorker(id, snap.data()) : null;
+        }));
         const batch = writeBatch(db);
         ids.forEach(id => {
             batch.delete(doc(db, 'workers', id));
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(beforeRows.map((before) =>
+            before ? logWorkerChange('deleted', before, null, 'manpowerService.deleteWorkers') : Promise.resolve()
+        ));
     },
 
     // Retire a worker (set status to '??�궗')
     retireWorker: async (id: string): Promise<void> => {
-        await workerFirestoreService.updateWorker(id, { status: '\uD1F4\uC0AC' });
-        cachedWorkers = null;
+        await manpowerService.updateWorker(id, { status: '\uD1F4\uC0AC' });
     },
 
     // Retire multiple workers
     retireWorkers: async (ids: string[]): Promise<void> => {
+        const beforeRows = await Promise.all(ids.map(async (id) => {
+            const snap = await getDoc(doc(db, 'workers', id));
+            return snap.exists() ? snapshotWorker(id, snap.data()) : null;
+        }));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         ids.forEach(id => {
             batch.update(doc(db, 'workers', id), {
                 status: '\uD1F4\uC0AC',
-                updatedAt: Timestamp.now()
+                updatedAt
             });
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(beforeRows.map((before) =>
+            before
+                ? logWorkerChange(
+                    'updated',
+                    before,
+                    { ...before, status: '\uD1F4\uC0AC', updatedAt },
+                    'manpowerService.retireWorkers'
+                )
+                : Promise.resolve()
+        ));
     },
 
     // Increment man-day count for a worker
@@ -256,11 +309,22 @@ export const manpowerService = {
     updateWorkersTeamName: async (teamId: string, teamName: string) => {
         const q = query(collection(db, 'workers'), where('teamId', '==', teamId));
         const snapshot = await getDocs(q);
+        const rows = snapshot.docs.map(d => snapshotWorker(d.id, d.data()));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { teamName, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { teamName, updatedAt });
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(rows.map((before) =>
+            logWorkerChange(
+                'updated',
+                before,
+                { ...before, teamName, updatedAt },
+                'manpowerService.updateWorkersTeamName'
+            )
+        ));
     },
 
     updateWorkersTeamColor: async (teamId: string, color: string) => {
@@ -268,46 +332,90 @@ export const manpowerService = {
         const snapshot = await getDocs(q);
         if (snapshot.empty) return;
 
+        const rows = snapshot.docs.map(d => snapshotWorker(d.id, d.data()));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { color, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { color, updatedAt });
         });
         await batch.commit();
         cachedWorkers = null;
+        await Promise.all(rows.map((before) =>
+            logWorkerChange(
+                'updated',
+                before,
+                { ...before, color, updatedAt },
+                'manpowerService.updateWorkersTeamColor'
+            )
+        ));
     },
 
     // Update salary model for all workers in a team
     updateWorkersSalaryModelByTeam: async (teamId: string, salaryModel: string) => {
         const q = query(collection(db, 'workers'), where('teamId', '==', teamId));
         const snapshot = await getDocs(q);
+        const rows = snapshot.docs.map(d => snapshotWorker(d.id, d.data()));
         const batch = writeBatch(db);
         const syncedUpdates = syncWorkerSalaryFields({ salaryModel });
+        const cleanedUpdates = stripUndefinedFields(syncedUpdates as Record<string, unknown>);
+        const updatedAt = Timestamp.now();
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { ...syncedUpdates, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { ...cleanedUpdates, updatedAt });
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(rows.map((before) =>
+            logWorkerChange(
+                'updated',
+                before,
+                { ...before, ...cleanedUpdates, updatedAt },
+                'manpowerService.updateWorkersSalaryModelByTeam'
+            )
+        ));
     },
 
     // Update site name for all related workers
     updateWorkersSiteName: async (siteId: string, siteName: string) => {
         const q = query(collection(db, 'workers'), where('siteId', '==', siteId));
         const snapshot = await getDocs(q);
+        const rows = snapshot.docs.map(d => snapshotWorker(d.id, d.data()));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { siteName, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { siteName, updatedAt });
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(rows.map((before) =>
+            logWorkerChange(
+                'updated',
+                before,
+                { ...before, siteName, updatedAt },
+                'manpowerService.updateWorkersSiteName'
+            )
+        ));
     },
 
     // Update company name for all related workers
     updateWorkersCompanyName: async (companyId: string, companyName: string) => {
         const q = query(collection(db, 'workers'), where('companyId', '==', companyId));
         const snapshot = await getDocs(q);
+        const rows = snapshot.docs.map(d => snapshotWorker(d.id, d.data()));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
         snapshot.docs.forEach(d => {
-            batch.update(d.ref, { companyName, updatedAt: Timestamp.now() });
+            batch.update(d.ref, { companyName, updatedAt });
         });
         await batch.commit();
+        cachedWorkers = null;
+        await Promise.all(rows.map((before) =>
+            logWorkerChange(
+                'updated',
+                before,
+                { ...before, companyName, updatedAt },
+                'manpowerService.updateWorkersCompanyName'
+            )
+        ));
     },
 
     // Sync partner company workers team type
@@ -363,17 +471,37 @@ export const manpowerService = {
 
         if (updates.length === 0) return;
 
+        const preparedUpdates = updates.map(({ id, updates: workerUpdates }) => ({
+            id,
+            updates: stripUndefinedFields(syncWorkerSalaryFields(workerUpdates) as Record<string, unknown>),
+        }));
+        const beforeRows = await Promise.all(preparedUpdates.map(async ({ id }) => {
+            const snap = await getDoc(doc(db, 'workers', id));
+            return snap.exists() ? snapshotWorker(id, snap.data()) : null;
+        }));
+        const updatedAt = Timestamp.now();
         const batch = writeBatch(db);
-        updates.forEach(({ id, updates: workerUpdates }) => {
+        preparedUpdates.forEach(({ id, updates: workerUpdates }) => {
             const workerRef = doc(db, 'workers', id);
             batch.update(workerRef, {
-                ...stripUndefinedFields(syncWorkerSalaryFields(workerUpdates) as Record<string, unknown>),
-                updatedAt: Timestamp.now()
+                ...workerUpdates,
+                updatedAt
             });
         });
 
         await batch.commit();
         cachedWorkers = null;
+        await Promise.all(preparedUpdates.map(({ updates: workerUpdates }, index) => {
+            const before = beforeRows[index];
+            return before
+                ? logWorkerChange(
+                    'updated',
+                    before,
+                    { ...before, ...workerUpdates, updatedAt },
+                    'manpowerService.updateWorkersBatch'
+                )
+                : Promise.resolve();
+        }));
     },
 };
 

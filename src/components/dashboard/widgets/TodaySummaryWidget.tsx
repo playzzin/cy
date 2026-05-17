@@ -103,7 +103,7 @@ const TrendBadge = styled.div<{ $isPositive: boolean; $isNeutral?: boolean }>`
 
 export const TodaySummaryWidget: React.FC<TodaySummaryWidgetProps> = ({ stats, dailyTrend }) => {
     // Current values
-    const todayManDay = useCountAnimation(stats.totalManDay || 0);
+    const todayManDay = useCountAnimation(stats.totalManDay || 0, 1000, 1);
     const todayWorkerCount = useCountAnimation(stats.totalWorkers || 0);
 
     // Calculate trends (comparing to yesterday)
@@ -151,7 +151,10 @@ export const TodaySummaryWidget: React.FC<TodaySummaryWidgetProps> = ({ stats, d
                     <StatCard>
                         <StatLabel>총 공수</StatLabel>
                         <StatValue>
-                            {todayManDay.toLocaleString()}
+                            {todayManDay.toLocaleString('ko-KR', {
+                                minimumFractionDigits: 1,
+                                maximumFractionDigits: 1
+                            })}
                             <small>공수</small>
                         </StatValue>
                         <TrendBadge $isPositive={trends.manDay >= 0} $isNeutral={trends.manDay === 0}>

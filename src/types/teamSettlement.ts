@@ -27,13 +27,15 @@ export const TeamSettlementDeductionOriginSchema = z.enum([
   'office_expense',
   'daily_wage_payroll',
   'monthly_wage_payroll',
+  'service_team_payroll',
+  'team_expense_claim',
   'vehicle_billing',
   'card_billing',
   'manual'
 ]);
 export type TeamSettlementDeductionOrigin = z.infer<typeof TeamSettlementDeductionOriginSchema>;
 
-export const TeamSettlementAdditionOriginSchema = z.enum(['manual']);
+export const TeamSettlementAdditionOriginSchema = z.enum(['team_expense_claim', 'manual']);
 export type TeamSettlementAdditionOrigin = z.infer<typeof TeamSettlementAdditionOriginSchema>;
 
 export const TeamSettlementSalesItemSchema = z.object({

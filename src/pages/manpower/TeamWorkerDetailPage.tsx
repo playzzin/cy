@@ -33,6 +33,12 @@ import type { PaymentData } from '../payroll/components/PayslipTemplate';
 import { dailyReportService, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
+import {
+    useWorkerAccessScope,
+    workerAccessMatchesReportRow,
+    workerAccessMatchesTeam,
+    workerAccessMatchesWorker,
+} from '../../hooks/useWorkerAccessScope';
 import { resolveReportPayType } from '../../utils/payType';
 import { toast } from '../../utils/swal';
 import './TeamWorkerDetailPage.css';
@@ -272,6 +278,7 @@ const TeamWorkerDetailPage: React.FC = () => {
     const [isSignatureOpen, setIsSignatureOpen] = useState(false);
 
     const { startDate, endDate } = useMemo(() => getMonthRange(selectedMonth), [selectedMonth]);
+    const accessScope = useWorkerAccessScope(workers, teams);
 
     useEffect(() => {
         let mounted = true;
@@ -357,14 +364,44 @@ const TeamWorkerDetailPage: React.FC = () => {
         return map;
     }, [teams]);
 
+    const visibleTeams = useMemo(
+        () => accessScope.loading ? [] : teams.filter(team => workerAccessMatchesTeam(accessScope, team)),
+        [accessScope, teams]
+    );
+
+    useEffect(() => {
+        if (accessScope.loading) return;
+
+        if (visibleTeams.length === 0) {
+            setSelectedTeamId('');
+            return;
+        }
+
+        setSelectedTeamId(current =>
+            visibleTeams.some(team => [team.id, team.legacyId, team.name].map(value => String(value ?? '')).includes(current))
+                ? current
+                : String(visibleTeams[0]?.id ?? visibleTeams[0]?.legacyId ?? visibleTeams[0]?.name ?? '')
+        );
+    }, [accessScope.loading, visibleTeams]);
+
     const selectedTeam = useMemo(() => {
         if (!selectedTeamId) return null;
-        return teamById.get(selectedTeamId) ?? teams.find(team => String(team.id ?? '') === selectedTeamId) ?? null;
-    }, [selectedTeamId, teamById, teams]);
+        return visibleTeams.find(team =>
+            [team.id, team.legacyId, team.name].map(value => String(value ?? '')).includes(selectedTeamId)
+        ) ?? null;
+    }, [selectedTeamId, visibleTeams]);
+
+    const scopedOutputRows = useMemo(
+        () => outputRows.filter(row => workerAccessMatchesReportRow(accessScope, row)),
+        [accessScope, outputRows]
+    );
 
     const allTeamWorkers = useMemo(
-        () => selectedTeam ? workers.filter(worker => workerMatchesTeam(worker, selectedTeam)) : [],
-        [workers, selectedTeam]
+        () => {
+            const scopedWorkers = workers.filter(worker => workerAccessMatchesWorker(accessScope, worker));
+            return selectedTeam ? scopedWorkers.filter(worker => workerMatchesTeam(worker, selectedTeam)) : scopedWorkers;
+        },
+        [accessScope, selectedTeam, workers]
     );
 
     const filteredWorkers = useMemo(() => {
@@ -415,23 +452,23 @@ const TeamWorkerDetailPage: React.FC = () => {
 
     const teamOutputRows = useMemo(() => (
         selectedTeam
-            ? outputRows.filter(row => rowMatchesTeam(row, selectedTeam, selectedTeamWorkerIds, selectedTeamWorkerNames))
+            ? scopedOutputRows.filter(row => rowMatchesTeam(row, selectedTeam, selectedTeamWorkerIds, selectedTeamWorkerNames))
             : []
-    ), [outputRows, selectedTeam, selectedTeamWorkerIds, selectedTeamWorkerNames]);
+    ), [scopedOutputRows, selectedTeam, selectedTeamWorkerIds, selectedTeamWorkerNames]);
 
     const workerOutputRows = useMemo(() => {
         if (!selectedWorker) return [];
 
         const workerId = String(selectedWorker.id ?? '').trim();
         const workerName = normalizeText(selectedWorker.name);
-        return outputRows
+        return scopedOutputRows
             .filter(row => {
                 const rowWorkerId = String(row.workerId ?? '').trim();
                 if (workerId && rowWorkerId === workerId) return true;
                 return workerName.length > 0 && normalizeText(row.workerName) === workerName;
             })
             .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')));
-    }, [outputRows, selectedWorker]);
+    }, [scopedOutputRows, selectedWorker]);
 
     const selectedRowsForExport = selectedWorker ? workerOutputRows : teamOutputRows;
 
@@ -743,10 +780,12 @@ const TeamWorkerDetailPage: React.FC = () => {
     };
 
     const renderTeamItem = (team: Team) => {
-        const teamWorkers = workers.filter(worker => workerMatchesTeam(worker, team));
+        const teamWorkers = workers
+            .filter(worker => workerAccessMatchesWorker(accessScope, worker))
+            .filter(worker => workerMatchesTeam(worker, team));
         const workerIds = new Set(teamWorkers.map(worker => String(worker.id ?? '')).filter(Boolean));
         const workerNames = new Set(teamWorkers.map(worker => normalizeText(worker.name)).filter(Boolean));
-        const rows = outputRows.filter(row => rowMatchesTeam(row, team, workerIds, workerNames));
+        const rows = scopedOutputRows.filter(row => rowMatchesTeam(row, team, workerIds, workerNames));
         const totalManDay = rows.reduce((sum, row) => sum + asNumber(row.manDay), 0);
         const isSelected = String(team.id ?? '') === selectedTeamId;
 
@@ -794,8 +833,8 @@ const TeamWorkerDetailPage: React.FC = () => {
                         <Printer size={18} />
                         <span>인쇄</span>
                     </button>
-                    <button type="button" className="tw-primary-button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput}>
-                        <RefreshCw size={18} className={loadingMaster || loadingOutput ? 'tw-spin' : ''} />
+                    <button type="button" className="tw-primary-button" onClick={handleRefresh} disabled={loadingMaster || loadingOutput || accessScope.loading}>
+                        <RefreshCw size={18} className={loadingMaster || loadingOutput || accessScope.loading ? 'tw-spin' : ''} />
                         새로고침
                     </button>
                 </div>
@@ -920,7 +959,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                 className="tw-team-picker-button"
                                 onClick={() => setIsTeamPickerOpen(prev => !prev)}
                                 aria-expanded={isTeamPickerOpen}
-                                disabled={loadingMaster || teams.length === 0}
+                                disabled={loadingMaster || accessScope.loading || visibleTeams.length === 0}
                             >
                                 <span className="tw-team-item__color" style={{ background: selectedTeam?.color || '#2563eb' }} />
                                 <span className="tw-team-picker-button__body">
@@ -932,21 +971,21 @@ const TeamWorkerDetailPage: React.FC = () => {
                                 </span>
                                 <ChevronDown size={18} className={isTeamPickerOpen ? 'tw-team-picker-button__chevron tw-team-picker-button__chevron--open' : 'tw-team-picker-button__chevron'} />
                             </button>
-                            {loadingMaster ? (
+                            {loadingMaster || accessScope.loading ? (
                                 <div className="tw-empty-state">팀 데이터를 불러오는 중입니다.</div>
                             ) : masterError ? (
                                 <div className="tw-empty-state tw-empty-state--error">{masterError}</div>
-                            ) : teams.length === 0 ? (
+                            ) : visibleTeams.length === 0 ? (
                                 <div className="tw-empty-state">청연이엔지 소속팀이 없습니다.</div>
                             ) : isTeamPickerOpen && (
                                 <div className="tw-team-picker-menu">
-                                    {teams.map(renderTeamItem)}
+                                    {visibleTeams.map(renderTeamItem)}
                                 </div>
                             )}
                         </div>
 
                         <div className="tw-list-block-title tw-list-block-title--workers">작업자 목록</div>
-                        {loadingMaster ? (
+                        {loadingMaster || accessScope.loading ? (
                             <div className="tw-empty-state">작업자 데이터를 불러오는 중입니다.</div>
                         ) : masterError ? (
                             <div className="tw-empty-state tw-empty-state--error">작업자 목록을 표시할 수 없습니다.</div>
@@ -958,7 +997,7 @@ const TeamWorkerDetailPage: React.FC = () => {
                                 const selected = workerId === selectedWorkerId;
                                 const teamLabel = getTeamLabel(worker, teamById);
                                 const workerTeamColor = getWorkerTeamColor(worker, teamById, selectedTeam);
-                                const workerRows = outputRows.filter(row => {
+                                const workerRows = scopedOutputRows.filter(row => {
                                     if (workerId && String(row.workerId ?? '') === workerId) return true;
                                     return normalizeText(row.workerName) === normalizeText(worker.name);
                                 });

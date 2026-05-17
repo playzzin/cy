@@ -6,7 +6,6 @@ import {
     faCheck, faExclamationTriangle, faProjectDiagram, faBuilding, faUser 
 } from '@fortawesome/free-solid-svg-icons';
 import { siteService, Site } from '../../services/siteService';
-import { manpowerService } from '../../services/manpowerService';
 import { Team } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
 
@@ -346,10 +345,6 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
 
             if (currentSite.id) {
                 await siteService.updateSite(currentSite.id, siteData);
-                // Sync Name Change
-                if (initialData?.name && currentSite.name && initialData.name !== currentSite.name) {
-                    await manpowerService.updateWorkersSiteName(currentSite.id, currentSite.name);
-                }
             } else {
                 await siteService.addSite(siteData as Site);
             }

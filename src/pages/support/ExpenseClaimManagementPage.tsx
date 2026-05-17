@@ -335,10 +335,11 @@ const ExpenseClaimManagementPage: React.FC = () => {
       const isOther = form.claimType === 'otherExpense';
       const payer = findTeam(form.payerTeamId);
       const chargeTo = isOther ? undefined : findTeam(form.chargeToTeamId);
+      const claimYearMonth = form.yearMonth || yearMonth;
 
       await teamExpenseLedgerService.saveClaim({
         id: form.id,
-        yearMonth,
+        yearMonth: claimYearMonth,
         date: form.date,
         claimType: form.claimType,
         payerTeamId: form.payerTeamId,
@@ -680,8 +681,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
                   <CurrencyInput
                     value={form.amount}
                     onChange={(value: number) => updateForm('amount', value)}
+                    emptyWhenZero
                     className={`${inputClass} text-right tabular-nums`}
-                    placeholder="0"
+                    placeholder="금액 입력"
                   />
                 </label>
 

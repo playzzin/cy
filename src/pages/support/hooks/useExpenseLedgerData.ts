@@ -89,12 +89,13 @@ const ALL_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: stri
   { value: 'deposit', label: '보증금' },
   { value: 'marking', label: '마이킹' },
   { value: 'fieldGoods', label: '현장물품' },
+  { value: 'equipment', label: '장비비' },
   { value: 'etc', label: '기타' }
 ];
 
 const HIDDEN_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['fuel', 'material', 'tool'];
-const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'fieldGoods', 'etc'];
-const OTHER_CLAIM_ONLY_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking'];
+const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'fieldGoods', 'equipment', 'etc'];
+const OTHER_CLAIM_ONLY_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'equipment'];
 
 export const CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(
   (option) => !HIDDEN_CATEGORY_VALUES.includes(option.value) && !OTHER_CLAIM_ONLY_CATEGORY_VALUES.includes(option.value)

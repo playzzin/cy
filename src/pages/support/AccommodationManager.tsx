@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
 import { Accommodation, UtilityRecord } from '../../types/accommodation';
 import AccommodationForm from '../../components/accommodation/AccommodationForm';
 import AccommodationQuickAssignmentModal from '../../components/accommodation/QuickAssignmentModal';
-import AccommodationBillingManager from '../../components/accommodation/AccommodationBillingManager';
 import UtilityLedger from '../../components/accommodation/UtilityLedger';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
@@ -23,6 +23,7 @@ interface AccommodationManagerProps {
 }
 
 const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = false }) => {
+    const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [canUseAccommodationManager, setCanUseAccommodationManager] = useState<boolean | null>(null);
     const [activeTab, setActiveTab] = useState<'status' | 'ledger'>('status');
@@ -31,13 +32,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const [billingTargets, setBillingTargets] = useState<AccommodationBillingTarget[]>([]);
     const [currentMonthLedgerRecords, setCurrentMonthLedgerRecords] = useState<UtilityRecord[]>([]);
     const [loading, setLoading] = useState(true);
-    const [seeding, setSeeding] = useState(false);
+
     const [showForm, setShowForm] = useState(false);
     const [editingItem, setEditingItem] = useState<Accommodation | undefined>(undefined);
     const [quickAssignItem, setQuickAssignItem] = useState<Accommodation | null>(null);
     const [filterStatus, setFilterStatus] = useState<'active' | 'inactive'>('active');
     const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
-    const [showBillingPanel, setShowBillingPanel] = useState(false);
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
@@ -698,82 +698,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         }
     };
 
-    const handleSeedAllAccommodations = async () => {
-        const ok = window.confirm('전체 42개 숙소 데이터를 일괄 등록할까요? (이미 있으면 건너뜁니다)');
-        if (!ok) return;
-
-        setSeeding(true);
-        try {
-            const existingNameSet = new Set(accommodations.map((a) => a.name));
-
-            const fullSeeds: Array<Omit<Accommodation, 'id' | 'createdAt' | 'updatedAt'>> = [
-                // ── 청연이엔지 명의 ──
-                { name: '초지동 726-4 305호', address: '초지로 116', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-05-20', deposit: 0, monthlyRent: 0, paymentDay: 20, landlordName: '서원석', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '선불' },
-                { name: '이동 712-2 503호', address: '광덕1로 341', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-01-30', deposit: 20000000, monthlyRent: 1530000, paymentDay: 20, landlordName: '엄순애', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '와동 730-5 202호', address: '와개길 53-1', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-03-02', deposit: 5000000, monthlyRent: 450000, paymentDay: 20, landlordName: '박점쇠', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable', fixedMaintenance: 30000 }, memo: '' },
-                { name: '와동 730-5 103호', address: '와개길 53-1', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2027-01-29', deposit: 5000000, monthlyRent: 450000, paymentDay: 2, landlordName: '박점쇠', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '1인거주' },
-                { name: '와동 729-5 401호', address: '와개길 62', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-11-26', deposit: 5000000, monthlyRent: 480000, paymentDay: 29, landlordName: '정숙영', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '와동 729-5 203호', address: '와개길 62', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-06-01', deposit: 5000000, monthlyRent: 480000, paymentDay: 26, landlordName: '정숙영', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '와동 729-5 204호', address: '와개길 62', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2023-08-31', deposit: 5000000, monthlyRent: 480000, paymentDay: 1, landlordName: '정숙영', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '3인거주' },
-                { name: '사동 1428-14 202호', address: '항호1길 26-5', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '2023-08-31', endDate: '', deposit: 5000000, monthlyRent: 450000, paymentDay: 1, landlordName: '김종국', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'fixed', maintenance: 'fixed', fixedInternet: 25000, fixedMaintenance: 50000 }, memo: '' },
-                { name: '사동 1393-3 201호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '2024-04-27', endDate: '2026-04-27', deposit: 3000000, monthlyRent: 500000, paymentDay: 28, landlordName: '유현주', landlordContact: '농협 352-1436-374583', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'fixed', maintenance: 'fixed', fixedInternet: 25000, fixedMaintenance: 50000 }, memo: '수도개별' },
-                { name: '사동 1393-3 203호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2027-11-20', deposit: 3000000, monthlyRent: 500000, paymentDay: 20, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '수도개별' },
-                { name: '사동 1393-3 303호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2027-06-30', deposit: 3000000, monthlyRent: 520000, paymentDay: 5, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'included' }, memo: '관리비포함(47만원)' },
-                { name: '사동 1393-3 103호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-11-04', deposit: 3000000, monthlyRent: 520000, paymentDay: 30, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1421-4 402호', address: '장화3길 6-1', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2023-10-30', deposit: 10000000, monthlyRent: 800000, paymentDay: 30, landlordName: '이선옥', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'included' }, memo: '3인포함' },
-                { name: '사동 1421-3 304호', address: '장화3길 6', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2026-08-04', deposit: 2000000, monthlyRent: 330000, paymentDay: 4, landlordName: '최기호', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1393-3 101호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2025-09-30', deposit: 3000000, monthlyRent: 500000, paymentDay: 1, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '수도개별' },
-                { name: '사동 1393-3 301호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2027-07-06', deposit: 2000000, monthlyRent: 520000, paymentDay: 7, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '수도개별' },
-                { name: '사동 1393-3 402호', address: '초당4길 18', type: 'Apartment', status: 'active', ownership: 'Cheongyeon', contract: { startDate: '', endDate: '2027-10-14', deposit: 15000000, monthlyRent: 900000, paymentDay: 15, landlordName: '유현주', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '수도개별' },
-                // ── 개인명의 ──
-                { name: '사동 1431-1 202호', address: '항가울로 17', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-04-01', deposit: 5000000, monthlyRent: 500000, paymentDay: 31, landlordName: '이송재', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1431-4 402호', address: '항가울로 13', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-12-20', deposit: 5000000, monthlyRent: 400000, paymentDay: 1, landlordName: '왕경식', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1422-6 501호', address: '초당로 16-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-03-20', deposit: 5000000, monthlyRent: 650000, paymentDay: 30, landlordName: '엄순애', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'variable' }, memo: '수도개별' },
-                { name: '사동 1392-12 201호', address: '초당로 41', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-05-03', deposit: 5000000, monthlyRent: 420000, paymentDay: 20, landlordName: '김황원', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '1인거주' },
-                { name: '사동 1408-14 202호', address: '장화3안길 9', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-07-13', deposit: 5000000, monthlyRent: 580000, paymentDay: 3, landlordName: '이재천', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1415-2 203호', address: '장화로 7', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-01-11', deposit: 5000000, monthlyRent: 580000, paymentDay: 13, landlordName: '문지연', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1407-22 202호', address: '장화2길 37-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2024-11-01', deposit: 5000000, monthlyRent: 530000, paymentDay: 1, landlordName: '김순자', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable', fixedMaintenance: 30000 }, memo: '2명거주 관리비10,000추가' },
-                { name: '사동 1416-1 202호', address: '평안로1안길 4', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-07-22', deposit: 5000000, monthlyRent: 530000, paymentDay: 20, landlordName: '이상옥', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1384-6 204호', address: '항호길 35', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '', deposit: 2000000, monthlyRent: 280000, paymentDay: 1, landlordName: '안순오', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1384-6 303호', address: '항호길 35', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '', deposit: 2000000, monthlyRent: 450000, paymentDay: 1, landlordName: '안순오', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1424-1 202호', address: '항가울로 31-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-10-25', deposit: 5000000, monthlyRent: 500000, paymentDay: 22, landlordName: '강재인', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1421-3 202호', address: '장화3길 6', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-04-08', deposit: 5000000, monthlyRent: 545000, paymentDay: 25, landlordName: '최기호', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1421-3 303호', address: '장화3길 6', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-10-28', deposit: 5000000, monthlyRent: 545000, paymentDay: 8, landlordName: '최기호', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1426-3 301호', address: '항호1길 40-10', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-08-20', deposit: 5000000, monthlyRent: 540000, paymentDay: 28, landlordName: '이현재', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable', fixedMaintenance: 40000 }, memo: '' },
-                { name: '사동 1407-31 201호', address: '장화로 22-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-07-31', deposit: 5000000, monthlyRent: 430000, paymentDay: 31, landlordName: '김숙향', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1421-4 202호', address: '장화3길 6-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2025-05-31', deposit: 5000000, monthlyRent: 400000, paymentDay: 31, landlordName: '이선옥', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1383-10 402호', address: '항호2길 12-10', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-01-04', deposit: 10000000, monthlyRent: 530000, paymentDay: 4, landlordName: '임진우', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1415-2 401호', address: '장화로 7', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2024-03-31', deposit: 10000000, monthlyRent: 830000, paymentDay: 31, landlordName: '문지연', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1407-1 103호', address: '장화3길 28', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2024-12-01', deposit: 5000000, monthlyRent: 480000, paymentDay: 1, landlordName: '양재순', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1394-5 303호', address: '초당5길 22', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2026-02-04', deposit: 5000000, monthlyRent: 458000, paymentDay: 4, landlordName: '박옥자', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1403 102호', address: '장화1길 54', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2023-10-31', deposit: 5000000, monthlyRent: 430000, paymentDay: 11, landlordName: '이성현', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1376-6 303호', address: '항가울로 56', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-11-10', deposit: 5000000, monthlyRent: 450000, paymentDay: 10, landlordName: '이은영', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '사동 1386-3 302호', address: '항가울로 48', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '2027-07-22', deposit: 5000000, monthlyRent: 500000, paymentDay: 22, landlordName: '장철수', landlordContact: '', isReported: true }, costProfile: { electricity: 'variable', gas: 'variable', water: 'included', internet: 'variable', maintenance: 'included' }, memo: '' },
-                { name: '와동 760-12 102호', address: '와동공원로6길 11-1', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '', deposit: 5000000, monthlyRent: 420000, paymentDay: 1, landlordName: '김상현', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-                { name: '사동 1391-10 101호', address: '초당4길 3', type: 'Apartment', status: 'active', ownership: 'Individual', contract: { startDate: '', endDate: '', deposit: 5000000, monthlyRent: 500000, paymentDay: 1, landlordName: '모정자', landlordContact: '', isReported: false }, costProfile: { electricity: 'variable', gas: 'variable', water: 'variable', internet: 'variable', maintenance: 'variable' }, memo: '' },
-            ];
-
-            const toCreate = fullSeeds.filter((s) => !existingNameSet.has(s.name));
-
-            for (const item of toCreate) {
-                await accommodationService.addAccommodation(item);
-            }
-
-            await loadData();
-
-            if (toCreate.length === 0) {
-                alert('모든 숙소가 이미 등록되어 있습니다.');
-            } else {
-                alert(`${toCreate.length}건 등록 완료!`);
-            }
-        } catch (e) {
-            console.error(e);
-            alert('등록에 실패했습니다.');
-        } finally {
-            setSeeding(false);
-        }
-    };
-
     if (canUseAccommodationManager === null) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-slate-50">
@@ -836,8 +760,8 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const occupancyRate = totalCount > 0 ? Math.round((occupiedCount / totalCount) * 100) : 0;
 
     return (
-        <div className={embedded ? 'space-y-6 bg-transparent min-h-full' : 'p-6 space-y-6 bg-slate-50 min-h-full'}>
-            <div className={embedded ? 'space-y-6' : 'space-y-6'}>
+        <div className={embedded ? 'space-y-6 bg-transparent min-h-full w-full min-w-0' : 'p-6 space-y-6 bg-slate-50 min-h-full w-full min-w-0'}>
+            <div className={embedded ? 'space-y-6 w-full min-w-0' : 'space-y-6 w-full min-w-0'}>
 
                 {/* Header Section */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -852,36 +776,18 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                     </div>
                     <div className="flex items-center gap-2">
                         <button
+                            onClick={() => navigate('/support/accommodation/logs')}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm"
+                        >
+                            <FontAwesomeIcon icon={faHistory} />
+                            <span>청구 로그</span>
+                        </button>
+                        <button
                             onClick={loadData}
                             className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
                             title="새로고침"
                         >
                             <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
-                        </button>
-                        <button
-                            onClick={handleSeedAllAccommodations}
-                            disabled={seeding}
-                            className={`px-4 py-2.5 rounded-xl font-bold text-sm transition shadow-sm flex items-center gap-2
-                                ${seeding ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:border-slate-300'}
-                            `}
-                        >
-                            {seeding ? <div className="animate-spin w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full"></div> : <FontAwesomeIcon icon={faPlus} />}
-                            샘플 데이터 생성
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                setActiveTab('status');
-                                setShowBillingPanel((prev) => !prev);
-                            }}
-                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all border ${
-                                showBillingPanel
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                            }`}
-                        >
-                            <FontAwesomeIcon icon={faFileInvoiceDollar} />
-                            <span>{showBillingPanel ? '청구관리 닫기' : '청구관리'}</span>
                         </button>
                         <button
                             onClick={handleAddClick}
@@ -894,31 +800,31 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                 </div>
 
                 {/* 필터 및 탭 섹션 */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex p-1 bg-slate-100 rounded-xl w-fit">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex flex-wrap p-1 bg-slate-100 rounded-xl w-full lg:w-fit gap-1">
                         <button
                             onClick={() => setActiveTab('status')}
-                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`flex-1 lg:flex-none min-w-[150px] px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <FontAwesomeIcon icon={faChartPie} className="mr-2" />
                             배정 및 청구현황
                         </button>
                         <button
                             onClick={() => setActiveTab('ledger')}
-                            className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                            className={`flex-1 lg:flex-none min-w-[170px] px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                         >
                             <FontAwesomeIcon icon={faFileInvoiceDollar} className="mr-2" />
                             숙소 통합관리대장
                         </button>
                     </div>
 
-                    <div className="flex items-center gap-3 px-2">
-                        <span className="text-sm font-bold text-slate-500">팀별 필터:</span>
+                    <div className="flex items-center gap-3 px-2 min-w-0">
+                        <span className="text-sm font-bold text-slate-500 whitespace-nowrap">팀별 필터:</span>
                         <select
                             value={selectedTeamId}
                             onChange={(e) => setSelectedTeamId(e.target.value)}
                             disabled={activeTab !== 'status' || filterStatus !== 'active'}
-                            className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-48 p-2 outline-none disabled:text-slate-300"
+                            className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-48 p-2 outline-none disabled:text-slate-300"
                         >
                             <option value="">전체 팀 보기</option>
                             {selectableTeams.map((team) => (
@@ -1135,7 +1041,22 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                 /* ── 목록형 (Table) ── */
                                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                                     <div className="overflow-x-auto">
-                                        <table className="w-full text-sm">
+                                        <table className="support-compact-table support-compact-status w-full table-fixed text-xs">
+                                            <colgroup>
+                                                <col style={{ width: '3%' }} />
+                                                <col style={{ width: '10%' }} />
+                                                <col style={{ width: '14%' }} />
+                                                <col style={{ width: '9%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '6%' }} />
+                                                <col style={{ width: '10%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '7%' }} />
+                                                <col style={{ width: '6%' }} />
+                                            </colgroup>
                                             <thead>
                                                 <tr className="bg-slate-50 border-b border-slate-200">
                                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-8">#</th>
@@ -1713,28 +1634,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                                    <div>
-                                        <h2 className="text-lg font-extrabold text-slate-900">숙소 청구관리</h2>
-                                        <p className="text-sm text-slate-500 font-medium mt-1">
-                                            현황판에서 배정/청구대상을 정리한 뒤 월별 숙소 청구서를 생성/수정/확정하세요.
-                                        </p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowBillingPanel((prev) => !prev)}
-                                        className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                                    >
-                                        {showBillingPanel ? '청구관리 접기' : '청구관리 열기'}
-                                    </button>
-                                </div>
-                                {showBillingPanel && (
-                                    <div className="mt-4 pt-4 border-t border-slate-200">
-                                        <AccommodationBillingManager />
-                                    </div>
-                                )}
                             </div>
                         </div>
                     ) : (

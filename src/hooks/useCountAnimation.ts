@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
  * @param target The target number to animate to.
  * @param duration The duration of the animation in milliseconds. Default: 1000ms.
  */
-export const useCountAnimation = (target: number, duration: number = 1000) => {
+export const useCountAnimation = (target: number, duration: number = 1000, precision: number = 0) => {
     const [count, setCount] = useState(0);
 
     useEffect(() => {
@@ -38,6 +38,6 @@ export const useCountAnimation = (target: number, duration: number = 1000) => {
         return () => window.cancelAnimationFrame(animationFrameId);
     }, [target, duration]);
 
-    // Return integer for display
-    return Math.round(count);
+    const factor = Math.pow(10, precision);
+    return Math.round(count * factor) / factor;
 };

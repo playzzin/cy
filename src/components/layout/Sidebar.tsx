@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -43,7 +43,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { userService } from '../../services/userService';
+import { userMenuPositionService } from '../../services/userMenuPositionService';
 import { rolePermissionService } from '../../services/rolePermissionService';
 import { UserRole } from '../../types/roles';
 import { SiteDataType, MenuItem } from '../../types/menu';
@@ -81,6 +81,9 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
     '급여 지급 관리': 'payroll-payment',
     '명세서 조회': 'payroll-payslip',
     '시스템 설정': 'system-config',
+    '복지 자산 관리': 'welfare-assets',
+    '캐시/포인트 관리': 'welfare-assets',
+    '포인트 게임 관리': 'welfare-assets',
     '스마트 메모': 'smart-memo',
     'Smart Memo': 'smart-memo',
     // Add mappings for parent menus if needed, or handle logic to show parent if any child is visible
@@ -88,9 +91,38 @@ const MENU_PERMISSION_MAP: { [key: string]: string } = {
 
 const PATH_PERMISSION_MAP: { [key: string]: string } = {
     '/memos': 'smart-memo',
+    '/admin/welfare-assets': 'welfare-assets',
 };
 
 const normalizeRole = (role: unknown): string => String(role || '').trim();
+const normalizeRoleKey = (role: unknown): string => normalizeRole(role).toLowerCase();
+
+const toRoleList = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+        return value.map(normalizeRole).filter(Boolean);
+    }
+    const normalized = normalizeRole(value);
+    return normalized ? [normalized] : [];
+};
+
+const uniqueRoles = (roles: unknown[]): string[] => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    roles.flatMap(toRoleList).forEach((role) => {
+        const key = normalizeRoleKey(role);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        result.push(role);
+    });
+
+    return result;
+};
+
+const roleListIncludes = (actualRoles: string[], allowedRoles: string[]): boolean => {
+    const actualKeys = new Set(actualRoles.map(normalizeRoleKey));
+    return allowedRoles.some((role) => actualKeys.has(normalizeRoleKey(role)));
+};
 
 const isAdminRole = (role: unknown): boolean => {
     const normalized = normalizeRole(role).toLowerCase();
@@ -177,8 +209,18 @@ const Sidebar: React.FC<SidebarProps> = ({
     const location = useLocation();
     const navigate = useNavigate();
     const { currentUser } = useAuth();
-    const [userRole, setUserRole] = useState<string>('user');
+    const [userProfile, setUserProfile] = useState<any>(null);
+    const [additionalMenuPositions, setAdditionalMenuPositions] = useState<string[]>([]);
     const [permissions, setPermissions] = useState<any>(null);
+    const userAccessRoles = useMemo(() => {
+        return uniqueRoles([
+            userProfile?.position,
+            userProfile?.role,
+            userProfile?.additionalPositions,
+            additionalMenuPositions,
+            'user'
+        ]);
+    }, [userProfile, additionalMenuPositions]);
     const safeCurrentSiteData = currentSiteData || {
         name: '청연ENG ERP',
         icon: 'fa-shield-halved',
@@ -187,18 +229,29 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     useEffect(() => {
         let userUnsubscribe: () => void;
+        let positionUnsubscribe: () => void;
 
         if (currentUser) {
             // Listen to user role changes in real-time
             userUnsubscribe = onSnapshot(doc(db, 'users', currentUser.uid), (docSnap: any) => {
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    if (data?.role) {
-                        setUserRole(data.role);
-                        console.log("Sidebar: User role updated to", data.role);
-                    }
+                    setUserProfile(data || null);
+                    console.log("Sidebar: User access profile updated", {
+                        role: data?.role,
+                        position: data?.position
+                    });
+                } else {
+                    setUserProfile(null);
                 }
             });
+
+            positionUnsubscribe = userMenuPositionService.subscribe((map) => {
+                setAdditionalMenuPositions(map[currentUser.uid] || []);
+            });
+        } else {
+            setUserProfile(null);
+            setAdditionalMenuPositions([]);
         }
 
         const unsubscribe = rolePermissionService.subscribe((perms) => {
@@ -211,22 +264,23 @@ const Sidebar: React.FC<SidebarProps> = ({
         return () => {
             unsubscribe();
             if (userUnsubscribe) userUnsubscribe();
+            if (positionUnsubscribe) positionUnsubscribe();
         };
     }, [currentUser]);
 
     const hasPermission = (itemText: string, itemRoles?: string[], itemPath?: string): boolean => {
-        if (isAdminRole(userRole)) return true;
+        if (userAccessRoles.some(isAdminRole)) return true;
 
         // 1. Dynamic Check (Priority 1)
         if (itemRoles && itemRoles.length > 0) {
-            return itemRoles.includes(userRole);
+            return roleListIncludes(userAccessRoles, itemRoles);
         }
 
         // 2. Legacy Check (Priority 2)
         const permissionId = getPermissionId(itemText, itemPath);
         if (!permissionId) return true;
 
-        return rolePermissionService.hasAccess(userRole, permissionId);
+        return userAccessRoles.some((role) => rolePermissionService.hasAccess(role, permissionId));
     };
 
     const isActiveCheck = (path: string | undefined) => {

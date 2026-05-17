@@ -10,7 +10,6 @@ import { RecentReportsWidget } from './widgets/RecentReportsWidget';
 import { format, subDays } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
-import { RoleFocusPanel } from './RoleFocusPanel';
 import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
 
 const Container = styled.div`
@@ -105,8 +104,6 @@ export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConf
 
     return (
         <Container>
-            <RoleFocusPanel modeConfig={modeConfig} />
-
             {/* Top Row: Today Summary - High Priority */}
             <Grid>
                 <Col $span={12}>

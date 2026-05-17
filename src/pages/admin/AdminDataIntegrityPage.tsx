@@ -8,14 +8,45 @@ import { companyService, Company } from '../../services/companyService';
 import { toast } from '../../utils/swal';
 
 interface Discrepancy {
-    type: 'team' | 'site' | 'company';
-    workerId: string;
-    workerName: string;
+    type: 'team' | 'site' | 'company' | 'siteResponsibleTeam';
+    workerId: string; // Worker ID, or Site ID for siteResponsibleTeam issues
+    workerName: string; // Worker name, or Site name for siteResponsibleTeam issues
     targetId: string; // The ID of the team/site/company
     currentName: string; // The name currently in the worker document
     correctName: string; // The correct name from the master document
     masterExists: boolean; // Does the master document even exist?
 }
+
+const normalizeNameKey = (value?: unknown): string => {
+    return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase();
+};
+
+const isSupportSite = (site: Site): boolean => {
+    return String(site.siteType ?? '').trim().includes('지원');
+};
+
+const extractResponsibleTeamNameFromSiteName = (siteName?: unknown): string => {
+    const match = String(siteName ?? '').trim().match(/\(([^()]*)\)\s*$/);
+    return match?.[1]?.trim() || '';
+};
+
+const findTeamByNameHint = (teams: Team[], rawName: string): Team | undefined => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return undefined;
+
+    const candidates = [
+        trimmed,
+        trimmed.endsWith('팀') ? trimmed.slice(0, -1) : `${trimmed}팀`,
+    ].map(normalizeNameKey);
+
+    return teams.find((team) => candidates.includes(normalizeNameKey(team.name)));
+};
+
+const teamIdMatches = (team: Team, id?: unknown): boolean => {
+    const normalizedId = String(id ?? '').trim();
+    if (!normalizedId) return false;
+    return normalizedId === String(team.id ?? '').trim() || normalizedId === String(team.legacyId ?? '').trim();
+};
 
 const AdminDataIntegrityPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -121,10 +152,38 @@ const AdminDataIntegrityPage: React.FC = () => {
                 }
             });
 
+            sites.forEach(site => {
+                if (!isSupportSite(site)) return;
+
+                const expectedTeamNameHint = extractResponsibleTeamNameFromSiteName(site.name);
+                if (!expectedTeamNameHint) return;
+
+                const expectedTeam = findTeamByNameHint(teams, expectedTeamNameHint);
+                const currentResponsibleTeamName = String(site.responsibleTeamName ?? '').trim();
+                const currentResponsibleTeamId = String(site.responsibleTeamId ?? '').trim();
+                const expectedTeamName = expectedTeam?.name || expectedTeamNameHint;
+                const hasCorrectName = normalizeNameKey(currentResponsibleTeamName) === normalizeNameKey(expectedTeamName);
+                const hasCorrectId = expectedTeam ? teamIdMatches(expectedTeam, currentResponsibleTeamId) : false;
+
+                if (!expectedTeam || !hasCorrectName || !hasCorrectId) {
+                    issues.push({
+                        type: 'siteResponsibleTeam',
+                        workerId: String(site.id || site.legacyId || site.name),
+                        workerName: site.name,
+                        targetId: expectedTeam?.id || expectedTeamNameHint,
+                        currentName: currentResponsibleTeamName
+                            ? `${currentResponsibleTeamName}${expectedTeam && !hasCorrectId ? ' (ID 불일치)' : ''}`
+                            : '(없음)',
+                        correctName: expectedTeamName,
+                        masterExists: Boolean(expectedTeam)
+                    });
+                }
+            });
+
             setDiscrepancies(issues);
             setStats({
                 totalWorkers: workers.length,
-                scanned: workers.length,
+                scanned: workers.length + sites.length,
                 issues: issues.length
             });
             setLastScanned(new Date());
@@ -155,7 +214,14 @@ const AdminDataIntegrityPage: React.FC = () => {
             if (issue.type === 'site') updates.siteName = issue.correctName;
             if (issue.type === 'company') updates.companyName = issue.correctName;
 
-            await manpowerService.updateWorker(issue.workerId, updates);
+            if (issue.type === 'siteResponsibleTeam') {
+                await siteService.updateSite(issue.workerId, {
+                    responsibleTeamId: issue.targetId,
+                    responsibleTeamName: issue.correctName
+                });
+            } else {
+                await manpowerService.updateWorker(issue.workerId, updates);
+            }
             toast.success('수정되었습니다.');
 
             // Remove from list locally
@@ -186,7 +252,14 @@ const AdminDataIntegrityPage: React.FC = () => {
                     if (issue.type === 'team') updates.teamName = issue.correctName;
                     if (issue.type === 'site') updates.siteName = issue.correctName;
                     if (issue.type === 'company') updates.companyName = issue.correctName;
-                    await manpowerService.updateWorker(issue.workerId, updates);
+                    if (issue.type === 'siteResponsibleTeam') {
+                        await siteService.updateSite(issue.workerId, {
+                            responsibleTeamId: issue.targetId,
+                            responsibleTeamName: issue.correctName
+                        });
+                    } else {
+                        await manpowerService.updateWorker(issue.workerId, updates);
+                    }
                     fixedCount += 1;
                 }
             }
@@ -210,7 +283,7 @@ const AdminDataIntegrityPage: React.FC = () => {
                         데이터 연결 무결성 점검
                     </h1>
                     <p className="text-slate-500 mt-1">
-                        작업자 정보와 원본(팀, 현장, 회사) 데이터의 이름 일치 여부를 검사하고 수정합니다.
+                        작업자 정보와 원본(팀, 현장, 회사) 데이터의 이름 일치 여부, 지원 현장의 담당팀을 검사하고 수정합니다.
                     </p>
                 </div>
                 <div className="flex items-center gap-4">
@@ -247,7 +320,7 @@ const AdminDataIntegrityPage: React.FC = () => {
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                     <div className="text-sm text-slate-500 font-medium mb-1">검사된 항목</div>
-                    <div className="text-3xl font-bold text-blue-600">{stats.scanned.toLocaleString()}명</div>
+                    <div className="text-3xl font-bold text-blue-600">{stats.scanned.toLocaleString()}건</div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                     <div className="text-sm text-slate-500 font-medium mb-1">발견된 문제</div>
@@ -279,7 +352,7 @@ const AdminDataIntegrityPage: React.FC = () => {
                             <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-6 py-3">유형</th>
-                                    <th className="px-6 py-3">작업자</th>
+                                    <th className="px-6 py-3">대상</th>
                                     <th className="px-6 py-3">현재 저장된 이름</th>
                                     <th className="px-6 py-3">원본 이름 (Master)</th>
                                     <th className="px-6 py-3 text-right">조치</th>
@@ -292,14 +365,14 @@ const AdminDataIntegrityPage: React.FC = () => {
                                             <span className={`
                                                 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border
                                                 ${issue.type === 'team' ? 'bg-orange-50 text-orange-600 border-orange-100' :
-                                                    issue.type === 'site' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                                                    issue.type === 'site' || issue.type === 'siteResponsibleTeam' ? 'bg-blue-50 text-blue-600 border-blue-100' :
                                                         'bg-purple-50 text-purple-600 border-purple-100'}
                                             `}>
                                                 <FontAwesomeIcon icon={
                                                     issue.type === 'team' ? faUserGroup :
-                                                        issue.type === 'site' ? faHardHat : faBuilding
+                                                        issue.type === 'site' || issue.type === 'siteResponsibleTeam' ? faHardHat : faBuilding
                                                 } />
-                                                {issue.type === 'team' ? '팀' : issue.type === 'site' ? '현장' : '회사'}
+                                                {issue.type === 'team' ? '팀' : issue.type === 'site' ? '현장' : issue.type === 'siteResponsibleTeam' ? '현장 담당팀' : '회사'}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 font-medium text-slate-900">

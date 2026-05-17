@@ -108,13 +108,19 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
         return <span className="text-slate-500 text-xs">-</span>;
     };
 
+    const hasActiveAssignment = (card: Card) => {
+        return Boolean(card.currentAssigneeId && card.currentAssigneeType && card.currentAssigneeName);
+    };
+
     const getResolvedBillingTargetName = (card: Card) => {
+        if (!hasActiveAssignment(card)) return '';
         return card.billingTargetType && card.billingTargetId
             ? (card.billingTargetName ?? '')
             : (card.currentAssigneeName ?? '');
     };
 
     const getResolvedBillingTargetType = (card: Card) => {
+        if (!hasActiveAssignment(card)) return undefined;
         return card.billingTargetType && card.billingTargetId
             ? card.billingTargetType
             : card.currentAssigneeType;
@@ -257,7 +263,20 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
             {viewMode === 'list' ? (
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="support-compact-table support-compact-status w-full table-fixed text-xs">
+                            <colgroup>
+                                <col style={{ width: '3%' }} />
+                                <col style={{ width: '13%' }} />
+                                <col style={{ width: '9%' }} />
+                                <col style={{ width: '6%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '7%' }} />
+                                <col style={{ width: '7%' }} />
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '13%' }} />
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '8%' }} />
+                            </colgroup>
                             {/* ... (thead) */}
                             <thead className="bg-slate-50 border-b border-slate-200">
                                 <tr>
@@ -288,7 +307,8 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                     const billingTargetName = getResolvedBillingTargetName(card);
                                     const billingTargetType = getResolvedBillingTargetType(card);
                                     const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
-                                    const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
+                                    const isAssigned = hasActiveAssignment(card);
+                                    const hasExplicitBillingTarget = isAssigned && Boolean(card.billingTargetType && card.billingTargetId);
 
                                     return (
                                         <tr
@@ -386,7 +406,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                                     ) : (
                                                         <span className="text-xs font-bold text-slate-300">미지정</span>
                                                     )}
-                                                    {!hasExplicitBillingTarget && (
+                                                    {isAssigned && !hasExplicitBillingTarget && (
                                                     <button
                                                         type="button"
                                                         onClick={(e) => {
@@ -464,7 +484,8 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                         const billingTargetName = getResolvedBillingTargetName(card);
                         const billingTargetType = getResolvedBillingTargetType(card);
                         const billingTargetTeamInfo = getTargetTeamInfo(billingTargetType, billingTargetName);
-                        const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
+                        const isAssigned = hasActiveAssignment(card);
+                        const hasExplicitBillingTarget = isAssigned && Boolean(card.billingTargetType && card.billingTargetId);
 
                         return (
                             <div
@@ -505,7 +526,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             >
                                                 <FontAwesomeIcon icon={card.currentAssigneeType === 'TEAM' ? faUsers : faUser} className="text-xs" />
                                             </button>
-                                            {!hasExplicitBillingTarget && (
+                                            {isAssigned && !hasExplicitBillingTarget && (
                                             <button
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -595,7 +616,7 @@ export const CardStatusBoard: React.FC<CardStatusBoardProps> = ({ cards, teams =
                                             )}
                                         </div>
 
-                                        {!hasExplicitBillingTarget && (
+                                        {isAssigned && !hasExplicitBillingTarget && (
                                         <button
                                             type="button"
                                             onClick={(e) => {

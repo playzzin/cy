@@ -7,13 +7,21 @@ import {
     faSave,
     faExclamationTriangle,
     faUsers,
-    faUser
+    faUser,
+    faPen,
+    faRotateRight,
+    faEye,
+    faBan
 } from '@fortawesome/free-solid-svg-icons';
 import { Card, CardAssignmentRecord, CardTransactionCategory, CardTransaction } from '../../types/card';
+import { CardBillingCostItem, CardBillingDocument } from '../../types/cardBilling';
 import { cardService } from '../../services/cardService';
+import { cardBillingService } from '../../services/cardBillingService';
 import { Team } from '../../services/teamService';
 import { Worker, manpowerService } from '../../services/manpowerService';
 import { iconMap } from '../../constants/iconMap';
+import { Timestamp } from '../../types/timestamp';
+import LedgerBillingEditorModal from '../support/LedgerBillingEditorModal';
 
 // ── 독립 EditableCell 컴포넌트 (Ref 기반 비제어 방식) ──────────
 // typing 중 React 리렌더 0회 → 커서 이탈 완전 방지
@@ -108,6 +116,32 @@ interface CardMonthlyLedgerProps {
     loadingCards: boolean;
 }
 
+type BillingFilter = 'all' | 'unbilled' | 'draft' | 'confirmed' | 'blocked';
+type BillingRowStatus = 'unbilled' | 'draft' | 'confirmed' | 'partial' | 'blocked';
+
+const BILLING_FILTERS: Array<{ value: BillingFilter; label: string }> = [
+    { value: 'all', label: '전체' },
+    { value: 'unbilled', label: '미청구' },
+    { value: 'draft', label: '작성중' },
+    { value: 'confirmed', label: '확정' },
+    { value: 'blocked', label: '청구불가' }
+];
+
+const getBillingStatusBadge = (status: BillingRowStatus) => {
+    switch (status) {
+        case 'confirmed':
+            return { label: '확정', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+        case 'draft':
+            return { label: '작성중', className: 'bg-amber-50 text-amber-700 border-amber-200' };
+        case 'partial':
+            return { label: '일부청구', className: 'bg-sky-50 text-sky-700 border-sky-200' };
+        case 'blocked':
+            return { label: '청구불가', className: 'bg-slate-100 text-slate-500 border-slate-200' };
+        default:
+            return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
+    }
+};
+
 const hexToRgba = (hex: string, alpha: number) => {
     const r = parseInt(hex.slice(1, 3), 16);
     const g = parseInt(hex.slice(3, 5), 16);
@@ -126,6 +160,10 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     const [rows, setRows] = useState<CardLedgerRow[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
     const [assignments, setAssignments] = useState<CardAssignmentRecord[]>([]);
+    const [billingDocuments, setBillingDocuments] = useState<CardBillingDocument[]>([]);
+    const [billingFilter, setBillingFilter] = useState<BillingFilter>('all');
+    const [billingProcessingId, setBillingProcessingId] = useState('');
+    const [billingEditor, setBillingEditor] = useState<{ row: CardLedgerRow; document: CardBillingDocument } | null>(null);
     /** 원본 트랜잭션 (저장 시 기존 데이터 삭제용) */
     const originalTxsRef = useRef<CardTransaction[]>([]);
 
@@ -183,6 +221,24 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         return map;
     }, [teams]);
 
+    const workerByAnyId = useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            if (worker.id) map.set(String(worker.id), worker);
+            if (worker.legacyId) map.set(String(worker.legacyId), worker);
+        });
+        return map;
+    }, [workers]);
+
+    const workerByName = useMemo(() => {
+        const map = new Map<string, Worker>();
+        workers.forEach((worker) => {
+            const name = normalizeKey(worker.name);
+            if (name && !map.has(name)) map.set(name, worker);
+        });
+        return map;
+    }, [workers]);
+
     useEffect(() => {
         const y = currentDate.getFullYear();
         const m = String(currentDate.getMonth() + 1).padStart(2, '0');
@@ -194,12 +250,14 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         if (!yearMonth || cards.length === 0) return;
         setLoading(true);
         try {
-            const [txs, assignmentList] = await Promise.all([
+            const [txs, assignmentList, billings] = await Promise.all([
                 cardService.getTransactionsByMonth(yearMonth),
-                cardService.listAllCardAssignments().catch(() => [] as CardAssignmentRecord[])
+                cardService.listAllCardAssignments().catch(() => [] as CardAssignmentRecord[]),
+                cardBillingService.getBillingsByMonth(yearMonth).catch(() => [] as CardBillingDocument[])
             ]);
             originalTxsRef.current = txs;
             setAssignments(assignmentList);
+            setBillingDocuments(billings);
 
             // 카드별 카테고리 합산
             const amountsMap = new Map<string, CategoryAmounts>();
@@ -287,17 +345,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             normalizeKey(assignment.cardId) === cardId && isAssignmentActiveInMonth(assignment)
         );
 
-        const fallbackAssignments: CardAssignmentRecord[] = activeAssignments.length > 0 ? activeAssignments : (
-            card.currentAssigneeName && card.currentAssigneeType ? [{
-                id: `current-${card.id}`,
-                cardId: card.id,
-                cardLabel: `${card.name} (${card.last4})`,
-                assigneeId: card.currentAssigneeId || '',
-                assigneeType: card.currentAssigneeType,
-                assigneeName: card.currentAssigneeName,
-                startDate: ''
-            }] : []
-        );
+        const fallbackAssignments: CardAssignmentRecord[] = activeAssignments;
 
         const teamMap = new Map<string, NonNullable<ReturnType<typeof resolveTeamBadge>>>();
         const workerMap = new Map<string, string>();
@@ -322,6 +370,49 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
             primaryColor: assignedTeams[0]?.color || '#94a3b8'
         };
     };
+
+    const getCardBillingDocuments = useCallback((card: Card) => {
+        return billingDocuments.filter((doc) => (
+            normalizeKey(doc.cardId) === normalizeKey(card.id) &&
+            normalizeKey(doc.yearMonth) === normalizeKey(yearMonth)
+        ));
+    }, [billingDocuments, yearMonth]);
+
+    const hasCardBillingTarget = useCallback((card: Card): boolean => {
+        if (card.billingTargetType && card.billingTargetId) return true;
+        const cardId = normalizeKey(card.id);
+        return assignments.some((assignment) =>
+            normalizeKey(assignment.cardId) === cardId &&
+            isAssignmentActiveInMonth(assignment)
+        );
+    }, [assignments, monthRange]);
+
+    const getRowBillingState = useCallback((row: CardLedgerRow): {
+        status: BillingRowStatus;
+        documents: CardBillingDocument[];
+        reason?: string;
+    } => {
+        if (row.total <= 0) return { status: 'blocked', documents: [], reason: '금액 없음' };
+        if (!hasCardBillingTarget(row.card)) return { status: 'blocked', documents: [], reason: '청구대상 없음' };
+
+        const documents = getCardBillingDocuments(row.card);
+        if (documents.length === 0) return { status: 'unbilled', documents };
+
+        const confirmedCount = documents.filter((doc) => doc.status === 'CONFIRMED').length;
+        if (confirmedCount === documents.length) return { status: 'confirmed', documents };
+        if (confirmedCount > 0) return { status: 'partial', documents };
+        return { status: 'draft', documents };
+    }, [getCardBillingDocuments, hasCardBillingTarget]);
+
+    const billingRows = useMemo(() => {
+        return rows
+            .map((row, index) => ({ row, index, billingState: getRowBillingState(row) }))
+            .filter(({ billingState }) => {
+                if (billingFilter === 'all') return true;
+                if (billingFilter === 'draft') return billingState.status === 'draft' || billingState.status === 'partial';
+                return billingState.status === billingFilter;
+            });
+    }, [rows, billingFilter, getRowBillingState]);
 
     useEffect(() => {
         if (yearMonth && cards.length > 0) {
@@ -404,7 +495,117 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
         }
     };
 
+    const handleCreateOrRecalculateBilling = async (row: CardLedgerRow, mode: 'create' | 'recalculate') => {
+        const state = getRowBillingState(row);
+        if (isDirty) {
+            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
+            return;
+        }
+        if (state.status === 'blocked') {
+            alert(state.reason || '청구할 수 없는 행입니다.');
+            return;
+        }
+
+        setBillingProcessingId(row.card.id);
+        try {
+            const generated = await cardBillingService.generateAssignmentBillings(row.card, yearMonth);
+            if (generated.length === 0) {
+                alert('배정 이력과 사용 금액 기준으로 생성할 청구 문서를 찾지 못했습니다.');
+                return;
+            }
+
+            const confirmedIds = new Set(
+                state.documents
+                    .filter((doc) => doc.status === 'CONFIRMED')
+                    .map((doc) => doc.id)
+            );
+            let saved = 0;
+            for (const doc of generated) {
+                const existing = state.documents.find((item) => item.id === doc.id);
+                if (confirmedIds.has(existing?.id ?? doc.id)) continue;
+                await cardBillingService.saveBilling({
+                    ...doc,
+                    id: existing?.id ?? doc.id,
+                    status: 'DRAFT',
+                    memo: existing?.memo ?? doc.memo
+                });
+                saved += 1;
+            }
+
+            await loadData();
+            alert(mode === 'recalculate'
+                ? `청구서가 재계산되었습니다. (${saved}건)`
+                : `청구서가 생성되었습니다. (${saved}건)`);
+        } catch (error) {
+            console.error(error);
+            alert('청구 처리에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const buildCardDocumentWithItems = (
+        document: CardBillingDocument,
+        lineItems: CardBillingCostItem[],
+        memo: string,
+        status: CardBillingDocument['status']
+    ): CardBillingDocument => {
+        const totalAmount = lineItems.reduce((sum, item) => sum + (Number.isFinite(item.amount) ? item.amount : 0), 0);
+        return {
+            ...document,
+            lineItems,
+            memo,
+            status,
+            variableCost: totalAmount,
+            totalAmount,
+            updatedAt: Timestamp.now(),
+            confirmedAt: status === 'CONFIRMED' ? Timestamp.now() : document.confirmedAt
+        };
+    };
+
+    const handleSaveBillingEditor = async (
+        lineItems: CardBillingCostItem[],
+        memo: string,
+        status: CardBillingDocument['status'] = billingEditor?.document.status ?? 'DRAFT'
+    ) => {
+        if (!billingEditor) return;
+        setBillingProcessingId(billingEditor.row.card.id);
+        try {
+            const next = buildCardDocumentWithItems(billingEditor.document, lineItems, memo, status);
+            await cardBillingService.saveBilling(next);
+            await loadData();
+            setBillingEditor(null);
+            alert(status === 'CONFIRMED' ? '청구서가 확정되었습니다.' : '청구서가 저장되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구서 저장에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
     /** 총금액 합계 */
+    const handleCancelBilling = async (row: CardLedgerRow, document?: CardBillingDocument) => {
+        if (!document) return;
+        if (document.status === 'CONFIRMED') {
+            alert('확정된 청구서는 취소할 수 없습니다.');
+            return;
+        }
+        if (!window.confirm('작성중 청구서를 취소할까요?')) return;
+
+        setBillingProcessingId(row.card.id);
+        try {
+            await cardBillingService.deleteBilling(document.id);
+            await loadData();
+            alert('청구가 취소되었습니다.');
+        } catch (error) {
+            console.error(error);
+            alert('청구 취소에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
     const totals = useMemo(() => {
         const result = { ...emptyCategoryAmounts(), total: 0 };
         rows.forEach(r => {
@@ -417,9 +618,9 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
     }, [rows]);
 
     return (
-        <div className="flex flex-col h-full space-y-5">
+        <div className="flex flex-col h-full w-full min-w-0 space-y-5">
             {/* Toolbar */}
-            <div className="flex justify-between items-center bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
+            <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center bg-slate-100 rounded-full p-1">
                         <button
@@ -450,10 +651,26 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     </div>
                 </div>
 
-                <div className="flex gap-4 items-center">
+                <div className="flex flex-wrap gap-3 items-center justify-start lg:justify-end">
                     <div className="text-right mr-4">
                         <div className="text-xs text-slate-500 font-bold uppercase">총 합계</div>
                         <div className="text-2xl font-extrabold text-indigo-700 font-mono">{totals.total.toLocaleString()}</div>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
+                        {BILLING_FILTERS.map((filter) => (
+                            <button
+                                key={filter.value}
+                                type="button"
+                                onClick={() => setBillingFilter(filter.value)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+                                    billingFilter === filter.value
+                                        ? 'bg-white text-indigo-700 shadow-sm'
+                                        : 'text-slate-500 hover:text-slate-700'
+                                }`}
+                            >
+                                {filter.label}
+                            </button>
+                        ))}
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 h-[46px] shadow-sm">
                         <input
@@ -486,7 +703,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                             <p>데이터를 불러오는 중입니다...</p>
                         </div>
                     ) : (
-                        <table className="w-full text-sm min-w-[1250px]">
+                        <table className="support-compact-table support-compact-ledger w-full table-fixed text-[11px] lg:text-xs">
+                            <colgroup>
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '15%' }} />
+                                <col style={{ width: '11%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '14%' }} />
+                            </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
@@ -495,13 +723,18 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 개인</th>
                                     <th className="px-4 py-4 text-left w-48 tracking-wider bg-indigo-700">카드</th>
                                     <th className="px-2 py-4 text-center w-40 border-l border-indigo-400 bg-indigo-500">총금액</th>
+                                    <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">청구상태</th>
+                                    <th className="px-2 py-4 text-center w-44 border-l border-indigo-500">청구작업</th>
                                     <th className="px-4 py-4 text-left border-l border-indigo-500">메모</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-indigo-50">
-                                {rows.map((row, idx) => {
+                                {billingRows.map(({ row, index: idx, billingState }) => {
                                     const assignmentSummary = getAssignmentSummary(row.card);
                                     const visibleAssignedWorkers = assignmentSummary.assignedWorkers.slice(0, 3);
+                                    const billingBadge = getBillingStatusBadge(billingState.status);
+                                    const firstBillingDocument = billingState.documents.find((doc) => doc.status !== 'CONFIRMED') ?? billingState.documents[0];
+                                    const isProcessing = billingProcessingId === row.card.id;
 
                                     return (
                                         <tr key={row.card.id} className="group hover:bg-blue-50/40 transition-colors">
@@ -614,6 +847,66 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                                 `}
                                             />
 
+                                            <td className="px-2 py-3 border-l border-indigo-50 bg-white text-center">
+                                                <span className={`inline-flex items-center justify-center min-w-[72px] rounded-lg border px-2 py-1 text-[11px] font-extrabold ${billingBadge.className}`}>
+                                                    {billingBadge.label}
+                                                </span>
+                                                {billingState.documents.length > 1 && (
+                                                    <div className="mt-1 text-[10px] font-bold text-slate-400">{billingState.documents.length}건</div>
+                                                )}
+                                            </td>
+
+                                            <td className="px-2 py-3 border-l border-indigo-50 bg-white">
+                                                <div className="flex items-center justify-center gap-1.5">
+                                                    {billingState.status === 'blocked' ? (
+                                                        <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
+                                                    ) : billingState.status === 'unbilled' ? (
+                                                        <button
+                                                            type="button"
+                                                            disabled={isProcessing}
+                                                            onClick={() => handleCreateOrRecalculateBilling(row, 'create')}
+                                                            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300"
+                                                        >
+                                                            {isProcessing ? '처리중' : '청구'}
+                                                        </button>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                type="button"
+                                                                disabled={!firstBillingDocument}
+                                                                onClick={() => firstBillingDocument && setBillingEditor({ row, document: firstBillingDocument })}
+                                                                className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:text-slate-300"
+                                                                title={firstBillingDocument?.status === 'CONFIRMED' ? '청구서 보기' : '청구서 수정'}
+                                                            >
+                                                                <FontAwesomeIcon icon={firstBillingDocument?.status === 'CONFIRMED' ? faEye : faPen} />
+                                                            </button>
+                                                            {firstBillingDocument?.status !== 'CONFIRMED' && (
+                                                                <>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={isProcessing}
+                                                                    onClick={() => handleCreateOrRecalculateBilling(row, 'recalculate')}
+                                                                    className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:text-amber-300"
+                                                                    title="대장 기준 재계산"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faRotateRight} />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={isProcessing}
+                                                                    onClick={() => handleCancelBilling(row, firstBillingDocument)}
+                                                                    className="w-8 h-8 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:text-rose-300"
+                                                                    title="청구 취소"
+                                                                >
+                                                                    <FontAwesomeIcon icon={faBan} />
+                                                                </button>
+                                                                </>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </td>
+
                                             {/* 메모 */}
                                             <td className="p-1">
                                                 <input
@@ -627,12 +920,12 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                         </tr>
                                     );
                                 })}
-                                {rows.length === 0 && (
+                                {billingRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={7} className="p-20 text-center text-slate-400 bg-slate-50/50">
+                                        <td colSpan={9} className="p-20 text-center text-slate-400 bg-slate-50/50">
                                             <div className="flex flex-col items-center gap-3">
                                                 <FontAwesomeIcon icon={faReceipt} className="text-4xl text-slate-300" />
-                                                <p>해당 월의 데이터가 없습니다.</p>
+                                                <p>조건에 맞는 카드 대장 행이 없습니다.</p>
                                             </div>
                                         </td>
                                     </tr>
@@ -644,7 +937,7 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                                     <td className="p-4 border-r border-slate-600 text-right font-mono text-amber-300 text-lg">
                                         {totals.total.toLocaleString()}
                                     </td>
-                                    <td className="bg-slate-900 border-l border-slate-700"></td>
+                                    <td colSpan={3} className="bg-slate-900 border-l border-slate-700"></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -666,6 +959,21 @@ export const CardMonthlyLedger: React.FC<CardMonthlyLedgerProps> = ({ cards, tea
                     </p>
                 </div>
             </div>
+
+            {billingEditor && (
+                <LedgerBillingEditorModal<CardBillingCostItem>
+                    title={`${billingEditor.document.cardLabel} 카드 청구서`}
+                    subtitle={`${billingEditor.document.yearMonth} · ${billingEditor.document.teamName || billingEditor.document.issuedToWorkerName || '청구대상'}`}
+                    statusLabel={billingEditor.document.status === 'CONFIRMED' ? '확정' : '작성중'}
+                    readOnly={billingEditor.document.status === 'CONFIRMED'}
+                    lineItems={billingEditor.document.lineItems ?? []}
+                    memo={billingEditor.document.memo ?? ''}
+                    saving={billingProcessingId === billingEditor.row.card.id}
+                    onClose={() => setBillingEditor(null)}
+                    onSave={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo)}
+                    onConfirm={(lineItems, memo) => handleSaveBillingEditor(lineItems, memo, 'CONFIRMED')}
+                />
+            )}
         </div>
     );
 };

@@ -8,7 +8,6 @@ import {
 import { siteService, Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
-import { manpowerService } from '../../services/manpowerService';
 import { dailyReportService } from '../../services/dailyReportService';
 import { statisticsService } from '../../services/statisticsService';
 import SiteForm from '../../components/manpower/SiteForm';
@@ -30,7 +29,8 @@ const SITE_COLUMNS = [
     { key: 'partnerName', label: '협력사' },
     { key: 'siteType', label: '현장구분' },
     { key: 'paymentMethod', label: '결제구분' },
-    { key: 'status', label: '상태' }
+    { key: 'status', label: '상태' },
+    { key: 'totalManDay', label: '누적공수' }
 ];
 
 interface SiteDatabaseProps {
@@ -93,6 +93,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const getFilteredTeamsForSite = (site: Site): Team[] => {
         const rawCompanyId = site.companyId ? String(site.companyId).trim() : '';
         const targetCompanyId = rawCompanyId ? (companyUuidByAnyId.get(rawCompanyId) ?? rawCompanyId) : '';
+        const currentTeam = resolveResponsibleTeam(site);
 
         const constructorCompanyIds = new Set(
             companies
@@ -104,20 +105,38 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                 .filter(Boolean)
         );
 
-        const constructorTeams = teams.filter((team) => {
+        const normalizeTeamCompanyId = (team: Team): string => {
             const teamCompanyIdRaw = team.companyId ? String(team.companyId).trim() : '';
-            if (!teamCompanyIdRaw) return false;
-            const teamCompanyId = companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw;
+            return teamCompanyIdRaw ? (companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw) : '';
+        };
+
+        const isExternalTeam = (team: Team): boolean => {
+            const teamType = String(team.type ?? '').trim();
+            const teamCompanyName = String(team.companyName ?? '').trim();
+            return normalizeTeamCompanyId(team).length === 0 && (teamCompanyName === '외부팀' || teamType === '지원팀');
+        };
+
+        const constructorTeams = teams.filter((team) => {
+            const teamCompanyId = normalizeTeamCompanyId(team);
+            if (!teamCompanyId) return false;
             return constructorCompanyIds.has(teamCompanyId);
         });
 
-        if (!targetCompanyId) return constructorTeams;
+        const baseTeams = !targetCompanyId
+            ? constructorTeams
+            : constructorTeams.filter((team) => normalizeTeamCompanyId(team) === targetCompanyId);
 
-        return constructorTeams.filter((team) => {
-            const teamCompanyIdRaw = team.companyId ? String(team.companyId).trim() : '';
-            if (!teamCompanyIdRaw) return false;
-            const teamCompanyId = companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw;
-            return teamCompanyId === targetCompanyId;
+        const externalTeams = teams.filter(isExternalTeam);
+        const mergedTeams = currentTeam
+            ? [currentTeam, ...baseTeams, ...externalTeams]
+            : [...baseTeams, ...externalTeams];
+
+        const seen = new Set<string>();
+        return mergedTeams.filter((team) => {
+            const key = String(team.id || team.legacyId || team.name || '').trim();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
         });
     };
 
@@ -245,7 +264,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const renderCellValue = (site: Site, column: any) => {
         const value = site[column.key as keyof Site];
 
-        if (column.key === 'totalGongsu') {
+        if (column.key === 'totalManDay' || column.key === 'totalGongsu') {
             // Try matching by ID first, then Name
             const gongsu = siteStats[site.id!] || siteStats[site.name] || 0;
             return (
@@ -310,9 +329,6 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const handleSiteBlur = async (id: string, field: keyof Site, value: any) => {
         try {
             await siteService.updateSite(id, { [field]: value });
-            if (field === 'name') {
-                await manpowerService.updateWorkersSiteName(id, value);
-            }
             await refreshSites(); // Context 새로고침
         } catch (error) {
             console.error("Failed to update site", error);

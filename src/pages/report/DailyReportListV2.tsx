@@ -11,13 +11,14 @@ import {
     faFilter,
     faDownload,
     faSpinner,
-    faTrashCan,
+    faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import { dailyReportService, DailyReportWorker, DailyReportWorkerRow } from '../../services/dailyReportService';
 import { dailyReportTransferService } from '../../services/dailyReportTransferService';
 import { teamService, Team } from '../../services/teamService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { siteService, Site } from '../../services/siteService';
+import { companyService, Company } from '../../services/companyService';
 import { confirm, toast } from '../../utils/swal';
 import { normalizeTypedDateInput, sanitizeTypedDateInput } from '../../utils/typedDateInput';
 import { loadSessionState, saveSessionState } from '../../utils/sessionStorage';
@@ -28,6 +29,7 @@ import './DailyReportListV2.css';
 
 interface DailyReportListV2Props {
     initialDate?: string;
+    targetReportId?: string;
 }
 
 const formatYmd = (d: Date): string => {
@@ -63,6 +65,12 @@ const SALARY_MODEL_OPTIONS = ['일급제', '일급', '월급제', '월급', '지
 
 type RowDraft = {
     siteId: string;
+    companyId: string;
+    companyName: string;
+    constructorCompanyId: string;
+    constructorCompanyName: string;
+    partnerId: string;
+    partnerName: string;
     teamId: string;
     responsibleTeamId: string;
     responsibleTeamName: string;
@@ -78,9 +86,30 @@ type RowDraft = {
     paymentType: string;
 };
 
+type WorkerDraftValidation =
+    | { ok: true; manDay: number; unitPrice: number }
+    | { ok: false; message: string };
+
+const parseNonNegativeDraftNumber = (value: unknown, label: string): { ok: true; value: number } | { ok: false; message: string } => {
+    const text = String(value ?? '').trim();
+    if (text === '') {
+        return { ok: false, message: `${label} 값을 입력해 주세요.` };
+    }
+
+    const numberValue = Number(text);
+    if (!Number.isFinite(numberValue) || numberValue < 0) {
+        return { ok: false, message: `${label}은 0 이상 숫자로 입력해 주세요.` };
+    }
+
+    return { ok: true, value: numberValue };
+};
+
 type ColumnFilterKey =
     | 'date'
     | 'siteName'
+    | 'companyName'
+    | 'constructorCompanyName'
+    | 'partnerName'
     | 'siteType'
     | 'paymentType'
     | 'teamName'
@@ -153,7 +182,7 @@ const fromColumnFilterValue = (value: string): string => {
     return value === EMPTY_COLUMN_FILTER_VALUE ? '(빈값)' : value;
 };
 
-const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) => {
+const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targetReportId }) => {
     const todayStr = formatYmd(new Date());
     const defaultDate = initialDate || todayStr;
     const persistedViewState = useMemo(() => {
@@ -190,9 +219,13 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [rows, setRows] = useState<DailyReportWorkerRow[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const siteOptions = useMemo(() => {
         return [...sites].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
     }, [sites]);
+    const companyOptions = useMemo(() => {
+        return [...companies].sort((a, b) => compareKo(a.name ?? '', b.name ?? ''));
+    }, [companies]);
     const [allWorkers, setAllWorkers] = useState<Worker[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -211,6 +244,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const [siteSortOrder, setSiteSortOrder] = useState<'asc' | 'desc'>(persistedViewState.siteSortOrder === 'desc' ? 'desc' : 'asc');
 
     const [isEditMode, setIsEditMode] = useState(false);
+    const [showSiteDetailColumns, setShowSiteDetailColumns] = useState(false);
     const isFixed = true;
 
     const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
@@ -236,14 +270,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     useEffect(() => {
         (async () => {
             try {
-                const [teamsData, sitesData, workersData] = await Promise.all([
+                const [teamsData, sitesData, workersData, companiesData] = await Promise.all([
                     teamService.getTeams(),
                     siteService.getSites(),
-                    manpowerService.getWorkers()
+                    manpowerService.getWorkers(),
+                    companyService.getActiveCompanies()
                 ]);
                 setTeams(teamsData);
                 setSites(sitesData);
                 setAllWorkers(workersData);
+                setCompanies(companiesData);
             } catch (error) {
                 console.error('[DailyReportListV2] Failed to fetch initial data', error);
             }
@@ -418,7 +454,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     }, [startDateInput, endDateInput, startDate, endDate, searchRowsByRange]);
 
     const getRowKey = useCallback((r: DailyReportWorkerRow) => {
-        return `${String(r.reportId)}::${String(r.workerId)}`;
+        const workerIndex = typeof r.workerIndex === 'number' ? String(r.workerIndex) : 'none';
+        return `${String(r.reportId)}::${String(r.workerId)}::${workerIndex}`;
     }, []);
 
     const rowByKey = useMemo(() => {
@@ -529,12 +566,59 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         return siteCanonicalIdMap.get(raw) ?? raw;
     }, [siteCanonicalIdMap]);
 
+    const normalizeCompanyName = useCallback((value?: string | null) => {
+        return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase();
+    }, []);
+
+    const resolveCompanySelection = useCallback((params: { companyId?: string; companyName?: string }) => {
+        const rawId = String(params.companyId ?? '').trim();
+        const rawName = String(params.companyName ?? '').trim();
+        const matchedById = rawId
+            ? companyOptions.find((company) => String(company.id ?? '') === rawId || String(company.legacyId ?? '') === rawId)
+            : undefined;
+        const matchedByName = rawName
+            ? companyOptions.find((company) => normalizeCompanyName(company.name) === normalizeCompanyName(rawName))
+            : undefined;
+        const matched = matchedById || matchedByName;
+
+        return {
+            id: matched?.id ? String(matched.id) : '',
+            name: matched?.name ?? rawName,
+        };
+    }, [companyOptions, normalizeCompanyName]);
+
+    const getSiteDetailValuesFromSite = useCallback((site?: Site | null) => ({
+        companyId: String(site?.clientCompanyId || '').trim(),
+        companyName: String(site?.clientCompanyName || '').trim(),
+        constructorCompanyId: String(site?.companyId || site?.constructorCompanyId || '').trim(),
+        constructorCompanyName: String(site?.companyName || site?.constructorCompanyName || '').trim(),
+        partnerId: String(site?.partnerId || '').trim(),
+        partnerName: String(site?.partnerName || '').trim(),
+    }), []);
+
+    const getRowSiteDetailValues = useCallback((row: DailyReportWorkerRow) => {
+        return {
+            companyId: String(row.companyId || '').trim(),
+            companyName: String(row.companyName || '').trim(),
+            constructorCompanyId: String(row.constructorCompanyId || '').trim(),
+            constructorCompanyName: String(row.constructorCompanyName || '').trim(),
+            partnerId: String(row.partnerId || '').trim(),
+            partnerName: String(row.partnerName || '').trim(),
+        };
+    }, []);
+
     const getColumnFilterValue = useCallback((row: DailyReportWorkerRow, key: ColumnFilterKey): string => {
         switch (key) {
             case 'date':
                 return row.date ?? '';
             case 'siteName':
                 return row.siteName ?? '';
+            case 'companyName':
+                return getRowSiteDetailValues(row).companyName;
+            case 'constructorCompanyName':
+                return getRowSiteDetailValues(row).constructorCompanyName;
+            case 'partnerName':
+                return getRowSiteDetailValues(row).partnerName;
             case 'siteType':
                 return row.siteType ?? '';
             case 'paymentType':
@@ -562,7 +646,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             default:
                 return '';
         }
-    }, [resolveWorkerTeamDisplayName, resolveResponsibleTeamDisplayName]);
+    }, [getRowSiteDetailValues, resolveWorkerTeamDisplayName, resolveResponsibleTeamDisplayName]);
 
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
@@ -1210,6 +1294,25 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
     };
 
+    const handleToggleSiteDetailColumns = useCallback(() => {
+        setShowSiteDetailColumns((prev) => !prev);
+    }, []);
+
+    useEffect(() => {
+        if (showSiteDetailColumns) return;
+
+        setColumnFilters((prev) => {
+            if (!prev.companyName && !prev.constructorCompanyName && !prev.partnerName) return prev;
+            const {
+                companyName: _companyName,
+                constructorCompanyName: _constructorCompanyName,
+                partnerName: _partnerName,
+                ...rest
+            } = prev;
+            return rest;
+        });
+    }, [showSiteDetailColumns]);
+
     const getRowInitialDraft = useCallback((r: DailyReportWorkerRow): RowDraft => {
         const baseManDay = Number.isFinite(r.manDay) ? String(r.manDay) : '0';
         const baseUnitPrice = Number.isFinite(r.unitPrice) ? String(r.unitPrice) : '0';
@@ -1221,8 +1324,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             workerTeamId: r.workerTeamId,
             workerTeamName: r.workerTeamName
         });
+        const siteDetailValues = getRowSiteDetailValues(r);
         return {
             siteId: normalizeSiteId(r.siteId),
+            companyId: siteDetailValues.companyId,
+            companyName: siteDetailValues.companyName,
+            constructorCompanyId: siteDetailValues.constructorCompanyId,
+            constructorCompanyName: siteDetailValues.constructorCompanyName,
+            partnerId: siteDetailValues.partnerId,
+            partnerName: siteDetailValues.partnerName,
             teamId: normalizeTeamId(r.teamId),
             responsibleTeamId: resolveResponsibleTeamOptionId({
                 responsibleTeamId: r.responsibleTeamId,
@@ -1242,23 +1352,24 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             siteType: String(r.siteType ?? ''),
             paymentType: String(r.paymentType ?? '')
         };
-    }, [normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, resolveResponsibleTeamOptionId, resolveResponsibleTeamDisplayName]);
+    }, [getRowSiteDetailValues, normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, resolveResponsibleTeamOptionId, resolveResponsibleTeamDisplayName]);
 
     const isRowDirty = useCallback((original: DailyReportWorkerRow, draft?: RowDraft) => {
         if (!draft) return false;
+        const initialDraft = getRowInitialDraft(original);
 
         if (draft.workerId && String(draft.workerId) !== String(original.workerId)) return true;
         if (draft.workerName !== undefined && draft.workerName !== original.workerName) return true;
-        if (draft.siteId !== normalizeSiteId(original.siteId)) return true;
-        if (draft.teamId !== normalizeTeamId(original.teamId)) return true;
-        if (draft.responsibleTeamId !== resolveResponsibleTeamOptionId({
-            responsibleTeamId: original.responsibleTeamId,
-            responsibleTeamName: original.responsibleTeamName
-        })) return true;
-        if (draft.responsibleTeamName !== resolveResponsibleTeamDisplayName({
-            responsibleTeamId: original.responsibleTeamId,
-            responsibleTeamName: original.responsibleTeamName
-        })) return true;
+        if (draft.siteId !== initialDraft.siteId) return true;
+        if (draft.companyId !== initialDraft.companyId) return true;
+        if (draft.companyName !== initialDraft.companyName) return true;
+        if (draft.constructorCompanyId !== initialDraft.constructorCompanyId) return true;
+        if (draft.constructorCompanyName !== initialDraft.constructorCompanyName) return true;
+        if (draft.partnerId !== initialDraft.partnerId) return true;
+        if (draft.partnerName !== initialDraft.partnerName) return true;
+        if (draft.teamId !== initialDraft.teamId) return true;
+        if (draft.responsibleTeamId !== initialDraft.responsibleTeamId) return true;
+        if (draft.responsibleTeamName !== initialDraft.responsibleTeamName) return true;
         if (draft.salaryModel !== resolveReportPayType(original)) return true;
         if (Number(draft.manDay) !== (Number.isFinite(original.manDay) ? original.manDay : 0)) return true;
         if (Number(draft.unitPrice) !== (Number.isFinite(original.unitPrice) ? original.unitPrice : 0)) return true;
@@ -1271,44 +1382,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         })) return true;
 
         return false;
-    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamDisplayName]);
+    }, [getRowInitialDraft, resolveWorkerTeamDisplayName]);
 
     const setRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>) => {
         const key = getRowKey(r);
         setRowDrafts(prev => {
-            const current = prev[key] || {
-                siteId: normalizeSiteId(r.siteId),
-                teamId: normalizeTeamId(r.teamId),
-                responsibleTeamId: resolveResponsibleTeamOptionId({
-                    responsibleTeamId: r.responsibleTeamId,
-                    responsibleTeamName: r.responsibleTeamName
-                }),
-                responsibleTeamName: resolveResponsibleTeamDisplayName({
-                    responsibleTeamId: r.responsibleTeamId,
-                    responsibleTeamName: r.responsibleTeamName
-                }),
-                workerName: r.workerName ?? '',
-                workerTeamName: resolveWorkerTeamDisplayName({
-                    workerTeamId: r.workerTeamId,
-                    workerTeamName: r.workerTeamName
-                }),
-                workerTeamId: resolveWorkerTeamCanonicalId({
-                    workerTeamId: r.workerTeamId,
-                    workerTeamName: r.workerTeamName
-                }) || undefined,
-                salaryModel: resolveReportPayType(r),
-                manDay: String(Number.isFinite(r.manDay) ? r.manDay : 0),
-                unitPrice: String(Number.isFinite(r.unitPrice) ? r.unitPrice : 0),
-                workContent: r.workContent ?? '',
-                siteType: r.siteType ?? '',
-                paymentType: r.paymentType ?? ''
-            };
+            const current = prev[key] || getRowInitialDraft(r);
             return {
                 ...prev,
                 [key]: { ...current, ...changes }
             };
         });
-    }, [getRowKey, normalizeSiteId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName]);
+    }, [getRowInitialDraft, getRowKey]);
 
     const mergeRowDraft = useCallback((r: DailyReportWorkerRow, changes: Partial<RowDraft>): RowDraft => {
         const key = getRowKey(r);
@@ -1344,9 +1429,19 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
     const splitResponsibleTeamUpdates = useCallback((updates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string }) => {
         const responsibleUpdates: Partial<DailyReportWorkerRow> = {};
         const otherUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
+        const siteWideKeys = new Set([
+            'responsibleTeamId',
+            'responsibleTeamName',
+            'companyId',
+            'companyName',
+            'constructorCompanyId',
+            'constructorCompanyName',
+            'partnerId',
+            'partnerName',
+        ]);
 
         Object.entries(updates).forEach(([key, value]) => {
-            if (key === 'responsibleTeamId' || key === 'responsibleTeamName') {
+            if (siteWideKeys.has(key)) {
                 (responsibleUpdates as any)[key] = value;
                 return;
             }
@@ -1358,16 +1453,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
     const buildReportLevelUpdates = useCallback((original: DailyReportWorkerRow, draft: RowDraft) => {
         const reportLevelUpdates: Partial<DailyReportWorkerRow> & { siteId?: string; siteName?: string } = {};
+        const initialDraft = getRowInitialDraft(original);
 
         if (
-            draft.responsibleTeamId !== resolveResponsibleTeamOptionId({
-                responsibleTeamId: original.responsibleTeamId,
-                responsibleTeamName: original.responsibleTeamName
-            }) ||
-            draft.responsibleTeamName !== resolveResponsibleTeamDisplayName({
-                responsibleTeamId: original.responsibleTeamId,
-                responsibleTeamName: original.responsibleTeamName
-            })
+            draft.responsibleTeamId !== initialDraft.responsibleTeamId ||
+            draft.responsibleTeamName !== initialDraft.responsibleTeamName
         ) {
             const matchedTeam = teams.find((team) => {
                 const canonicalId = normalizeTeamId(team.id ?? team.legacyId ?? '');
@@ -1377,6 +1467,36 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             reportLevelUpdates.responsibleTeamId = matchedTeam?.id ? String(matchedTeam.id) : '';
             reportLevelUpdates.responsibleTeamName = matchedTeam?.name ?? draft.responsibleTeamName ?? '';
+        }
+
+        if (draft.companyId !== initialDraft.companyId || draft.companyName !== initialDraft.companyName) {
+            const company = resolveCompanySelection({
+                companyId: draft.companyId,
+                companyName: draft.companyName,
+            });
+            reportLevelUpdates.companyId = company.id;
+            reportLevelUpdates.companyName = company.name;
+        }
+
+        if (
+            draft.constructorCompanyId !== initialDraft.constructorCompanyId ||
+            draft.constructorCompanyName !== initialDraft.constructorCompanyName
+        ) {
+            const constructorCompany = resolveCompanySelection({
+                companyId: draft.constructorCompanyId,
+                companyName: draft.constructorCompanyName,
+            });
+            reportLevelUpdates.constructorCompanyId = constructorCompany.id;
+            reportLevelUpdates.constructorCompanyName = constructorCompany.name;
+        }
+
+        if (draft.partnerId !== initialDraft.partnerId || draft.partnerName !== initialDraft.partnerName) {
+            const partnerCompany = resolveCompanySelection({
+                companyId: draft.partnerId,
+                companyName: draft.partnerName,
+            });
+            reportLevelUpdates.partnerId = partnerCompany.id;
+            reportLevelUpdates.partnerName = partnerCompany.name;
         }
 
         if (draft.siteId !== normalizeSiteId(original.siteId)) {
@@ -1390,7 +1510,84 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         }
 
         return reportLevelUpdates;
-    }, [normalizeSiteId, normalizeTeamId, resolveResponsibleTeamDisplayName, resolveResponsibleTeamOptionId, siteOptions, teams]);
+    }, [getRowInitialDraft, normalizeSiteId, normalizeTeamId, resolveCompanySelection, siteOptions, teams]);
+
+    const validateWorkerDraft = useCallback((r: DailyReportWorkerRow, draft: RowDraft): WorkerDraftValidation => {
+        const workerName = String(draft.workerName ?? '').trim();
+        if (!workerName) {
+            return { ok: false, message: '작업자 이름을 입력해 주세요.' };
+        }
+
+        const manDay = parseNonNegativeDraftNumber(draft.manDay, '공수');
+        if (!manDay.ok) return { ok: false, message: manDay.message };
+
+        const unitPrice = parseNonNegativeDraftNumber(draft.unitPrice, '단가');
+        if (!unitPrice.ok) return { ok: false, message: unitPrice.message };
+
+        const normalizedName = workerName.replace(/\s+/g, '');
+        const matchedWorker = allWorkers.find(worker => worker.name === workerName)
+            || (normalizedName ? allWorkers.find(worker => worker.name.replace(/\s+/g, '') === normalizedName) : undefined);
+        const nextWorkerId = draft.workerId
+            ? String(draft.workerId)
+            : (matchedWorker?.id ? String(matchedWorker.id) : '');
+
+        if (nextWorkerId && String(nextWorkerId) !== String(r.workerId)) {
+            const currentRowKey = getRowKey(r);
+            const isDuplicate = rows.some(existingRow => {
+                if (existingRow.reportId !== r.reportId) return false;
+                const existingKey = getRowKey(existingRow);
+                if (existingKey === currentRowKey) return false;
+                const existingDraft = rowDrafts[existingKey];
+                const existingWorkerId = existingDraft?.workerId ?? existingRow.workerId;
+                return String(existingWorkerId) === nextWorkerId;
+            });
+
+            if (isDuplicate) {
+                return { ok: false, message: `같은 일보에 이미 등록된 작업자입니다: ${workerName}` };
+            }
+        }
+
+        return { ok: true, manDay: manDay.value, unitPrice: unitPrice.value };
+    }, [allWorkers, getRowKey, rowDrafts, rows]);
+
+    const saveEmptyReportDraft = useCallback(async (r: DailyReportWorkerRow, draft: RowDraft) => {
+        if (!r.reportId) {
+            throw new Error('Empty report is missing reportId');
+        }
+
+        const reportLevelUpdates = buildReportLevelUpdates(r, draft);
+        const { responsibleUpdates, otherUpdates } = splitResponsibleTeamUpdates(reportLevelUpdates);
+        const updates: Record<string, unknown> = {
+            ...otherUpdates,
+            ...responsibleUpdates
+        };
+
+        if (draft.siteType !== (r.siteType ?? '')) {
+            updates.siteType = draft.siteType;
+        }
+        if (draft.paymentType !== (r.paymentType ?? '')) {
+            updates.paymentType = draft.paymentType;
+        }
+        if (draft.workContent !== (r.workContent ?? '')) {
+            updates.workContent = draft.workContent;
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return;
+        }
+
+        await dailyReportService.updateReport(r.reportId, updates as any);
+        setRows(prev => prev.map(row => {
+            if (row.reportId !== r.reportId) return row;
+            return {
+                ...row,
+                ...updates,
+                siteType: typeof updates.siteType === 'string' ? updates.siteType : row.siteType,
+                paymentType: typeof updates.paymentType === 'string' ? updates.paymentType : row.paymentType,
+                workContent: typeof updates.workContent === 'string' ? updates.workContent : row.workContent,
+            } as DailyReportWorkerRow;
+        }));
+    }, [buildReportLevelUpdates, splitResponsibleTeamUpdates]);
 
     const handleWorkerNameChange = useCallback((r: DailyReportWorkerRow, newName: string) => {
         const trimmedName = newName.trim();
@@ -1411,11 +1608,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (isDuplicate) {
                 toast.warning(`'${newName}' 작업자는 같은 일보에 이미 포함되어 있습니다. (이름만 변경됨)`);
                 setRowDraft(r, {
-                    workerName: newName,
-                    workerId: undefined,
-                    workerTeamName: '',
-                    unitPrice: '0',
-                    salaryModel: ''
+                    workerName: newName
                 });
                 return;
             }
@@ -1456,6 +1649,20 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         options?: { confirmSave?: boolean; successMessage?: string }
     ) => {
         const key = getRowKey(r);
+        let validatedWorker: { manDay: number; unitPrice: number } | null = null;
+
+        if (!r.isEmptyReport) {
+            const validation = validateWorkerDraft(r, draft);
+            if (!validation.ok) {
+                toast.warning(validation.message);
+                return false;
+            }
+            validatedWorker = {
+                manDay: validation.manDay,
+                unitPrice: validation.unitPrice,
+            };
+        }
+
         const { confirmSave = true, successMessage = '저장되었습니다.' } = options ?? {};
 
         if (confirmSave) {
@@ -1470,6 +1677,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         });
 
         try {
+            if (r.isEmptyReport) {
+                await saveEmptyReportDraft(r, draft);
+                if (successMessage) {
+                    toast.success(successMessage);
+                }
+                clearRowDraft(key);
+                return true;
+            }
+
             const updates: any = {};
 
             if (draft.workerId && String(draft.workerId) !== String(r.workerId)) {
@@ -1501,8 +1717,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             updates.salaryModel = draft.salaryModel;
             updates.payType = draft.salaryModel;
-            updates.manDay = Number(draft.manDay);
-            updates.unitPrice = Number(draft.unitPrice);
+            updates.manDay = validatedWorker?.manDay ?? 0;
+            updates.unitPrice = validatedWorker?.unitPrice ?? 0;
             updates.workContent = draft.workContent;
             updates.workerTeamName = draft.workerTeamName ?? originalWorkerTeamName;
             updates.siteType = draft.siteType;
@@ -1514,7 +1730,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 ? getSameDateSiteReportIds(r)
                 : [];
 
-            await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+            await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
             if (Object.keys(otherUpdates).length > 0) {
                 await dailyReportService.updateReport(r.reportId, otherUpdates as any);
             }
@@ -1538,10 +1754,10 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             setRows(prev => prev.map(row => {
                 const isSameReport = row.reportId === r.reportId;
-                const isSameWorker = row.workerId === r.workerId;
+                const isTargetRow = getRowKey(row) === key;
                 const isSameDateSite = row.date === r.date && normalizeSiteId(row.siteId) === normalizeSiteId(r.siteId);
 
-                if (isSameWorker) {
+                if (isTargetRow) {
                     return { ...row, ...rowLevelWorkerUpdates, ...otherUpdates, ...(isSameDateSite ? responsibleUpdates : {}) };
                 }
 
@@ -1569,7 +1785,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 return next;
             });
         }
-    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, confirm, getRowKey, getSameDateSiteReportIds, normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, splitResponsibleTeamUpdates, toast]);
+    }, [allWorkers, buildReportLevelUpdates, clearRowDraft, confirm, getRowKey, getSameDateSiteReportIds, normalizeSiteId, normalizeTeamId, resolveWorkerTeamCanonicalId, resolveWorkerTeamDisplayName, saveEmptyReportDraft, splitResponsibleTeamUpdates, toast, validateWorkerDraft]);
 
     const handleSaveRow = useCallback(async (r: DailyReportWorkerRow) => {
         const key = getRowKey(r);
@@ -1618,11 +1834,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             if (isDuplicate) {
                 toast.warning(`'${workerName}' 작업자는 같은 일보에 이미 포함되어 있습니다. (이름만 변경됨)`);
                 nextChanges = {
-                    workerName,
-                    workerId: undefined,
-                    workerTeamName: '',
-                    unitPrice: '0',
-                    salaryModel: ''
+                    workerName
                 };
             } else {
                 let team = matched.teamId
@@ -1692,6 +1904,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
         setIsLoading(true);
         try {
             for (const r of selected) {
+                if (r.isEmptyReport) {
+                    const reportUpdates: Record<string, unknown> = {};
+                    if (nextWorkContent != null) reportUpdates.workContent = nextWorkContent;
+                    if (bulkSiteType) reportUpdates.siteType = bulkSiteType;
+                    if (bulkPaymentType) reportUpdates.paymentType = bulkPaymentType;
+
+                    if (Object.keys(reportUpdates).length > 0) {
+                        await dailyReportService.updateReport(r.reportId, reportUpdates as any);
+                    }
+                    continue;
+                }
+
                 const updates: Partial<DailyReportWorker> = {};
                 if (parsedManDay != null) updates.manDay = parsedManDay;
                 if (parsedUnitPrice != null) updates.unitPrice = parsedUnitPrice;
@@ -1701,7 +1925,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 if (bulkPaymentType) updates.paymentType = bulkPaymentType;
                 if (bulkWorkerTeamName.trim()) updates.workerTeamName = bulkWorkerTeamName.trim();
                 
-                await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+                await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
             }
 
             toast.updated('일보');
@@ -1739,7 +1963,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
             const successDates = new Set<string>();
             for (const r of selected) {
                 try {
-                    await dailyReportService.removeWorkerFromReport(r.reportId, r.workerId);
+                    if (r.isEmptyReport) {
+                        await dailyReportService.deleteReport(r.reportId);
+                    } else {
+                        await dailyReportService.removeWorkerFromReport(r.reportId, r.workerId, r.workerIndex);
+                    }
                     successCount++;
                     successDates.add(r.date);
                 } catch (e) {
@@ -1802,12 +2030,27 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
             let successCount = 0;
             let failCount = 0;
+            const failedDraftKeys = new Set<string>();
 
             for (const key of dirtyKeys) {
                 const r = rowByKey.get(key)!;
                 const draft = rowDrafts[key];
 
                 try {
+                    if (r.isEmptyReport) {
+                        await saveEmptyReportDraft(r, draft);
+                        successCount++;
+                        continue;
+                    }
+
+                    const validation = validateWorkerDraft(r, draft);
+                    if (!validation.ok) {
+                        failedDraftKeys.add(key);
+                        failCount++;
+                        console.warn('[SaveAll] Row validation failed:', validation.message);
+                        continue;
+                    }
+
                     const updates: any = {};
                     if (draft.workerId && String(draft.workerId) !== String(r.workerId)) updates.workerId = draft.workerId;
                     if (draft.workerName !== undefined && draft.workerName !== r.workerName) updates.name = draft.workerName;
@@ -1836,8 +2079,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
 
                     updates.salaryModel = draft.salaryModel;
                     updates.payType = draft.salaryModel;
-                    updates.manDay = Number(draft.manDay);
-                    updates.unitPrice = Number(draft.unitPrice);
+                    updates.manDay = validation.manDay;
+                    updates.unitPrice = validation.unitPrice;
                     updates.workContent = draft.workContent;
                     updates.workerTeamName = draft.workerTeamName ?? originalWorkerTeamName;
                     updates.siteType = draft.siteType;
@@ -1850,7 +2093,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         ? getSameDateSiteReportIds(r)
                         : [];
 
-                    await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates);
+                    await dailyReportService.updateWorkerInReport(r.reportId, r.workerId, updates, r.workerIndex);
                     if (Object.keys(otherUpdates).length > 0) {
                         await dailyReportService.updateReport(r.reportId, otherUpdates as any);
                     }
@@ -1861,6 +2104,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     successCount++;
                 } catch (error) {
                     failCount++;
+                    failedDraftKeys.add(key);
                     console.error('[SaveAll] Row save failed:', error);
                 }
             }
@@ -1871,7 +2115,15 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                 toast.warning(`${successCount}건 저장, ${failCount}건 실패 (중복 등 확인 필요)`);
             }
 
-            setRowDrafts({});
+            setRowDrafts(prev => {
+                const next = { ...prev };
+                dirtyKeys.forEach(key => {
+                    if (!failedDraftKeys.has(key)) {
+                        delete next[key];
+                    }
+                });
+                return next;
+            });
             await fetchRows();
         } catch (error) {
             console.error('[DailyReportListV2] Save All Failed (Critical)', error);
@@ -2113,6 +2365,20 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                             {isEditMode ? '수정 종료' : '수정모드'}
                         </button>
 
+                        <button
+                            type="button"
+                            onClick={handleToggleSiteDetailColumns}
+                            aria-pressed={showSiteDetailColumns}
+                            title={showSiteDetailColumns ? '현장상세 컬럼 숨기기' : '현장상세 컬럼 보기'}
+                            className={`daily-report-v2-tool-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm border transition-colors ${showSiteDetailColumns
+                                ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                                }`}
+                        >
+                            <FontAwesomeIcon icon={faFilter} />
+                            현장상세
+                        </button>
+
                         {isEditMode && (
                             <>
                                 <button
@@ -2342,6 +2608,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                         <option key={String(team.id ?? team.name)} value={team.name ?? ''} />
                     ))}
                 </datalist>
+                <datalist id="company-list-v2">
+                    {companyOptions.map((company) => (
+                        <option key={String(company.id ?? company.legacyId ?? company.name)} value={company.name ?? ''} />
+                    ))}
+                </datalist>
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mb-2"></div>
@@ -2389,11 +2660,18 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                     </div>
                 ) : (
                     <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper" style={{ flex: 1 }}>
-                    <table className="sheet-table daily-report-workbook-table min-w-[1310px] text-left text-slate-700">
+                    <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1640px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
                         <colgroup>
                             {isEditMode && <col className="daily-report-col-select" />}
                             <col className="daily-report-col-date" />
                             <col className="daily-report-col-site" />
+                            {showSiteDetailColumns && (
+                                <>
+                                    <col className="daily-report-col-company" />
+                                    <col className="daily-report-col-company" />
+                                    <col className="daily-report-col-company" />
+                                </>
+                            )}
                             <col className="daily-report-col-site-type" />
                             <col className="daily-report-col-payment-type" />
                             <col className="daily-report-col-team" />
@@ -2427,57 +2705,76 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 {renderFilterHeader(
                                     'siteName',
                                     '현장명',
-                                    'px-2.5 py-2 whitespace-nowrap w-[150px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[150px] daily-report-header-purple'
+                                )}
+                                {showSiteDetailColumns && (
+                                    <>
+                                        {renderFilterHeader(
+                                            'companyName',
+                                            '발주',
+                                            'px-2.5 py-2 whitespace-nowrap w-[110px] daily-report-header-purple'
+                                        )}
+                                        {renderFilterHeader(
+                                            'constructorCompanyName',
+                                            '시공',
+                                            'px-2.5 py-2 whitespace-nowrap w-[110px] daily-report-header-purple'
+                                        )}
+                                        {renderFilterHeader(
+                                            'partnerName',
+                                            '협력',
+                                            'px-2.5 py-2 whitespace-nowrap w-[110px] daily-report-header-purple'
+                                        )}
+                                    </>
                                 )}
                                 {renderFilterHeader(
                                     'siteType',
                                     '구분',
-                                    'px-2.5 py-2 whitespace-nowrap w-[60px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px] daily-report-header-purple'
                                 )}
                                 {renderFilterHeader(
                                     'paymentType',
                                     '결제',
-                                    'px-2.5 py-2 whitespace-nowrap w-[60px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px] daily-report-header-purple'
                                 )}
                                 {renderFilterHeader(
                                     'teamName',
                                     '현장소속팀',
-                                    'px-2.5 py-2 whitespace-nowrap w-[120px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[120px] daily-report-header-purple'
                                 )}
                                 {renderFilterHeader(
                                     'workerName',
                                     '성명',
-                                    'px-2.5 py-2 whitespace-nowrap w-[80px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[80px] daily-report-header-navy'
                                 )}
                                 {renderFilterHeader(
                                     'workerTeamName',
                                     '소속팀',
-                                    'px-2.5 py-2 whitespace-nowrap w-[120px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[120px] daily-report-header-navy'
                                 )}
                                 {renderFilterHeader(
                                     'salaryModel',
                                     '급여방식',
-                                    'px-2.5 py-2 whitespace-nowrap w-[80px]'
+                                    'px-2.5 py-2 whitespace-nowrap w-[80px] daily-report-header-navy'
                                 )}
                                 {renderFilterHeader(
                                     'manDay',
                                     '공수',
-                                    'px-2.5 py-2 whitespace-nowrap w-[60px] text-right',
+                                    'px-2.5 py-2 whitespace-nowrap w-[60px] text-right daily-report-header-green',
                                     'right'
                                 )}
                                 {renderFilterHeader(
                                     'unitPrice',
                                     '단가',
-                                    'px-2.5 py-2 whitespace-nowrap w-[90px] text-right',
+                                    'px-2.5 py-2 whitespace-nowrap w-[90px] text-right daily-report-header-green',
                                     'right'
                                 )}
                                 {renderFilterHeader(
                                     'amount',
                                     '금액',
-                                    'px-2.5 py-2 whitespace-nowrap w-[100px] text-right',
+                                    'px-2.5 py-2 whitespace-nowrap w-[100px] text-right daily-report-header-green',
                                     'right'
                                 )}
-                                <th className="px-2.5 py-2 whitespace-nowrap min-w-[150px]">비고(내용)</th>
+                                <th className="px-2.5 py-2 whitespace-nowrap min-w-[150px] daily-report-header-green">비고(내용)</th>
                                 {isEditMode && (
                                     <th className="px-2.5 py-2 whitespace-nowrap w-[80px] text-center">작업</th>
                                 )}
@@ -2490,8 +2787,17 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 const draft = rowDrafts[key];
                                 const isDirty = isRowDirty(row, draft);
                                 const isSaving = rowSavingKeys.has(key);
+                                const isEmptyReport = !!row.isEmptyReport;
+                                const isTargetReport = !!targetReportId && row.reportId === targetReportId;
 
+                                const initialDraft = draft ? getRowInitialDraft(row) : null;
+                                const rowSiteDetail = getRowSiteDetailValues(row);
                                 const displayRow = draft ? { ...row, ...draft } : row;
+                                const displaySiteDetail = {
+                                    companyName: draft ? draft.companyName : rowSiteDetail.companyName,
+                                    constructorCompanyName: draft ? draft.constructorCompanyName : rowSiteDetail.constructorCompanyName,
+                                    partnerName: draft ? draft.partnerName : rowSiteDetail.partnerName,
+                                };
                                 const displayResponsibleTeamName = resolveResponsibleTeamDisplayName({
                                     responsibleTeamId: displayRow.responsibleTeamId ?? displayRow.teamId,
                                     responsibleTeamName: displayRow.responsibleTeamName ?? displayRow.teamName
@@ -2508,7 +2814,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                 return (
                                     <tr
                                         key={key}
-                                        className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''}`}
+                                        className={`sheet-row hover:bg-slate-50 transition-colors border-b border-slate-100 ${isSelected ? 'bg-indigo-50/50' : ''} ${isDirty ? 'bg-amber-50/50' : ''} ${isTargetReport ? 'ring-2 ring-rose-300 bg-rose-50/60' : ''}`}
                                     >
                                         {isEditMode && (
                                             <td className={`px-2.5 py-1.5 text-center ${isFixed ? 'sticky left-0 z-30 bg-inherit border-r border-slate-200' : ''}`}>
@@ -2520,23 +2826,85 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                 />
                                             </td>
                                         )}
-                                        <td className={`px-2.5 py-1.5 font-mono text-slate-500 ${isFixed ? `sticky z-30 bg-inherit border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>
+                                        <td className={`daily-report-col-date px-2.5 py-1.5 font-mono text-slate-500 ${isFixed ? `sticky z-30 bg-inherit border-r border-slate-200 ${isEditMode ? 'left-[48px]' : 'left-0'}` : ''}`}>
                                             {row.date}
                                         </td>
                                         <td className="px-2.5 py-1.5">
                                             {isEditMode ? (
-                                                <select
-                                                    value={displayRow.siteId}
-                                                    onChange={(e) => setRowDraft(row, { siteId: e.target.value })}
-                                                    className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteId !== normalizeSiteId(row.siteId) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
-                                                >
-                                                    <option value="">현장 선택</option>
-                                                    {siteOptions.map(s => <option key={String(s.id)} value={String(s.id)}>{s.name}</option>)}
-                                                </select>
+                                                <div className="space-y-1">
+                                                    <select
+                                                        value={displayRow.siteId}
+                                                        onChange={(e) => {
+                                                            const nextSiteId = e.target.value;
+                                                            const normalizedNextSiteId = normalizeSiteId(nextSiteId);
+                                                            const matchedSite = siteOptions.find((site) => normalizeSiteId(site.id ?? site.legacyId ?? '') === normalizedNextSiteId);
+                                                            setRowDraft(row, {
+                                                                siteId: nextSiteId,
+                                                                ...getSiteDetailValuesFromSite(matchedSite),
+                                                            });
+                                                        }}
+                                                        className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteId !== normalizeSiteId(row.siteId) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                    >
+                                                        <option value="">현장 선택</option>
+                                                        {siteOptions.map(s => <option key={String(s.id)} value={String(s.id)}>{s.name}</option>)}
+                                                    </select>
+                                                </div>
                                             ) : (
                                                 <span className="truncate block" title={row.siteName ?? ''}>{row.siteName}</span>
                                             )}
                                         </td>
+                                        {showSiteDetailColumns && (
+                                            <>
+                                                <td className="px-2.5 py-1.5">
+                                                    {isEditMode ? (
+                                                        <input
+                                                            type="text"
+                                                            list="company-list-v2"
+                                                            value={displaySiteDetail.companyName}
+                                                            onChange={(e) => setRowDraft(row, { companyName: e.target.value, companyId: '' })}
+                                                            placeholder="발주"
+                                                            className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.companyName !== initialDraft?.companyName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                        />
+                                                    ) : displaySiteDetail.companyName ? (
+                                                        <span className="truncate block" title={displaySiteDetail.companyName}>{displaySiteDetail.companyName}</span>
+                                                    ) : (
+                                                        <span className="text-slate-300">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-2.5 py-1.5">
+                                                    {isEditMode ? (
+                                                        <input
+                                                            type="text"
+                                                            list="company-list-v2"
+                                                            value={displaySiteDetail.constructorCompanyName}
+                                                            onChange={(e) => setRowDraft(row, { constructorCompanyName: e.target.value, constructorCompanyId: '' })}
+                                                            placeholder="시공"
+                                                            className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.constructorCompanyName !== initialDraft?.constructorCompanyName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                        />
+                                                    ) : displaySiteDetail.constructorCompanyName ? (
+                                                        <span className="truncate block" title={displaySiteDetail.constructorCompanyName}>{displaySiteDetail.constructorCompanyName}</span>
+                                                    ) : (
+                                                        <span className="text-slate-300">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-2.5 py-1.5">
+                                                    {isEditMode ? (
+                                                        <input
+                                                            type="text"
+                                                            list="company-list-v2"
+                                                            value={displaySiteDetail.partnerName}
+                                                            onChange={(e) => setRowDraft(row, { partnerName: e.target.value, partnerId: '' })}
+                                                            placeholder="협력"
+                                                            className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.partnerName !== initialDraft?.partnerName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                        />
+                                                    ) : displaySiteDetail.partnerName ? (
+                                                        <span className="truncate block" title={displaySiteDetail.partnerName}>{displaySiteDetail.partnerName}</span>
+                                                    ) : (
+                                                        <span className="text-slate-300">-</span>
+                                                    )}
+                                                </td>
+                                            </>
+                                        )}
                                         <td className="px-2.5 py-1.5">
                                             {isEditMode ? (
                                                 <select
@@ -2593,7 +2961,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isEditMode && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="worker-list-v2"
@@ -2601,12 +2969,16 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     onChange={(e) => handleWorkerNameChange(row, e.target.value)}
                                                     className={`w-full px-2 py-0.5 border rounded text-sm font-bold ${isDirty && draft?.workerName !== row.workerName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
+                                            ) : isEmptyReport ? (
+                                                <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700">
+                                                    작업자 행 없음
+                                                </span>
                                             ) : (
                                                 <span className="font-bold text-slate-900">{row.workerName}</span>
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isEditMode && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="worker-team-list-v2"
@@ -2620,12 +2992,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     }}
                                                     className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.workerTeamName !== originalWorkerTeamName ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
+                                            ) : isEmptyReport ? (
+                                                <span className="text-slate-300">-</span>
                                             ) : (
                                                 <span className="truncate block text-slate-500" title={displayWorkerTeamName}>{displayWorkerTeamName}</span>
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5">
-                                            {isEditMode ? (
+                                            {isEditMode && !isEmptyReport ? (
                                                 <input
                                                     type="text"
                                                     list="daily-report-v2-salary-model-options"
@@ -2633,12 +3007,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     onChange={(e) => setRowDraft(row, { salaryModel: e.target.value })}
                                                     className={`w-full px-2 py-0.5 border rounded text-sm ${isDirty && draft?.salaryModel !== resolveReportPayType(row) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
+                                            ) : isEmptyReport ? (
+                                                <span className="text-slate-300">-</span>
                                             ) : (
                                                 <span className="text-slate-500">{resolveReportPayType(row)}</span>
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5 text-right font-mono">
-                                            {isEditMode ? (
+                                            {isEditMode && !isEmptyReport ? (
                                                 <input
                                                     type="number"
                                                     step="0.1"
@@ -2646,24 +3022,28 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                     onChange={(e) => setRowDraft(row, { manDay: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm text-right font-bold ${isDirty && Number(draft?.manDay) !== row.manDay ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
+                                            ) : isEmptyReport ? (
+                                                <span className="text-slate-300">-</span>
                                             ) : (
                                                 <span className="font-bold">{formatManDay(row.manDay)}</span>
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5 text-right font-mono">
-                                            {isEditMode ? (
+                                            {isEditMode && !isEmptyReport ? (
                                                 <input
                                                     type="number"
                                                     value={displayRow.unitPrice}
                                                     onChange={(e) => setRowDraft(row, { unitPrice: e.target.value })}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm text-right ${isDirty && Number(draft?.unitPrice) !== row.unitPrice ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
                                                 />
+                                            ) : isEmptyReport ? (
+                                                <span className="text-slate-300">-</span>
                                             ) : (
                                                 formatNumber(Math.round(row.unitPrice))
                                             )}
                                         </td>
                                         <td className="px-2.5 py-1.5 text-right font-mono font-bold text-indigo-600">
-                                            {formatNumber(Math.round((Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0)))}
+                                            {isEmptyReport ? '-' : formatNumber(Math.round((Number(displayRow.manDay) || 0) * (Number(displayRow.unitPrice) || 0)))}
                                         </td>
                                         <td className="px-2.5 py-1.5">
                                             {isEditMode ? (
@@ -2696,11 +3076,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate }) =>
                                                                 className="w-7 h-7 flex items-center justify-center bg-slate-200 text-slate-600 rounded hover:bg-slate-300"
                                                                 title="취소"
                                                             >
-                                                                <FontAwesomeIcon icon={faTrashCan} />
+                                                                <FontAwesomeIcon icon={faXmark} />
                                                             </button>
                                                         </>
                                                     ) : (
-                                                        <span className="text-[10px] text-slate-300 font-bold italic">CLEAN</span>
+                                                        <span className="text-[10px] text-slate-300 font-bold">저장됨</span>
                                                     )}
                                                 </div>
                                             </td>

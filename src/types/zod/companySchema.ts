@@ -6,6 +6,7 @@ export const CompanyTypeSchema = z.enum([
     '\uC2DC\uACF5\uC0AC',
     '\uD611\uB825\uC0AC',
     '\uAC74\uC124\uC0AC',
+    '\uC784\uB300\uC0AC',
     '\uAE30\uD0C0',
 ]);
 export const CompanyStatusSchema = z.enum(['active', 'inactive', 'archived']);
@@ -35,6 +36,9 @@ export const CompanySchema = z.object({
     icon: z.string().optional().nullable(),
     iconKey: z.string().optional().nullable(),
     totalManDay: z.number().optional().default(0),
+    clientTotalManDay: z.number().optional().default(0),
+    constructorTotalManDay: z.number().optional().default(0),
+    partnerTotalManDay: z.number().optional().default(0),
     isMyCompany: z.boolean().optional().default(false),
     assignedClientCompanyIds: z.array(z.string()).optional().default([]),
     createdAt: z.any().optional(),

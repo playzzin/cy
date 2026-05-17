@@ -13,6 +13,7 @@ import {
     limit as firestoreLimit
 } from 'firebase/firestore';
 import { createConverter } from '../utils/firestoreConverter';
+import { stripUndefinedFields } from '../utils/stripUndefinedFields';
 import { vehicleSchema, vehicleAssignmentSchema, vehicleExpenseSchema } from '../types/zod/vehicleSchema';
 import { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord } from '../types/vehicle';
 
@@ -49,10 +50,10 @@ export const vehicleFirestoreService = {
     saveVehicle: async (data: Partial<Vehicle> & { id: string }) => {
         const { id, ...vehicleData } = data;
         const ref = doc(db, VEHICLE_COLLECTION, id);
-        await setDoc(ref, {
+        await setDoc(ref, stripUndefinedFields({
             ...vehicleData,
             updatedAt: serverTimestamp()
-        }, { merge: true });
+        }), { merge: true });
     },
 
     /**
@@ -70,10 +71,13 @@ export const vehicleFirestoreService = {
         let q = query(collection(db, ASSIGNMENT_COLLECTION).withConverter(createConverter(vehicleAssignmentSchema)));
         if (vehicleId) {
             q = query(q, where('vehicleId', '==', vehicleId));
+        } else {
+            q = query(q, orderBy('startDate', 'desc'));
         }
-        q = query(q, orderBy('startDate', 'desc'));
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as VehicleAssignmentRecord);
+        return snapshot.docs
+            .map(doc => doc.data() as VehicleAssignmentRecord)
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
     },
 
     /**
@@ -83,14 +87,18 @@ export const vehicleFirestoreService = {
         let q = query(collection(db, EXPENSE_COLLECTION).withConverter(createConverter(vehicleExpenseSchema)));
         if (vehicleId) {
             q = query(q, where('vehicleId', '==', vehicleId));
-        }
-        if (yearMonth) {
+        } else if (yearMonth) {
             // date matches YYYY-MM
             q = query(q, where('date', '>=', `${yearMonth}-01`), where('date', '<=', `${yearMonth}-31`));
         }
-        q = query(q, orderBy('date', 'desc'));
+        if (!vehicleId) {
+            q = query(q, orderBy('date', 'desc'));
+        }
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as VehicleExpenseRecord);
+        return snapshot.docs
+            .map(doc => doc.data() as VehicleExpenseRecord)
+            .filter((expense) => !yearMonth || String(expense.date ?? '').startsWith(yearMonth))
+            .sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
     },
 
     /**

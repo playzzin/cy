@@ -15,7 +15,7 @@ import AdminPanel from './AdminPanel';
 // 타입 인터페이스 정의
 import SidebarSkeleton from './SidebarSkeleton';
 import { menuServiceV11 } from '../../services/menuServiceV11';
-import { SiteData, SiteDataType, MenuItem } from '../../types/menu';
+import { SiteData, SiteDataType, MenuItem, PositionItem } from '../../types/menu';
 import { MENU_PATHS } from '../../constants/menuPaths';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -27,6 +27,8 @@ import { SiteModeProvider } from '../../contexts/SiteModeContext';
 interface DashboardLayoutProps {
     children: React.ReactNode;
 }
+
+type QuickTool = 'calculator' | 'camera';
 
 // Error Fallback Component for UI Stability
 const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
@@ -51,11 +53,63 @@ const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
     );
 };
 
+const normalizePositionKey = (value: unknown): string =>
+    String(value || '').trim().toLowerCase().replace(/[\s_-]/g, '');
+
+const getPositionSiteKey = (positionId: string): string =>
+    positionId.startsWith('pos_') ? positionId : `pos_${positionId}`;
+
+const findMatchingPosition = (positions: PositionItem[], value: unknown): PositionItem | undefined => {
+    const key = normalizePositionKey(value);
+    if (!key) return undefined;
+
+    return positions.find((position) => {
+        const id = String(position.id || '').trim();
+        return [
+            id,
+            getPositionSiteKey(id),
+            position.name
+        ].some((candidate) => normalizePositionKey(candidate) === key);
+    });
+};
+
+const findFirstPositionById = (positions: PositionItem[], ids: string[]): PositionItem | undefined => {
+    const wanted = ids.map(normalizePositionKey);
+    return positions.find((position) => wanted.includes(normalizePositionKey(position.id)));
+};
+
+const resolveUserMenuPositionId = (
+    positions: PositionItem[],
+    userProfile: { position?: unknown; role?: unknown } | null | undefined,
+    linkedWorkerRole?: unknown
+): string | undefined => {
+    const candidates = [userProfile?.position, linkedWorkerRole, userProfile?.role];
+
+    for (const candidate of candidates) {
+        const matched = findMatchingPosition(positions, candidate);
+        if (matched?.id) return matched.id;
+    }
+
+    const roleKey = normalizePositionKey(userProfile?.role);
+    if (['admin', 'administrator', 'superadmin', 'owner', '\uad00\ub9ac\uc790', '\uc0ac\uc7a5', '\uc2e4\uc7a5'].includes(roleKey)) {
+        return findFirstPositionById(positions, ['full'])?.id || 'full';
+    }
+    if (roleKey.startsWith('manager') || roleKey.startsWith('\ub9e4\ub2c8\uc800') || roleKey.startsWith('\uba54\ub2c8\uc800')) {
+        return findFirstPositionById(positions, ['manager1', 'manager', 'teamLead'])?.id;
+    }
+    if (['user', 'general', '\uc77c\ubc18'].includes(roleKey)) {
+        return findFirstPositionById(positions, ['general'])?.id;
+    }
+
+    return undefined;
+};
+
 const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [isMobile, setIsMobile] = useState(false);
     const [isMobileOpen, setIsMobileOpen] = useState(false);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
     const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
+    const [activeQuickTool, setActiveQuickTool] = useState<QuickTool>('calculator');
     const [isPositionPanelOpen, setIsPositionPanelOpen] = useState(false);
     // 사이트 모드를 localStorage에서 복원하여 수동 변경 시 유지되도록 함
     const [currentSite, setCurrentSite] = useState(() => {
@@ -80,6 +134,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     const [siteData, setSiteData] = useState<SiteDataType | null>(null);
 
     const didRunMenuMigrationsRef = useRef(false);
+    const autoAppliedPositionForUserRef = useRef('');
 
     const { currentUser } = useAuth();
     const navigate = useNavigate();
@@ -325,6 +380,14 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
         }
     };
 
+    const openQuickTool = (tool: QuickTool) => {
+        const shouldClose = isBottomPanelOpen && activeQuickTool === tool;
+        setActiveQuickTool(tool);
+        setIsBottomPanelOpen(!shouldClose);
+        setIsAdminPanelOpen(false);
+        setIsPositionPanelOpen(false);
+    };
+
     const toggleSubmenu = (itemId: string) => {
         setActiveMenuItems(prev => {
             const newState = { ...prev };
@@ -356,7 +419,50 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
     // Position to Site mapping - 직책별로 전용 메뉴 사용
     // 'full' = 현재 사이트(보통 admin) 전체 메뉴 표시
     // Dynamic Position Config extraction
-    const positions = (siteData?.['admin']?.positionConfig || []).sort((a, b) => (a.order || 0) - (b.order || 0));
+    const positions = React.useMemo(
+        () => [...(siteData?.['admin']?.positionConfig || [])].sort((a, b) => (a.order || 0) - (b.order || 0)),
+        [siteData]
+    );
+
+    useEffect(() => {
+        if (!currentUser?.uid || !siteData || positions.length === 0) return;
+
+        let cancelled = false;
+
+        const applyUserPositionMode = async () => {
+            try {
+                const [{ userService }, { manpowerService }] = await Promise.all([
+                    import('../../services/userService'),
+                    import('../../services/manpowerService')
+                ]);
+
+                const [profile, linkedWorker] = await Promise.all([
+                    userService.getUser(currentUser.uid),
+                    manpowerService.getWorkerByUid(currentUser.uid).catch(() => null)
+                ]);
+
+                if (cancelled) return;
+
+                const resolvedPositionId = resolveUserMenuPositionId(positions, profile, linkedWorker?.role);
+                if (!resolvedPositionId) return;
+
+                const applyKey = `${currentUser.uid}:${resolvedPositionId}`;
+                if (autoAppliedPositionForUserRef.current === applyKey) return;
+                autoAppliedPositionForUserRef.current = applyKey;
+
+                localStorage.setItem('cy_current_position', resolvedPositionId);
+                setCurrentPosition((prev) => (prev === resolvedPositionId ? prev : resolvedPositionId));
+            } catch (error) {
+                console.error('[DashboardLayout] Failed to apply user position menu:', error);
+            }
+        };
+
+        void applyUserPositionMode();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentUser?.uid, siteData, positions]);
 
     // Fallback if no config (shouldn't happen due to auto-migration, but safe fallback)
     // We don't need a hardcoded fallback here if we trust the service migration.
@@ -543,6 +649,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     <Header
                         toggleSidebar={toggleSidebar}
                         togglePanel={togglePanel}
+                        openQuickTool={openQuickTool}
+                        activeQuickTool={activeQuickTool}
+                        isQuickPanelOpen={isBottomPanelOpen}
                         currentSiteData={currentSiteData}
                         isAdmin={isAdmin}
                         isPositionPanelOpen={isPositionPanelOpen}
@@ -585,6 +694,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                     <BottomPanel
                         isOpen={isBottomPanelOpen}
                         togglePanel={togglePanel}
+                        activeTool={activeQuickTool}
                         currentSite={currentSite}
                         changeSite={changeSite}
                     />
@@ -626,6 +736,9 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <Header
                     toggleSidebar={toggleSidebar}
                     togglePanel={togglePanel}
+                    openQuickTool={openQuickTool}
+                    activeQuickTool={activeQuickTool}
+                    isQuickPanelOpen={isBottomPanelOpen}
                     currentSiteData={currentSiteData}
                     isAdmin={isAdmin}
                     isPositionPanelOpen={isPositionPanelOpen}
@@ -664,6 +777,7 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
                 <BottomPanel
                     isOpen={isBottomPanelOpen}
                     togglePanel={togglePanel}
+                    activeTool={activeQuickTool}
                     currentSite={currentSite}
                     changeSite={changeSite}
                 />

@@ -145,10 +145,12 @@ export const dailyReportFirestoreService = {
         toast.deleted('report', 1);
     },
 
-    async saveReportsBatch(reports: Array<Omit<DailyReportInputZod, 'id' | 'createdAt' | 'updatedAt'>>): Promise<void> {
+    async saveReportsBatch(reports: Array<Omit<DailyReportInputZod, 'id' | 'createdAt' | 'updatedAt'>>): Promise<string[]> {
         const batch = writeBatch(db);
+        const ids: string[] = [];
         reports.forEach(report => {
             const docRef = doc(collection(db, COLLECTION_NAME)).withConverter(reportConverter);
+            ids.push(docRef.id);
             batch.set(docRef, {
                 ...report,
                 createdAt: serverTimestamp(),
@@ -157,6 +159,7 @@ export const dailyReportFirestoreService = {
         });
         await batch.commit();
         toast.saved('report', reports.length);
+        return ids;
     },
 
     async getDBStats(): Promise<{ total: number; thisMonth: number; today: number }> {

@@ -400,30 +400,37 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
 
         setProcessing(true);
         try {
-            const generated = await cardBillingService.generateBilling(card, yearMonth);
-            const resolvedId = cardBillingService.buildBillingDocumentId({
-                cardId: card.id,
-                teamId: selectedTeam.id,
-                issuedToType,
-                workerId: issuedToType === 'worker' ? target?.id : undefined,
-                yearMonth
-            });
+            const generatedDocs = await cardBillingService.generateAssignmentBillings(card, yearMonth);
+            const teamCandidates = new Set(
+                [selectedTeam.id, selectedTeam.legacyId, selectedTeamId]
+                    .filter(Boolean)
+                    .map((value) => String(value))
+            );
+            const workerCandidates = new Set(
+                [target?.id, issuedToWorkerId]
+                    .filter(Boolean)
+                    .map((value) => String(value))
+            );
+            const next = generatedDocs.find((doc) => (
+                teamCandidates.has(String(doc.teamId ?? '')) &&
+                doc.issuedToType === issuedToType &&
+                (
+                    issuedToType !== 'worker' ||
+                    workerCandidates.has(String(doc.issuedToWorkerId ?? ''))
+                )
+            ));
+
+            if (!next) {
+                toast.error('선택한 청구 대상에 해당하는 배정 이력/사용 내역이 없습니다.');
+                return;
+            }
+
+            const resolvedId = next.id;
 
             if (documents.some((doc) => doc.id === resolvedId)) {
                 const ok = await showConfirmAlert('청구서 생성', '이미 해당 카드의 청구서가 존재합니다. 재계산하여 덮어쓸까요?');
                 if (!ok.isConfirmed) return;
             }
-
-            const next: CardBillingDocument = {
-                ...generated,
-                id: resolvedId,
-                teamId: selectedTeam.id,
-                teamName: selectedTeam.name,
-                issuedToType,
-                issuedToWorkerId: issuedToType === 'worker' ? target?.id : undefined,
-                issuedToWorkerName: issuedToType === 'team' ? selectedTeam.name : (target?.name ?? ''),
-                updatedAt: Timestamp.now()
-            };
 
             await cardBillingService.saveBilling(next);
             toast.success('청구서가 생성되었습니다.');
@@ -450,9 +457,28 @@ export const CardBillingManager: React.FC<CardBillingManagerProps> = ({ cards, l
                 return;
             }
 
-            const docs = await Promise.all(targets.map((c) => cardBillingService.generateBilling(c, yearMonth)));
+            const generatedGroups = await Promise.all(targets.map((c) => cardBillingService.generateAssignmentBillings(c, yearMonth)));
+            const docs = generatedGroups.reduce<CardBillingDocument[]>((acc, list) => acc.concat(list), []);
+            if (docs.length === 0) {
+                toast.info('배정 이력 기준으로 청구할 카드 사용 내역이 없습니다.');
+                return;
+            }
+
+            const confirmedIds = new Set(
+                documents
+                    .filter((doc) => doc.status === 'CONFIRMED')
+                    .map((doc) => doc.id)
+            );
+            let skippedConfirmed = 0;
             for (const doc of docs) {
+                if (confirmedIds.has(doc.id)) {
+                    skippedConfirmed += 1;
+                    continue;
+                }
                 await cardBillingService.saveBilling(doc);
+            }
+            if (skippedConfirmed > 0) {
+                toast.info(`확정 문서 ${skippedConfirmed}건은 유지했습니다.`);
             }
 
             toast.success('청구 초안 생성이 완료되었습니다.');

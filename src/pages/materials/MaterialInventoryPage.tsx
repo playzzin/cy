@@ -4,12 +4,20 @@ import { faBoxes, faSearch, faExclamationTriangle, faCheckCircle, faPlus } from 
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Inventory } from '../../types/materials';
-import { createSiteIdSet, filterCheongyeonMaterialSites, filterInventoriesBySites } from './materialSiteFilters';
+import {
+    createSiteIdSet,
+    filterCheongyeonMaterialSites,
+    filterInventoriesBySites,
+    filterSitesByMaterialStatus,
+    getSiteStatusLabel,
+    MaterialSiteStatusFilter
+} from './materialSiteFilters';
 
 const MaterialInventoryPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [categoryFilter, setCategoryFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'sufficient' | 'warning' | 'shortage'>('all');
+    const [siteStatusFilter, setSiteStatusFilter] = useState<MaterialSiteStatusFilter>('active');
     const [siteIdFilter, setSiteIdFilter] = useState('');
     const [siteKeyword, setSiteKeyword] = useState('');
 
@@ -41,7 +49,7 @@ const MaterialInventoryPage: React.FC = () => {
                 materialService.getAllInventory(),
                 siteService.getSites(),
             ]);
-            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows);
+            const cheongyeonSites = filterCheongyeonMaterialSites(siteRows, 'all');
             const cheongyeonSiteIds = createSiteIdSet(cheongyeonSites);
             console.log(`[DEBUG] Received inventory data: ${data.length} items`, data);
             setInventories(filterInventoriesBySites(data, cheongyeonSiteIds));
@@ -55,17 +63,13 @@ const MaterialInventoryPage: React.FC = () => {
         }
     };
 
-    // 통계 계산
-    const stats = inventories.reduce((acc, inv) => {
-        acc.total++;
-        if (inv.status === 'sufficient') acc.sufficient++;
-        else if (inv.status === 'warning') acc.warning++;
-        else if (inv.status === 'shortage') acc.shortage++;
-        return acc;
-    }, { total: 0, sufficient: 0, warning: 0, shortage: 0 });
+    const statusFilteredSites = filterSitesByMaterialStatus(sites, siteStatusFilter);
+    const statusFilteredSiteIds = createSiteIdSet(statusFilteredSites);
+    const siteById = new Map(sites.map((site) => [site.id, site]));
 
     // 필터링
     const filteredInventories = inventories.filter(inv => {
+        if (!statusFilteredSiteIds.has(inv.siteId)) return false;
         if (categoryFilter && inv.category !== categoryFilter) return false;
         if (statusFilter !== 'all' && inv.status !== statusFilter) return false;
         if (siteIdFilter && inv.siteId !== siteIdFilter) return false;
@@ -74,6 +78,15 @@ const MaterialInventoryPage: React.FC = () => {
         }
         return true;
     });
+
+    // 통계 계산
+    const stats = filteredInventories.reduce((acc, inv) => {
+        acc.total++;
+        if (inv.status === 'sufficient') acc.sufficient++;
+        else if (inv.status === 'warning') acc.warning++;
+        else if (inv.status === 'shortage') acc.shortage++;
+        return acc;
+    }, { total: 0, sufficient: 0, warning: 0, shortage: 0 });
 
     const sortedInventories = [...filteredInventories].sort((a, b) => {
         const siteCompare = String(a.siteName || '').localeCompare(String(b.siteName || ''), 'ko');
@@ -168,7 +181,7 @@ const MaterialInventoryPage: React.FC = () => {
 
             {/* 필터 */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6 flex-shrink-0">
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">분류</label>
                         <select
@@ -196,15 +209,30 @@ const MaterialInventoryPage: React.FC = () => {
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-bold text-slate-700 mb-2">현장</label>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">현장구분</label>
+                        <select
+                            value={siteStatusFilter}
+                            onChange={(e) => {
+                                setSiteStatusFilter(e.target.value as MaterialSiteStatusFilter);
+                                setSiteIdFilter('');
+                            }}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                        >
+                            <option value="active">진행현장</option>
+                            <option value="completed">마감현장</option>
+                            <option value="all">전체현장</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">현장명</label>
                         <select
                             value={siteIdFilter}
                             onChange={(e) => setSiteIdFilter(e.target.value)}
                             className="w-full border border-slate-300 rounded-lg px-3 py-2"
                         >
                             <option value="">전체 현장</option>
-                            {sites.map((site) => (
-                                <option key={site.id} value={site.id}>{site.name}</option>
+                            {statusFilteredSites.map((site) => (
+                                <option key={site.id} value={site.id}>[{getSiteStatusLabel(site.status)}] {site.name}</option>
                             ))}
                         </select>
                     </div>
@@ -269,15 +297,15 @@ const MaterialInventoryPage: React.FC = () => {
                         <table className="w-full min-w-[1680px] text-sm">
                             <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                 <tr>
-                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
-                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[180px] z-20 bg-slate-100 min-w-[160px]">분류</th>
-                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[340px] z-20 bg-slate-100 min-w-[180px]">품명</th>
-                                    <th className="p-3 text-left font-bold text-slate-700 sticky left-[520px] z-20 bg-slate-100 min-w-[130px]">규격</th>
-                                    <th className="p-3 text-right font-bold text-slate-700">입고</th>
-                                    <th className="p-3 text-right font-bold text-slate-700">출고</th>
-                                    <th className="p-3 text-right font-bold text-slate-700">현재고</th>
-                                    <th className="p-3 text-right font-bold text-slate-700">안전재고</th>
-                                    <th className="p-3 text-center font-bold text-slate-700">상태</th>
+                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-0 z-20 bg-slate-100 min-w-[180px]">현장</th>
+                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[180px] z-20 bg-slate-100 min-w-[160px]">분류</th>
+                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[340px] z-20 bg-slate-100 min-w-[180px]">품명</th>
+                                    <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[520px] z-20 bg-slate-100 min-w-[130px]">규격</th>
+                                    <th className="px-3 py-2 text-right font-bold text-slate-700">입고</th>
+                                    <th className="px-3 py-2 text-right font-bold text-slate-700">출고</th>
+                                    <th className="px-3 py-2 text-right font-bold text-slate-700">현재고</th>
+                                    <th className="px-3 py-2 text-right font-bold text-slate-700">안전재고</th>
+                                    <th className="px-3 py-2 text-center font-bold text-slate-700">상태</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-200">
@@ -290,15 +318,18 @@ const MaterialInventoryPage: React.FC = () => {
                                         </tr>
                                         {group.rows.map(inv => (
                                             <tr key={`${inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                                <td className="p-3 sticky left-0 z-10 bg-white font-semibold text-slate-800">{inv.siteName || '미지정 현장'}</td>
-                                                <td className="p-3 sticky left-[180px] z-10 bg-white">{inv.category}</td>
-                                                <td className="p-3 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
-                                                <td className="p-3 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
-                                                <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
-                                                <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
-                                                <td className="p-3 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
-                                                <td className="p-3 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
-                                                <td className="p-3 text-center">
+                                                <td className="px-3 py-2 sticky left-0 z-10 bg-white font-semibold text-slate-800">
+                                                    <div>{inv.siteName || '미지정 현장'}</div>
+                                                    <div className="text-[11px] font-semibold text-slate-400">{getSiteStatusLabel(siteById.get(inv.siteId)?.status)}</div>
+                                                </td>
+                                                <td className="px-3 py-2 sticky left-[180px] z-10 bg-white">{inv.category}</td>
+                                                <td className="px-3 py-2 sticky left-[340px] z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                <td className="px-3 py-2 sticky left-[520px] z-10 bg-white">{inv.spec}</td>
+                                                <td className="px-3 py-2 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
+                                                <td className="px-3 py-2 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
+                                                <td className="px-3 py-2 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
+                                                <td className="px-3 py-2 text-right text-slate-500">{inv.safetyStock?.toLocaleString() || '-'}</td>
+                                                <td className="px-3 py-2 text-center">
                                                     {inv.status === 'sufficient' && (
                                                         <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-semibold">
                                                             <FontAwesomeIcon icon={faCheckCircle} />

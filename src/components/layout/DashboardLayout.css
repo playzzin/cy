@@ -201,6 +201,28 @@ a {
     color: var(--primary-color);
 }
 
+.header-quick-tool-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 4px;
+    padding-right: 8px;
+    border-right: 1px solid rgba(148, 163, 184, 0.28);
+}
+
+.header-tool-btn {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 8px;
+}
+
+.header-tool-btn.active {
+    background: #e0f2fe;
+    color: #0284c7;
+    box-shadow: inset 0 0 0 1px rgba(14, 165, 233, 0.24);
+}
+
 .app-menu-logo-button {
     width: 38px;
     height: 38px;
@@ -231,8 +253,9 @@ a {
 }
 
 .profile-btn {
-    padding: 0 4px;
-    /* Reduce padding for profile button */
+    min-height: 38px;
+    padding: 0 8px;
+    gap: 8px;
 }
 
 .header-profile-img {
@@ -246,6 +269,21 @@ a {
 .fallback-icon {
     font-size: 20px;
     color: #555;
+}
+
+.header-profile-position {
+    max-width: 104px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.cheongyeon-header .header-profile-position {
+    color: #e2e8f0;
 }
 
 /* Mobile Logo Area */
@@ -268,6 +306,12 @@ a {
 .cheongyeon-header .header-btn:hover {
     background: rgba(255, 255, 255, 0.1);
     color: #ffffff;
+}
+
+.cheongyeon-header .header-tool-btn.active {
+    background: rgba(14, 165, 233, 0.18);
+    color: #7dd3fc;
+    box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.24);
 }
 
 .cheongyeon-header .mobile-logo-area {
@@ -594,6 +638,11 @@ a {
 
 .app.cheongyeon-mode.cy-light .cheongyeon-header-logo-icon {
     color: #0284c7;
+}
+
+.app.cheongyeon-mode.cy-light .header-tool-btn.active {
+    background: #e0f2fe !important;
+    color: #0284c7 !important;
 }
 
 /* ë¼ì´í¸ëª¨ë: Tailwind ë¤í¬ slate ë°°ê²½ â ë°ì ìì¼ë¡ ì¬ì ì */
@@ -1384,6 +1433,25 @@ a {
         display: none;
     }
 
+    .header-profile-position {
+        display: none;
+    }
+
+    .profile-menu-container {
+        margin-left: 6px;
+    }
+
+    .header-quick-tool-group {
+        gap: 2px;
+        margin-right: 2px;
+        padding-right: 6px;
+    }
+
+    .header-tool-btn {
+        width: 34px;
+        height: 34px;
+    }
+
     #mobile-close-btn {
         display: block;
     }
@@ -1468,6 +1536,19 @@ a {
     font-size: 1rem;
     color: #333;
     margin-bottom: 5px;
+}
+
+.profile-position {
+    display: inline-flex;
+    max-width: 100%;
+    margin-bottom: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #e0f2fe;
+    color: #0369a1;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.3;
 }
 
 .profile-email {

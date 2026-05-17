@@ -125,6 +125,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({ initialData, onSave, onCancel
                                     <option value="시공사">시공사</option>
                                     <option value="협력사">협력사</option>
                                     <option value="건설사">건설사</option>
+                                    <option value="임대사">임대사</option>
                                     <option value="기타">기타</option>
                                 </select>
                             </div>

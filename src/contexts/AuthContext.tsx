@@ -70,20 +70,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
-    await signInWithEmailAndPassword(auth, email, password);
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      const { loginLogService } = await import('../services/loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_success',
+        provider: 'password',
+        method: 'email/password',
+        user: result.user,
+        email,
+      });
+    } catch (error) {
+      const { loginLogService } = await import('../services/loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_failed',
+        provider: 'password',
+        method: 'email/password',
+        email,
+        errorCode: (error as { code?: string })?.code || null,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   async function signup(email: string, password: string) {
-    await createUserWithEmailAndPassword(auth, email, password);
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    const { loginLogService } = await import('../services/loginLogService');
+    await loginLogService.safeCreateLog({
+      action: 'signup_success',
+      provider: 'password',
+      method: 'email/password',
+      user: result.user,
+      email,
+    });
   }
 
   async function logout() {
+    const user = auth.currentUser;
+    const { loginLogService } = await import('../services/loginLogService');
+    await loginLogService.safeCreateLog({
+      action: 'logout',
+      provider: 'firebase',
+      method: 'manual',
+      user,
+      email: user?.email || null,
+    });
     await firebaseSignOut(auth);
   }
 
   async function loginWithGoogle() {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const { loginLogService } = await import('../services/loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_success',
+        provider: 'google',
+        method: 'popup',
+        user: result.user,
+        email: result.user.email,
+      });
+    } catch (error) {
+      const { loginLogService } = await import('../services/loginLogService');
+      await loginLogService.safeCreateLog({
+        action: 'login_failed',
+        provider: 'google',
+        method: 'popup',
+        errorCode: (error as { code?: string })?.code || null,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   const value = {

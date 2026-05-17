@@ -7,9 +7,14 @@ import { faPlus, faSave, faCalendarAlt, faTimes, faMinus, faComment, faExclamati
 import { siteService, Site } from '../../services/siteService';
 import SingleSelectPopover from '../../components/common/SingleSelectPopover';
 import { teamService, Team } from '../../services/teamService';
+import { companyService, Company } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
+import {
+    applyDailyReportSiteSnapshotToReport,
+    buildDailyReportSiteSnapshot,
+} from '../../utils/dailyReportSiteSnapshot';
 
 import { AnalyzedDailyReport, geminiService, KakaoAnalyzeContext } from '../../services/geminiService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -135,13 +140,14 @@ const DailyReportTable: React.FC<{
     ledgerIndex: number;
     sites: Site[];
     teams: Team[];
+    companies: Company[];
     workerMap: Map<string, Worker & { isDuplicateName?: boolean }>;
     retiredWorkerMap: Map<string, Worker>;
     globalDuplicateNames: Set<string>;
     onUpdate: (ledgerId: string, updates: Partial<Ledger>) => void;
     onDelete: (ledgerId: string) => void;
     onAddRow: (ledgerId: string) => void; 
-}> = ({ ledger, ledgerIndex, sites, teams, workerMap, retiredWorkerMap, globalDuplicateNames, onUpdate, onDelete, onAddRow }) => {
+}> = ({ ledger, ledgerIndex, sites, teams, companies, workerMap, retiredWorkerMap, globalDuplicateNames, onUpdate, onDelete, onAddRow }) => {
 
     const hotRef = useRef<any>(null);
     const isEditingNameCellRef = useRef(false);
@@ -371,15 +377,36 @@ const DailyReportTable: React.FC<{
         [sites]
     );
     const selectedSite = sites.find((s) => String(s.id ?? '').trim() === normalizedLedgerSiteId);
-    const ledgerResponsibleTeamId = String(ledger.responsibleTeamId ?? selectedSite?.responsibleTeamId ?? '').trim();
-    const ledgerResponsibleTeamName = String(ledger.responsibleTeamName ?? selectedSite?.responsibleTeamName ?? '').trim();
-    const ledgerSiteType = String(selectedSite?.siteType ?? '').trim();
-    const ledgerPaymentMethod = String(selectedSite?.paymentMethod ?? '').trim();
+    const selectedSiteSnapshot = useMemo(() => buildDailyReportSiteSnapshot({
+        site: selectedSite,
+        siteId: normalizedLedgerSiteId,
+        teams,
+        companies,
+        fallback: {
+            responsibleTeamId: ledger.responsibleTeamId,
+            responsibleTeamName: ledger.responsibleTeamName,
+        },
+    }), [companies, ledger.responsibleTeamId, ledger.responsibleTeamName, normalizedLedgerSiteId, selectedSite, teams]);
+    const ledgerResponsibleTeamId = selectedSiteSnapshot.responsibleTeamId;
+    const ledgerResponsibleTeamName = selectedSiteSnapshot.responsibleTeamName;
+    const ledgerSiteType = selectedSiteSnapshot.siteType;
+    const ledgerPaymentMethod = selectedSiteSnapshot.paymentType;
+    const siteSnapshotDisplayItems = [
+        { label: '발주', title: '발주사', value: selectedSiteSnapshot.clientCompanyName },
+        { label: '시공', title: '시공사', value: selectedSiteSnapshot.constructorCompanyName },
+        { label: '협력', title: '협력사', value: selectedSiteSnapshot.partnerName },
+        { label: '구분', title: '현장 구분', value: ledgerSiteType },
+        { label: '결제방식', title: '결제방식', value: ledgerPaymentMethod },
+    ];
 
     const siteTeams = useMemo(() => {
-        if (!ledgerResponsibleTeamId) return [];
-        return teams.filter(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId);
-    }, [ledgerResponsibleTeamId, teams]);
+        if (!ledgerResponsibleTeamId && !ledgerResponsibleTeamName) return [];
+        return teams.filter(t =>
+            t.id === ledgerResponsibleTeamId ||
+            t.legacyId === ledgerResponsibleTeamId ||
+            String(t.name ?? '').trim() === ledgerResponsibleTeamName
+        );
+    }, [ledgerResponsibleTeamId, ledgerResponsibleTeamName, teams]);
 
     const handleAddTeamMembers = (team: Team) => {
         const teamWorkers = Array.from(workerMap.values()).filter(w => w.teamId === team.id);
@@ -480,53 +507,43 @@ const DailyReportTable: React.FC<{
 
                 {selectedSite && (
                     <div className="mt-1 pb-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-white/90 border-t border-white/20 pt-1">
-                        {selectedSite.clientCompanyName && selectedSite.clientCompanyName.trim() !== '' && (
-                            <div className="flex items-center gap-1" title="발주사">
-                                <span>🏢</span>
-                                <span className="opacity-70 text-[9px]">발주:</span>
-                                <span className="font-medium">{selectedSite.clientCompanyName}</span>
-                            </div>
-                        )}
-                        {selectedSite.companyName && selectedSite.companyName.trim() !== '' && selectedSite.companyName !== selectedSite.partnerName && (
-                            <div className="flex items-center gap-1" title="시공사">
-                                <span>🏗️</span>
-                                <span className="opacity-70 text-[9px]">시공:</span>
-                                <span className="font-medium">{selectedSite.companyName}</span>
-                            </div>
-                        )}
-                        {selectedSite.partnerName && selectedSite.partnerName.trim() !== '' && (
-                            <div className="flex items-center gap-1" title="협력사">
-                                <span>🤝</span>
-                                <span className="opacity-70 text-[9px]">협력:</span>
-                                <span className="font-medium">{selectedSite.partnerName}</span>
-                            </div>
-                        )}
-                        {ledgerSiteType && (
-                            <div className="flex items-center gap-1" title="현장 구분">
-                                <span className="opacity-70 text-[9px]">구분:</span>
-                                <span className="font-medium">{ledgerSiteType}</span>
-                            </div>
-                        )}
-                        {ledgerPaymentMethod && (
-                            <div className="flex items-center gap-1" title="결제방식">
-                                <span className="opacity-70 text-[9px]">결제방식:</span>
-                                <span className="font-medium">{ledgerPaymentMethod}</span>
-                            </div>
-                        )}
-                        {ledgerResponsibleTeamName && (
+                        {siteSnapshotDisplayItems.map((item) => {
+                            const isMissing = item.value.trim() === '';
+                            return (
+                                <div key={item.label} className="flex items-center gap-1" title={item.title}>
+                                    <span className="opacity-70 text-[9px]">{item.label}:</span>
+                                    <span className={`font-medium ${isMissing ? 'text-white/55' : ''}`}>
+                                        {isMissing ? '미지정' : item.value}
+                                    </span>
+                                </div>
+                            );
+                        })}
+                        {ledgerResponsibleTeamName ? (
                             <button
                                 onClick={() => {
-                                    const team = siteTeams.find(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId);
+                                    const team = siteTeams.find(t =>
+                                        t.id === ledgerResponsibleTeamId ||
+                                        t.legacyId === ledgerResponsibleTeamId ||
+                                        String(t.name ?? '').trim() === ledgerResponsibleTeamName
+                                    );
                                     if (team) handleAddTeamMembers(team);
                                 }}
-                                disabled={!siteTeams.find(t => t.id === ledgerResponsibleTeamId || t.legacyId === ledgerResponsibleTeamId)}
+                                disabled={!siteTeams.find(t =>
+                                    t.id === ledgerResponsibleTeamId ||
+                                    t.legacyId === ledgerResponsibleTeamId ||
+                                    String(t.name ?? '').trim() === ledgerResponsibleTeamName
+                                )}
                                 className="flex items-center gap-1 hover:bg-white/20 px-1 py-0.5 rounded cursor-pointer transition-colors"
                                 title="현장담당팀 (클릭하여 팀원 일괄 추가)"
                             >
-                                <span>👷</span>
                                 <span className="opacity-70 text-[9px]">현장담당팀:</span>
                                 <span className="font-medium underline decoration-dotted">{ledgerResponsibleTeamName}</span>
                             </button>
+                        ) : (
+                            <div className="flex items-center gap-1" title="현장담당팀">
+                                <span className="opacity-70 text-[9px]">현장담당팀:</span>
+                                <span className="font-medium text-white/55">미지정</span>
+                            </div>
                         )}
                     </div>
                 )}
@@ -636,6 +653,7 @@ const DailyReportGridInput: React.FC = () => {
     const [ledgers, setLedgers] = useState<Ledger[]>([]);
     const [sites, setSites] = useState<Site[]>([]);
     const [teams, setTeams] = useState<Team[]>([]);
+    const [companies, setCompanies] = useState<Company[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
 
     useEffect(() => {
@@ -736,13 +754,15 @@ const DailyReportGridInput: React.FC = () => {
         async (options?: { rematchLedgers?: boolean }) => {
             try {
                 setFetching(true);
-                const [sitesData, teamsData, workersData] = await Promise.all([
+                const [sitesData, teamsData, companiesData, workersData] = await Promise.all([
                     siteService.getSites(),
                     teamService.getTeams(),
+                    companyService.getCompanies(),
                     manpowerService.getWorkers(true)
                 ]);
                 setSites(sitesData);
                 setTeams(teamsData);
+                setCompanies(companiesData);
                 setWorkers(workersData);
 
                 if (options?.rematchLedgers) {
@@ -1905,16 +1925,36 @@ const DailyReportGridInput: React.FC = () => {
                 if (!normalizedLedgerSiteId) continue;
                 const validRows = ledger.rows.filter(r => r.name.trim() !== '' && r.role !== '지원팀입력');
                 if (validRows.length === 0) continue;
-                const groups: { [key: string]: GridRow[] } = {};
-                validRows.forEach(row => { const key = normalizeSiteId(row.teamId) || 'no-team'; if (!groups[key]) groups[key] = []; groups[key].push(row); });
                 const site = sites.find((s) => normalizeSiteId(s.id) === normalizedLedgerSiteId);
-                const siteType = String(site?.siteType ?? '').trim();
-                const paymentType = String(site?.paymentMethod ?? '').trim();
-                const ledgerResponsibleTeamId = normalizeSiteId(ledger.responsibleTeamId) || normalizeSiteId(site?.responsibleTeamId);
-                const ledgerResponsibleTeamName = String(ledger.responsibleTeamName || site?.responsibleTeamName || '').trim();
+                const siteSnapshot = buildDailyReportSiteSnapshot({
+                    site,
+                    siteId: normalizedLedgerSiteId,
+                    teams,
+                    companies,
+                    fallback: {
+                        siteId: normalizedLedgerSiteId,
+                        responsibleTeamId: ledger.responsibleTeamId,
+                        responsibleTeamName: ledger.responsibleTeamName,
+                    },
+                });
+                const siteType = siteSnapshot.siteType;
+                const paymentType = siteSnapshot.paymentType;
+                const ledgerResponsibleTeamId = siteSnapshot.responsibleTeamId || normalizeSiteId(ledger.responsibleTeamId);
+                const ledgerResponsibleTeamName = siteSnapshot.responsibleTeamName || String(ledger.responsibleTeamName || '').trim();
+                const ledgerResponsibleTeam =
+                    teams.find((t) => normalizeSiteId(t.id) === ledgerResponsibleTeamId) ||
+                    teams.find((t) => String(t.name ?? '').trim() === ledgerResponsibleTeamName);
+                const reportResponsibleTeamId = ledgerResponsibleTeamId || normalizeSiteId(ledgerResponsibleTeam?.id);
+                const reportResponsibleTeamName = ledgerResponsibleTeamName || String(ledgerResponsibleTeam?.name ?? '').trim();
+                const groups: { [key: string]: GridRow[] } = {};
+                validRows.forEach(row => {
+                    const key = reportResponsibleTeamId || normalizeSiteId(row.teamId) || 'no-team';
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
                 for (const [teamKey, rows] of Object.entries(groups)) {
                     const realTeamId = teamKey === 'no-team' ? '' : normalizeSiteId(teamKey);
-                    const fallbackTeamId = ledgerResponsibleTeamId || normalizeSiteId(rows[0]?.workerTeamId) || normalizeSiteId(rows[0]?.teamId);
+                    const fallbackTeamId = reportResponsibleTeamId || normalizeSiteId(rows[0]?.workerTeamId) || normalizeSiteId(rows[0]?.teamId);
                     const resolvedTeamId = realTeamId || fallbackTeamId;
                     const team = teams.find((t) => normalizeSiteId(t.id) === resolvedTeamId);
                     if (!resolvedTeamId) { skippedGroupCount += 1; continue; }
@@ -1923,9 +1963,31 @@ const DailyReportGridInput: React.FC = () => {
                     const reportWorkers = rows.map(r => {
                         const matchedWorker = workers.find(w => w.id === r.workerId);
                         const resolvedSalaryType = normalizeSalaryType(r.payType) || resolveWorkerSalaryType(matchedWorker);
-                        return { salaryModel: resolvedSalaryType, payType: resolvedSalaryType, workerId: r.workerId || 'unknown', name: r.name, role: r.role, status: 'attendance' as const, manDay: r.manDay, workContent: r.description, teamId: normalizeSiteId(r.teamId) || resolvedTeamId, unitPrice: r.unitPrice ?? 0, siteType, paymentType, workerTeamId: normalizeSiteId(r.workerTeamId) || normalizeSiteId(r.teamId) || resolvedTeamId, workerTeamName: r.workerTeamName || r.teamName || team?.name || ledgerResponsibleTeamName || '' };
+                        const workerTeamId = normalizeSiteId(r.workerTeamId) || normalizeSiteId(r.teamId) || resolvedTeamId;
+                        const workerTeam = teams.find((t) => normalizeSiteId(t.id) === workerTeamId);
+                        if (workerTeamId) involvedTeamIds.add(workerTeamId);
+                        return { salaryModel: resolvedSalaryType, payType: resolvedSalaryType, workerId: r.workerId || 'unknown', name: r.name, role: r.role, status: 'attendance' as const, manDay: r.manDay, workContent: r.description, teamId: workerTeamId, unitPrice: r.unitPrice ?? 0, siteType, paymentType, workerTeamId, workerTeamName: r.workerTeamName || r.teamName || workerTeam?.name || team?.name || reportResponsibleTeamName || '' };
                     });
-                    allReports.push({ date, teamId: resolvedTeamId, teamName: team?.name || rows[0]?.teamName || ledgerResponsibleTeamName || '', siteId: normalizedLedgerSiteId, siteName: site?.name || '', writerId: currentUser?.uid || 'unknown', workers: reportWorkers, totalManDay, responsibleTeamId: ledgerResponsibleTeamId || resolvedTeamId, responsibleTeamName: ledgerResponsibleTeamName || team?.name || '', companyId: site?.clientCompanyId || '', companyName: site?.clientCompanyName || '', constructorCompanyId: site?.companyId || '', constructorCompanyName: site?.companyName || '', partnerId: site?.partnerId || '', partnerName: site?.partnerName != null ? String(site.partnerName) : '', workContent: ledger.description || '', siteType, paymentType });
+                    const reportSnapshot = {
+                        ...siteSnapshot,
+                        responsibleTeamId: reportResponsibleTeamId || resolvedTeamId,
+                        responsibleTeamName: reportResponsibleTeamName || team?.name || '',
+                    };
+                    allReports.push(applyDailyReportSiteSnapshotToReport({
+                        date,
+                        teamId: resolvedTeamId,
+                        teamName: team?.name || reportResponsibleTeamName || rows[0]?.teamName || '',
+                        siteId: normalizedLedgerSiteId,
+                        siteName: site?.name || '',
+                        writerId: currentUser?.uid || 'unknown',
+                        workers: reportWorkers,
+                        totalManDay,
+                        responsibleTeamId: reportSnapshot.responsibleTeamId,
+                        responsibleTeamName: reportSnapshot.responsibleTeamName,
+                        workContent: ledger.description || '',
+                        siteType,
+                        paymentType,
+                    }, reportSnapshot));
                 }
             }
             if (allReports.length > 0) {
@@ -2502,6 +2564,7 @@ const DailyReportGridInput: React.FC = () => {
                             ledgerIndex={index + 1}
                             sites={sites}
                             teams={teams}
+                            companies={companies}
                             workerMap={workerMap}
                             retiredWorkerMap={retiredWorkerMap}
                             globalDuplicateNames={globalDuplicateNames}

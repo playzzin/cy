@@ -3,6 +3,7 @@ import {
     listAllAccommodationBillingLineItems,
     createAccommodationBillingDocument,
     updateAccommodationBillingDocument,
+    deleteAccommodationBillingDocument,
     createAccommodationBillingLineItem,
     deleteAccommodationBillingLineItem,
     listAllAdvancePayments,
@@ -220,6 +221,55 @@ const getLineItemBillingDocumentId = (row: any): string => {
     return '';
 };
 
+const mapAccommodationBillingDocument = (
+    row: any,
+    items: any[]
+): AccommodationBillingDocument => {
+    const rawIssuedToType = row?.issuedToType ? String(row.issuedToType) : 'worker';
+    const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
+
+    return {
+        id: String(row?.id ?? ''),
+        yearMonth: String(row?.yearMonth ?? ''),
+        teamId: getRelatedId(row, 'team', 'teamId'),
+        teamName: row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''),
+        issuedToType: issuedToType as any,
+        issuedToWorkerId: getRelatedId(row, 'issuedToWorker', 'issuedToWorkerId'),
+        issuedToWorkerName: issuedToType === 'team'
+            ? (row?.teamName ? String(row.teamName) : (row?.team?.name ? String(row.team.name) : ''))
+            : (row?.issuedToWorkerName ? String(row.issuedToWorkerName) : (row?.issuedToWorker?.name ? String(row.issuedToWorker.name) : '')),
+        status: (row?.status ? String(row.status) : 'draft') as any,
+        memo: row?.memo ? String(row.memo) : undefined,
+        lineItems: items
+            .filter((li: any) => getLineItemBillingDocumentId(li) === String(row?.id ?? ''))
+            .map((li: any) => ({
+                id: String(li?.id ?? ''),
+                label: li?.label ? String(li.label) : '',
+                amount: typeof li?.amount === 'number' && Number.isFinite(li.amount) ? li.amount : 0,
+                targetField: (li?.targetField ? String(li.targetField) : 'accommodation') as AccommodationBillingTargetField,
+                sourceType: li?.sourceType ? String(li.sourceType) as any : undefined,
+                sourceAccommodationId: li?.sourceAccommodationId ? String(li.sourceAccommodationId) : undefined,
+                sourceUtilityRecordId: li?.sourceUtilityRecordId ? String(li.sourceUtilityRecordId) : undefined
+            } as AccommodationBillingLineItem)),
+        createdAt: toFirestoreTimestamp(row?.createdAt),
+        updatedAt: toFirestoreTimestamp(row?.updatedAt),
+        confirmedAt: toFirestoreTimestamp(row?.confirmedAt),
+        postedAdvancePaymentId: row?.postedAdvancePaymentId ? String(row.postedAdvancePaymentId) : undefined
+    } as unknown as AccommodationBillingDocument;
+};
+
+const findAccommodationBillingDocumentById = async (id: string): Promise<AccommodationBillingDocument | null> => {
+    if (!id) return null;
+    const [docsRes, itemsRes] = await Promise.all([
+        listAllAccommodationBillingDocuments(),
+        listAllAccommodationBillingLineItems()
+    ]);
+    const docs = (docsRes as any)?.data?.accommodationBillingDocuments ?? [];
+    const items = (itemsRes as any)?.data?.accommodationBillingLineItems ?? [];
+    const row = docs.find((d: any) => String(d?.id ?? '') === String(id));
+    return row ? mapAccommodationBillingDocument(row, items) : null;
+};
+
 export const accommodationBillingService = {
     buildBillingDocumentId: (params: {
         teamId: string;
@@ -280,7 +330,10 @@ export const accommodationBillingService = {
                         id: String(li?.id ?? ''),
                         label: li?.label ? String(li.label) : '',
                         amount: typeof li?.amount === 'number' && Number.isFinite(li.amount) ? li.amount : 0,
-                        targetField: (li?.targetField ? String(li.targetField) : 'accommodation') as AccommodationBillingTargetField
+                        targetField: (li?.targetField ? String(li.targetField) : 'accommodation') as AccommodationBillingTargetField,
+                        sourceType: li?.sourceType ? String(li.sourceType) as any : undefined,
+                        sourceAccommodationId: li?.sourceAccommodationId ? String(li.sourceAccommodationId) : undefined,
+                        sourceUtilityRecordId: li?.sourceUtilityRecordId ? String(li.sourceUtilityRecordId) : undefined
                     } as AccommodationBillingLineItem;
                 });
 
@@ -314,6 +367,7 @@ export const accommodationBillingService = {
         if (!teamUuid) throw new Error('???李얠쓣 ???놁뒿?덈떎.');
         if (shouldRequireWorker && !workerUuid) throw new Error('?묒뾽?먮? 李얠쓣 ???놁뒿?덈떎.');
 
+        const beforeBilling = await findAccommodationBillingDocumentById(docData.id).catch(() => null);
         const issuedToWorkerName = issuedToType === 'team'
             ? (docData.teamName ?? '')
             : (docData.issuedToWorkerName ?? null);
@@ -368,15 +422,74 @@ export const accommodationBillingService = {
                     billingDocumentId: docData.id,
                     label: li.label ?? null,
                     amount: Number.isFinite(li.amount) ? li.amount : 0,
-                    targetField: li.targetField ?? null
+                    targetField: li.targetField ?? null,
+                    sourceType: li.sourceType ?? null,
+                    sourceAccommodationId: li.sourceAccommodationId ?? null,
+                    sourceUtilityRecordId: li.sourceUtilityRecordId ?? null
                 } as any);
             })
         );
 
+        const savedBilling = {
+            ...docData,
+            id: docData.id,
+            teamId: teamUuid,
+            issuedToType: issuedToType as any,
+            issuedToWorkerId: workerUuid ?? '',
+            issuedToWorkerName: issuedToWorkerName ?? '',
+            lineItems: docData.lineItems ?? [],
+            updatedAt: Timestamp.now()
+        } as unknown as AccommodationBillingDocument;
+
+        try {
+            const { accommodationBillingLogService } = await import('./accommodationBillingLogService');
+            await accommodationBillingLogService.createLog({
+                action: beforeBilling ? 'updated' : 'created',
+                before: beforeBilling,
+                after: savedBilling,
+                source: 'accommodationBillingService.upsertBillingDocument'
+            });
+        } catch (logError) {
+            console.warn('[accommodationBillingService] accommodation billing log failed:', logError);
+        }
+
         return docData.id;
     },
 
+    async deleteBillingDocument(id: string): Promise<void> {
+        const beforeBilling = await findAccommodationBillingDocumentById(id).catch(() => null);
+        const listItemsRes = await listAllAccommodationBillingLineItems();
+        const existingItems = (listItemsRes as any)?.data?.accommodationBillingLineItems ?? [];
+        const toDelete = existingItems.filter((li: any) => getLineItemBillingDocumentId(li) === String(id));
+        await Promise.all(
+            toDelete.map(async (li: any) => {
+                const liId = li?.id ? String(li.id) : '';
+                if (!liId) return;
+                await deleteAccommodationBillingLineItem({ id: liId } as any);
+            })
+        );
+        await deleteAccommodationBillingDocument({ id } as any);
+        if (beforeBilling) {
+            try {
+                const { accommodationBillingLogService } = await import('./accommodationBillingLogService');
+                await accommodationBillingLogService.createLog({
+                    action: 'deleted',
+                    before: beforeBilling,
+                    after: null,
+                    source: 'accommodationBillingService.deleteBillingDocument'
+                });
+            } catch (logError) {
+                console.warn('[accommodationBillingService] accommodation billing delete log failed:', logError);
+            }
+        }
+    },
+
+    async getBillingDocumentById(id: string): Promise<AccommodationBillingDocument | null> {
+        return findAccommodationBillingDocumentById(id);
+    },
+
     async confirmAndPostToAdvancePayment(billingId: string): Promise<void> {
+        const beforeBilling = await findAccommodationBillingDocumentById(billingId).catch(() => null);
         const [docsRes, itemsRes] = await Promise.all([
             listAllAccommodationBillingDocuments(),
             listAllAccommodationBillingLineItems()
@@ -391,12 +504,31 @@ export const accommodationBillingService = {
         const rawIssuedToType = row?.issuedToType ? String(row.issuedToType) : 'worker';
         const issuedToType = rawIssuedToType === 'team_leader' ? 'team' : rawIssuedToType;
         if (issuedToType === 'team') {
+            const confirmedAt = new Date().toISOString();
             await updateAccommodationBillingDocument({
                 id: billingId,
                 status: 'confirmed',
-                confirmedAt: new Date().toISOString(),
+                confirmedAt,
                 postedAdvancePaymentId: null
             } as any);
+            if (beforeBilling) {
+                try {
+                    const { accommodationBillingLogService } = await import('./accommodationBillingLogService');
+                    await accommodationBillingLogService.createLog({
+                        action: 'updated',
+                        before: beforeBilling,
+                        after: {
+                            ...beforeBilling,
+                            status: 'confirmed',
+                            confirmedAt: Timestamp.fromDate(new Date(confirmedAt)),
+                            postedAdvancePaymentId: undefined
+                        } as unknown as AccommodationBillingDocument,
+                        source: 'accommodationBillingService.confirmAndPostToAdvancePayment'
+                    });
+                } catch (logError) {
+                    console.warn('[accommodationBillingService] accommodation billing confirm log failed:', logError);
+                }
+            }
             return;
         }
 
@@ -417,7 +549,10 @@ export const accommodationBillingService = {
                         id: String(li?.id ?? ''),
                         label: li?.label ? String(li.label) : '',
                         amount: typeof li?.amount === 'number' && Number.isFinite(li.amount) ? li.amount : 0,
-                        targetField: (li?.targetField ? String(li.targetField) : 'accommodation') as AccommodationBillingTargetField
+                        targetField: (li?.targetField ? String(li.targetField) : 'accommodation') as AccommodationBillingTargetField,
+                        sourceType: li?.sourceType ? String(li.sourceType) as any : undefined,
+                        sourceAccommodationId: li?.sourceAccommodationId ? String(li.sourceAccommodationId) : undefined,
+                        sourceUtilityRecordId: li?.sourceUtilityRecordId ? String(li.sourceUtilityRecordId) : undefined
                     } as AccommodationBillingLineItem;
                 })
         };
@@ -522,12 +657,31 @@ export const accommodationBillingService = {
             } as any);
         }
 
+        const confirmedAt = new Date().toISOString();
         await updateAccommodationBillingDocument({
             id: billingId,
             status: 'confirmed',
-            confirmedAt: new Date().toISOString(),
+            confirmedAt,
             postedAdvancePaymentId: advanceId
         } as any);
+        if (beforeBilling) {
+            try {
+                const { accommodationBillingLogService } = await import('./accommodationBillingLogService');
+                await accommodationBillingLogService.createLog({
+                    action: 'updated',
+                    before: beforeBilling,
+                    after: {
+                        ...beforeBilling,
+                        status: 'confirmed',
+                        confirmedAt: Timestamp.fromDate(new Date(confirmedAt)),
+                        postedAdvancePaymentId: advanceId
+                    } as unknown as AccommodationBillingDocument,
+                    source: 'accommodationBillingService.confirmAndPostToAdvancePayment'
+                });
+            } catch (logError) {
+                console.warn('[accommodationBillingService] accommodation billing confirm log failed:', logError);
+            }
+        }
     },
 
     getAdvanceFieldForTargetField: mapTargetFieldToAdvanceField,

@@ -190,11 +190,8 @@ export const taxInvoiceListService = {
     },
 
     /**
-     * 해당 월 현장 데이터 기반 공수 합산
-     * dailyReportService.getWorkerRows()를 통해 worker 레벨까지 반영된 정확한 데이터를 가져옵니다.
-     * - siteType/paymentType: worker → report → site 3단 fallback
-     * - teamName: 실제 투입팀(workerTeamName) 우선
-     * - companyName: 회사 DB 상호명 우선
+     * 해당 월 출력일보 저장값 기준 공수 합산.
+     * 현재 현장/팀/회사 마스터를 다시 조회해 재해석하지 않습니다.
      */
     async fetchMonthlySiteData(yearMonth: string): Promise<SiteWorkSummary[]> {
         const [year, month] = yearMonth.split('-');
@@ -202,91 +199,14 @@ export const taxInvoiceListService = {
         const endDate = getMonthEndDate(yearMonth);
 
         const { dailyReportService } = await import('./dailyReportService');
-        const { siteService } = await import('./siteService');
-        const { teamService } = await import('./teamService');
-        const { companyService } = await import('./companyService');
+        const rows = await dailyReportService.getWorkerRows({ startDate, endDate });
 
-        const [rows, sites, teams, companies] = await Promise.all([
-            dailyReportService.getWorkerRows({ startDate, endDate }),
-            siteService.getSites(),
-            teamService.getTeams(),
-            companyService.getCompanies(),
-        ]);
+        const resolveSavedReportCompanyName = (row: any, siteType: string) => {
+            const candidateNames = siteType === '지원'
+                ? [row.partnerName, row.companyName, row.constructorCompanyName]
+                : [row.companyName, row.constructorCompanyName, row.partnerName];
 
-        const siteIdMap = new Map<string, any>();
-        const siteNameMap = new Map<string, any>();
-        sites.forEach(site => {
-            if (site.id) siteIdMap.set(normalizeText(site.id), site);
-            if ((site as any).legacyId) siteIdMap.set(normalizeText((site as any).legacyId), site);
-            if (site.name && !siteNameMap.has(normalizeKey(site.name))) {
-                siteNameMap.set(normalizeKey(site.name), site);
-            }
-        });
-
-        const teamIdMap = new Map<string, any>();
-        const teamNameMap = new Map<string, any>();
-        teams.forEach(team => {
-            if (team.id) teamIdMap.set(normalizeText(team.id), team);
-            if ((team as any).legacyId) teamIdMap.set(normalizeText((team as any).legacyId), team);
-            if (team.name && !teamNameMap.has(normalizeKey(team.name))) {
-                teamNameMap.set(normalizeKey(team.name), team);
-            }
-        });
-
-        const companyIdMap = new Map<string, any>();
-        const companyNameMap = new Map<string, any>();
-        companies.forEach(company => {
-            if (company.id) companyIdMap.set(normalizeText(company.id), company);
-            if ((company as any).legacyId) companyIdMap.set(normalizeText((company as any).legacyId), company);
-            if (company.name && !companyNameMap.has(normalizeKey(company.name))) {
-                companyNameMap.set(normalizeKey(company.name), company);
-            }
-        });
-
-        const findTeam = (...candidates: Array<unknown>) => {
-            for (const candidate of candidates) {
-                const text = normalizeText(candidate);
-                if (text && teamIdMap.has(text)) return teamIdMap.get(text);
-            }
-            for (const candidate of candidates) {
-                const key = normalizeKey(candidate);
-                if (key && teamNameMap.has(key)) return teamNameMap.get(key);
-            }
-            return undefined;
-        };
-
-        const findCompany = (candidateIds: Array<unknown>, candidateNames: Array<unknown>) => {
-            for (const candidate of candidateIds) {
-                const text = normalizeText(candidate);
-                if (text && companyIdMap.has(text)) return companyIdMap.get(text);
-            }
-            for (const candidate of candidateNames) {
-                const key = normalizeKey(candidate);
-                if (key && companyNameMap.has(key)) return companyNameMap.get(key);
-            }
-            return undefined;
-        };
-
-        const resolveCompanyName = (candidateIds: Array<unknown>, candidateNames: Array<unknown>) => {
-            const company = findCompany(candidateIds, candidateNames);
-            if (company?.name) return normalizeText(company.name);
             return candidateNames.map(normalizeText).find(value => value && !isGenericCompanyLabel(value)) || '';
-        };
-
-        const resolveSiteCompanyName = (site: any, siteType: string) => {
-            if (!site) return '';
-
-            if (siteType === '지원') {
-                return resolveCompanyName(
-                    [site.partnerId, site.clientCompanyId, site.companyId],
-                    [site.partnerName, site.clientCompanyName, site.companyName]
-                );
-            }
-
-            return resolveCompanyName(
-                [site.clientCompanyId, site.companyId],
-                [site.clientCompanyName, site.companyName]
-            );
         };
 
         const aggregateMap = new Map<string, SiteWorkSummary>();
@@ -296,37 +216,15 @@ export const taxInvoiceListService = {
             const siteId = normalizeText(row.siteId);
             const siteType = normalizeText(row.siteType);
             const paymentType = normalizeText(row.paymentType);
-
-            const workTeam = findTeam(
-                row.workerTeamId,
-                row.workerTeamName,
-                row.teamId,
-                row.teamName
+            const teamName = (
+                normalizeText(row.responsibleTeamName) ||
+                normalizeText(row.teamName) ||
+                normalizeText(row.workerTeamName)
             );
-            const responsibleTeam = findTeam(
-                row.responsibleTeamId,
-                row.responsibleTeamName,
-                row.teamId,
-                row.teamName
-            );
-            const team = workTeam || responsibleTeam;
-            const teamName = normalizeText(team?.name) || normalizeText(row.workerTeamName) || normalizeText(row.teamName) || normalizeText(row.responsibleTeamName);
 
-            const site = (siteId ? siteIdMap.get(siteId) : undefined) ?? siteNameMap.get(normalizeKey(siteName));
+            const companyName = resolveSavedReportCompanyName(row, siteType);
 
-            const teamCompanyName = resolveCompanyName(
-                [team?.companyId, workTeam?.companyId, responsibleTeam?.companyId],
-                [team?.companyName, workTeam?.companyName, responsibleTeam?.companyName]
-            );
-            const isSupportTeamRow = (
-                siteType === '지원' ||
-                /지원|용역/.test(`${row.salaryModel || ''} ${row.payType || ''} ${team?.type || ''} ${teamName}`)
-            );
-            const companyName = isSupportTeamRow
-                ? (teamCompanyName || resolveSiteCompanyName(site, siteType))
-                : (resolveSiteCompanyName(site, siteType) || teamCompanyName);
-
-            const teamKey = normalizeText(team?.id) || normalizeText(row.workerTeamId) || teamName;
+            const teamKey = normalizeText(row.responsibleTeamId) || normalizeText(row.responsibleTeamName) || normalizeText(row.teamId) || teamName;
             const key = `${siteId || siteName}|${siteType}|${paymentType}|${teamKey}|${companyName}`;
 
             if (aggregateMap.has(key)) {

@@ -14,6 +14,7 @@ import { dailyReportService } from './dailyReportService';
 import { laborExchangeService } from './laborExchangeService';
 import { manpowerService } from './manpowerService';
 import { siteService, type Site } from './siteService';
+import { teamExpenseLedgerService } from './teamExpenseLedgerService';
 import { teamService } from './teamService';
 import { vehicleBillingService } from './vehicleBillingService';
 import { vehicleService } from './vehicleService';
@@ -25,6 +26,7 @@ import {
   type TeamSettlementPurchaseItem,
   type TeamSettlementSalesItem
 } from '../types/teamSettlement';
+import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../types/teamExpenseLedger';
 
 const SYSTEM_CONFIG_ID_PREFIX = 'team_settlement_';
 
@@ -124,8 +126,31 @@ const normalizeBillingStatus = (value: unknown): string => {
 const selectPreferredTeamBillings = <T extends { status?: unknown }>(docs: T[]): T[] => {
   if (!Array.isArray(docs) || docs.length === 0) return [];
   const confirmed = docs.filter((doc) => normalizeBillingStatus(doc.status) === 'confirmed');
-  if (confirmed.length > 0) return confirmed;
-  return docs;
+  return confirmed;
+};
+
+const allowUnconfirmedLedgerFallback = false;
+
+const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
+  meal: '식대',
+  parking: '주차',
+  fuel: '유류',
+  toll: '통행료',
+  material: '자재',
+  tool: '공구',
+  deposit: '보증금',
+  marking: '마킹',
+  fieldGoods: '현장물품',
+  equipment: '장비비',
+  etc: '기타'
+};
+
+const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
+  return teamExpenseCategoryLabels[category] ?? '기타';
+};
+
+const isPostedTeamExpenseClaim = (claim: TeamExpenseClaim): boolean => {
+  return claim.status === 'charged' || claim.status === 'settled';
 };
 
 const isTeamIssuedTo = (value: unknown): boolean => {
@@ -368,14 +393,15 @@ export const teamSettlementService = {
 
     const exchangeSnapshotInfo = await laborExchangeService.getMonthSnapshotInfo(period.year, period.month);
 
-    const [sites, teams, workerRows, exchangeSummaries, accommodationDocs, vehicleDocs, cardDocs] = await Promise.all([
+    const [sites, teams, workerRows, exchangeSummaries, accommodationDocs, vehicleDocs, cardDocs, teamExpenseClaims] = await Promise.all([
       siteService.getSites(),
       teamService.getTeams(),
       dailyReportService.getReportWorkerRowsByRange({ startDate: period.startDate, endDate: period.endDate }),
       laborExchangeService.getExchangeReport(period.year, period.month, params.teamId, { preferSnapshot: Boolean(exchangeSnapshotInfo?.confirmedAt) }),
       accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth: params.yearMonth }),
       vehicleBillingService.getBillingsByMonth(params.yearMonth),
-      cardBillingService.getBillingsByMonth(params.yearMonth)
+      cardBillingService.getBillingsByMonth(params.yearMonth),
+      teamExpenseLedgerService.getClaimsByMonth(params.yearMonth)
     ]);
 
     const matchesTeam = (value: unknown): boolean => {
@@ -468,6 +494,33 @@ export const teamSettlementService = {
         amountFee: number;
       }
     >();
+
+    const getWorkerRowResponsibleTeamId = (row: (typeof workerRows)[number]): string => {
+      const rawSiteId = row.siteId ? String(row.siteId) : '';
+      const rawSiteName = row.siteName ? String(row.siteName) : '현장 미지정';
+      const site = resolveSite(rawSiteId, rawSiteName);
+      const reportTeamId = row.teamId ? String(row.teamId) : '';
+      const rowResponsibleTeamId = row.responsibleTeamId ? String(row.responsibleTeamId) : '';
+      const siteResponsibleTeamId = site?.responsibleTeamId ? String(site.responsibleTeamId) : '';
+      return siteResponsibleTeamId || rowResponsibleTeamId || reportTeamId;
+    };
+
+    const getWorkerRowManagedKind = (row: (typeof workerRows)[number]): '도급' | '직영' | '지원' => {
+      const rawSiteId = row.siteId ? String(row.siteId) : '';
+      const rawSiteName = row.siteName ? String(row.siteName) : '현장 미지정';
+      const site = resolveSite(rawSiteId, rawSiteName);
+      const rowSiteType = String(row.siteType ?? '').trim();
+      const resolvedSiteType = rowSiteType || String(site?.siteType ?? '').trim();
+      return resolvedSiteType === '도급' || resolvedSiteType === '직영' || resolvedSiteType === '지원'
+        ? resolvedSiteType
+        : '직영';
+    };
+
+    const isSelectedTeamDirectWorkRow = (row: (typeof workerRows)[number]): boolean => {
+      if (!matchesTeam(getWorkerRowResponsibleTeamId(row))) return false;
+      const managedKind = getWorkerRowManagedKind(row);
+      return managedKind === '도급' || managedKind === '직영';
+    };
 
     const managedSalesGrouped = new Map<
       string,
@@ -572,18 +625,12 @@ export const teamSettlementService = {
       const rowAmount = toFiniteNumberOrZero(row.amount);
 
       const site = resolveSite(rawSiteId, rawSiteName);
-      const reportTeamId = row.teamId ? String(row.teamId) : '';
-      const rowResponsibleTeamId = row.responsibleTeamId ? String(row.responsibleTeamId) : '';
-      const siteResponsibleTeamId = site?.responsibleTeamId ? String(site.responsibleTeamId) : '';
-      const responsibleTeamId = siteResponsibleTeamId || rowResponsibleTeamId || reportTeamId;
+      const responsibleTeamId = getWorkerRowResponsibleTeamId(row);
 
       const isManagedSiteStrict = matchesTeam(responsibleTeamId);
       if (!isManagedSiteStrict) return;
 
-      const rowSiteType = String(row.siteType ?? '').trim();
-      const resolvedSiteType = rowSiteType || String(site?.siteType ?? '').trim();
-      const managedKind: '도급' | '직영' | '지원' =
-        resolvedSiteType === '도급' || resolvedSiteType === '직영' || resolvedSiteType === '지원' ? resolvedSiteType : '직영';
+      const managedKind = getWorkerRowManagedKind(row);
 
       if (managedKind !== '도급' && managedKind !== '직영') return;
 
@@ -788,7 +835,8 @@ export const teamSettlementService = {
         });
     }
 
-    let accommodationDeductions: TeamSettlementDeductionItem[] = Array.from(utilityTotalByAccommodation.entries())
+    let accommodationDeductions: TeamSettlementDeductionItem[] = allowUnconfirmedLedgerFallback
+      ? Array.from(utilityTotalByAccommodation.entries())
       .filter(([, amount]) => Number.isFinite(amount) && amount > 0)
       .map(([accommodationId, amount]): TeamSettlementDeductionItem => ({
         id: `accommodation_billing:${params.yearMonth}:ledger:${accommodationId}`,
@@ -797,7 +845,8 @@ export const teamSettlementService = {
         category: `숙소비 (${accommodationNameById.get(accommodationId) ?? accommodationId})`,
         amount,
         memo: '월별 공과금 대장 자동집계'
-      }));
+      }))
+      : [];
 
     if (accommodationDeductions.length === 0) {
       const teamAccommodationDocs = accommodationDocs.filter((doc) => {
@@ -876,7 +925,7 @@ export const teamSettlementService = {
 
     let vehicleDeductions: TeamSettlementDeductionItem[] = vehicleDeductionsFromDocs;
 
-    if (vehicleDeductions.length === 0) {
+    if (allowUnconfirmedLedgerFallback && vehicleDeductions.length === 0) {
       const [vehicles, expenses, workerLookups, vehicleAssignments] = await Promise.all([
         vehicleService.getVehicles(),
         vehicleService.getExpensesByMonth(params.yearMonth),
@@ -1091,7 +1140,7 @@ export const teamSettlementService = {
 
     let cardDeductions: TeamSettlementDeductionItem[] = cardDeductionsFromDocs;
 
-    if (cardDeductions.length === 0) {
+    if (allowUnconfirmedLedgerFallback && cardDeductions.length === 0) {
       const [cards, txs, workerLookups] = await Promise.all([
         cardService.getCards(),
         cardService.getTransactionsByMonth(params.yearMonth),
@@ -1138,6 +1187,75 @@ export const teamSettlementService = {
         .filter((item): item is TeamSettlementDeductionItem => Boolean(item));
     }
 
+    const postedTeamExpenseClaims = teamExpenseClaims.filter(isPostedTeamExpenseClaim);
+    const teamExpenseDeductions: TeamSettlementDeductionItem[] = postedTeamExpenseClaims
+      .flatMap((claim): TeamSettlementDeductionItem[] => {
+        const amount = Math.round(toFiniteNumberOrZero(claim.amount));
+        if (amount <= 0) return [];
+
+        const isOtherExpense =
+          claim.claimType === 'otherExpense' ||
+          !String(claim.chargeToTeamId ?? '').trim();
+        const payerTeamId = resolveTeamIdFromAny(claim.payerTeamId, claim.payerTeamName);
+        const chargeToTeamId = resolveTeamIdFromAny(claim.chargeToTeamId, claim.chargeToTeamName);
+        const shouldDeduct = isOtherExpense
+          ? Boolean(payerTeamId && matchesTeam(payerTeamId))
+          : Boolean(chargeToTeamId && matchesTeam(chargeToTeamId));
+
+        if (!shouldDeduct) return [];
+
+        const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
+        const description = String(claim.description ?? '').trim();
+        const counterpartyName = String(claim.payerTeamName ?? '').trim();
+        const memoParts = [
+          String(claim.date ?? '').trim(),
+          String(claim.siteName ?? '').trim(),
+          String(claim.cardLabel ?? '').trim(),
+          isOtherExpense ? '기타청구' : `후청구: ${counterpartyName || '사용팀 미지정'}`,
+          String(claim.memo ?? '').trim()
+        ].filter(Boolean);
+
+        return [{
+          id: `team_expense_claim:${params.yearMonth}:${claim.id}:deduction`,
+          source: 'auto',
+          origin: 'team_expense_claim',
+          category: `경비(${categoryLabel}${description ? ` - ${description}` : ''})`,
+          amount,
+          memo: memoParts.join(' / ')
+        }];
+      });
+
+    const teamExpenseAdditions: TeamSettlementAdditionItem[] = postedTeamExpenseClaims
+      .flatMap((claim): TeamSettlementAdditionItem[] => {
+        if (claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim()) return [];
+
+        const amount = Math.round(toFiniteNumberOrZero(claim.amount));
+        if (amount <= 0) return [];
+
+        const payerTeamId = resolveTeamIdFromAny(claim.payerTeamId, claim.payerTeamName);
+        if (!payerTeamId || !matchesTeam(payerTeamId)) return [];
+
+        const categoryLabel = getTeamExpenseCategoryLabel(claim.category);
+        const description = String(claim.description ?? '').trim();
+        const chargeToName = String(claim.chargeToTeamName ?? '').trim();
+        const memoParts = [
+          String(claim.date ?? '').trim(),
+          String(claim.siteName ?? '').trim(),
+          String(claim.cardLabel ?? '').trim(),
+          `받을 후청구: ${chargeToName || '청구대상 미지정'}`,
+          String(claim.memo ?? '').trim()
+        ].filter(Boolean);
+
+        return [{
+          id: `team_expense_claim:${params.yearMonth}:${claim.id}:addition`,
+          source: 'auto',
+          origin: 'team_expense_claim',
+          category: `경비 환급(${categoryLabel}${description ? ` - ${description}` : ''})`,
+          amount,
+          memo: memoParts.join(' / ')
+        }];
+      });
+
     const officeExpenseManDay = roundManDay(
       dailyReportSales
         .filter((s) => s.kind === '도급' || s.kind === '직영')
@@ -1161,7 +1279,11 @@ export const teamSettlementService = {
     const normalizeSalaryModel = (r: (typeof workerRows)[number]): string => {
       const raw = typeof r.salaryModel === 'string' ? r.salaryModel : (typeof r.payType === 'string' ? r.payType : '');
       const trimmed = String(raw ?? '').trim();
-      return trimmed || '일급제';
+      if (!trimmed) return '일급제';
+      if (trimmed.includes('용역')) return '용역팀';
+      if (trimmed.includes('월급')) return '월급제';
+      if (trimmed.includes('일급') || trimmed.includes('일당')) return '일급제';
+      return trimmed;
     };
 
     const teamWorkerRows = workerRows.filter((r) => {
@@ -1170,9 +1292,9 @@ export const teamSettlementService = {
     });
 
     const buildPayrollDeduction = (params2: {
-      origin: 'daily_wage_payroll' | 'monthly_wage_payroll';
+      origin: 'daily_wage_payroll' | 'monthly_wage_payroll' | 'service_team_payroll';
       category: string;
-      salaryModel: '일급제' | '월급제';
+      salaryModel: '일급제' | '월급제' | '용역팀';
       rows: (typeof workerRows)[number][];
     }): TeamSettlementDeductionItem | null => {
       const manDay = roundManDay(params2.rows.reduce((sum, r) => sum + (Number.isFinite(r.manDay) ? r.manDay : 0), 0));
@@ -1193,6 +1315,10 @@ export const teamSettlementService = {
 
     const dailyWageRows = teamWorkerRows.filter((r) => normalizeSalaryModel(r) === '일급제');
     const monthlyWageRows = teamWorkerRows.filter((r) => normalizeSalaryModel(r) === '월급제');
+    const serviceTeamRows = workerRows.filter((r) =>
+      normalizeSalaryModel(r) === '용역팀' &&
+      isSelectedTeamDirectWorkRow(r)
+    );
 
     const dailyWageDeduction = buildPayrollDeduction({
       origin: 'daily_wage_payroll',
@@ -1208,6 +1334,13 @@ export const teamSettlementService = {
       rows: monthlyWageRows
     });
 
+    const serviceTeamDeduction = buildPayrollDeduction({
+      origin: 'service_team_payroll',
+      category: '용역팀 급여',
+      salaryModel: '용역팀',
+      rows: serviceTeamRows
+    });
+
     const nowIso = new Date().toISOString();
 
     return {
@@ -1220,11 +1353,13 @@ export const teamSettlementService = {
         officeExpenseDeduction,
         ...(dailyWageDeduction ? [dailyWageDeduction] : []),
         ...(monthlyWageDeduction ? [monthlyWageDeduction] : []),
+        ...(serviceTeamDeduction ? [serviceTeamDeduction] : []),
         ...accommodationDeductions,
         ...vehicleDeductions,
-        ...cardDeductions
+        ...cardDeductions,
+        ...teamExpenseDeductions
       ],
-      additions: [],
+      additions: [...teamExpenseAdditions],
       summary: {
         prevCarryover: 0,
         deposit: 0

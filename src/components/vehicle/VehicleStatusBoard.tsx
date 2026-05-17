@@ -183,13 +183,19 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
         return type === 'TEAM' ? '팀' : '개인';
     };
 
+    const hasActiveAssignment = (vehicle: Vehicle) => {
+        return Boolean(vehicle.currentAssigneeId && vehicle.currentAssigneeType && vehicle.currentAssigneeName);
+    };
+
     const getBillingTargetName = (vehicle: Vehicle) => {
+        if (!hasActiveAssignment(vehicle)) return '';
         return vehicle.billingTargetType && vehicle.billingTargetId
             ? (vehicle.billingTargetName ?? '')
             : (vehicle.currentAssigneeName ?? '');
     };
 
     const getBillingTargetType = (vehicle: Vehicle) => {
+        if (!hasActiveAssignment(vehicle)) return undefined;
         return vehicle.billingTargetType && vehicle.billingTargetId
             ? vehicle.billingTargetType
             : vehicle.currentAssigneeType;
@@ -368,7 +374,21 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
             {viewMode === 'list' ? (
                 <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="support-compact-table support-compact-status w-full table-fixed text-xs">
+                            <colgroup>
+                                <col style={{ width: '3%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '6%' }} />
+                                <col style={{ width: '11%' }} />
+                                <col style={{ width: '12%' }} />
+                                <col style={{ width: '9%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '6%' }} />
+                                <col style={{ width: '10%' }} />
+                                <col style={{ width: '9%' }} />
+                                <col style={{ width: '6%' }} />
+                            </colgroup>
                             <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200">
                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-8">#</th>
@@ -395,7 +415,8 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                     const billingTargetType = getBillingTargetType(vehicle);
                                     const billingTargetName = getBillingTargetName(vehicle);
                                     const billingTargetTeamInfo = getBillingTargetTeamInfo(vehicle);
-                                    const hasExplicitBillingTarget = Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
+                                    const isAssigned = hasActiveAssignment(vehicle);
+                                    const hasExplicitBillingTarget = isAssigned && Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
 
                                     return (
                                         <tr
@@ -467,7 +488,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                                     ) : (
                                                         <span className="text-xs font-bold text-slate-300">미지정</span>
                                                     )}
-                                                    {!hasExplicitBillingTarget && (
+                                                    {isAssigned && !hasExplicitBillingTarget && (
                                                         <button
                                                             type="button"
                                                             onClick={(e) => {
@@ -577,7 +598,8 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                         const billingTargetType = getBillingTargetType(vehicle);
                         const billingTargetName = getBillingTargetName(vehicle);
                         const billingTargetTeamInfo = getBillingTargetTeamInfo(vehicle);
-                        const hasExplicitBillingTarget = Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
+                        const isAssigned = hasActiveAssignment(vehicle);
+                        const hasExplicitBillingTarget = isAssigned && Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
 
                         return (
                             <div
@@ -710,7 +732,7 @@ export const VehicleStatusBoard: React.FC<VehicleStatusBoardProps> = ({
                                             )}
                                         </div>
 
-                                        {!hasExplicitBillingTarget && (
+                                        {isAssigned && !hasExplicitBillingTarget && (
                                             <button
                                                 type="button"
                                                 onClick={(e) => {

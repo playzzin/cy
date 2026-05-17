@@ -85,9 +85,14 @@ const kindLabels: Record<FieldGoodsTransactionKind, string> = {
     issue: '반출',
 };
 
+const OFFICE_STOCK_ID = '__field_goods_office__';
+const OFFICE_STOCK_NAME = '사무실';
+
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 const money = (value: number): string => Math.round(value).toLocaleString('ko-KR');
+
+const quantityText = (value: number): string => value.toLocaleString('ko-KR');
 
 const normalizeNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -127,12 +132,18 @@ const createBlankLines = (teamId: string, itemId: string, count = 1): InputLine[
     }));
 
 const sortItems = (rows: FieldGoodsItem[]): FieldGoodsItem[] =>
-    [...rows].sort((left, right) => {
+    Array.from(new Map(rows.map((row) => [row.id, row])).values()).sort((left, right) => {
         if (left.active !== right.active) return left.active ? -1 : 1;
         const sortCompare = (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
         if (sortCompare !== 0) return sortCompare;
         return left.name.localeCompare(right.name, 'ko-KR');
     });
+
+const mergeItem = (rows: FieldGoodsItem[], item: FieldGoodsItem): FieldGoodsItem[] => {
+    const merged = new Map(rows.map((row) => [row.id, row]));
+    merged.set(item.id, item);
+    return sortItems(Array.from(merged.values()));
+};
 
 const sortTransactions = (rows: FieldGoodsTransaction[]): FieldGoodsTransaction[] =>
     [...rows].sort((left, right) => {
@@ -232,6 +243,7 @@ const createSnapshotItem = (transaction: FieldGoodsTransaction): FieldGoodsItem 
 
 const FieldGoodsProgramPage: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const addItemInFlightRef = useRef(false);
     const {
         teams: masterTeams,
         companies: masterCompanies,
@@ -351,6 +363,14 @@ const FieldGoodsProgramPage: React.FC = () => {
 
     const defaultTeamId = activeTeams[0]?.id || '';
     const defaultItemId = activeItems[0]?.id || '';
+
+    const getTransactionTeamName = useCallback(
+        (transaction: Pick<FieldGoodsTransaction, 'kind' | 'teamId' | 'teamName'>): string => {
+            if (transaction.kind === 'purchase') return OFFICE_STOCK_NAME;
+            return teamMap.get(transaction.teamId)?.name || transaction.teamName || '-';
+        },
+        [teamMap]
+    );
 
     const loadProgramData = useCallback(async () => {
         setLoading(true);
@@ -545,11 +565,25 @@ const FieldGoodsProgramPage: React.FC = () => {
             if (!keyword) return true;
 
             const haystack = normalizeIdentity(
-                `${transaction.date}${transaction.teamName}${transaction.itemName}${transaction.unit}${transaction.memo}${kindLabels[transaction.kind]}`
+                `${transaction.date}${getTransactionTeamName(transaction)}${transaction.itemName}${transaction.unit}${transaction.memo}${kindLabels[transaction.kind]}`
             );
             return haystack.includes(keyword);
         });
-    }, [ledgerKeyword, ledgerKind, transactions]);
+    }, [getTransactionTeamName, ledgerKeyword, ledgerKind, transactions]);
+
+    const getIssueAvailableStock = useCallback(
+        (itemId: string, replacingTransaction?: FieldGoodsTransaction): number => {
+            const currentStock = stockByItemId.get(itemId) ?? 0;
+            if (!replacingTransaction || replacingTransaction.itemId !== itemId) return currentStock;
+
+            const currentEffect =
+                replacingTransaction.kind === 'purchase'
+                    ? replacingTransaction.quantity
+                    : -replacingTransaction.quantity;
+            return currentStock - currentEffect;
+        },
+        [stockByItemId]
+    );
 
     const updateInputLine = (lineId: string, patch: Partial<InputLine>) => {
         setInputLines((prev) => prev.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
@@ -573,7 +607,9 @@ const FieldGoodsProgramPage: React.FC = () => {
     };
 
     const handleSaveInput = async () => {
-        if (!activeTeams.length) {
+        const isPurchase = transactionKind === 'purchase';
+
+        if (!isPurchase && !activeTeams.length) {
             alert('팀 데이터가 없습니다. 팀 DB를 먼저 확인해 주세요.');
             return;
         }
@@ -590,8 +626,7 @@ const FieldGoodsProgramPage: React.FC = () => {
             }))
             .filter(
                 (line) =>
-                    line.teamId &&
-                    activeTeamIdSet.has(line.teamId) &&
+                    (isPurchase || (line.teamId && activeTeamIdSet.has(line.teamId))) &&
                     line.itemId &&
                     activeItemIdSet.has(line.itemId) &&
                     line.quantityNumber > 0
@@ -603,27 +638,37 @@ const FieldGoodsProgramPage: React.FC = () => {
         }
 
         if (transactionKind === 'issue') {
-            const shortages = validLines.filter((line) => {
-                const currentStock = stockByItemId.get(line.itemId) ?? 0;
-                return currentStock < line.quantityNumber;
+            const requestedByItemId = new Map<string, number>();
+            validLines.forEach((line) => {
+                requestedByItemId.set(line.itemId, (requestedByItemId.get(line.itemId) ?? 0) + line.quantityNumber);
             });
 
+            const shortages = Array.from(requestedByItemId.entries())
+                .map(([itemId, requested]) => ({
+                    item: itemMap.get(itemId),
+                    requested,
+                    available: stockByItemId.get(itemId) ?? 0,
+                }))
+                .filter((row) => row.available < row.requested);
+
             if (shortages.length > 0) {
-                const proceed = window.confirm(
-                    `현재 재고보다 반출 수량이 큰 품목이 ${shortages.length}건 있습니다. 그래도 저장하시겠습니까?`
-                );
-                if (!proceed) return;
+                const detail = shortages
+                    .slice(0, 5)
+                    .map((row) => `${row.item?.name || '품목'}: 재고 ${quantityText(row.available)} / 반출 ${quantityText(row.requested)}`)
+                    .join('\n');
+                alert(`매입 재고가 부족해서 반출을 저장할 수 없습니다.\n${detail}`);
+                return;
             }
         }
 
         const payload: FieldGoodsTransactionInput[] = validLines.map((line) => {
-            const team = teamMap.get(line.teamId);
+            const team = isPurchase ? null : teamMap.get(line.teamId);
             const item = itemMap.get(line.itemId);
 
             return {
                 date: transactionDate,
-                teamId: line.teamId,
-                teamName: team?.name || '',
+                teamId: isPurchase ? OFFICE_STOCK_ID : line.teamId,
+                teamName: isPurchase ? OFFICE_STOCK_NAME : team?.name || '',
                 kind: transactionKind,
                 itemId: line.itemId,
                 itemName: item?.name || '',
@@ -655,6 +700,8 @@ const FieldGoodsProgramPage: React.FC = () => {
     };
 
     const handleAddItem = async () => {
+        if (saving || addItemInFlightRef.current) return;
+
         const name = newItem.name.trim();
         if (!name) {
             alert('품목명을 입력해 주세요.');
@@ -667,6 +714,7 @@ const FieldGoodsProgramPage: React.FC = () => {
             return;
         }
 
+        addItemInFlightRef.current = true;
         setSaving(true);
         try {
             const created = await fieldGoodsService.addItem({
@@ -677,12 +725,15 @@ const FieldGoodsProgramPage: React.FC = () => {
                 active: true,
                 sortOrder: items.length + 1,
             });
-            setItems((prev) => sortItems([...prev, created]));
+            if (!firestoreLive) {
+                setItems((prev) => mergeItem(prev, created));
+            }
             setNewItem({ name: '', unit: 'EA', purchasePrice: '0', salePrice: '0' });
         } catch (error) {
             console.error('Failed to add field goods item:', error);
             alert('품목 저장에 실패했습니다.');
         } finally {
+            addItemInFlightRef.current = false;
             setSaving(false);
         }
     };
@@ -765,7 +816,7 @@ const FieldGoodsProgramPage: React.FC = () => {
         setEditingTransactionId(transaction.id);
         setTransactionDraft({
             date: transaction.date,
-            teamId: transaction.teamId,
+            teamId: transaction.kind === 'purchase' ? OFFICE_STOCK_ID : transaction.teamId,
             kind: transaction.kind,
             itemId: transaction.itemId,
             quantity: String(transaction.quantity),
@@ -777,7 +828,7 @@ const FieldGoodsProgramPage: React.FC = () => {
         setEditingTransactionId(null);
         setTransactionDraft({
             date: today(),
-            teamId: defaultTeamId,
+            teamId: defaultTeamId || OFFICE_STOCK_ID,
             kind: 'issue',
             itemId: defaultItemId,
             quantity: '',
@@ -787,11 +838,12 @@ const FieldGoodsProgramPage: React.FC = () => {
 
     const handleSaveTransaction = async (transaction: FieldGoodsTransaction) => {
         const quantity = normalizeNumber(transactionDraft.quantity);
+        const isPurchase = transactionDraft.kind === 'purchase';
         if (!transactionDraft.date) {
             alert('일자를 입력해 주세요.');
             return;
         }
-        if (!transactionDraft.teamId) {
+        if (!isPurchase && !transactionDraft.teamId) {
             alert('팀을 선택해 주세요.');
             return;
         }
@@ -804,12 +856,22 @@ const FieldGoodsProgramPage: React.FC = () => {
             return;
         }
 
-        const team = teamMap.get(transactionDraft.teamId);
         const item = itemMap.get(transactionDraft.itemId);
+        if (transactionDraft.kind === 'issue') {
+            const availableStock = getIssueAvailableStock(transactionDraft.itemId, transaction);
+            if (availableStock < quantity) {
+                alert(
+                    `매입 재고가 부족해서 반출을 저장할 수 없습니다.\n${item?.name || transaction.itemName}: 재고 ${quantityText(availableStock)} / 반출 ${quantityText(quantity)}`
+                );
+                return;
+            }
+        }
+
+        const team = isPurchase ? null : teamMap.get(transactionDraft.teamId);
         const updates: FieldGoodsTransactionInput = {
             date: transactionDraft.date,
-            teamId: transactionDraft.teamId,
-            teamName: team?.name || transaction.teamName,
+            teamId: isPurchase ? OFFICE_STOCK_ID : transactionDraft.teamId,
+            teamName: isPurchase ? OFFICE_STOCK_NAME : team?.name || transaction.teamName,
             kind: transactionDraft.kind,
             itemId: transactionDraft.itemId,
             itemName: item?.name || transaction.itemName,
@@ -840,7 +902,7 @@ const FieldGoodsProgramPage: React.FC = () => {
     };
 
     const handleDeleteTransaction = async (transaction: FieldGoodsTransaction) => {
-        if (!window.confirm(`'${transaction.date} ${transaction.teamName} ${transaction.itemName}' 원장 행을 삭제하시겠습니까?`)) return;
+        if (!window.confirm(`'${transaction.date} ${getTransactionTeamName(transaction)} ${transaction.itemName}' 원장 행을 삭제하시겠습니까?`)) return;
 
         setSaving(true);
         try {
@@ -855,11 +917,6 @@ const FieldGoodsProgramPage: React.FC = () => {
     };
 
     const parseWorkbook = async (file: File) => {
-        if (!teams.length) {
-            alert('팀 데이터가 없습니다. 팀 DB를 먼저 확인해 주세요.');
-            return;
-        }
-
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
         const itemSheet = workbook.Sheets['품목'] || workbook.Sheets[workbook.SheetNames[0]];
@@ -923,10 +980,11 @@ const FieldGoodsProgramPage: React.FC = () => {
                     const quantity = normalizeNumber(row[quantityColumn]);
                     if (!itemName || isHeaderLikeItemName(itemName) || quantity <= 0) continue;
 
+                    const kind = parseKind(row[kindColumn >= 0 ? kindColumn : 2]);
                     const teamName = normalizeText(row[teamColumn >= 0 ? teamColumn : 1]);
-                    const team = teamByName.get(normalizeIdentity(teamName));
-                    if (!team) {
-                        if (teamName) unmatchedTeamNames.add(teamName);
+                    const team = kind === 'issue' ? teamByName.get(normalizeIdentity(teamName)) : undefined;
+                    if (kind === 'issue' && !team) {
+                        unmatchedTeamNames.add(teamName || '(팀 없음)');
                         continue;
                     }
 
@@ -946,9 +1004,9 @@ const FieldGoodsProgramPage: React.FC = () => {
 
                     payload.push({
                         date: toISODate(row[dateColumn >= 0 ? dateColumn : 0]),
-                        teamId: team.id,
-                        teamName: team.name,
-                        kind: parseKind(row[kindColumn >= 0 ? kindColumn : 2]),
+                        teamId: kind === 'purchase' ? OFFICE_STOCK_ID : team!.id,
+                        teamName: kind === 'purchase' ? OFFICE_STOCK_NAME : team!.name,
+                        kind,
                         itemId: item.id,
                         itemName: item.name,
                         unit: item.unit,
@@ -983,13 +1041,14 @@ const FieldGoodsProgramPage: React.FC = () => {
                     const date = toISODate(row[0]);
                     const teamName = normalizeText(row[1]);
                     const rawKind = normalizeText(row[2]);
-                    const team = teamByName.get(normalizeIdentity(teamName));
+                    if (!rawKind) return;
+                    const kind = parseKind(rawKind);
+                    const team = kind === 'issue' ? teamByName.get(normalizeIdentity(teamName)) : undefined;
 
-                    if (!team) {
-                        if (teamName) unmatchedTeamNames.add(teamName);
+                    if (kind === 'issue' && !team) {
+                        unmatchedTeamNames.add(teamName || '(팀 없음)');
                         return;
                     }
-                    if (!rawKind) return;
 
                     itemColumnMap.forEach((entry) => {
                         const quantity = normalizeNumber(row[entry.index]);
@@ -1000,9 +1059,9 @@ const FieldGoodsProgramPage: React.FC = () => {
 
                         payload.push({
                             date,
-                            teamId: team.id,
-                            teamName: team.name,
-                            kind: parseKind(rawKind),
+                            teamId: kind === 'purchase' ? OFFICE_STOCK_ID : team!.id,
+                            teamName: kind === 'purchase' ? OFFICE_STOCK_NAME : team!.name,
+                            kind,
                             itemId: item.id,
                             itemName: item.name,
                             unit: item.unit,
@@ -1058,7 +1117,7 @@ const FieldGoodsProgramPage: React.FC = () => {
             ['일자', '팀', '구분', '품목', '단위', '수량', '매입단가', '판매단가', '금액', '비고', '입력방식'],
             ...sortTransactions(transactions).map((transaction) => [
                 transaction.date,
-                teamMap.get(transaction.teamId)?.name || transaction.teamName,
+                getTransactionTeamName(transaction),
                 kindLabels[transaction.kind],
                 transaction.itemName,
                 transaction.unit,
@@ -1271,7 +1330,7 @@ const FieldGoodsProgramPage: React.FC = () => {
 
             {!masterDataLoading && !activeTeams.length && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
-                    사용 가능한 팀 데이터가 없습니다. 팀 DB에서 팀을 등록하거나 상태를 확인해 주세요.
+                    반출할 팀 데이터가 없습니다. 매입은 사무실 재고로 저장할 수 있고, 반출 청구에는 팀 DB가 필요합니다.
                 </div>
             )}
 
@@ -1320,12 +1379,14 @@ const FieldGoodsProgramPage: React.FC = () => {
                             </select>
                         </div>
                         <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                            팀과 품목은 DB에서 불러옵니다. 품목이 없으면 품목/단가 탭에서 먼저 등록해 주세요.
+                            {transactionKind === 'purchase'
+                                ? '매입은 사무실 재고로 입고됩니다. 반출할 때만 팀을 선택합니다.'
+                                : '반출은 매입된 사무실 재고에서 차감됩니다. 품목이 없으면 품목/단가 탭에서 먼저 등록해 주세요.'}
                         </div>
                         <button
                             type="button"
                             onClick={() => void handleSaveInput()}
-                            disabled={saving || !activeTeams.length || !activeItems.length}
+                            disabled={saving || !activeItems.length || (transactionKind === 'issue' && !activeTeams.length)}
                             className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-black text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                         >
                             <FontAwesomeIcon icon={faSave} />
@@ -1338,7 +1399,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                             <thead className="bg-[#d9eaf7] text-[#17365d]">
                                 <tr>
                                     <th className="border border-slate-300 px-3 py-2 text-center">No</th>
-                                    <th className="border border-slate-300 px-3 py-2 text-left">팀</th>
+                                    <th className="border border-slate-300 px-3 py-2 text-left">{transactionKind === 'purchase' ? '입고처' : '팀'}</th>
                                     <th className="border border-slate-300 px-3 py-2 text-left">품목</th>
                                     <th className="border border-slate-300 px-3 py-2 text-right">수량</th>
                                     <th className="border border-slate-300 px-3 py-2 text-center">단위</th>
@@ -1352,7 +1413,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                             <tbody>
                                 {inputLines.map((line, index) => {
                                     const item = itemMap.get(line.itemId);
-                                    const selectedTeam = teamMap.get(line.teamId);
+                                    const selectedTeam = transactionKind === 'purchase' ? undefined : teamMap.get(line.teamId);
                                     const quantity = normalizeNumber(line.quantity);
                                     const amount =
                                         quantity * (transactionKind === 'issue' ? item?.salePrice || 0 : item?.purchasePrice || 0);
@@ -1364,29 +1425,35 @@ const FieldGoodsProgramPage: React.FC = () => {
                                                 <div className="flex items-center gap-2">
                                                     <span
                                                         className="h-4 w-4 flex-shrink-0 rounded-full border border-white shadow ring-1 ring-slate-200"
-                                                        style={{ backgroundColor: selectedTeam?.color || '#64748b' }}
+                                                        style={{ backgroundColor: transactionKind === 'purchase' ? '#0f766e' : selectedTeam?.color || '#64748b' }}
                                                         aria-hidden="true"
                                                     />
-                                                    <select
-                                                    value={line.teamId}
-                                                    onChange={(event) => updateInputLine(line.id, { teamId: event.target.value })}
-                                                    disabled={!activeTeams.length}
-                                                    className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 py-1.5 outline-none focus:border-blue-500"
-                                                >
-                                                    {activeTeams.length ? (
-                                                        activeTeams.map((team) => (
-                                                            <option
-                                                                key={team.id}
-                                                                value={team.id}
-                                                                style={{ color: team.color || '#334155' }}
-                                                            >
-                                                                ● {team.name}
-                                                            </option>
-                                                        ))
+                                                    {transactionKind === 'purchase' ? (
+                                                        <span className="min-w-0 flex-1 rounded border border-teal-100 bg-teal-50 px-2 py-1.5 font-bold text-teal-700">
+                                                            {OFFICE_STOCK_NAME}
+                                                        </span>
                                                     ) : (
-                                                        <option value="">팀 없음</option>
+                                                        <select
+                                                            value={line.teamId}
+                                                            onChange={(event) => updateInputLine(line.id, { teamId: event.target.value })}
+                                                            disabled={!activeTeams.length}
+                                                            className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 py-1.5 outline-none focus:border-blue-500"
+                                                        >
+                                                            {activeTeams.length ? (
+                                                                activeTeams.map((team) => (
+                                                                    <option
+                                                                        key={team.id}
+                                                                        value={team.id}
+                                                                        style={{ color: team.color || '#334155' }}
+                                                                    >
+                                                                        ● {team.name}
+                                                                    </option>
+                                                                ))
+                                                            ) : (
+                                                                <option value="">팀 없음</option>
+                                                            )}
+                                                        </select>
                                                     )}
-                                                    </select>
                                                 </div>
                                             </td>
                                             <td className="border border-slate-200 px-2 py-1">
@@ -1609,7 +1676,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                             <thead className="sticky top-0 z-10 bg-[#d9e2f3] text-[#1f4e79]">
                                 <tr>
                                     <th className="border border-slate-300 px-3 py-2 text-left">일자</th>
-                                    <th className="border border-slate-300 px-3 py-2 text-left">팀</th>
+                                    <th className="border border-slate-300 px-3 py-2 text-left">팀/입고처</th>
                                     <th className="border border-slate-300 px-3 py-2 text-center">구분</th>
                                     <th className="border border-slate-300 px-3 py-2 text-left">품목</th>
                                     <th className="border border-slate-300 px-3 py-2 text-center">단위</th>
@@ -1654,19 +1721,29 @@ const FieldGoodsProgramPage: React.FC = () => {
                                                 </td>
                                                 <td className="whitespace-nowrap border border-slate-200 px-2 py-1 font-bold text-slate-800">
                                                     {editing ? (
-                                                        <select
-                                                            value={transactionDraft.teamId}
-                                                            onChange={(event) => setTransactionDraft((prev) => ({ ...prev, teamId: event.target.value }))}
-                                                            className="w-full rounded border border-slate-200 bg-white px-2 py-1 outline-none focus:border-indigo-500"
-                                                        >
-                                                            {teams.map((team) => (
-                                                                <option key={team.id} value={team.id}>
-                                                                    {team.name}
-                                                                </option>
-                                                            ))}
-                                                        </select>
+                                                        transactionDraft.kind === 'purchase' ? (
+                                                            <span className="inline-flex w-full rounded border border-teal-100 bg-teal-50 px-2 py-1 text-teal-700">
+                                                                {OFFICE_STOCK_NAME}
+                                                            </span>
+                                                        ) : (
+                                                            <select
+                                                                value={transactionDraft.teamId}
+                                                                onChange={(event) => setTransactionDraft((prev) => ({ ...prev, teamId: event.target.value }))}
+                                                                className="w-full rounded border border-slate-200 bg-white px-2 py-1 outline-none focus:border-indigo-500"
+                                                            >
+                                                                {teams.length ? (
+                                                                    teams.map((team) => (
+                                                                        <option key={team.id} value={team.id}>
+                                                                            {team.name}
+                                                                        </option>
+                                                                    ))
+                                                                ) : (
+                                                                    <option value="">팀 없음</option>
+                                                                )}
+                                                            </select>
+                                                        )
                                                     ) : (
-                                                        teamMap.get(transaction.teamId)?.name || transaction.teamName
+                                                        getTransactionTeamName(transaction)
                                                     )}
                                                 </td>
                                                 <td className="border border-slate-200 px-2 py-1 text-center">
@@ -1674,10 +1751,19 @@ const FieldGoodsProgramPage: React.FC = () => {
                                                         <select
                                                             value={transactionDraft.kind}
                                                             onChange={(event) =>
-                                                                setTransactionDraft((prev) => ({
-                                                                    ...prev,
-                                                                    kind: event.target.value as FieldGoodsTransactionKind,
-                                                                }))
+                                                                setTransactionDraft((prev) => {
+                                                                    const nextKind = event.target.value as FieldGoodsTransactionKind;
+                                                                    return {
+                                                                        ...prev,
+                                                                        kind: nextKind,
+                                                                        teamId:
+                                                                            nextKind === 'purchase'
+                                                                                ? OFFICE_STOCK_ID
+                                                                                : prev.teamId === OFFICE_STOCK_ID
+                                                                                    ? defaultTeamId
+                                                                                    : prev.teamId,
+                                                                    };
+                                                                })
                                                             }
                                                             className="w-full rounded border border-slate-200 bg-white px-2 py-1 outline-none focus:border-indigo-500"
                                                         >

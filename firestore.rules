@@ -1,6 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isLoginFailureLogCreate() {
+      return request.auth == null
+        && request.resource.data.keys().hasOnly([
+          'id',
+          'action',
+          'actionLabel',
+          'status',
+          'provider',
+          'method',
+          'actor',
+          'email',
+          'summaryLines',
+          'summaryText',
+          'errorCode',
+          'errorMessage',
+          'client',
+          'createdAt',
+          'createdAtIso'
+        ])
+        && request.resource.data.action == 'login_failed'
+        && request.resource.data.status == 'failed'
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.actor is map
+        && request.resource.data.client is map
+        && request.resource.data.summaryLines is list
+        && request.resource.data.summaryLines.size() <= 8
+        && request.resource.data.summaryText is string
+        && request.resource.data.summaryText.size() <= 2000
+        && (request.resource.data.email == null || request.resource.data.email is string)
+        && (request.resource.data.errorCode == null || request.resource.data.errorCode is string)
+        && (request.resource.data.errorMessage == null || request.resource.data.errorMessage is string)
+        && request.resource.data.actor.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL'])
+        && request.resource.data.client.keys().hasOnly([
+          'userAgent',
+          'browser',
+          'os',
+          'platform',
+          'language',
+          'timezone',
+          'path',
+          'referrer',
+          'screen',
+          'viewport'
+        ]);
+    }
+
+    match /login_logs/{logId} {
+      allow create: if request.auth != null || isLoginFailureLogCreate();
+    }
+
     match /{allPaths=**} {
       allow read, write: if request.auth != null;
     }

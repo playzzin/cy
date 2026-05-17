@@ -20,6 +20,9 @@ export interface AccommodationBillingLineItem {
     label: string;
     amount: number;
     targetField: AccommodationBillingTargetField;
+    sourceType?: 'utility_ledger' | 'manual';
+    sourceAccommodationId?: string;
+    sourceUtilityRecordId?: string;
 }
 
 export interface AccommodationBillingDocument {

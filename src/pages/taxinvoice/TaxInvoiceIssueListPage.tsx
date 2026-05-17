@@ -50,7 +50,7 @@ const ISSUE_TYPE_OPTIONS = ['입력', '신규', '다원'];
 const EMPTY_ISSUE = (yearMonth: string, no: number): Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'> => ({
     yearMonth,
     no,
-    isNew: '입력',
+    isNew: '',
     issueDate: getMonthEndDate(yearMonth),
     recipient: '',
     item: '',
@@ -103,8 +103,15 @@ const SiteImportModal: React.FC<SiteImportModalProps> = ({ sites, onClose, onImp
     const [filterSiteType, setFilterSiteType] = useState<string>('전체');
     const [filterPaymentType, setFilterPaymentType] = useState<string>('전체');
 
-    // unique key per row: siteName|siteType|paymentType
-    const rowKey = (s: SiteWorkSummary) => `${s.siteName}|${s.siteType}|${s.paymentType}`;
+    // Include team/company because the same site can be imported as separate invoice rows.
+    const rowKey = (s: SiteWorkSummary) => [
+        s.siteId || s.siteName,
+        s.siteName,
+        s.companyName,
+        s.teamName,
+        s.siteType,
+        s.paymentType,
+    ].join('|');
 
     const filtered = sites.filter(s => {
         const matchSiteType = filterSiteType === '전체' || s.siteType === filterSiteType;
@@ -888,7 +895,7 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         const newIssues: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'>[] = selected.map((s, idx) => ({
             yearMonth,
             no: startNo + idx + 1,
-            isNew: '입력',
+            isNew: '',
             issueDate: monthEndDate,
             recipient: s.companyName,    // 상호명 → 공급받는자
             item: '',                    // 품목 (나중에 수정 가능)

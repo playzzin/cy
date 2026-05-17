@@ -181,11 +181,27 @@ interface SupportExchangeSummaryRow {
 
 interface SupportManualAdjustment {
     additionalAmount: number;
+    progressStatus: SupportProgressStatus;
     remark: string;
     etc: string;
 }
 
 type SupportManualAdjustments = Record<string, SupportManualAdjustment>;
+
+type SupportProgressStatus =
+    | ''
+    | 'depositComplete'
+    | 'dawinIssued'
+    | 'cheongyeonIssued'
+    | 'laborProcessed'
+    | 'issueRequested';
+
+interface SupportProgressOption {
+    value: Exclude<SupportProgressStatus, ''>;
+    label: string;
+    color: string;
+    rowColor: string;
+}
 
 interface SupportMonthlyRateOverrides {
     bulkRate?: number;
@@ -225,14 +241,28 @@ const formatDayValue = (value: number): string => {
 const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
 const SUPPORT_MANUAL_STORAGE_PREFIX = 'support-team-payment-manual-v1';
 const SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX = 'support-team-payment-rate-overrides-v1';
+const SUPPORT_PROGRESS_OPTIONS: SupportProgressOption[] = [
+    { value: 'depositComplete', label: '입금 완료', color: '#ffc000', rowColor: '#ffc000' },
+    { value: 'dawinIssued', label: '다윈 발행', color: '#00b0f0', rowColor: '#00b0f0' },
+    { value: 'cheongyeonIssued', label: '청연 발행', color: '#ffff00', rowColor: '#ffff00' },
+    { value: 'laborProcessed', label: '노무 처리', color: '#00b050', rowColor: '#00b050' },
+    { value: 'issueRequested', label: '발행 요청', color: '#ff00ff', rowColor: '#ff00ff' }
+];
 
 const getManualStorageKey = (yearMonth: string): string => `${SUPPORT_MANUAL_STORAGE_PREFIX}:${yearMonth}`;
 const getRateOverrideStorageKey = (yearMonth: string): string => `${SUPPORT_RATE_OVERRIDE_STORAGE_PREFIX}:${yearMonth}`;
+
+const isSupportProgressStatus = (value: unknown): value is SupportProgressStatus =>
+    value === '' || SUPPORT_PROGRESS_OPTIONS.some(option => option.value === value);
+
+const getSupportProgressOption = (value: SupportProgressStatus | undefined): SupportProgressOption | undefined =>
+    SUPPORT_PROGRESS_OPTIONS.find(option => option.value === value);
 
 const normalizeManualAdjustment = (value: Partial<SupportManualAdjustment> | undefined): SupportManualAdjustment => ({
     additionalAmount: typeof value?.additionalAmount === 'number' && Number.isFinite(value.additionalAmount)
         ? Math.max(0, Math.round(value.additionalAmount))
         : 0,
+    progressStatus: isSupportProgressStatus(value?.progressStatus) ? value.progressStatus : '',
     remark: String(value?.remark ?? ''),
     etc: String(value?.etc ?? '')
 });
@@ -1703,7 +1733,7 @@ const SupportTeamPaymentPage: React.FC = () => {
 
     if (loading && aggregates.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+            <div className="support-team-font flex flex-col items-center justify-center min-h-[400px] gap-4 font-['Pretendard']">
                 <FontAwesomeIcon icon={faSpinner} spin className="text-4xl text-amber-500" />
                 <p className="text-slate-500 font-bold">정산 데이터를 집계하고 있습니다...</p>
             </div>
@@ -1711,7 +1741,7 @@ const SupportTeamPaymentPage: React.FC = () => {
     }
 
     return (
-        <div className="p-6 max-w-[1600px] w-full mx-auto space-y-6">
+        <div className="support-team-font p-6 w-full max-w-none space-y-6 font-['Pretendard']">
             {/* 상단 헤더 영역 */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -1766,7 +1796,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                 </div>
             </section>
 
-            <div className="flex flex-col lg:flex-row gap-6">
+            <div className="flex w-full flex-col gap-6 lg:flex-row">
                 {/* 좌측 사이드바 */}
                 <aside className="w-full lg:w-72 flex-none space-y-4">
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden sticky top-6">
@@ -1809,7 +1839,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                 </aside>
 
                 {/* 우측 메인 */}
-                <div className="flex-1 space-y-6">
+                <div className="min-w-0 flex-1 space-y-6">
                     {/* 상단 요약 카드 및 필터 */}
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                         <div className="flex flex-wrap items-center gap-3">
@@ -1885,7 +1915,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                             <span className="text-[11px] font-bold text-slate-500">팀 행을 클릭하면 현장 상세가 열립니다.</span>
                         </div>
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[980px] border-collapse text-[13px]">
+                            <table className="w-full min-w-[1240px] border-collapse text-[13px]">
                                 <thead>
                                     <tr className="text-center font-black text-slate-950">
                                         <th className="w-14 border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white p-2"></th>
@@ -1895,6 +1925,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                         <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">금 액</th>
                                         <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">추 가</th>
                                         <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">합 계</th>
+                                        <th className="w-36 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">진행구분</th>
                                         <th className="w-44 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">비 고</th>
                                         <th className="w-44 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">기 타</th>
                                     </tr>
@@ -1902,7 +1933,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                 <tbody>
                                     {photoStyleSummaryGroups.every(group => group.aggregates.length === 0) ? (
                                         <tr>
-                                            <td colSpan={9} className="border border-slate-900 px-4 py-16 text-center font-bold text-slate-400">
+                                            <td colSpan={10} className="border border-slate-900 px-4 py-16 text-center font-bold text-slate-400">
                                                 해당 조건의 정산 내역이 없습니다.
                                             </td>
                                         </tr>
@@ -1927,6 +1958,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                         const manualAdjustment = getAdjustment(manualAdjustments, aggKey);
                                                         const additionalAmount = manualAdjustment.additionalAmount;
                                                         const aggregateTotal = getAggregateTotalWithAdditional(agg, manualAdjustments);
+                                                        const progressOption = getSupportProgressOption(manualAdjustment.progressStatus);
                                                         const remarkPlaceholder = getAggregateRemarkFallback(agg) || '비고 입력';
                                                         const etcPlaceholder = getAggregateEtcFallback(agg) || '기타 입력';
 
@@ -1934,7 +1966,8 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                             <React.Fragment key={aggKey}>
                                                                 <tr
                                                                     onClick={() => toggleAggregateExpand(aggKey)}
-                                                                    className={`cursor-pointer ${isExpanded ? 'bg-slate-50' : 'bg-white'} hover:bg-slate-50`}
+                                                                    className={`cursor-pointer transition-colors ${progressOption ? '' : `${isExpanded ? 'bg-slate-50' : 'bg-white'} hover:bg-slate-50`}`}
+                                                                    style={progressOption ? { backgroundColor: progressOption.rowColor } : undefined}
                                                                 >
                                                                     {index === 0 && (
                                                                         <td
@@ -1946,7 +1979,10 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                             </div>
                                                                         </td>
                                                                     )}
-                                                                    <td className={`border border-slate-900 px-2 py-1.5 text-center font-black ${getTeamCellClass(agg.direction)}`}>
+                                                                    <td
+                                                                        className={`border border-slate-900 px-2 py-1.5 text-center font-black text-slate-950 ${progressOption ? '' : getTeamCellClass(agg.direction)}`}
+                                                                        style={progressOption ? { backgroundColor: progressOption.rowColor } : undefined}
+                                                                    >
                                                                         <span className="inline-flex items-center gap-1">
                                                                             <FontAwesomeIcon icon={faChevronRight} className={`text-[10px] ${isExpanded ? 'rotate-90' : ''}`} />
                                                                             {agg.companyName}
@@ -1979,6 +2015,26 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                         />
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(aggregateTotal)}</td>
+                                                                    <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
+                                                                        <select
+                                                                            aria-label={`${agg.companyName} 진행구분`}
+                                                                            value={manualAdjustment.progressStatus}
+                                                                            onChange={(event) => updateManualAdjustment(aggKey, { progressStatus: event.target.value as SupportProgressStatus })}
+                                                                            className="h-7 w-full border border-slate-900/20 px-1 text-center text-[12px] font-black text-slate-950 outline-none transition focus:bg-white focus:ring-1 focus:ring-amber-400"
+                                                                            style={{ backgroundColor: progressOption?.color ?? '#ffffff' }}
+                                                                        >
+                                                                            <option value="">선택</option>
+                                                                            {SUPPORT_PROGRESS_OPTIONS.map(option => (
+                                                                                <option
+                                                                                    key={option.value}
+                                                                                    value={option.value}
+                                                                                    style={{ backgroundColor: option.color, color: '#111827' }}
+                                                                                >
+                                                                                    {option.label}
+                                                                                </option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
                                                                         <input
                                                                             type="text"
@@ -2021,6 +2077,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                         <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
                                                                         <td className="border border-slate-900 px-2 py-1"></td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-1"></td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-center text-[12px] text-slate-500">
                                                                             현장담당팀: {summarizeNames(site.workers.map(worker => worker.siteResponsibleTeamName ?? worker.targetTeamName), '미지정')}
                                                                         </td>
@@ -2045,6 +2102,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                         <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(groupAmount)}</td>
                                                         <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatOptionalMoney(groupAdditional)}</td>
                                                         <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(groupTotal)}</td>
+                                                        <td className="border border-slate-900 px-2 py-1.5"></td>
                                                         <td className="border border-slate-900 px-2 py-1.5"></td>
                                                         <td className="border border-slate-900 px-2 py-1.5"></td>
                                                     </tr>

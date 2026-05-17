@@ -22,6 +22,7 @@ import { PayslipTemplate } from './components/PayslipTemplate';
 import MonthlyAdvanceLedger from './components/MonthlyAdvanceLedger';
 import type { MonthlyAdvanceLedgerHandle } from './components/MonthlyAdvanceLedger';
 import { PayrollToolbar } from './components/PayrollToolbar';
+import { formatPayrollPaymentDate } from './utils/paymentDate';
 
 import { usePayrollData } from './hooks/usePayrollData';
 import { PaymentData, MonthlyAdvanceLedgerRow, MonthlyAdvanceLedgerWorkEntry, LedgerManualInput, DeductionBreakdown, WorkerWorkEntry, DeductionLine, TaxRateSnapshot, LedgerUtilityInputLike, InsuranceAppliedSummary, InsuranceAppliedSiteSummary, InsuranceAppliedReason, WithholdingAppliedSummary, WithholdingAppliedSiteSummary, BusinessIncomeAppliedSummary, BusinessIncomeAppliedSiteSummary } from './types/payroll';
@@ -3866,6 +3867,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
             ...taxBreakdown.standardLines,
             ...taxBreakdown.additionalLines,
         ];
+        const paymentDateText = formatPayrollPaymentDate(payslipTarget.month);
 
         const rows: (string | number)[][] = [];
         const merges: XLSX.Range[] = [];
@@ -3877,7 +3879,7 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         const titleRow = pushRow(['월급제 노임명세서', '', '', '', '', '', '', '']);
         merges.push({ s: { r: titleRow, c: 0 }, e: { r: titleRow, c: 7 } });
         pushRow([]);
-        pushRow(['성명', payslipTarget.workerName, '팀', payslipTarget.teamName, '지급월', payslipTarget.month]);
+        pushRow(['성명', payslipTarget.workerName, '팀', payslipTarget.teamName, '지급월', payslipTarget.month, '지급일', paymentDateText]);
         pushRow([
             '주민등록번호',
             payslipTarget.idNumber || '-',
@@ -3967,8 +3969,8 @@ const MonthlyWagePaymentPage: React.FC<Props> = ({ hideHeader }) => {
         };
         const infoRows = [2, 3, 4];
         infoRows.forEach((rowIdx) => {
-            [0, 2, 4].forEach((colIdx) => applyStyle(rowIdx, colIdx, infoKeyStyle));
-            [1, 3, 5].forEach((colIdx) => applyStyle(rowIdx, colIdx, infoValueStyle));
+            [0, 2, 4, 6].forEach((colIdx) => applyStyle(rowIdx, colIdx, infoKeyStyle));
+            [1, 3, 5, 7].forEach((colIdx) => applyStyle(rowIdx, colIdx, infoValueStyle));
         });
 
         const sectionHeaderStyle: XLSX.CellObject['s'] = {

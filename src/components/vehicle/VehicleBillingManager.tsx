@@ -26,6 +26,11 @@ const createEmptyLineItem = () => {
     };
 };
 
+const getLedgerRowIdSuffix = (id?: string): string => {
+    const match = String(id ?? '').match(/(__row_.+)$/);
+    return match ? match[1] : '';
+};
+
 const computeTotals = (draft: VehicleBillingDocument) => {
     const fixedCost = (draft.lineItems ?? []).filter((li) => li.type === 'FIXED').reduce((sum, li) => sum + (li.amount || 0), 0);
     const variableCost = (draft.lineItems ?? []).filter((li) => li.type === 'VARIABLE').reduce((sum, li) => sum + (li.amount || 0), 0);
@@ -238,39 +243,41 @@ export const VehicleBillingManager: React.FC = () => {
 
         setProcessing(true);
         try {
-            const targets = documents.filter((d) => d.status !== 'CONFIRMED');
+            const generatedGroups = await Promise.all(
+                vehicles.map((vehicle) => vehicleBillingService.generateAssignmentBillings(vehicle, yearMonth))
+            );
+            const targets = generatedGroups.reduce<VehicleBillingDocument[]>((acc, list) => acc.concat(list), []);
             if (targets.length === 0) {
                 toast.info('재계산할 DRAFT 문서가 없습니다.');
                 return;
             }
 
-            let skipped = 0;
-            await Promise.all(
-                targets.map(async (doc) => {
-                    const vehicle = vehicles.find((v) => String(v.id) === String(doc.vehicleId)) ?? null;
-                    if (!vehicle) {
-                        skipped += 1;
-                        return;
-                    }
-
-                    const regenerated = await vehicleBillingService.generateBilling(vehicle, yearMonth);
-                    const next: VehicleBillingDocument = {
-                        ...doc,
-                        vehiclePlate: vehicle.licensePlate,
-                        fixedCost: regenerated.fixedCost,
-                        variableCost: regenerated.variableCost,
-                        totalAmount: regenerated.totalAmount,
-                        lineItems: regenerated.lineItems
-                    };
-                    await vehicleBillingService.saveBilling(next);
-                })
+            const confirmedIds = new Set(
+                documents
+                    .filter((doc) => doc.status === 'CONFIRMED')
+                    .map((doc) => doc.id)
             );
+            let skipped = 0;
+            for (const doc of targets) {
+                if (confirmedIds.has(doc.id)) {
+                    skipped += 1;
+                    continue;
+                }
+                await vehicleBillingService.saveBilling(doc);
+            }
+            if (skipped > 0) {
+                toast.info(`확정 문서 ${skipped}건은 유지했습니다.`);
+            }
+
+            const successMessage = skipped > 0
+                ? `배정 이력 기준 차량 청구 초안 반영 완료 (대상 ${targets.length}건 중 확정 ${skipped}건 유지)`
+                : `배정 이력 기준 차량 청구 초안 반영 완료 (${targets.length}건)`;
 
             const msg = skipped > 0
                 ? `재계산 완료 (대상 ${targets.length}건 중 ${skipped}건은 차량 매칭 실패로 스킵)`
                 : `재계산 완료 (${targets.length}건)`;
 
-            toast.success(msg);
+            toast.success(successMessage);
             await loadBillings();
         } catch (error) {
             console.error(error);
@@ -342,25 +349,32 @@ export const VehicleBillingManager: React.FC = () => {
 
         setProcessing(true);
         try {
-            const next = await vehicleBillingService.generateBilling(vehicle, yearMonth);
+            const generatedDocs = await vehicleBillingService.generateAssignmentBillings(vehicle, yearMonth);
+            const teamCandidates = new Set(
+                [selectedTeam.id, selectedTeam.legacyId, selectedTeamId]
+                    .filter(Boolean)
+                    .map((value) => String(value))
+            );
+            const workerCandidates = new Set(
+                [target?.id, issuedToWorkerId]
+                    .filter(Boolean)
+                    .map((value) => String(value))
+            );
+            const withIssue = generatedDocs.find((doc) => (
+                teamCandidates.has(String(doc.teamId ?? '')) &&
+                doc.issuedToType === normalizedIssuedToType &&
+                (
+                    normalizedIssuedToType !== 'worker' ||
+                    workerCandidates.has(String(doc.issuedToWorkerId ?? ''))
+                )
+            ));
 
-            const resolvedId = vehicleBillingService.buildBillingDocumentId({
-                vehicleId: vehicle.id,
-                teamId: selectedTeam.id,
-                issuedToType: normalizedIssuedToType as any,
-                workerId: normalizedIssuedToType === 'worker' ? target?.id : undefined,
-                yearMonth
-            });
+            if (!withIssue) {
+                toast.error('선택한 청구 대상에 해당하는 배정 이력/금액이 없습니다.');
+                return;
+            }
 
-            const withIssue: VehicleBillingDocument = {
-                ...next,
-                id: resolvedId,
-                teamId: selectedTeam.id,
-                teamName: selectedTeam.name,
-                issuedToType: normalizedIssuedToType,
-                issuedToWorkerId: normalizedIssuedToType === 'worker' ? target?.id : undefined,
-                issuedToWorkerName: normalizedIssuedToType === 'team' ? selectedTeam.name : (target?.name ?? '')
-            };
+            const resolvedId = withIssue.id;
 
             const exists = documents.some((d) => d.id === resolvedId);
 
@@ -454,10 +468,11 @@ export const VehicleBillingManager: React.FC = () => {
                 workerId: normalizedIssuedToType === 'worker' ? issuedToWorkerId : undefined,
                 yearMonth: draft.yearMonth
             });
+            const nextId = `${resolvedId}${getLedgerRowIdSuffix(draft.id)}`;
 
             const next: VehicleBillingDocument = {
                 ...draft,
-                id: resolvedId,
+                id: nextId,
                 fixedCost: computed.fixedCost,
                 variableCost: computed.variableCost,
                 totalAmount: computed.totalAmount,
@@ -471,7 +486,7 @@ export const VehicleBillingManager: React.FC = () => {
             await vehicleBillingService.saveBilling(next);
             toast.success('저장되었습니다.');
             await loadBillings();
-            setSelectedDocumentId(resolvedId);
+            setSelectedDocumentId(nextId);
         } catch (e) {
             console.error(e);
             toast.error('저장에 실패했습니다.');
@@ -513,10 +528,11 @@ export const VehicleBillingManager: React.FC = () => {
                 workerId: normalizedIssuedToType === 'worker' ? issuedToWorkerId : undefined,
                 yearMonth: draft.yearMonth
             });
+            const nextId = `${resolvedId}${getLedgerRowIdSuffix(draft.id)}`;
 
             const next: VehicleBillingDocument = {
                 ...draft,
-                id: resolvedId,
+                id: nextId,
                 fixedCost: computed.fixedCost,
                 variableCost: computed.variableCost,
                 totalAmount: computed.totalAmount,
@@ -531,7 +547,7 @@ export const VehicleBillingManager: React.FC = () => {
             await vehicleBillingService.saveBilling(next);
             toast.success('확정되었습니다.');
             await loadBillings();
-            setSelectedDocumentId(resolvedId);
+            setSelectedDocumentId(nextId);
         } catch (e) {
             console.error(e);
             toast.error('확정에 실패했습니다.');

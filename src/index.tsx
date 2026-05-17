@@ -10,6 +10,67 @@ import { library } from '@fortawesome/fontawesome-svg-core';
 import { fas } from '@fortawesome/free-solid-svg-icons';
 import { AuthProvider } from './contexts/AuthContext';
 
+const CHUNK_RECOVERY_KEY = 'cy-erp-chunk-recovery-at';
+const CHUNK_RECOVERY_WINDOW_MS = 10000;
+
+function getErrorText(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return `${error.name} ${error.message}`;
+  if (error && typeof error === 'object') {
+    const maybeError = error as { name?: unknown; message?: unknown; reason?: unknown };
+    return [maybeError.name, maybeError.message, getErrorText(maybeError.reason)]
+      .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      .join(' ');
+  }
+  return '';
+}
+
+function isChunkLoadError(error: unknown): boolean {
+  return /ChunkLoadError|Loading chunk .* failed|Failed to fetch dynamically imported module|Importing a module script failed/i.test(
+    getErrorText(error),
+  );
+}
+
+async function clearRuntimeCaches() {
+  if ('caches' in window) {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)));
+  }
+
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  }
+}
+
+function recoverFromChunkLoadError() {
+  const lastRecoveryAt = Number(window.sessionStorage.getItem(CHUNK_RECOVERY_KEY) ?? 0);
+  const now = Date.now();
+
+  if (now - lastRecoveryAt < CHUNK_RECOVERY_WINDOW_MS) {
+    return;
+  }
+
+  window.sessionStorage.setItem(CHUNK_RECOVERY_KEY, String(now));
+  void clearRuntimeCaches().finally(() => {
+    window.location.reload();
+  });
+}
+
+function setupChunkLoadRecovery() {
+  window.addEventListener('error', (event) => {
+    if (!isChunkLoadError(event.error ?? event.message)) return;
+    event.preventDefault();
+    recoverFromChunkLoadError();
+  });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    if (!isChunkLoadError(event.reason)) return;
+    event.preventDefault();
+    recoverFromChunkLoadError();
+  });
+}
+
 // Add all Font Awesome solid icons to the library
 library.add(fas);
 
@@ -28,6 +89,7 @@ Sentry.init({
   replaysOnErrorSampleRate: 1.0,
 });
 
+setupChunkLoadRecovery();
 setupPwaInstallPromptCapture();
 
 const root = ReactDOM.createRoot(

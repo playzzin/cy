@@ -4,10 +4,16 @@ import { faMapMarkerAlt, faSearch } from '@fortawesome/free-solid-svg-icons';
 import materialService from '../../services/materialService';
 import { siteService, Site } from '../../services/siteService';
 import { Inventory } from '../../types/materials';
-import { filterCheongyeonMaterialSites } from './materialSiteFilters';
+import {
+    filterCheongyeonMaterialSites,
+    filterSitesByMaterialStatus,
+    getSiteStatusLabel,
+    MaterialSiteStatusFilter
+} from './materialSiteFilters';
 
 const MaterialInventoryBySitePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
+    const [siteStatusFilter, setSiteStatusFilter] = useState<MaterialSiteStatusFilter>('active');
     const [siteId, setSiteId] = useState('');
     const [siteName, setSiteName] = useState('');
 
@@ -21,11 +27,13 @@ const MaterialInventoryBySitePage: React.FC = () => {
     const loadSites = async () => {
         try {
             const data = await siteService.getSites();
-            setSites(filterCheongyeonMaterialSites(data));
+            setSites(filterCheongyeonMaterialSites(data, 'all'));
         } catch (error) {
             console.error('Failed to load sites:', error);
         }
     };
+
+    const statusFilteredSites = filterSitesByMaterialStatus(sites, siteStatusFilter);
 
     const handleSiteChange = (selectedSiteId: string) => {
         setSiteId(selectedSiteId);
@@ -38,7 +46,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
             alert('현장을 선택하세요.');
             return;
         }
-        if (!sites.some((site) => site.id === siteId)) {
+        if (!statusFilteredSites.some((site) => site.id === siteId)) {
             alert('(주)청연이엔지 소속 현장만 선택할 수 있습니다.');
             return;
         }
@@ -78,7 +86,24 @@ const MaterialInventoryBySitePage: React.FC = () => {
 
             {/* 현장 선택 */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
+                    <div>
+                        <label className="block text-sm font-bold text-slate-700 mb-2">현장구분</label>
+                        <select
+                            value={siteStatusFilter}
+                            onChange={(e) => {
+                                setSiteStatusFilter(e.target.value as MaterialSiteStatusFilter);
+                                setSiteId('');
+                                setSiteName('');
+                                setInventories([]);
+                            }}
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                        >
+                            <option value="active">진행현장</option>
+                            <option value="completed">마감현장</option>
+                            <option value="all">전체현장</option>
+                        </select>
+                    </div>
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-2">현장 선택 *</label>
                         <select
@@ -87,8 +112,8 @@ const MaterialInventoryBySitePage: React.FC = () => {
                             className="w-full border border-slate-300 rounded-lg px-3 py-2"
                         >
                             <option value="">현장 선택</option>
-                            {sites.map(site => (
-                                <option key={site.id} value={site.id}>{site.name}</option>
+                            {statusFilteredSites.map(site => (
+                                <option key={site.id} value={site.id}>[{getSiteStatusLabel(site.status)}] {site.name}</option>
                             ))}
                         </select>
                     </div>
@@ -156,23 +181,23 @@ const MaterialInventoryBySitePage: React.FC = () => {
                                     <table className="w-full min-w-[1080px] text-sm">
                                         <thead className="bg-slate-100 border-b border-slate-300 sticky top-0 z-10">
                                             <tr>
-                                                <th className="p-3 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
-                                                <th className="p-3 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
-                                                <th className="p-3 text-right font-bold text-slate-700">입고</th>
-                                                <th className="p-3 text-right font-bold text-slate-700">출고</th>
-                                                <th className="p-3 text-right font-bold text-slate-700 bg-green-50">현재고</th>
-                                                <th className="p-3 text-center font-bold text-slate-700">단위</th>
+                                                <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-0 z-10 bg-slate-100 min-w-[220px]">품명</th>
+                                                <th className="px-3 py-2 text-left font-bold text-slate-700 sticky left-[220px] z-10 bg-slate-100 min-w-[180px]">규격</th>
+                                                <th className="px-3 py-2 text-right font-bold text-slate-700">입고</th>
+                                                <th className="px-3 py-2 text-right font-bold text-slate-700">출고</th>
+                                                <th className="px-3 py-2 text-right font-bold text-slate-700 bg-green-50">현재고</th>
+                                                <th className="px-3 py-2 text-center font-bold text-slate-700">단위</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-200">
                                             {categoryInventories.map(inv => (
                                                 <tr key={`${inv.materialKey || inv.materialId}-${inv.siteId}`} className="hover:bg-slate-50">
-                                                    <td className="p-3 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
-                                                    <td className="p-3 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
-                                                    <td className="p-3 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
-                                                    <td className="p-3 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
-                                                    <td className="p-3 text-right font-bold text-lg">{inv.currentStock.toLocaleString()}</td>
-                                                    <td className="p-3 text-center text-slate-500">{inv.unit}</td>
+                                                    <td className="px-3 py-2 sticky left-0 z-10 bg-white font-semibold">{inv.itemName}</td>
+                                                    <td className="px-3 py-2 sticky left-[220px] z-10 bg-white">{inv.spec}</td>
+                                                    <td className="px-3 py-2 text-right text-blue-600">{inv.totalInbound.toLocaleString()}</td>
+                                                    <td className="px-3 py-2 text-right text-red-600">{inv.totalOutbound.toLocaleString()}</td>
+                                                    <td className="px-3 py-2 text-right font-bold">{inv.currentStock.toLocaleString()}</td>
+                                                    <td className="px-3 py-2 text-center text-slate-500">{inv.unit}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

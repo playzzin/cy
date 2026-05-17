@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faUserGear,
@@ -9,12 +10,18 @@ import {
     faShieldHalved,
     faIdBadge,
     faSun,
-    faMoon
+    faMoon,
+    faCalculator,
+    faCamera,
+    faEnvelope
 } from '@fortawesome/free-solid-svg-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { db } from '../../config/firebase';
 import { resolveIcon } from '../../constants/iconMap';
-import { userService } from '../../services/userService';
+import { manpowerService } from '../../services/manpowerService';
+import { userService, type UserData } from '../../services/userService';
+import MessageIndicator from '../messages/MessageIndicator';
 import PositionPanel from './PositionPanel';
 import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
 
@@ -34,6 +41,9 @@ interface CheongyeonNavSection {
 interface HeaderProps {
     toggleSidebar: () => void;
     togglePanel: (type: 'bottom' | 'admin' | 'position') => void;
+    openQuickTool: (tool: QuickTool) => void;
+    activeQuickTool: QuickTool;
+    isQuickPanelOpen: boolean;
     currentSiteData: any;
     isAdmin: boolean;
     isPositionPanelOpen: boolean;
@@ -49,13 +59,61 @@ interface HeaderProps {
     toggleDarkMode?: () => void;
 }
 
+type QuickTool = 'calculator' | 'camera';
+
 const getMenuDisplayText = (text: string): string => {
     return text === '일보목록v2' ? '일보목록' : text;
+};
+
+const normalizePositionValue = (value: unknown): string =>
+    String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^pos[\s_-]*/i, '')
+        .replace(/[\s_-]/g, '');
+
+const resolveSystemRoleLabel = (role: string): string => {
+    const key = role.trim().toLowerCase();
+    if (key === 'admin' || key === 'administrator') return '관리자';
+    if (key === 'manager') return '매니저';
+    if (key === 'user' || key === 'general') return '일반';
+    return role;
+};
+
+const resolvePositionLabel = (value: unknown, positions: PositionItem[]): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const key = normalizePositionValue(raw);
+    const matched = positions.find((position) => {
+        const id = String(position.id || '').trim();
+        return [id, `pos_${id}`, position.name].some((candidate) => normalizePositionValue(candidate) === key);
+    });
+
+    return matched?.name || resolveSystemRoleLabel(raw);
+};
+
+const resolveUserPositionLabel = (
+    userProfile: UserData | null,
+    linkedWorkerRole: string,
+    positions: PositionItem[]
+): string => {
+    const candidates = [userProfile?.position, linkedWorkerRole, userProfile?.role];
+
+    for (const candidate of candidates) {
+        const label = resolvePositionLabel(candidate, positions);
+        if (label) return label;
+    }
+
+    return '';
 };
 
 const Header: React.FC<HeaderProps> = ({
     toggleSidebar,
     togglePanel,
+    openQuickTool,
+    activeQuickTool,
+    isQuickPanelOpen,
     currentSiteData,
     isAdmin,
     isPositionPanelOpen,
@@ -75,6 +133,8 @@ const Header: React.FC<HeaderProps> = ({
     const location = useLocation();
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [activeTopNavKey, setActiveTopNavKey] = useState<string | null>(null);
+    const [userProfile, setUserProfile] = useState<UserData | null>(null);
+    const [linkedWorkerRole, setLinkedWorkerRole] = useState('');
     const topNavCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const profileRef = useRef<HTMLDivElement>(null);
     const positionPanelRef = useRef<HTMLDivElement>(null);
@@ -83,6 +143,7 @@ const Header: React.FC<HeaderProps> = ({
         icon: 'fa-shield-halved',
         menu: []
     };
+    const userPositionLabel = resolveUserPositionLabel(userProfile, linkedWorkerRole, positions);
 
     const clearTopNavCloseTimer = () => {
         if (topNavCloseTimerRef.current) {
@@ -136,6 +197,59 @@ const Header: React.FC<HeaderProps> = ({
             clearTopNavCloseTimer();
         };
     }, [isPositionPanelOpen, togglePanel]);
+
+    useEffect(() => {
+        if (!currentUser?.uid) {
+            setUserProfile(null);
+            setLinkedWorkerRole('');
+            return;
+        }
+
+        const uid = currentUser.uid;
+        let cancelled = false;
+
+        const loadLinkedWorkerRole = async () => {
+            try {
+                const linkedWorker = await manpowerService.getWorkerByUid(uid);
+                if (!cancelled) {
+                    setLinkedWorkerRole(String(linkedWorker?.role || '').trim());
+                }
+            } catch (error) {
+                console.error('[Header] Failed to load linked worker role:', error);
+                if (!cancelled) setLinkedWorkerRole('');
+            }
+        };
+
+        const loadUserProfileFallback = async () => {
+            try {
+                const profile = await userService.getUser(uid);
+                if (!cancelled) setUserProfile(profile);
+            } catch (error) {
+                console.error('[Header] Failed to load user profile:', error);
+                if (!cancelled) setUserProfile(null);
+            }
+        };
+
+        loadLinkedWorkerRole();
+
+        const unsubscribe = onSnapshot(
+            doc(db, 'users', uid),
+            (docSnap) => {
+                if (cancelled) return;
+                setUserProfile(docSnap.exists() ? ({ ...(docSnap.data() as UserData), uid }) : null);
+                loadLinkedWorkerRole();
+            },
+            (error) => {
+                console.error('[Header] Failed to subscribe user profile:', error);
+                loadUserProfileFallback();
+            }
+        );
+
+        return () => {
+            cancelled = true;
+            unsubscribe();
+        };
+    }, [currentUser?.uid]);
 
     const handleLogout = async () => {
         try {
@@ -346,9 +460,28 @@ const Header: React.FC<HeaderProps> = ({
                         <FontAwesomeIcon icon={isDarkMode ? faSun : faMoon} />
                     </button>
                 )}
-                <button className="header-btn" onClick={() => togglePanel('bottom')} title="빠른 실행" aria-label="빠른 실행 열기">
-                    <FontAwesomeIcon icon={faUserGear} />
-                </button>
+                <div className="header-quick-tool-group" role="group" aria-label="빠른 도구">
+                    <button
+                        type="button"
+                        className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === 'calculator' ? 'active' : ''}`}
+                        onClick={() => openQuickTool('calculator')}
+                        title="계산기"
+                        aria-label="계산기 열기"
+                        aria-pressed={isQuickPanelOpen && activeQuickTool === 'calculator'}
+                    >
+                        <FontAwesomeIcon icon={faCalculator} />
+                    </button>
+                    <button
+                        type="button"
+                        className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === 'camera' ? 'active' : ''}`}
+                        onClick={() => openQuickTool('camera')}
+                        title="카메라"
+                        aria-label="카메라 열기"
+                        aria-pressed={isQuickPanelOpen && activeQuickTool === 'camera'}
+                    >
+                        <FontAwesomeIcon icon={faCamera} />
+                    </button>
+                </div>
 
                 {isAdmin && (
                     <div className="relative" ref={positionPanelRef}>
@@ -376,6 +509,8 @@ const Header: React.FC<HeaderProps> = ({
                     </button>
                 )}
 
+                <MessageIndicator />
+
                 <div className="profile-menu-container" ref={profileRef}>
                     <button
                         className="header-btn profile-btn"
@@ -401,14 +536,27 @@ const Header: React.FC<HeaderProps> = ({
                         {currentUser?.photoURL && (
                             <FontAwesomeIcon icon={faUser} className="fallback-icon" style={{ display: 'none' }} />
                         )}
+                        {userPositionLabel && (
+                            <span className="header-profile-position">{userPositionLabel}</span>
+                        )}
                     </button>
 
                     {isProfileOpen && (
                         <div className="profile-dropdown">
                             <div className="profile-info">
                                 <div className="profile-name">{currentUser?.displayName || '사용자'}</div>
+                                {userPositionLabel && (
+                                    <div className="profile-position">직책: {userPositionLabel}</div>
+                                )}
                                 <div className="profile-email">{currentUser?.email}</div>
                             </div>
+                            <button className="dropdown-item logout-btn" onClick={() => {
+                                setIsProfileOpen(false);
+                                navigate('/messages');
+                            }} style={{ color: '#0f766e' }}>
+                                <FontAwesomeIcon icon={faEnvelope} />
+                                <span>메시지함</span>
+                            </button>
                             <button className="dropdown-item logout-btn" onClick={() => {
                                 setIsProfileOpen(false);
                                 navigate('/profile');

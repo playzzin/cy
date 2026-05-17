@@ -361,6 +361,7 @@ export const ExpenseClaimForm: React.FC<Props> = ({
             <CurrencyInput
               value={field.value}
               onChange={(val: number) => field.onChange(val)}
+              emptyWhenZero
               placeholder="청구 금액"
               className="h-10 w-full rounded-lg border border-slate-200 px-3 text-right text-sm font-bold text-slate-800 outline-none focus:border-blue-500 transition-colors"
             />
