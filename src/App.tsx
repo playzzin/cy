@@ -314,6 +314,7 @@ const App: React.FC = () => {
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
               <Route path="support-team" element={<SupportTeamPaymentPage />} />
+              <Route path="support-team-internal" element={<SupportTeamPaymentPage scope="internal" />} />
               <Route path="support-client-site" element={<SupportClientSitePage />} />
               <Route path="support-company-site" element={<SupportClientSitePage />} />
               <Route path="support-site" element={<SupportClientSitePage />} />

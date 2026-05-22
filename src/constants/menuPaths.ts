@@ -38,6 +38,8 @@ export const MENU_PATHS: { [key: string]: string } = {
     "\uc6d4\uae09\uc81c \uc9d1\uacc4": "/payroll/monthly-wage",
     "\uc9c0\uc6d0\ud300": "/payroll/support-team",
     "\uc9c0\uc6d0\ud300 \uc9c0\uae09": "/payroll/support-team",
+    "내부지원팀": "/payroll/support-team-internal",
+    "내부지원팀 지급": "/payroll/support-team-internal",
     "지원팀 발주팀별 현장별": "/payroll/support-client-site",
     "발주팀별 현장별": "/payroll/support-client-site",
     "발주팀별 현장별 지원": "/payroll/support-client-site",

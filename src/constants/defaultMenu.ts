@@ -51,6 +51,7 @@ export const DEFAULT_MENU_CONFIG: SiteDataType = {
                     "월급제",
                     "프리랜서 관리",
                     "지원팀",
+                    "내부지원팀",
                     "팀정산 관리",
                     { text: "가불관리", sub: ["가불등록", "세금/가불"] }
                 ]

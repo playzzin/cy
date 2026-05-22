@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faCalendarAlt,
@@ -99,6 +100,7 @@ interface SupportWorkerBreakdown {
 }
 
 type SupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
+type SupportTeamPaymentScope = 'external' | 'internal';
 
 interface SupportSiteRow {
     siteId: string;
@@ -388,6 +390,8 @@ const formatFullIdNumber = (value?: string | null): string => {
 };
 
 const SUPPORT_DIRECTION_ORDER: SupportDirection[] = ['외부지원간곳', '외부지원온곳', '내부지원간곳', '내부지원온곳'];
+const EXTERNAL_SUPPORT_DIRECTIONS: SupportDirection[] = ['외부지원간곳', '외부지원온곳'];
+const INTERNAL_SUPPORT_DIRECTIONS: SupportDirection[] = ['내부지원간곳', '내부지원온곳'];
 
 const SUPPORT_DIRECTION_META: Record<SupportDirection, { label: string; cellClass: string; badgeClass: string; rule: string }> = {
     외부지원간곳: {
@@ -1669,10 +1673,24 @@ const StatementBrand: React.FC<{ logoUrl?: string | null }> = ({ logoUrl }) => {
     );
 };
 
-const SupportTeamPaymentPage: React.FC = () => {
+interface SupportTeamPaymentPageProps {
+    scope?: SupportTeamPaymentScope;
+}
+
+const SupportTeamPaymentPage: React.FC<SupportTeamPaymentPageProps> = ({ scope = 'external' }) => {
+    const navigate = useNavigate();
     const today = new Date();
     const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
     const statementLogoUrl = useErpStatementLogoUrl();
+    const isInternalScope = scope === 'internal';
+    const scopedDirections = isInternalScope ? INTERNAL_SUPPORT_DIRECTIONS : EXTERNAL_SUPPORT_DIRECTIONS;
+    const scopedDirectionSet = useMemo(() => new Set<SupportDirection>(scopedDirections), [scopedDirections]);
+    const pageTitle = isInternalScope ? '내부지원팀 지급 관리' : '지원팀 지급 관리';
+    const pageDescription = isInternalScope
+        ? '내부지원간곳/내부지원온곳만 분리해 팀 간 정산합니다.'
+        : '외부지원간곳/외부지원온곳만 기준으로 자동 정산합니다.';
+    const switchPageLabel = isInternalScope ? '외부지원 페이지' : '내부지원 페이지';
+    const switchPagePath = isInternalScope ? '/payroll/support-team' : '/payroll/support-team-internal';
 
     const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth);
     const [selectedDirection, setSelectedDirection] = useState<'all' | SupportDirection>('all');
@@ -1730,6 +1748,19 @@ const SupportTeamPaymentPage: React.FC = () => {
     useEffect(() => {
         saveRateOverrides(monthlyRateOverrideState.month, monthlyRateOverrideState.data);
     }, [monthlyRateOverrideState]);
+
+    useEffect(() => {
+        if (selectedDirection !== 'all' && !scopedDirectionSet.has(selectedDirection)) {
+            setSelectedDirection('all');
+        }
+    }, [scopedDirectionSet, selectedDirection]);
+
+    useEffect(() => {
+        setSelectedDirection('all');
+        setSelectedSourceTeamId('');
+        setSelectedSiteId('');
+        setExpandedAggregates(new Set());
+    }, [scope]);
 
     const updateManualAdjustment = useCallback((
         aggregateId: string,
@@ -2280,7 +2311,7 @@ const SupportTeamPaymentPage: React.FC = () => {
     }, [fetchSupportData, teams.length, companies.length]);
 
     const filteredAggregates = useMemo(() => {
-        let rows = aggregates;
+        let rows = aggregates.filter((aggregate) => scopedDirectionSet.has(aggregate.direction));
         if (selectedDirection !== 'all') {
             rows = rows.filter((aggregate) => aggregate.direction === selectedDirection);
         }
@@ -2298,7 +2329,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                 .filter((aggregate) => aggregate.sites.length > 0);
         }
         return rows;
-    }, [aggregates, selectedDirection, selectedSourceTeamId, selectedSiteId]);
+    }, [aggregates, scopedDirectionSet, selectedDirection, selectedSourceTeamId, selectedSiteId]);
 
     const displayAggregates = useMemo(
         () => selectedSourceTeamId ? filteredAggregates : mergeAggregatesBySettlementTeam(filteredAggregates),
@@ -2307,22 +2338,21 @@ const SupportTeamPaymentPage: React.FC = () => {
 
     const directionOptions = useMemo(() => [
         { id: 'all', name: '전체' },
-        { id: '내부지원간곳', name: '내부지원간곳' },
-        { id: '내부지원온곳', name: '내부지원온곳' },
-        { id: '외부지원간곳', name: '외부지원간곳' },
-        { id: '외부지원온곳', name: '외부지원온곳' }
-    ], []);
+        ...scopedDirections.map((direction) => ({ id: direction, name: direction }))
+    ], [scopedDirections]);
 
     const siteOptions = useMemo(() => {
         const map = new Map<string, string>();
-        aggregates.forEach((aggregate) => {
+        aggregates
+            .filter((aggregate) => scopedDirectionSet.has(aggregate.direction))
+            .forEach((aggregate) => {
             aggregate.sites.forEach((site) => {
                 const id = normalize(site.siteId);
                 if (id && !map.has(id)) map.set(id, site.siteName || '현장 미지정');
             });
         });
         return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
-    }, [aggregates]);
+    }, [aggregates, scopedDirectionSet]);
 
     const workerById = useMemo(() => {
         const map = new Map<string, Worker>();
@@ -2406,13 +2436,13 @@ const SupportTeamPaymentPage: React.FC = () => {
     }, [displayAggregates, siteById]);
 
     const photoStyleSummaryGroups = useMemo(() => {
-        return SUPPORT_DIRECTION_ORDER.map(dir => ({
+        return scopedDirections.map(dir => ({
             direction: dir,
             label: SUPPORT_DIRECTION_META[dir].label,
             cellClass: SUPPORT_DIRECTION_META[dir].cellClass,
             aggregates: displayAggregates.filter(a => a.direction === dir)
         }));
-    }, [displayAggregates]);
+    }, [displayAggregates, scopedDirections]);
 
     const totalSummary = useMemo(() => displayAggregates.reduce((acc, agg) => {
         const additionalAmount = getAggregateAdditionalAmount(agg, manualAdjustments);
@@ -2627,7 +2657,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                 isCheongyeonCompanyName(company?.name);
         };
 
-        aggregates.forEach(agg => {
+        aggregates.filter((agg) => scopedDirectionSet.has(agg.direction)).forEach(agg => {
             if (!isCheongyeonViewTeam(agg.viewTeamId, agg.viewTeamName)) return;
             const err = Object.values(agg.errors).some(Boolean);
             const id = agg.viewTeamId || normalizeName(agg.viewTeamName) || 'unknown-view-team';
@@ -2637,7 +2667,7 @@ const SupportTeamPaymentPage: React.FC = () => {
             else { ex.count++; if (err) ex.error = true; }
         });
         return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
-    }, [aggregates, companies, teams]);
+    }, [aggregates, companies, scopedDirectionSet, teams]);
 
     useEffect(() => {
         if (selectedSourceTeamId && !sidebarTeams.some(team => team.id === selectedSourceTeamId)) {
@@ -2696,14 +2726,17 @@ const SupportTeamPaymentPage: React.FC = () => {
                         <FontAwesomeIcon icon={faUsers} size="lg" />
                     </div>
                     <div>
-                        <h1 className="text-2xl font-black text-slate-800 tracking-tight">지원팀 지급 관리</h1>
+                        <h1 className="text-2xl font-black text-slate-800 tracking-tight">{pageTitle}</h1>
                         <p className="text-[13px] text-slate-500 font-bold mt-0.5 flex items-center gap-2">
                             <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">BETA</span>
-                            팀별 간곳/온곳 기준 자동 정산 대시보드
+                            {pageDescription}
                         </p>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2.5">
+                    <ActionButton variant="outline-amber" onClick={() => navigate(switchPagePath)}>
+                        <FontAwesomeIcon icon={faUsers} /> {switchPageLabel}
+                    </ActionButton>
                     <ActionButton variant="solid-green" disabled={supportExcelRows.length === 0} onClick={() => setShowLaborPreview(true)}>
                         <FontAwesomeIcon icon={faFileExcel} /> 노무내역서 미리보기
                     </ActionButton>
