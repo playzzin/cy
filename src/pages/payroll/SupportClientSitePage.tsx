@@ -18,6 +18,11 @@ import {
     faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx-js-style';
+import {
+    MAX_DAY_COLUMNS,
+    DAY_LABELS_FIRST,
+    DAY_LABELS_SECOND,
+} from '../../utils/excel/SupportPaymentExcelGenerator';
 import { resolveIcon } from '../../constants/iconMap';
 import { Team, teamService } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
@@ -38,6 +43,9 @@ interface SupportClientSiteWorkerRow {
     direction: SupportDirection;
     workerId: string;
     workerName: string;
+    workerIdNumber: string;
+    workerAddress: string;
+    workerContact: string;
     role?: string;
     manDay: number;
     unitPrice: number;
@@ -103,6 +111,31 @@ interface SupportStatementTarget {
     subtitle?: string;
     rows: SupportClientSiteWorkerRow[];
     expenseClaims: TeamExpenseClaim[];
+}
+
+interface SupportClientLaborStatementRow {
+    workerId: string;
+    workerName: string;
+    idNumber: string;
+    address: string;
+    contact: string;
+    days: number[];
+    totalManDay: number;
+    unitPrice: number;
+    totalAmount: number;
+}
+
+interface SupportClientLaborSitePreview {
+    key: string;
+    siteName: string;
+    clientCompanyName: string;
+    siteType: string;
+    paymentType: string;
+    sourceTeamNames: string;
+    responsibleTeamNames: string;
+    rows: SupportClientLaborStatementRow[];
+    totalManDay: number;
+    totalAmount: number;
 }
 
 interface SupportResponsibleTeamSummary {
@@ -178,6 +211,17 @@ const formatNumber = (value: number): string => new Intl.NumberFormat('ko-KR').f
 const formatManDay = (value: number): string => {
     const fixed = Number((value || 0).toFixed(1));
     return fixed % 1 === 0 ? fixed.toFixed(0) : fixed.toFixed(1);
+};
+
+const formatCurrencyText = (value: number): string => `${formatNumber(Math.round(value || 0))}원`;
+const formatManDayText = (value: number): string => `${formatManDay(value || 0)}공수`;
+
+const formatFullIdNumber = (value?: string | null): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length === 13) return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+    return raw;
 };
 
 const getCurrentYearMonth = (): string => {
@@ -329,6 +373,118 @@ const dedupeExpenseClaims = (claims: TeamExpenseClaim[]): TeamExpenseClaim[] => 
 
 const getExpenseClaimsTotal = (claims: TeamExpenseClaim[]): number =>
     claims.reduce((sum, claim) => sum + getExpenseClaimAmount(claim), 0);
+
+const buildSupportClientLaborPreviews = (rows: SupportClientSiteWorkerRow[]): SupportClientLaborSitePreview[] => {
+    const siteMap = new Map<string, {
+        siteName: string;
+        clientCompanyName: string;
+        siteType: string;
+        paymentType: string;
+        sourceTeamNames: string[];
+        responsibleTeamNames: string[];
+        workerMap: Map<string, SupportClientLaborStatementRow>;
+    }>();
+
+    rows.forEach((row) => {
+        const siteKey = `${clientKeyForRow(row)}::${siteKeyForRow(row)}`;
+        if (!siteMap.has(siteKey)) {
+            siteMap.set(siteKey, {
+                siteName: row.siteName || '현장 미지정',
+                clientCompanyName: getClientCompanyName(row),
+                siteType: row.siteType,
+                paymentType: row.paymentType,
+                sourceTeamNames: [],
+                responsibleTeamNames: [],
+                workerMap: new Map<string, SupportClientLaborStatementRow>()
+            });
+        }
+
+        const siteGroup = siteMap.get(siteKey)!;
+        siteGroup.siteType = siteGroup.siteType || row.siteType;
+        siteGroup.paymentType = siteGroup.paymentType || row.paymentType;
+        siteGroup.sourceTeamNames.push(getSourceTeamDisplayName(row));
+        siteGroup.responsibleTeamNames.push(row.responsibleTeamName);
+
+        const workerKey = row.workerId || `${row.siteId}:${row.workerName}`;
+        if (!siteGroup.workerMap.has(workerKey)) {
+            siteGroup.workerMap.set(workerKey, {
+                workerId: workerKey,
+                workerName: row.workerName || '이름 미상',
+                idNumber: row.workerIdNumber || '',
+                address: row.workerAddress || row.siteAddress || '',
+                contact: row.workerContact || '',
+                days: Array.from({ length: MAX_DAY_COLUMNS }, () => 0),
+                totalManDay: 0,
+                unitPrice: row.unitPrice,
+                totalAmount: 0
+            });
+        }
+
+        const workerRow = siteGroup.workerMap.get(workerKey)!;
+        const day = new Date(row.date).getDate();
+        if (day >= 1 && day <= MAX_DAY_COLUMNS) workerRow.days[day - 1] += row.manDay;
+        workerRow.totalManDay += row.manDay;
+        workerRow.totalAmount += row.amount;
+        workerRow.unitPrice = workerRow.totalManDay > 0
+            ? Math.round(workerRow.totalAmount / workerRow.totalManDay)
+            : row.unitPrice;
+    });
+
+    return Array.from(siteMap.entries())
+        .map(([key, siteGroup]) => {
+            const laborRows = Array.from(siteGroup.workerMap.values()).sort((a, b) =>
+                a.workerName.localeCompare(b.workerName, 'ko-KR')
+            );
+            const totalManDay = laborRows.reduce((sum, row) => sum + row.totalManDay, 0);
+            const totalAmount = laborRows.reduce((sum, row) => sum + row.totalAmount, 0);
+
+            return {
+                key,
+                siteName: siteGroup.siteName,
+                clientCompanyName: siteGroup.clientCompanyName,
+                siteType: siteGroup.siteType,
+                paymentType: siteGroup.paymentType,
+                sourceTeamNames: summarizeNames(siteGroup.sourceTeamNames),
+                responsibleTeamNames: summarizeNames(siteGroup.responsibleTeamNames),
+                rows: laborRows,
+                totalManDay,
+                totalAmount
+            };
+        })
+        .sort((a, b) => b.totalAmount - a.totalAmount || a.siteName.localeCompare(b.siteName, 'ko-KR'));
+};
+
+const buildSupportClientLaborStatementText = (
+    target: SupportStatementTarget,
+    previews: SupportClientLaborSitePreview[],
+    yearMonth: string
+): string => {
+    const totalManDay = previews.reduce((sum, preview) => sum + preview.totalManDay, 0);
+    const totalAmount = previews.reduce((sum, preview) => sum + preview.totalAmount, 0);
+    const lines = [
+        `[노임명세서] ${yearMonth}`,
+        `대상: ${target.title}`,
+        target.subtitle ? `분류: ${target.subtitle}` : '',
+        `현장수: ${previews.length}개`,
+        `총공수: ${formatManDayText(totalManDay)}`,
+        `노임합계: ${formatCurrencyText(totalAmount)}`,
+        '',
+        '[현장별 내역]'
+    ].filter(Boolean);
+
+    previews.forEach((preview, index) => {
+        lines.push(`${index + 1}. ${preview.siteName}`);
+        lines.push(`   구분/결제: ${preview.siteType || '-'} / ${preview.paymentType || '-'}`);
+        lines.push(`   현장담당팀: ${preview.responsibleTeamNames}`);
+        lines.push(`   작업팀: ${preview.sourceTeamNames}`);
+        lines.push(`   공수 ${formatManDayText(preview.totalManDay)} / 노임 ${formatCurrencyText(preview.totalAmount)}`);
+        preview.rows.forEach((row) => {
+            lines.push(`   - ${row.workerName}: ${formatManDayText(row.totalManDay)} x ${formatCurrencyText(row.unitPrice)} = ${formatCurrencyText(row.totalAmount)}`);
+        });
+    });
+
+    return lines.join('\n');
+};
 
 type OwnSiteOutputComparableRow = Pick<
     SupportClientSiteWorkerRow,
@@ -726,6 +882,9 @@ const buildSupportRows = (
             const workerSiteType = String(reportWorker.siteType || siteType || '').trim();
             const workerPaymentType = String(reportWorker.paymentType || paymentType || '').trim();
             const workerProfile = findWorker(workerId, workerName);
+            const workerIdNumber = String(workerProfile?.idNumber || '').trim();
+            const workerAddress = String(workerProfile?.address || siteAddress || '').trim();
+            const workerContact = String(workerProfile?.contact || '').trim();
             const profileTeamId = String(workerProfile?.teamId || '').trim();
             const profileTeamName = String(workerProfile?.teamName || '').trim();
             const memberTeam = findTeamByMember(workerId, workerName);
@@ -816,6 +975,9 @@ const buildSupportRows = (
                     direction: entry.direction,
                     workerId,
                     workerName,
+                    workerIdNumber,
+                    workerAddress,
+                    workerContact,
                     role: reportWorker.role || undefined,
                     manDay,
                     unitPrice,
@@ -1097,21 +1259,164 @@ const SupportClientStatementModalShell: React.FC<{
     </div>
 );
 
+const DEFAULT_STATEMENT_LOGO_URL = '/icons/icon-192.png';
+
+const resolveStatementLogoUrl = (logoUrl?: string | null): string => {
+    const trimmed = typeof logoUrl === 'string' ? logoUrl.trim() : '';
+    return trimmed || DEFAULT_STATEMENT_LOGO_URL;
+};
+
+const SupportClientStatementBrand: React.FC<{ logoUrl?: string | null }> = ({ logoUrl }) => {
+    const resolvedLogoUrl = resolveStatementLogoUrl(logoUrl);
+    const [imageSrc, setImageSrc] = useState(resolvedLogoUrl);
+
+    useEffect(() => {
+        setImageSrc(resolvedLogoUrl);
+    }, [resolvedLogoUrl]);
+
+    return (
+        <div className="flex items-center gap-2 text-slate-900">
+            <img
+                src={imageSrc}
+                alt="ERP logo"
+                className="h-9 w-9 rounded-md object-contain"
+                onError={() => {
+                    if (imageSrc !== DEFAULT_STATEMENT_LOGO_URL) {
+                        setImageSrc(DEFAULT_STATEMENT_LOGO_URL);
+                    }
+                }}
+            />
+            <span className="text-sm font-black">(주) 청연이엔지</span>
+        </div>
+    );
+};
+
+const SupportClientLaborStatementPreview: React.FC<{
+    target: SupportStatementTarget;
+    preview: SupportClientLaborSitePreview;
+    yearMonth: string;
+}> = ({ target, preview, yearMonth }) => {
+    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+    const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
+    preview.rows.forEach((row) => {
+        row.days.forEach((value, index) => {
+            dayTotals[index] += value;
+        });
+    });
+    const avgPrice = preview.totalManDay > 0 ? Math.round(preview.totalAmount / preview.totalManDay) : 0;
+
+    return (
+        <div className="inline-block min-w-full border border-slate-200 bg-white p-10 shadow-2xl">
+            <h2 className="mb-8 text-center text-3xl font-black tracking-widest text-slate-800 underline decoration-4 underline-offset-8 decoration-amber-500">
+                노 무 비 지 급 명 세 서 ({month || ''}월분)
+            </h2>
+            <div className="mb-4 flex items-end justify-between gap-4 px-2">
+                <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-600">
+                        현장명: <span className="border-b-2 border-slate-300 px-2 text-slate-900">{preview.siteName}</span>
+                    </p>
+                    <p className="text-sm font-bold text-slate-600">
+                        정산 주체: <span className="border-b-2 border-slate-300 px-2 text-slate-900">{target.title}</span>
+                    </p>
+                    <p className="text-sm font-bold text-slate-600">
+                        구분/결제: <span className="border-b-2 border-slate-300 px-2 text-slate-900">{preview.siteType || '-'} / {preview.paymentType || '-'}</span>
+                    </p>
+                    <p className="text-sm font-bold text-slate-600">
+                        담당/작업팀: <span className="border-b-2 border-slate-300 px-2 text-slate-900">{preview.responsibleTeamNames} / {preview.sourceTeamNames}</span>
+                    </p>
+                </div>
+                <SupportClientStatementBrand />
+            </div>
+            <table className="w-full border-collapse border-2 border-slate-800 text-[10px]">
+                <thead>
+                <tr className="bg-slate-100 font-black text-slate-800">
+                    <th className="w-10 border-2 border-slate-800 p-1.5" rowSpan={2}>NO</th>
+                    <th className="min-w-[80px] border-2 border-slate-800 p-1.5" rowSpan={2}>성명</th>
+                    <th className="min-w-[110px] border-2 border-slate-800 p-1.5">주민번호</th>
+                    <th className="min-w-[150px] border-2 border-slate-800 p-1.5" rowSpan={2}>주 소</th>
+                    {DAY_LABELS_FIRST.map((day) => (
+                        <th key={day} className="w-6 border-2 border-slate-800 bg-sky-50 text-sky-700">{String(day).padStart(2, '0')}</th>
+                    ))}
+                    <th className="w-6 border-2 border-slate-800 bg-slate-50">X</th>
+                    <th className="w-16 border-2 border-slate-800 p-1.5" rowSpan={2}>출역</th>
+                    <th className="w-24 border-2 border-slate-800 p-1.5">단가</th>
+                </tr>
+                <tr className="bg-slate-100 font-black text-slate-800">
+                    <th className="border-2 border-slate-800 p-1.5">전화번호</th>
+                    {DAY_LABELS_SECOND.map((day) => (
+                        <th key={day} className="w-6 border-2 border-slate-800 bg-rose-50 text-rose-700">{day}</th>
+                    ))}
+                    <th className="border-2 border-slate-800 p-1.5">총액</th>
+                </tr>
+                </thead>
+                <tbody>
+                {preview.rows.map((row, index) => (
+                    <React.Fragment key={row.workerId}>
+                        <tr className="font-bold">
+                            <td rowSpan={2} className="border-2 border-slate-800 bg-slate-50 text-center">{index + 1}</td>
+                            <td rowSpan={2} className="border-2 border-slate-800 text-center text-xs">{row.workerName}</td>
+                            <td className="border-2 border-slate-800 text-center font-mono">{formatFullIdNumber(row.idNumber)}</td>
+                            <td rowSpan={2} className="border-2 border-slate-800 px-2 text-[9px] leading-tight">{row.address || '-'}</td>
+                            {DAY_LABELS_FIRST.map((day) => (
+                                <td key={day} className="border-2 border-slate-800 bg-sky-50/30 text-center">{formatManDay(row.days[day - 1])}</td>
+                            ))}
+                            <td className="border-2 border-slate-800 bg-slate-50"></td>
+                            <td rowSpan={2} className="border-2 border-slate-800 bg-slate-50 text-center font-mono text-xs">{formatManDay(row.totalManDay)}</td>
+                            <td className="border-2 border-slate-800 px-2 text-right font-mono">{formatNumber(row.unitPrice)}</td>
+                        </tr>
+                        <tr className="font-bold">
+                            <td className="border-2 border-slate-800 text-center font-mono text-slate-500">{row.contact || '-'}</td>
+                            {DAY_LABELS_SECOND.map((day) => (
+                                <td key={day} className="border-2 border-slate-800 bg-rose-50/30 text-center">{formatManDay(row.days[day - 1])}</td>
+                            ))}
+                            <td className="border-2 border-slate-800 bg-emerald-50 px-2 text-right font-mono text-indigo-700">{formatNumber(row.totalAmount)}</td>
+                        </tr>
+                    </React.Fragment>
+                ))}
+                <tr className="bg-slate-200 text-xs font-black">
+                    <td colSpan={4} className="border-2 border-slate-800 py-2 text-center">합 계</td>
+                    {DAY_LABELS_FIRST.map((day) => (
+                        <td key={day} className="border-2 border-slate-800 text-center">{formatManDay(dayTotals[day - 1])}</td>
+                    ))}
+                    <td className="border-2 border-slate-800"></td>
+                    <td rowSpan={2} className="border-2 border-slate-800 text-center font-mono">{formatManDay(preview.totalManDay)}</td>
+                    <td className="border-2 border-slate-800 px-2 text-right font-mono">{formatNumber(avgPrice)}</td>
+                </tr>
+                <tr className="bg-slate-200 text-xs font-black">
+                    <td colSpan={4} className="border-2 border-slate-800 py-2 text-center">총 액</td>
+                    {DAY_LABELS_SECOND.map((day) => (
+                        <td key={day} className="border-2 border-slate-800 text-center">{formatManDay(dayTotals[day - 1])}</td>
+                    ))}
+                    <td className="border-2 border-slate-800 bg-emerald-100 px-2 text-right font-mono text-indigo-800">{formatNumber(preview.totalAmount)}</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
 const SupportClientLaborStatementModal: React.FC<{
     target: SupportStatementTarget;
+    yearMonth: string;
     onClose: () => void;
-}> = ({ target, onClose }) => {
-    const sortedRows = useMemo(() => [...target.rows].sort((a, b) =>
-        a.date.localeCompare(b.date) ||
-        a.siteName.localeCompare(b.siteName, 'ko-KR') ||
-        a.workerName.localeCompare(b.workerName, 'ko-KR')
-    ), [target.rows]);
-    const totalManDay = sortedRows.reduce((sum, row) => sum + row.manDay, 0);
-    const totalAmount = sortedRows.reduce((sum, row) => sum + row.amount, 0);
+}> = ({ target, yearMonth, onClose }) => {
+    const previews = useMemo(() => buildSupportClientLaborPreviews(target.rows), [target.rows]);
+    const [activePreviewIndex, setActivePreviewIndex] = useState(0);
+    const activePreview = previews[activePreviewIndex] ?? previews[0] ?? null;
+    const totalManDay = previews.reduce((sum, preview) => sum + preview.totalManDay, 0);
+    const totalAmount = previews.reduce((sum, preview) => sum + preview.totalAmount, 0);
+    const statementText = useMemo(
+        () => buildSupportClientLaborStatementText(target, previews, yearMonth),
+        [target, previews, yearMonth]
+    );
+
+    useEffect(() => {
+        setActivePreviewIndex(0);
+    }, [target.title, previews.length]);
 
     return (
         <SupportClientStatementModalShell title="노임명세서" onClose={onClose}>
-            <div className="space-y-4">
+            <div className="space-y-5">
                 <div className="grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="text-[11px] font-black text-slate-500">대상</div>
@@ -1120,48 +1425,62 @@ const SupportClientLaborStatementModal: React.FC<{
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                         <div className="text-[11px] font-black text-slate-500">총공수</div>
-                        <div className="mt-1 text-sm font-black text-slate-900">{formatManDay(totalManDay)}</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{formatManDayText(totalManDay)}</div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-emerald-50 p-4">
                         <div className="text-[11px] font-black text-emerald-700">노임합계</div>
-                        <div className="mt-1 text-sm font-black text-emerald-800">{formatNumber(totalAmount)}원</div>
+                        <div className="mt-1 text-sm font-black text-emerald-800">{formatCurrencyText(totalAmount)}</div>
                     </div>
                 </div>
 
-                <div className="overflow-auto rounded-xl border border-slate-900 bg-white">
-                    <table className="w-full min-w-[1120px] border-collapse text-xs">
-                        <thead className="bg-slate-100 text-slate-700">
-                        <tr>
-                            <th className="border border-slate-900 px-3 py-2 text-left">일자</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">현장</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">구분</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">결제</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">작업자</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">작업팀</th>
-                            <th className="border border-slate-900 px-3 py-2 text-left">현장담당팀</th>
-                            <th className="border border-slate-900 px-3 py-2 text-right">공수</th>
-                            <th className="border border-slate-900 px-3 py-2 text-right">단가</th>
-                            <th className="border border-slate-900 px-3 py-2 text-right">금액</th>
-                        </tr>
-                        </thead>
-                        <tbody>
-                        {sortedRows.map((row) => (
-                            <tr key={`${row.rowId}:labor`}>
-                                <td className="border border-slate-900 px-3 py-2 font-mono text-slate-500">{row.date}</td>
-                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-700">{row.siteName}</td>
-                                <td className="border border-slate-900 px-3 py-2">{row.siteType || '-'}</td>
-                                <td className="border border-slate-900 px-3 py-2">{row.paymentType || '-'}</td>
-                                <td className="border border-slate-900 px-3 py-2 font-black text-slate-900">{row.workerName}</td>
-                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-600">{getSourceTeamDisplayName(row) || '-'}</td>
-                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-600">{row.responsibleTeamName || '-'}</td>
-                                <td className="border border-slate-900 px-3 py-2 text-right font-mono font-bold">{formatManDay(row.manDay)}</td>
-                                <td className="border border-slate-900 px-3 py-2 text-right font-mono">{formatNumber(row.unitPrice)}</td>
-                                <td className="border border-slate-900 px-3 py-2 text-right font-mono font-black">{formatNumber(row.amount)}</td>
-                            </tr>
+                {previews.length > 1 && (
+                    <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                        {previews.map((preview, index) => (
+                            <button
+                                key={`${preview.key}:tab`}
+                                type="button"
+                                onClick={() => setActivePreviewIndex(index)}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-black transition ${
+                                    activePreviewIndex === index
+                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                            >
+                                {preview.siteName}
+                            </button>
                         ))}
-                        </tbody>
-                    </table>
+                    </div>
+                )}
+
+                <div className="max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                    {activePreview ? (
+                        <div className="inline-block min-w-[1180px] bg-white">
+                            <SupportClientLaborStatementPreview
+                                target={target}
+                                preview={activePreview}
+                                yearMonth={yearMonth}
+                            />
+                        </div>
+                    ) : (
+                        <div className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-500">
+                            표시할 노임명세 표가 없습니다.
+                        </div>
+                    )}
                 </div>
+
+                <details className="rounded-xl border border-slate-200 bg-white">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-700">
+                        텍스트 보조본 보기
+                    </summary>
+                    <div className="border-t border-slate-100 p-4">
+                        <textarea
+                            readOnly
+                            value={statementText}
+                            onFocus={(event) => event.currentTarget.select()}
+                            className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 bg-white p-4 font-mono text-[13px] leading-6 text-slate-800 outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                    </div>
+                </details>
             </div>
         </SupportClientStatementModalShell>
     );
@@ -2058,6 +2377,7 @@ const SupportClientSitePage: React.FC = () => {
             {laborStatementTarget && (
                 <SupportClientLaborStatementModal
                     target={laborStatementTarget}
+                    yearMonth={selectedMonth}
                     onClose={() => setLaborStatementTarget(null)}
                 />
             )}
