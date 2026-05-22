@@ -5,22 +5,29 @@ import {
     faArrowLeft,
     faBuilding,
     faCalendarAlt,
-    faCaretDown,
-    faCaretRight,
+    faChevronRight,
     faCircleCheck,
     faDownload,
+    faFileInvoiceDollar,
     faMapLocationDot,
+    faReceipt,
     faSearch,
     faSpinner,
     faTriangleExclamation,
     faUsers,
+    faXmark,
 } from '@fortawesome/free-solid-svg-icons';
 import * as XLSX from 'xlsx-js-style';
+import { resolveIcon } from '../../constants/iconMap';
 import { Team, teamService } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
 import { Site, siteService } from '../../services/siteService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
+import { manpowerService, type Worker } from '../../services/manpowerService';
 import { SupportRate, supportRateService } from '../../services/supportRateService';
+import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
+import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
+import { hexToRgba, normalizeHexColor } from '../../utils/color';
 
 type SupportDirection = '내부지원간곳' | '내부지원온곳' | '외부지원간곳' | '외부지원온곳';
 
@@ -38,17 +45,30 @@ interface SupportClientSiteWorkerRow {
     siteId: string;
     siteName: string;
     siteAddress?: string;
+    siteType: string;
+    paymentType: string;
     clientCompanyId: string;
     clientCompanyName: string;
     constructorCompanyId: string;
     constructorCompanyName: string;
     sourceTeamId: string;
     sourceTeamName: string;
+    workerTeamId: string;
+    workerTeamName: string;
     responsibleTeamId: string;
     responsibleTeamName: string;
+    responsibleTeamColor: string;
+    responsibleTeamIcon: string;
     settlementName: string;
     counterpartyName: string;
     evidenceNote: string;
+}
+
+interface SupportTeamBadge {
+    key: string;
+    name: string;
+    color: string;
+    icon: string;
 }
 
 interface SupportSiteSummary {
@@ -56,10 +76,13 @@ interface SupportSiteSummary {
     siteId: string;
     siteName: string;
     siteAddress?: string;
+    siteTypes: string[];
+    paymentTypes: string[];
     clientCompanyId: string;
     clientCompanyName: string;
     constructorCompanyId: string;
     constructorCompanyName: string;
+    responsibleTeams: SupportTeamBadge[];
     responsibleTeamNames: string[];
     sourceTeamNames: string[];
     settlementNames: string[];
@@ -69,6 +92,32 @@ interface SupportSiteSummary {
     totalManDay: number;
     totalAmount: number;
     avgUnitPrice: number;
+    expenseClaimAmount: number;
+    expenseClaimCount: number;
+    expenseClaims: TeamExpenseClaim[];
+    rows: SupportClientSiteWorkerRow[];
+}
+
+interface SupportStatementTarget {
+    title: string;
+    subtitle?: string;
+    rows: SupportClientSiteWorkerRow[];
+    expenseClaims: TeamExpenseClaim[];
+}
+
+interface SupportResponsibleTeamSummary {
+    key: string;
+    team: SupportTeamBadge;
+    siteCount: number;
+    workerCount: number;
+    totalManDay: number;
+    totalAmount: number;
+    avgUnitPrice: number;
+    directions: SupportDirection[];
+    activeDates: string[];
+    sourceTeamNames: string[];
+    settlementNames: string[];
+    sites: SupportSiteSummary[];
     rows: SupportClientSiteWorkerRow[];
 }
 
@@ -87,6 +136,8 @@ interface SupportClientSummary {
 const DEFAULT_SUPPORT_UNIT_PRICE = 230000;
 const EXTERNAL_CLIENT_GROUP_ID = 'external-client-group';
 const EXTERNAL_CLIENT_GROUP_NAME = '외부팀';
+const EXTERNAL_CLIENT_GROUP_DISPLAY_NAME = '외부지원간곳';
+const OWN_SITE_OUTPUT_LABEL = '본인현장출력';
 const SUPPORT_DIRECTION_ORDER: SupportDirection[] = ['외부지원간곳', '외부지원온곳', '내부지원간곳', '내부지원온곳'];
 const DIRECTION_META: Record<SupportDirection, { label: string; badgeClass: string; rowClass: string }> = {
     외부지원간곳: {
@@ -119,6 +170,8 @@ const DIRECTION_OPTIONS: Array<{ id: 'all' | SupportDirection; label: string }> 
 const normalize = (value: unknown): string => String(value ?? '').replace(/\s+/g, '').trim();
 const normalizeName = (value: unknown): string =>
     String(value ?? '').replace(/\(.*?\)/g, '').replace(/\s+/g, '').trim();
+const normalizeTeamComparisonName = (value: unknown): string =>
+    normalizeName(value).replace(/(?:현장담당|작업|지원)?팀$/g, '');
 
 const formatNumber = (value: number): string => new Intl.NumberFormat('ko-KR').format(Math.round(value || 0));
 
@@ -209,6 +262,233 @@ const summarizeNames = (values: Array<string | undefined | null>, fallback = '-'
     return unique.length > 0 ? unique.join(', ') : fallback;
 };
 
+const isSameIdentity = (a?: string | null, b?: string | null): boolean =>
+    !!normalize(a) && normalize(a) === normalize(b);
+
+const matchesTeamReference = (
+    leftId?: string | null,
+    leftName?: string | null,
+    rightId?: string | null,
+    rightName?: string | null
+): boolean => (
+    isSameIdentity(leftId, rightId) ||
+    (!!normalizeName(leftName) && normalizeName(leftName) === normalizeName(rightName))
+);
+
+const matchesSiteReference = (
+    claim: Pick<TeamExpenseClaim, 'siteId' | 'siteName'>,
+    site: Pick<SupportSiteSummary, 'siteId' | 'siteName'>
+): boolean => (
+    isSameIdentity(claim.siteId, site.siteId) ||
+    (!!normalizeName(claim.siteName) && normalizeName(claim.siteName) === normalizeName(site.siteName))
+);
+
+const isPostedTeamChargeClaim = (claim: TeamExpenseClaim): boolean =>
+    claim.claimType === 'teamCharge' &&
+    (claim.status === 'charged' || claim.status === 'settled') &&
+    Number(claim.amount || 0) > 0;
+
+const getExpenseClaimAmount = (claim: TeamExpenseClaim): number =>
+    Math.max(0, Math.round(Number(claim.amount || 0)));
+
+const getExpenseClaimStatusLabel = (status: TeamExpenseClaim['status']): string => {
+    if (status === 'charged') return '청구완료';
+    if (status === 'settled') return '정산완료';
+    return '작성중';
+};
+
+const getExpenseClaimKey = (claim: TeamExpenseClaim): string =>
+    claim.id || [
+        claim.yearMonth,
+        claim.date,
+        claim.payerTeamId,
+        claim.payerTeamName,
+        claim.chargeToTeamId,
+        claim.chargeToTeamName,
+        claim.siteId,
+        claim.siteName,
+        claim.category,
+        claim.description,
+        claim.amount
+    ].map(value => String(value ?? '').trim()).join('::');
+
+const sortExpenseClaims = (claims: TeamExpenseClaim[]): TeamExpenseClaim[] =>
+    [...claims].sort((a, b) =>
+        (a.date || '').localeCompare(b.date || '') ||
+        (a.siteName || '').localeCompare(b.siteName || '', 'ko-KR') ||
+        (a.description || '').localeCompare(b.description || '', 'ko-KR')
+    );
+
+const dedupeExpenseClaims = (claims: TeamExpenseClaim[]): TeamExpenseClaim[] => {
+    const claimMap = new Map<string, TeamExpenseClaim>();
+    claims.forEach((claim) => {
+        claimMap.set(getExpenseClaimKey(claim), claim);
+    });
+    return sortExpenseClaims(Array.from(claimMap.values()));
+};
+
+const getExpenseClaimsTotal = (claims: TeamExpenseClaim[]): number =>
+    claims.reduce((sum, claim) => sum + getExpenseClaimAmount(claim), 0);
+
+type OwnSiteOutputComparableRow = Pick<
+    SupportClientSiteWorkerRow,
+    'sourceTeamId' | 'sourceTeamName' | 'responsibleTeamId' | 'responsibleTeamName'
+> & Partial<Pick<SupportClientSiteWorkerRow, 'workerTeamId' | 'workerTeamName'>>;
+
+const isOwnSiteOutputRow = (
+    row: OwnSiteOutputComparableRow
+): boolean => {
+    const sourceTeamId = normalize(row.sourceTeamId);
+    const responsibleTeamId = normalize(row.responsibleTeamId);
+    const sourceTeamName = normalizeTeamComparisonName(row.sourceTeamName);
+    const responsibleTeamName = normalizeTeamComparisonName(row.responsibleTeamName);
+    const workerTeamId = normalize(row.workerTeamId);
+    const workerTeamName = normalizeTeamComparisonName(row.workerTeamName);
+
+    const sourceMatchesResponsible =
+        (sourceTeamId && responsibleTeamId && sourceTeamId === responsibleTeamId) ||
+        (sourceTeamName && responsibleTeamName && sourceTeamName === responsibleTeamName);
+
+    const workerMatchesResponsible =
+        (workerTeamId && responsibleTeamId && workerTeamId === responsibleTeamId) ||
+        (workerTeamName && responsibleTeamName && workerTeamName === responsibleTeamName);
+
+    return Boolean(sourceMatchesResponsible || workerMatchesResponsible);
+};
+
+const getSourceTeamDisplayName = (
+    row: OwnSiteOutputComparableRow
+): string => (isOwnSiteOutputRow(row) ? OWN_SITE_OUTPUT_LABEL : String(row.sourceTeamName || '').trim());
+
+const summarizeSourceTeamDisplayNames = (rows: SupportClientSiteWorkerRow[], fallback = '-'): string =>
+    summarizeNames(rows.map((row) => getSourceTeamDisplayName(row)), fallback);
+
+const getOutputTypeDisplayName = (row: SupportClientSiteWorkerRow): string =>
+    isOwnSiteOutputRow(row) ? OWN_SITE_OUTPUT_LABEL : row.direction;
+
+const summarizeOutputTypeDisplayNames = (rows: SupportClientSiteWorkerRow[], fallback = '-'): string =>
+    summarizeNames(rows.map((row) => getOutputTypeDisplayName(row)), fallback);
+
+const uniqueResponsibleTeams = (rows: SupportClientSiteWorkerRow[]): SupportTeamBadge[] => {
+    const map = new Map<string, SupportTeamBadge>();
+
+    rows.forEach((row) => {
+        const name = String(row.responsibleTeamName || '').trim();
+        if (!name) return;
+
+        const key = normalize(row.responsibleTeamId) || normalizeName(name) || name;
+        if (map.has(key)) return;
+
+        map.set(key, {
+            key,
+            name,
+            color: normalizeHexColor(row.responsibleTeamColor),
+            icon: row.responsibleTeamIcon || 'fa-users'
+        });
+    });
+
+    return Array.from(map.values());
+};
+
+const getPrimaryResponsibleTeam = (site: SupportSiteSummary): SupportTeamBadge => {
+    const existing = site.responsibleTeams[0];
+    if (existing) return existing;
+
+    const row = site.rows[0];
+    const name = String(row?.responsibleTeamName || '현장담당팀 미지정').trim();
+    const key = normalize(row?.responsibleTeamId) || normalizeName(name) || `${site.key}:responsible-team`;
+    return {
+        key,
+        name,
+        color: normalizeHexColor(row?.responsibleTeamColor),
+        icon: row?.responsibleTeamIcon || 'fa-users'
+    };
+};
+
+const groupSitesByResponsibleTeam = (sites: SupportSiteSummary[]): SupportResponsibleTeamSummary[] => {
+    const groupMap = new Map<string, { team: SupportTeamBadge; sites: SupportSiteSummary[] }>();
+
+    sites.forEach((site) => {
+        const team = getPrimaryResponsibleTeam(site);
+        const key = team.key || normalizeName(team.name) || `${site.key}:responsible-team`;
+        if (!groupMap.has(key)) {
+            groupMap.set(key, { team: { ...team, key }, sites: [] });
+        }
+        groupMap.get(key)!.sites.push(site);
+    });
+
+    return Array.from(groupMap.values())
+        .map((group) => {
+            const rows = group.sites.flatMap((site) => site.rows);
+            const totalManDay = group.sites.reduce((sum, site) => sum + site.totalManDay, 0);
+            const totalAmount = group.sites.reduce((sum, site) => sum + site.totalAmount, 0);
+            const workerKeys = new Set(rows.map((row) => row.workerId || row.workerName));
+
+            return {
+                key: group.team.key,
+                team: group.team,
+                siteCount: group.sites.length,
+                workerCount: workerKeys.size,
+                totalManDay,
+                totalAmount,
+                avgUnitPrice: totalManDay > 0 ? Math.round(totalAmount / totalManDay) : 0,
+                directions: uniqueValues(rows.map((row) => row.direction)) as SupportDirection[],
+                activeDates: uniqueValues(rows.map((row) => row.date)).sort(),
+                sourceTeamNames: uniqueValues(rows.map((row) => row.sourceTeamName)),
+                settlementNames: uniqueValues(rows.map((row) => row.settlementName)),
+                sites: group.sites,
+                rows
+            };
+        })
+        .sort((a, b) => b.totalAmount - a.totalAmount || a.team.name.localeCompare(b.team.name, 'ko-KR'));
+};
+
+const isExternalClientSummary = (client: Pick<SupportClientSummary, 'clientCompanyId' | 'clientCompanyName'>): boolean =>
+    client.clientCompanyId === EXTERNAL_CLIENT_GROUP_ID ||
+    client.clientCompanyName === EXTERNAL_CLIENT_GROUP_NAME ||
+    client.clientCompanyName === EXTERNAL_CLIENT_GROUP_DISPLAY_NAME;
+
+const claimMatchesSiteSettlement = (claim: TeamExpenseClaim, site: SupportSiteSummary): boolean =>
+    site.rows.some((row) => {
+        if (row.direction.endsWith('간곳')) {
+            return matchesTeamReference(claim.chargeToTeamId, claim.chargeToTeamName, row.responsibleTeamId, row.responsibleTeamName);
+        }
+        return matchesTeamReference(claim.payerTeamId, claim.payerTeamName, row.sourceTeamId, row.sourceTeamName);
+    });
+
+const applyExpenseClaimsToClientGroups = (
+    clients: SupportClientSummary[],
+    claims: TeamExpenseClaim[]
+): SupportClientSummary[] => {
+    const postedClaims = claims.filter(isPostedTeamChargeClaim);
+
+    return clients.map((client) => ({
+        ...client,
+        sites: client.sites.map((site) => {
+            const expenseClaims = dedupeExpenseClaims(postedClaims.filter((claim) =>
+                matchesSiteReference(claim, site) && claimMatchesSiteSettlement(claim, site)
+            ));
+            const expenseClaimAmount = getExpenseClaimsTotal(expenseClaims);
+
+            return {
+                ...site,
+                expenseClaims,
+                expenseClaimAmount,
+                expenseClaimCount: expenseClaims.length
+            };
+        })
+    }));
+};
+
+const getSiteExpenseClaims = (site: SupportSiteSummary): TeamExpenseClaim[] =>
+    dedupeExpenseClaims(site.expenseClaims ?? []);
+
+const getSitesExpenseClaims = (sites: SupportSiteSummary[]): TeamExpenseClaim[] =>
+    dedupeExpenseClaims(sites.flatMap((site) => getSiteExpenseClaims(site)));
+
+const getSitesExpenseClaimAmount = (sites: SupportSiteSummary[]): number =>
+    getExpenseClaimsTotal(getSitesExpenseClaims(sites));
+
 const isCheongyeonCompanyName = (name?: string | null): boolean => {
     const normalized = normalizeName(name);
     return Boolean(normalized && (normalized.includes('청연') || normalized.includes('청연이엔지')));
@@ -238,14 +518,44 @@ const buildSupportRows = (
     teams: Team[],
     companies: Company[],
     sites: Site[],
-    supportRates: SupportRate[]
+    supportRates: SupportRate[],
+    workers: Worker[] = []
 ): SupportClientSiteWorkerRow[] => {
     const teamById = new Map<string, Team>();
     const teamByName = new Map<string, Team>();
+    const teamByMemberId = new Map<string, Team>();
+    const teamByMemberName = new Map<string, Team>();
     teams.forEach((team) => {
         if (team.id) teamById.set(String(team.id), team);
+        if (team.legacyId) teamById.set(String(team.legacyId), team);
         const nameKey = normalizeName(team.name);
         if (nameKey && !teamByName.has(nameKey)) teamByName.set(nameKey, team);
+        (team.memberIds || []).forEach((value) => {
+            const id = String(value ?? '').trim();
+            if (!id || teamByMemberId.has(id)) return;
+            teamByMemberId.set(id, team);
+            const normalizedId = normalize(id);
+            if (normalizedId && !teamByMemberId.has(normalizedId)) teamByMemberId.set(normalizedId, team);
+        });
+        (team.memberNames || []).forEach((value) => {
+            const nameKeyByMember = normalizeName(value);
+            if (nameKeyByMember && !teamByMemberName.has(nameKeyByMember)) teamByMemberName.set(nameKeyByMember, team);
+        });
+    });
+
+    const workerByAnyId = new Map<string, Worker>();
+    const workerByName = new Map<string, Worker>();
+    workers.forEach((worker) => {
+        [worker.id, worker.legacyId].forEach((value) => {
+            const id = String(value ?? '').trim();
+            if (!id) return;
+            if (!workerByAnyId.has(id)) workerByAnyId.set(id, worker);
+            const normalizedId = normalize(id);
+            if (normalizedId && !workerByAnyId.has(normalizedId)) workerByAnyId.set(normalizedId, worker);
+        });
+
+        const nameKey = normalizeName(worker.name);
+        if (nameKey && !workerByName.has(nameKey)) workerByName.set(nameKey, worker);
     });
 
     const companyById = new Map<string, Company>();
@@ -298,6 +608,22 @@ const buildSupportRows = (
         return nameKey ? teamByName.get(nameKey) : undefined;
     };
 
+    const findWorker = (workerId?: string | null, workerName?: string | null): Worker | undefined => {
+        const id = String(workerId ?? '').trim();
+        const byId = id ? (workerByAnyId.get(id) || workerByAnyId.get(normalize(id))) : undefined;
+        if (byId) return byId;
+        const nameKey = normalizeName(workerName);
+        return nameKey ? workerByName.get(nameKey) : undefined;
+    };
+
+    const findTeamByMember = (workerId?: string | null, workerName?: string | null): Team | undefined => {
+        const id = String(workerId ?? '').trim();
+        const byId = id ? (teamByMemberId.get(id) || teamByMemberId.get(normalize(id))) : undefined;
+        if (byId) return byId;
+        const nameKey = normalizeName(workerName);
+        return nameKey ? teamByMemberName.get(nameKey) : undefined;
+    };
+
     const normalizeClientCompany = (companyId?: string | null, companyName?: string | null): { id: string; name: string } => {
         const rawId = String(companyId ?? '').trim();
         const rawName = String(companyName ?? '').trim();
@@ -307,17 +633,17 @@ const buildSupportRows = (
         const resolvedName = String(companyByIdValue?.name || companyByNameValue?.name || rawName || '발주사 미지정').trim();
         const isTeamName = Boolean(findTeam('', resolvedName) || /팀$/.test(resolvedName));
 
-        if (resolvedName === EXTERNAL_CLIENT_GROUP_NAME) {
+        if (resolvedName === EXTERNAL_CLIENT_GROUP_NAME || resolvedName === EXTERNAL_CLIENT_GROUP_DISPLAY_NAME) {
             return {
                 id: EXTERNAL_CLIENT_GROUP_ID,
-                name: EXTERNAL_CLIENT_GROUP_NAME
+                name: EXTERNAL_CLIENT_GROUP_DISPLAY_NAME
             };
         }
 
         if (isTeamName && !companyByIdValue && !companyByNameValue) {
             return {
                 id: EXTERNAL_CLIENT_GROUP_ID,
-                name: EXTERNAL_CLIENT_GROUP_NAME
+                name: EXTERNAL_CLIENT_GROUP_DISPLAY_NAME
             };
         }
 
@@ -349,6 +675,8 @@ const buildSupportRows = (
         const siteId = String(report.siteId || reportSite?.id || 'unknown-site').trim();
         const siteName = String(report.siteName || reportSite?.name || '현장 미지정').trim();
         const siteAddress = String(reportSite?.address || '').trim();
+        const siteType = String(report.siteType || reportSite?.siteType || '').trim();
+        const paymentType = String(report.paymentType || reportSite?.paymentMethod || '').trim();
         const rawClientCompanyId = String(
             reportSite?.clientCompanyId ||
             report.companyId ||
@@ -383,6 +711,8 @@ const buildSupportRows = (
         const targetTeam = findTeam(targetTeamIdRaw, targetTeamNameRaw);
         const responsibleTeamId = String(targetTeam?.id || targetTeamIdRaw || '').trim();
         const responsibleTeamName = String(targetTeam?.name || targetTeamNameRaw || '현장담당팀 미지정').trim();
+        const responsibleTeamColor = normalizeHexColor(targetTeam?.color);
+        const responsibleTeamIcon = String(targetTeam?.iconKey || targetTeam?.icon || 'fa-users').trim();
         const targetCompanyId = String(targetTeam?.companyId || constructorCompanyId || report.companyId || '').trim();
         const targetCompanyName = String(targetTeam?.companyName || constructorCompanyName || report.companyName || '').trim();
         const targetIsMyCompany = isMyCompany(targetCompanyId, targetCompanyName);
@@ -391,12 +721,26 @@ const buildSupportRows = (
         reportWorkers.forEach((reportWorker: DailyReportWorker, workerIndex) => {
             const normalizedSalary = normalizeSalaryModel(reportWorker.salaryModel || reportWorker.payType);
             const isSupportModel = normalizedSalary === '지원팀';
+            const workerId = String(reportWorker.workerId || `${report.id || 'report'}-${workerIndex}`).trim();
+            const workerName = String(reportWorker.name || '이름 미상').trim();
+            const workerSiteType = String(reportWorker.siteType || siteType || '').trim();
+            const workerPaymentType = String(reportWorker.paymentType || paymentType || '').trim();
+            const workerProfile = findWorker(workerId, workerName);
+            const profileTeamId = String(workerProfile?.teamId || '').trim();
+            const profileTeamName = String(workerProfile?.teamName || '').trim();
+            const memberTeam = findTeamByMember(workerId, workerName);
             const reportWorkerTeamId = String(reportWorker.teamId || '').trim();
             const reportWorkerTeamName = String(reportWorker.workerTeamName || '').trim();
             const fallbackTeamId = reportWorkerTeamName ? '' : String(report.teamId || '').trim();
             const sourceTeam = findTeam(reportWorkerTeamId || fallbackTeamId, reportWorkerTeamName || report.teamName);
             const sourceTeamId = String(sourceTeam?.id || reportWorkerTeamId || fallbackTeamId || normalizeName(reportWorkerTeamName) || '').trim();
             const sourceTeamName = String(sourceTeam?.name || reportWorkerTeamName || report.teamName || '작업팀 미지정').trim();
+            const workerTeam =
+                findTeam(profileTeamId, profileTeamName) ||
+                memberTeam ||
+                findTeam(reportWorkerTeamId || fallbackTeamId, reportWorkerTeamName || report.teamName);
+            const workerTeamId = String(workerTeam?.id || profileTeamId || reportWorkerTeamId || fallbackTeamId || normalizeName(profileTeamName || reportWorkerTeamName) || '').trim();
+            const workerTeamName = String(workerTeam?.name || profileTeamName || reportWorkerTeamName || report.teamName || sourceTeamName || '작업팀 미지정').trim();
             const sourceCompanyId = String(sourceTeam?.companyId || '').trim();
             const sourceCompanyName = String(sourceTeam?.companyName || (sourceCompanyId ? companyById.get(sourceCompanyId)?.name : '') || '').trim();
             const sourceIsMyCompany = isMyCompany(sourceCompanyId, sourceCompanyName);
@@ -457,8 +801,6 @@ const buildSupportRows = (
                 toPositiveRate(reportWorker.unitPrice) ??
                 DEFAULT_SUPPORT_UNIT_PRICE;
             const amount = Math.round(manDay * unitPrice);
-            const workerId = String(reportWorker.workerId || `${report.id || 'report'}-${workerIndex}`).trim();
-            const workerName = String(reportWorker.name || '이름 미상').trim();
 
             classifiedEntries.forEach((entry) => {
                 rows.push({
@@ -481,14 +823,20 @@ const buildSupportRows = (
                     siteId,
                     siteName,
                     siteAddress,
+                    siteType: workerSiteType,
+                    paymentType: workerPaymentType,
                     clientCompanyId,
                     clientCompanyName,
                     constructorCompanyId,
                     constructorCompanyName,
                     sourceTeamId,
                     sourceTeamName,
+                    workerTeamId,
+                    workerTeamName,
                     responsibleTeamId,
                     responsibleTeamName,
+                    responsibleTeamColor,
+                    responsibleTeamIcon,
                     settlementName: entry.settlementName,
                     counterpartyName: entry.counterpartyName,
                     evidenceNote: entry.evidenceNote
@@ -532,10 +880,13 @@ const groupRowsByClientAndSite = (rows: SupportClientSiteWorkerRow[]): SupportCl
                 siteId: row.siteId,
                 siteName: row.siteName,
                 siteAddress: row.siteAddress,
+                siteTypes: [],
+                paymentTypes: [],
                 clientCompanyId: row.clientCompanyId,
                 clientCompanyName: getClientCompanyName(row),
                 constructorCompanyId: row.constructorCompanyId,
                 constructorCompanyName: row.constructorCompanyName,
+                responsibleTeams: [],
                 responsibleTeamNames: [],
                 sourceTeamNames: [],
                 settlementNames: [],
@@ -545,6 +896,9 @@ const groupRowsByClientAndSite = (rows: SupportClientSiteWorkerRow[]): SupportCl
                 totalManDay: 0,
                 totalAmount: 0,
                 avgUnitPrice: 0,
+                expenseClaimAmount: 0,
+                expenseClaimCount: 0,
+                expenseClaims: [],
                 rows: []
             });
         }
@@ -568,9 +922,12 @@ const groupRowsByClientAndSite = (rows: SupportClientSiteWorkerRow[]): SupportCl
                     return {
                         ...site,
                         rows: sortedRows,
+                        responsibleTeams: uniqueResponsibleTeams(sortedRows),
                         responsibleTeamNames: uniqueValues(sortedRows.map((row) => row.responsibleTeamName)),
                         sourceTeamNames: uniqueValues(sortedRows.map((row) => row.sourceTeamName)),
                         settlementNames: uniqueValues(sortedRows.map((row) => row.settlementName)),
+                        siteTypes: uniqueValues(sortedRows.map((row) => row.siteType)),
+                        paymentTypes: uniqueValues(sortedRows.map((row) => row.paymentType)),
                         directions: uniqueValues(sortedRows.map((row) => row.direction)) as SupportDirection[],
                         activeDates: uniqueValues(sortedRows.map((row) => row.date)).sort(),
                         workerCount: workerKeys.size,
@@ -603,6 +960,282 @@ const DirectionBadge: React.FC<{ direction: SupportDirection }> = ({ direction }
     </span>
 );
 
+const OwnSiteOutputBadge: React.FC = () => (
+    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">
+        {OWN_SITE_OUTPUT_LABEL}
+    </span>
+);
+
+const OutputTypeBadge: React.FC<{ label: string }> = ({ label }) =>
+    label === OWN_SITE_OUTPUT_LABEL ? <OwnSiteOutputBadge /> : <DirectionBadge direction={label as SupportDirection} />;
+
+const AccordionChevron: React.FC<{ expanded: boolean; className?: string }> = ({ expanded, className = '' }) => (
+    <FontAwesomeIcon
+        icon={faChevronRight}
+        className={`shrink-0 transition-transform duration-300 ${expanded ? 'rotate-90' : ''} ${className}`}
+    />
+);
+
+const ResponsibleTeamChips: React.FC<{ teams: SupportTeamBadge[]; size?: 'sm' | 'lg' }> = ({ teams, size = 'sm' }) => {
+    if (teams.length === 0) {
+        return <span className="text-[11px] font-bold text-slate-400">미지정</span>;
+    }
+
+    const isLarge = size === 'lg';
+
+    return (
+        <span className={`inline-flex min-w-0 flex-wrap items-center ${isLarge ? 'gap-2' : 'gap-1.5'}`}>
+            {teams.map((team) => {
+                const color = normalizeHexColor(team.color);
+                return (
+                    <span
+                        key={team.key}
+                        className={`inline-flex max-w-full items-center rounded-full border font-black ${
+                            isLarge ? 'gap-2 px-3 py-1.5 text-sm' : 'gap-1.5 px-2 py-1 text-[11px]'
+                        }`}
+                        style={{
+                            borderColor: hexToRgba(color, 0.28),
+                            backgroundColor: hexToRgba(color, 0.08),
+                            color
+                        }}
+                        title={team.name}
+                    >
+                        <span
+                            className={`flex shrink-0 items-center justify-center rounded-full text-white shadow-sm ${
+                                isLarge ? 'h-6 w-6' : 'h-5 w-5'
+                            }`}
+                            style={{ backgroundColor: color }}
+                        >
+                            <FontAwesomeIcon icon={resolveIcon(team.icon, faUsers)} className={isLarge ? 'text-xs' : 'text-[10px]'} />
+                        </span>
+                        <span className="truncate">{team.name}</span>
+                    </span>
+                );
+            })}
+        </span>
+    );
+};
+
+const SiteMetaBadge: React.FC<{ label: string; value: string; tone: 'violet' | 'sky' }> = ({ label, value, tone }) => {
+    if (!value || value === '-') return null;
+
+    const toneClass = tone === 'violet'
+        ? 'border-violet-200 bg-violet-50 text-violet-700'
+        : 'border-sky-200 bg-sky-50 text-sky-700';
+
+    return (
+        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black ${toneClass}`}>
+            <span className="text-slate-400">{label}</span>
+            <span>{value}</span>
+        </span>
+    );
+};
+
+const StatementActionButtons: React.FC<{
+    target: SupportStatementTarget;
+    onOpenLabor: (target: SupportStatementTarget) => void;
+    onOpenExpense: (target: SupportStatementTarget) => void;
+}> = ({ target, onOpenLabor, onOpenExpense }) => {
+    const expenseAmount = getExpenseClaimsTotal(target.expenseClaims);
+
+    return (
+        <div className={`grid gap-1 ${expenseAmount > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <button
+                type="button"
+                aria-label={`${target.title} 노임명세서`}
+                title="노임명세서"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenLabor(target);
+                }}
+                className="inline-flex h-7 items-center justify-center gap-1 rounded bg-emerald-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            >
+                <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                <span>노임명세</span>
+            </button>
+            {expenseAmount > 0 && (
+                <button
+                    type="button"
+                    aria-label={`${target.title} 경비내역서`}
+                    title="경비내역서"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenExpense(target);
+                    }}
+                    className="inline-flex h-7 items-center justify-center gap-1 rounded bg-teal-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                >
+                    <FontAwesomeIcon icon={faReceipt} />
+                    <span>경비내역</span>
+                </button>
+            )}
+        </div>
+    );
+};
+
+const SupportClientStatementModalShell: React.FC<{
+    title: string;
+    onClose: () => void;
+    children: React.ReactNode;
+}> = ({ title, onClose, children }) => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+        <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+                <h2 className="text-base font-black text-slate-900">{title}</h2>
+                <button
+                    type="button"
+                    onClick={onClose}
+                    aria-label="닫기"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                    <FontAwesomeIcon icon={faXmark} />
+                </button>
+            </div>
+            <div className="min-h-0 overflow-auto p-5">
+                {children}
+            </div>
+        </div>
+    </div>
+);
+
+const SupportClientLaborStatementModal: React.FC<{
+    target: SupportStatementTarget;
+    onClose: () => void;
+}> = ({ target, onClose }) => {
+    const sortedRows = useMemo(() => [...target.rows].sort((a, b) =>
+        a.date.localeCompare(b.date) ||
+        a.siteName.localeCompare(b.siteName, 'ko-KR') ||
+        a.workerName.localeCompare(b.workerName, 'ko-KR')
+    ), [target.rows]);
+    const totalManDay = sortedRows.reduce((sum, row) => sum + row.manDay, 0);
+    const totalAmount = sortedRows.reduce((sum, row) => sum + row.amount, 0);
+
+    return (
+        <SupportClientStatementModalShell title="노임명세서" onClose={onClose}>
+            <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">대상</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{target.title}</div>
+                        {target.subtitle && <div className="mt-1 text-[11px] font-bold text-slate-500">{target.subtitle}</div>}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">총공수</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{formatManDay(totalManDay)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-emerald-50 p-4">
+                        <div className="text-[11px] font-black text-emerald-700">노임합계</div>
+                        <div className="mt-1 text-sm font-black text-emerald-800">{formatNumber(totalAmount)}원</div>
+                    </div>
+                </div>
+
+                <div className="overflow-auto rounded-xl border border-slate-900 bg-white">
+                    <table className="w-full min-w-[1120px] border-collapse text-xs">
+                        <thead className="bg-slate-100 text-slate-700">
+                        <tr>
+                            <th className="border border-slate-900 px-3 py-2 text-left">일자</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">현장</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">구분</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">결제</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">작업자</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">작업팀</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">현장담당팀</th>
+                            <th className="border border-slate-900 px-3 py-2 text-right">공수</th>
+                            <th className="border border-slate-900 px-3 py-2 text-right">단가</th>
+                            <th className="border border-slate-900 px-3 py-2 text-right">금액</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {sortedRows.map((row) => (
+                            <tr key={`${row.rowId}:labor`}>
+                                <td className="border border-slate-900 px-3 py-2 font-mono text-slate-500">{row.date}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-700">{row.siteName}</td>
+                                <td className="border border-slate-900 px-3 py-2">{row.siteType || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2">{row.paymentType || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-black text-slate-900">{row.workerName}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-600">{getSourceTeamDisplayName(row) || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-600">{row.responsibleTeamName || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2 text-right font-mono font-bold">{formatManDay(row.manDay)}</td>
+                                <td className="border border-slate-900 px-3 py-2 text-right font-mono">{formatNumber(row.unitPrice)}</td>
+                                <td className="border border-slate-900 px-3 py-2 text-right font-mono font-black">{formatNumber(row.amount)}</td>
+                            </tr>
+                        ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </SupportClientStatementModalShell>
+    );
+};
+
+const SupportClientExpenseStatementModal: React.FC<{
+    target: SupportStatementTarget;
+    onClose: () => void;
+}> = ({ target, onClose }) => {
+    const sortedClaims = useMemo(() => sortExpenseClaims(target.expenseClaims), [target.expenseClaims]);
+    const totalAmount = getExpenseClaimsTotal(sortedClaims);
+
+    return (
+        <SupportClientStatementModalShell title="경비내역서" onClose={onClose}>
+            <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">대상</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{target.title}</div>
+                        {target.subtitle && <div className="mt-1 text-[11px] font-bold text-slate-500">{target.subtitle}</div>}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">후청구 건수</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{formatNumber(sortedClaims.length)}건</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-teal-50 p-4">
+                        <div className="text-[11px] font-black text-teal-700">후청구 합계</div>
+                        <div className="mt-1 text-sm font-black text-teal-800">{formatNumber(totalAmount)}원</div>
+                    </div>
+                </div>
+
+                <div className="overflow-auto rounded-xl border border-slate-900 bg-white">
+                    <table className="w-full min-w-[1120px] border-collapse text-xs">
+                        <thead className="bg-slate-100 text-slate-700">
+                        <tr>
+                            <th className="border border-slate-900 px-3 py-2 text-left">일자</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">현장</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">사용팀</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">청구대상</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">구분</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">내용</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">상태</th>
+                            <th className="border border-slate-900 px-3 py-2 text-right">금액</th>
+                            <th className="border border-slate-900 px-3 py-2 text-left">메모</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        {sortedClaims.length > 0 ? sortedClaims.map((claim) => (
+                            <tr key={getExpenseClaimKey(claim)}>
+                                <td className="border border-slate-900 px-3 py-2 font-mono text-slate-500">{claim.date}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-700">{claim.siteName || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2">{claim.payerTeamName || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2">{claim.chargeToTeamName || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2">{claim.category || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2 font-bold text-slate-700">{claim.description || '-'}</td>
+                                <td className="border border-slate-900 px-3 py-2">{getExpenseClaimStatusLabel(claim.status)}</td>
+                                <td className="border border-slate-900 px-3 py-2 text-right font-mono font-black">{formatNumber(getExpenseClaimAmount(claim))}</td>
+                                <td className="border border-slate-900 px-3 py-2 text-slate-500">{claim.memo || '-'}</td>
+                            </tr>
+                        )) : (
+                            <tr>
+                                <td colSpan={9} className="border border-slate-900 px-3 py-10 text-center font-bold text-slate-400">
+                                    등록된 후청구 경비내역이 없습니다.
+                                </td>
+                            </tr>
+                        )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </SupportClientStatementModalShell>
+    );
+};
+
 const SummaryCard: React.FC<{
     label: string;
     value: React.ReactNode;
@@ -634,9 +1267,13 @@ const SupportClientSitePage: React.FC = () => {
     const [selectedClientKey, setSelectedClientKey] = useState<string>('');
     const [selectedSiteKey, setSelectedSiteKey] = useState<string>('');
     const [rows, setRows] = useState<SupportClientSiteWorkerRow[]>([]);
+    const [expenseClaims, setExpenseClaims] = useState<TeamExpenseClaim[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
     const [errors, setErrors] = useState<string[]>([]);
+    const [laborStatementTarget, setLaborStatementTarget] = useState<SupportStatementTarget | null>(null);
+    const [expenseStatementTarget, setExpenseStatementTarget] = useState<SupportStatementTarget | null>(null);
     const [expandedClientKeys, setExpandedClientKeys] = useState<Set<string>>(new Set());
+    const [expandedResponsibleTeamKeys, setExpandedResponsibleTeamKeys] = useState<Set<string>>(new Set());
     const [expandedSiteKeys, setExpandedSiteKeys] = useState<Set<string>>(new Set());
     const [issuedAmountState, setIssuedAmountState] = useState<{ month: string; amounts: Record<string, string> }>(() => {
         const initialMonth = getCurrentYearMonth();
@@ -653,7 +1290,7 @@ const SupportClientSitePage: React.FC = () => {
         setErrors([]);
         try {
             const { start, end } = getMonthRange(selectedMonth);
-            const [reports, teams, companies, sites, supportRates] = await Promise.all([
+            const [reports, teams, companies, sites, supportRates, workers, teamExpenseClaims] = await Promise.all([
                 dailyReportService.getReportsByRange(start, end),
                 teamService.getTeams(),
                 companyService.getCompanies(),
@@ -661,13 +1298,23 @@ const SupportClientSitePage: React.FC = () => {
                 supportRateService.getAllSiteRates().catch((error) => {
                     console.error('[SupportClientSitePage] support rate load failed:', error);
                     return [] as SupportRate[];
+                }),
+                manpowerService.getWorkers().catch((error) => {
+                    console.error('[SupportClientSitePage] worker master load failed:', error);
+                    return [] as Worker[];
+                }),
+                teamExpenseLedgerService.getClaimsByMonth(selectedMonth).catch((error) => {
+                    console.error('[SupportClientSitePage] expense claim load failed:', error);
+                    return [] as TeamExpenseClaim[];
                 })
             ]);
 
-            setRows(buildSupportRows(reports, teams, companies, sites, supportRates));
+            setRows(buildSupportRows(reports, teams, companies, sites, supportRates, workers));
+            setExpenseClaims(teamExpenseClaims);
         } catch (error) {
             console.error('[SupportClientSitePage] support client-site data load failed:', error);
             setRows([]);
+            setExpenseClaims([]);
             setErrors(['발주사별/현장별 지원 정산 데이터를 불러오지 못했습니다. 일보, 현장, 팀 데이터 권한을 확인해주세요.']);
         } finally {
             setLoading(false);
@@ -698,6 +1345,7 @@ const SupportClientSitePage: React.FC = () => {
     }, [issuedAmountState, selectedMonth]);
 
     useEffect(() => {
+        setExpandedResponsibleTeamKeys(new Set());
         setExpandedSiteKeys(new Set());
     }, [selectedMonth, selectedDirection, selectedClientKey, selectedSiteKey]);
 
@@ -733,10 +1381,16 @@ const SupportClientSitePage: React.FC = () => {
         clientFilteredRows.filter((row) => !selectedSiteKey || siteKeyForRow(row) === selectedSiteKey)
     ), [clientFilteredRows, selectedSiteKey]);
 
-    const clientGroups = useMemo(() => groupRowsByClientAndSite(filteredRows), [filteredRows]);
+    const clientGroups = useMemo(
+        () => applyExpenseClaimsToClientGroups(groupRowsByClientAndSite(filteredRows), expenseClaims),
+        [filteredRows, expenseClaims]
+    );
 
     useEffect(() => {
-        setExpandedClientKeys(new Set(clientGroups.map((client) => client.key)));
+        const initiallyOpenClient = clientGroups.find((client) => isExternalClientSummary(client)) || clientGroups[0];
+        setExpandedClientKeys(initiallyOpenClient ? new Set([initiallyOpenClient.key]) : new Set());
+        setExpandedResponsibleTeamKeys(new Set());
+        setExpandedSiteKeys(new Set());
     }, [clientGroups]);
 
     const totalSummary = useMemo(() => {
@@ -764,20 +1418,26 @@ const SupportClientSitePage: React.FC = () => {
 
     const toggleSite = (siteKey: string) => {
         setExpandedSiteKeys((prev) => {
-            const next = new Set(prev);
-            if (next.has(siteKey)) next.delete(siteKey);
-            else next.add(siteKey);
-            return next;
+            if (prev.has(siteKey)) return new Set();
+            return new Set([siteKey]);
         });
+    };
+
+    const toggleResponsibleTeam = (teamKey: string) => {
+        setExpandedResponsibleTeamKeys((prev) => {
+            if (prev.has(teamKey)) return new Set();
+            return new Set([teamKey]);
+        });
+        setExpandedSiteKeys(new Set());
     };
 
     const toggleClient = (clientKey: string) => {
         setExpandedClientKeys((prev) => {
-            const next = new Set(prev);
-            if (next.has(clientKey)) next.delete(clientKey);
-            else next.add(clientKey);
-            return next;
+            if (prev.has(clientKey)) return new Set();
+            return new Set([clientKey]);
         });
+        setExpandedResponsibleTeamKeys(new Set());
+        setExpandedSiteKeys(new Set());
     };
 
     const handleIssuedAmountChange = (siteKey: string, value: string) => {
@@ -813,16 +1473,19 @@ const SupportClientSitePage: React.FC = () => {
                     발주사: client.clientCompanyName,
                     현장: site.siteName,
                     주소: site.siteAddress || '',
+                    현장구분: summarizeNames(site.siteTypes),
+                    결제방식: summarizeNames(site.paymentTypes),
                     시공사: site.constructorCompanyName || '',
-                    지원구분: site.directions.join(', '),
+                    지원구분: summarizeOutputTypeDisplayNames(site.rows),
                     현장담당팀: summarizeNames(site.responsibleTeamNames),
-                    작업팀: summarizeNames(site.sourceTeamNames),
+                    작업팀: summarizeSourceTeamDisplayNames(site.rows),
                     정산주체: summarizeNames(site.settlementNames),
                     투입일수: site.activeDates.length,
                     인원수: site.workerCount,
                     공수: Number(site.totalManDay.toFixed(1)),
                     평균단가: site.avgUnitPrice,
                     금액: site.totalAmount,
+                    후청구경비: getExpenseClaimsTotal(site.expenseClaims),
                     발행금액: issuedMetric.issuedAmount || '',
                     쓰꾸미: issuedMetric.ssukkumi || ''
                 };
@@ -837,10 +1500,12 @@ const SupportClientSitePage: React.FC = () => {
                 발주사: getClientCompanyName(row),
                 시공사: row.constructorCompanyName,
                 현장: row.siteName,
-                지원구분: row.direction,
+                현장구분: row.siteType,
+                결제방식: row.paymentType,
+                지원구분: getOutputTypeDisplayName(row),
                 작업자: row.workerName,
                 직종: row.role || '',
-                작업팀: row.sourceTeamName,
+                작업팀: getSourceTeamDisplayName(row),
                 현장담당팀: row.responsibleTeamName,
                 정산주체: row.settlementName,
                 공수: Number(row.manDay.toFixed(1)),
@@ -859,6 +1524,185 @@ const SupportClientSitePage: React.FC = () => {
     };
 
     const hasRows = filteredRows.length > 0;
+
+    const renderSiteRows = (site: SupportSiteSummary, indentClass = 'pl-5', siteLevelLabel?: string) => {
+        const isSiteExpanded = expandedSiteKeys.has(site.key);
+        const issuedAmountInputValue = issuedAmounts[site.key] || '';
+        const issuedAmount = parseIssuedAmount(issuedAmountInputValue);
+        const ssukkumi = issuedAmount > 0 && site.totalManDay > 0
+            ? Math.round(issuedAmount / site.totalManDay)
+            : 0;
+        const sourceTeamDisplayNames = summarizeSourceTeamDisplayNames(site.rows);
+        const siteTypeDisplay = summarizeNames(site.siteTypes);
+        const paymentTypeDisplay = summarizeNames(site.paymentTypes);
+        const siteStatementTarget: SupportStatementTarget = {
+            title: site.siteName,
+            subtitle: `${site.clientCompanyName} · 현장`,
+            rows: site.rows,
+            expenseClaims: getSiteExpenseClaims(site)
+        };
+
+        return (
+            <React.Fragment key={site.key}>
+                <tr
+                    onClick={() => toggleSite(site.key)}
+                    className="cursor-pointer bg-white transition-colors hover:bg-slate-50"
+                >
+                    <td className={`border border-slate-900 px-2 py-2 ${indentClass}`}>
+                        <div className="flex min-w-0 items-start gap-2">
+                            <AccordionChevron expanded={isSiteExpanded} className="mt-1 text-[11px] text-slate-500" />
+                            <div className="min-w-0">
+                                <div className="mb-1 flex flex-wrap items-center gap-1">
+                                    {uniqueValues(site.rows.map((row) => getOutputTypeDisplayName(row))).map((label) => (
+                                        <OutputTypeBadge key={label} label={label} />
+                                    ))}
+                                </div>
+                                <div className="flex min-w-0 items-center gap-2 font-black text-slate-900">
+                                    {siteLevelLabel && (
+                                        <span className="shrink-0 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                            {siteLevelLabel}
+                                        </span>
+                                    )}
+                                    <FontAwesomeIcon icon={faMapLocationDot} className="shrink-0 text-slate-400" />
+                                    <span className="truncate">{site.siteName}</span>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-1.5">
+                                    <SiteMetaBadge label="구분" value={siteTypeDisplay} tone="violet" />
+                                    <SiteMetaBadge label="결제" value={paymentTypeDisplay} tone="sky" />
+                                </div>
+                                {site.siteAddress && (
+                                    <div className="mt-1 truncate text-[11px] font-semibold text-slate-500">{site.siteAddress}</div>
+                                )}
+                            </div>
+                        </div>
+                    </td>
+                    <td className="border border-slate-900 px-2 py-2 text-center font-mono">{formatNumber(site.activeDates.length)}</td>
+                    <td className="border border-slate-900 px-2 py-2 text-center font-mono">{formatNumber(site.workerCount)}</td>
+                    <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatManDay(site.totalManDay)}</td>
+                    <td className="border border-slate-900 px-2 py-2 text-right font-mono">{formatNumber(site.avgUnitPrice)}</td>
+                    <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black">{formatNumber(site.totalAmount)}</td>
+                    <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex items-center">
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                aria-label={`${site.siteName} 발행금액 입력`}
+                                value={issuedAmountInputValue}
+                                onChange={(event) => handleIssuedAmountChange(site.key, event.target.value)}
+                                placeholder="0"
+                                className="h-7 min-w-0 flex-1 bg-transparent px-1 text-right font-mono text-slate-900 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                            />
+                            <span className="ml-1 text-[11px] font-black text-slate-500">원</span>
+                        </div>
+                    </td>
+                    <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-amber-800">{ssukkumi > 0 ? formatNumber(ssukkumi) : '-'}</td>
+                    <td className="border border-slate-900 px-2 py-2">
+                        <div className="space-y-1">
+                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="text-[10px] font-black text-slate-500">담당</span>
+                                <ResponsibleTeamChips teams={site.responsibleTeams} />
+                            </div>
+                            <div className="text-[11px] font-bold leading-4 text-slate-500">
+                                작업팀 {sourceTeamDisplayNames === OWN_SITE_OUTPUT_LABEL ? (
+                                    <span className="ml-1 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                                        {OWN_SITE_OUTPUT_LABEL}
+                                    </span>
+                                ) : sourceTeamDisplayNames}
+                            </div>
+                        </div>
+                    </td>
+                    <td className="border border-slate-900 px-1 py-1 text-center" onClick={(event) => event.stopPropagation()}>
+                        <StatementActionButtons
+                            target={siteStatementTarget}
+                            onOpenLabor={setLaborStatementTarget}
+                            onOpenExpense={setExpenseStatementTarget}
+                        />
+                    </td>
+                </tr>
+
+                {isSiteExpanded && (
+                    <tr>
+                        <td colSpan={10} className="border border-slate-900 bg-slate-50 p-4">
+                            <div className="mb-3">
+                                <h3 className="flex flex-wrap items-center gap-2 text-sm font-black text-slate-800">
+                                    {siteLevelLabel && (
+                                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-black text-white">
+                                            4단
+                                        </span>
+                                    )}
+                                    <span>{site.siteName} 작업자 상세</span>
+                                </h3>
+                                <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                                    {formatNumber(site.rows.length)}개 투입 행 · {formatManDay(site.totalManDay)}공수 · {formatNumber(site.totalAmount)}원
+                                </p>
+                            </div>
+                            <div className="overflow-x-auto border border-slate-900 bg-white">
+                                <table className="w-full min-w-[980px] border-collapse text-xs">
+                                    <thead className="bg-slate-100 text-slate-700">
+                                    <tr>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">일자</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">구분</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">작업자</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">작업팀</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">현장담당팀</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">정산주체</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-right">공수</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-right">단가</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-right">금액</th>
+                                        <th className="border border-slate-900 px-4 py-2.5 text-left">근거</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {site.rows.map((row) => (
+                                        <tr key={row.rowId}>
+                                            <td className="border border-slate-900 px-4 py-2.5 font-mono text-slate-500">{row.date}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5"><OutputTypeBadge label={getOutputTypeDisplayName(row)} /></td>
+                                            <td className="border border-slate-900 px-4 py-2.5 font-black text-slate-800">{row.workerName}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">
+                                                {isOwnSiteOutputRow(row) ? (
+                                                    <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">
+                                                        {OWN_SITE_OUTPUT_LABEL}
+                                                    </span>
+                                                ) : row.sourceTeamName || '-'}
+                                            </td>
+                                            <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">{row.responsibleTeamName || '-'}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 font-bold text-slate-600">{row.settlementName || '-'}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono font-bold">{formatManDay(row.manDay)}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono text-slate-500">{formatNumber(row.unitPrice)}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 text-right font-mono font-black text-slate-800">{formatNumber(row.amount)}</td>
+                                            <td className="border border-slate-900 px-4 py-2.5 text-slate-500">{row.evidenceNote}</td>
+                                        </tr>
+                                    ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </td>
+                    </tr>
+                )}
+            </React.Fragment>
+        );
+    };
+
+    const getClientVisibleRowCount = (client: SupportClientSummary): number => {
+        const isClientExpanded = expandedClientKeys.has(client.key);
+        if (!isClientExpanded) return 1;
+
+        const expandedSiteDetailCount = client.sites.filter((site) => expandedSiteKeys.has(site.key)).length;
+        if (isExternalClientSummary(client)) {
+            const responsibleTeamGroups = groupSitesByResponsibleTeam(client.sites);
+            const expandedResponsibleTeamSiteRowCount = responsibleTeamGroups
+                .filter((teamGroup) => expandedResponsibleTeamKeys.has(teamGroup.key))
+                .reduce((sum, teamGroup) => sum + teamGroup.sites.length, 0);
+            return 1 + responsibleTeamGroups.length + expandedResponsibleTeamSiteRowCount + expandedSiteDetailCount;
+        }
+
+        return 1 + client.sites.length + expandedSiteDetailCount;
+    };
+
+    const externalClientGroups = clientGroups.filter((client) => isExternalClientSummary(client));
+    const standardClientGroups = clientGroups.filter((client) => !isExternalClientSummary(client));
+    const orderedClientGroups = [...externalClientGroups, ...standardClientGroups];
+    const standardClientGroupRowSpan = standardClientGroups.reduce((sum, client) => sum + getClientVisibleRowCount(client), 0);
 
     return (
         <div className="support-team-font w-full max-w-none space-y-6 p-6 font-['Pretendard']">
@@ -1019,14 +1863,14 @@ const SupportClientSitePage: React.FC = () => {
                         <SummaryCard label="투입 인원" value={`${formatNumber(totalSummary.workerCount)} 명`} icon={faUsers} tone="orange" />
                     </div>
 
-                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="flex flex-col gap-2 border-b border-slate-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="overflow-hidden border border-slate-900 bg-white shadow-sm">
+                        <div className="flex flex-col gap-2 border-b border-slate-900 bg-white px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                             <h2 className="text-base font-black text-slate-900">
                                 {selectedClientKey
                                     ? clientOptions.find((client) => client.key === selectedClientKey)?.clientCompanyName || '선택 발주사'
                                     : '전체 발주사'} 현장별 지원 요약
                             </h2>
-                            <span className="text-[11px] font-bold text-slate-500">1단 발주사를 열고, 2단 현장을 다시 열면 3단 작업자 상세가 표시됩니다.</span>
+                            <span className="text-[11px] font-bold text-slate-500">외부지원간곳은 담당팀 기준, 발주사별현장은 2단 발주사 · 3단 현장 · 4단 작업자 상세로 표시합니다.</span>
                         </div>
 
                         {loading ? (
@@ -1040,9 +1884,29 @@ const SupportClientSitePage: React.FC = () => {
                                 해당 조건의 발주사별/현장별 지원 내역이 없습니다.
                             </div>
                         ) : (
-                            <div className="space-y-3 bg-slate-50/60 p-4">
-                                {clientGroups.map((client) => {
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[1460px] border-collapse text-[13px]">
+                                    <thead>
+                                        <tr className="text-center font-black text-slate-950">
+                                            <th className="w-14 border border-slate-900 bg-gradient-to-br from-yellow-100 via-yellow-400 to-white p-2"></th>
+                                            <th className="w-64 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">발주사 / 담당팀 / 현장</th>
+                                            <th className="w-24 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">현장/일수</th>
+                                            <th className="w-20 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">인원</th>
+                                            <th className="w-20 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">공수</th>
+                                            <th className="w-28 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">평균단가</th>
+                                            <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">정산금액</th>
+                                            <th className="w-32 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">발행금액</th>
+                                            <th className="w-28 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">쓰꾸미</th>
+                                            <th className="w-72 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.2em]">팀 정보</th>
+                                            <th className="w-36 border border-slate-900 bg-gradient-to-br from-white via-slate-200 to-slate-500 p-2 tracking-[0.35em]">기타</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                {orderedClientGroups.map((client) => {
                                     const isClientExpanded = expandedClientKeys.has(client.key);
+                                    const isExternalClient = isExternalClientSummary(client);
+                                    const isFirstStandardClient = !isExternalClient && standardClientGroups[0]?.key === client.key;
+                                    const responsibleTeamGroups = isExternalClient ? groupSitesByResponsibleTeam(client.sites) : [];
                                     const clientIssuedAmount = client.sites.reduce(
                                         (sum, site) => sum + parseIssuedAmount(issuedAmounts[site.key]),
                                         0
@@ -1050,213 +1914,159 @@ const SupportClientSitePage: React.FC = () => {
                                     const clientSsukkumi = clientIssuedAmount > 0 && client.totalManDay > 0
                                         ? Math.round(clientIssuedAmount / client.totalManDay)
                                         : 0;
+                                    const clientAverageUnitPrice = client.totalManDay > 0
+                                        ? Math.round(client.totalAmount / client.totalManDay)
+                                        : 0;
+                                    const clientRowSpan = getClientVisibleRowCount(client);
+                                    const firstLevelRowSpan = isExternalClient ? clientRowSpan : standardClientGroupRowSpan;
+                                    const firstLevelLabel = isExternalClient ? EXTERNAL_CLIENT_GROUP_DISPLAY_NAME : '발주사별현장';
+                                    const clientDisplayName = isExternalClient ? '외부 현장 전체' : client.clientCompanyName;
+                                    const clientStatementTarget: SupportStatementTarget = {
+                                        title: clientDisplayName,
+                                        subtitle: isExternalClient ? EXTERNAL_CLIENT_GROUP_DISPLAY_NAME : '발주사별현장',
+                                        rows: client.sites.flatMap((site) => site.rows),
+                                        expenseClaims: getSitesExpenseClaims(client.sites)
+                                    };
                                     return (
-                                        <section key={client.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                                            <button
-                                                type="button"
+                                        <React.Fragment key={client.key}>
+                                            <tr
                                                 onClick={() => toggleClient(client.key)}
-                                                className="flex w-full flex-col gap-3 px-5 py-4 text-left transition hover:bg-emerald-50/50 md:flex-row md:items-center md:justify-between"
+                                                className="cursor-pointer bg-white transition-colors hover:bg-emerald-50"
                                             >
-                                                <div className="flex min-w-0 items-start gap-3">
-                                                    <div className="mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
-                                                        <FontAwesomeIcon icon={isClientExpanded ? faCaretDown : faCaretRight} />
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <div className="mb-1 inline-flex rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-black text-white">
-                                                            1단 발주사
+                                                {(isExternalClient || isFirstStandardClient) && (
+                                                    <td
+                                                        rowSpan={firstLevelRowSpan}
+                                                        className={`border border-slate-900 text-center align-middle text-lg font-black text-slate-950 ${
+                                                            isExternalClient
+                                                                ? 'bg-gradient-to-br from-yellow-100 via-yellow-400 to-white'
+                                                                : 'bg-gradient-to-br from-emerald-100 via-emerald-400 to-white'
+                                                        }`}
+                                                    >
+                                                        <div className="mx-auto leading-8" style={{ writingMode: 'vertical-rl', textOrientation: 'upright' }}>
+                                                            {firstLevelLabel}
                                                         </div>
-                                                        <h3 className="truncate text-lg font-black text-slate-900">{client.clientCompanyName}</h3>
-                                                        <p className="mt-1 text-xs font-bold text-slate-500">
-                                                            {formatNumber(client.siteCount)}개 현장 · {formatNumber(client.workerCount)}명 · {formatManDay(client.totalManDay)}공수
-                                                            {clientIssuedAmount > 0 && (
-                                                                <> · 발행 {formatNumber(clientIssuedAmount)}원 · 쓰꾸미 {formatNumber(clientSsukkumi)}원</>
-                                                            )}
-                                                        </p>
+                                                    </td>
+                                                )}
+                                                <td className="border border-slate-900 px-2 py-2 font-black text-slate-950">
+                                                    <span className="inline-flex min-w-0 items-center gap-2">
+                                                        <AccordionChevron expanded={isClientExpanded} className="text-[11px] text-emerald-700" />
+                                                        {!isExternalClient && (
+                                                            <span className="shrink-0 rounded bg-emerald-700 px-1.5 py-0.5 text-[10px] font-black text-white">2단</span>
+                                                        )}
+                                                        <span className="truncate">{clientDisplayName}</span>
+                                                    </span>
+                                                </td>
+                                                <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatNumber(client.siteCount)}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-center font-mono">{formatNumber(client.workerCount)}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatManDay(client.totalManDay)}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-right font-mono">{clientAverageUnitPrice > 0 ? formatNumber(clientAverageUnitPrice) : '-'}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-slate-950">{formatNumber(client.totalAmount)}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-right font-mono text-sky-700">{clientIssuedAmount > 0 ? formatNumber(clientIssuedAmount) : '-'}</td>
+                                                <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-amber-800">{clientSsukkumi > 0 ? formatNumber(clientSsukkumi) : '-'}</td>
+                                                <td className="border border-slate-900 px-2 py-2">
+                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                        {uniqueValues(client.sites.flatMap((site) => site.rows.map((row) => getOutputTypeDisplayName(row)))).map((label) => (
+                                                            <OutputTypeBadge key={label} label={label} />
+                                                        ))}
                                                     </div>
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-2 text-right sm:grid-cols-3 xl:min-w-[640px] xl:grid-cols-5">
-                                                    <div className="rounded-lg bg-slate-50 px-3 py-2">
-                                                        <div className="text-[10px] font-black text-slate-400">현장</div>
-                                                        <div className="font-mono text-sm font-black text-slate-900">{formatNumber(client.siteCount)}</div>
-                                                    </div>
-                                                    <div className="rounded-lg bg-violet-50 px-3 py-2">
-                                                        <div className="text-[10px] font-black text-violet-500">공수</div>
-                                                        <div className="font-mono text-sm font-black text-violet-800">{formatManDay(client.totalManDay)}</div>
-                                                    </div>
-                                                    <div className="rounded-lg bg-emerald-50 px-3 py-2">
-                                                        <div className="text-[10px] font-black text-emerald-500">정산</div>
-                                                        <div className="font-mono text-sm font-black text-emerald-800">{formatNumber(client.totalAmount)}</div>
-                                                    </div>
-                                                    <div className="rounded-lg bg-sky-50 px-3 py-2">
-                                                        <div className="text-[10px] font-black text-sky-500">발행합계</div>
-                                                        <div className="font-mono text-sm font-black text-sky-800">{formatNumber(clientIssuedAmount)}</div>
-                                                    </div>
-                                                    <div className="rounded-lg bg-amber-50 px-3 py-2">
-                                                        <div className="text-[10px] font-black text-amber-600">쓰꾸미</div>
-                                                        <div className="font-mono text-sm font-black text-amber-900">
-                                                            {clientSsukkumi > 0 ? formatNumber(clientSsukkumi) : '-'}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </button>
+                                                </td>
+                                                <td className="border border-slate-900 px-1 py-1 text-center" onClick={(event) => event.stopPropagation()}>
+                                                    <StatementActionButtons
+                                                        target={clientStatementTarget}
+                                                        onOpenLabor={setLaborStatementTarget}
+                                                        onOpenExpense={setExpenseStatementTarget}
+                                                    />
+                                                </td>
+                                            </tr>
 
                                             {isClientExpanded && (
-                                                <div className="border-t border-emerald-100 bg-emerald-50/30 p-3">
-                                                    <div className="mb-2 flex items-center gap-2 px-2 text-[11px] font-black text-slate-500">
-                                                        <span className="h-px w-6 bg-emerald-300" />
-                                                        2단 현장
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        {client.sites.map((site) => {
-                                                            const isSiteExpanded = expandedSiteKeys.has(site.key);
-                                                            const issuedAmountInputValue = issuedAmounts[site.key] || '';
-                                                            const issuedAmount = parseIssuedAmount(issuedAmountInputValue);
-                                                            const ssukkumi = issuedAmount > 0 && site.totalManDay > 0
-                                                                ? Math.round(issuedAmount / site.totalManDay)
-                                                                : 0;
-                                                            return (
-                                                                <div key={site.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => toggleSite(site.key)}
-                                                                        className="flex w-full flex-col gap-3 px-4 py-3 text-left transition hover:bg-slate-50 xl:flex-row xl:items-center xl:justify-between"
-                                                                    >
-                                                                        <div className="flex min-w-0 items-start gap-3">
-                                                                            <div className="mt-0.5 flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                                                                                <FontAwesomeIcon icon={isSiteExpanded ? faCaretDown : faCaretRight} />
-                                                                            </div>
-                                                                            <div className="min-w-0">
-                                                                                <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                                                                                    {site.directions.map((direction) => (
-                                                                                        <DirectionBadge key={direction} direction={direction} />
-                                                                                    ))}
-                                                                                </div>
-                                                                                <h4 className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-900">
-                                                                                    <FontAwesomeIcon icon={faMapLocationDot} className="text-slate-400" />
-                                                                                    <span className="truncate">{site.siteName}</span>
-                                                                                </h4>
-                                                                                {site.siteAddress && (
-                                                                                    <p className="mt-1 truncate text-[11px] font-semibold text-slate-400">{site.siteAddress}</p>
-                                                                                )}
-                                                                                <p className="mt-1 text-[11px] font-bold text-slate-500">
-                                                                                    현장담당팀 {summarizeNames(site.responsibleTeamNames)} · 작업팀 {summarizeNames(site.sourceTeamNames)}
-                                                                                </p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="grid grid-cols-5 gap-2 text-right xl:min-w-[520px]">
-                                                                            <div className="rounded-lg bg-slate-50 px-2 py-2">
-                                                                                <div className="text-[10px] font-black text-slate-400">일수</div>
-                                                                                <div className="font-mono text-sm font-black text-slate-800">{formatNumber(site.activeDates.length)}</div>
-                                                                            </div>
-                                                                            <div className="rounded-lg bg-slate-50 px-2 py-2">
-                                                                                <div className="text-[10px] font-black text-slate-400">인원</div>
-                                                                                <div className="font-mono text-sm font-black text-slate-800">{formatNumber(site.workerCount)}</div>
-                                                                            </div>
-                                                                            <div className="rounded-lg bg-violet-50 px-2 py-2">
-                                                                                <div className="text-[10px] font-black text-violet-500">공수</div>
-                                                                                <div className="font-mono text-sm font-black text-violet-800">{formatManDay(site.totalManDay)}</div>
-                                                                            </div>
-                                                                            <div className="rounded-lg bg-slate-50 px-2 py-2">
-                                                                                <div className="text-[10px] font-black text-slate-400">평균단가</div>
-                                                                                <div className="font-mono text-sm font-black text-slate-800">{formatNumber(site.avgUnitPrice)}</div>
-                                                                            </div>
-                                                                            <div className="rounded-lg bg-emerald-50 px-2 py-2">
-                                                                                <div className="text-[10px] font-black text-emerald-500">금액</div>
-                                                                                <div className="font-mono text-sm font-black text-emerald-800">{formatNumber(site.totalAmount)}</div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </button>
-
-                                                                    <div className="grid gap-3 border-t border-slate-100 bg-white px-4 py-3 md:grid-cols-[minmax(220px,1fr)_minmax(130px,auto)_minmax(150px,auto)] md:items-end">
-                                                                        <label className="block">
-                                                                            <span className="mb-1 block text-[11px] font-black text-slate-500">발행금액 입력</span>
-                                                                            <div className="flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 focus-within:ring-2 focus-within:ring-emerald-500">
-                                                                                <input
-                                                                                    type="text"
-                                                                                    inputMode="numeric"
-                                                                                    value={issuedAmountInputValue}
-                                                                                    onChange={(event) => handleIssuedAmountChange(site.key, event.target.value)}
-                                                                                    placeholder="0"
-                                                                                    className="min-w-0 flex-1 bg-transparent text-right font-mono text-sm font-black text-slate-900 outline-none"
-                                                                                />
-                                                                                <span className="ml-2 text-xs font-black text-slate-400">원</span>
-                                                                            </div>
-                                                                        </label>
-                                                                        <div className="rounded-lg bg-violet-50 px-3 py-2 text-right">
-                                                                            <div className="text-[10px] font-black text-violet-500">공수</div>
-                                                                            <div className="font-mono text-sm font-black text-violet-800">{formatManDay(site.totalManDay)}</div>
-                                                                        </div>
-                                                                        <div className="rounded-lg bg-amber-50 px-3 py-2 text-right">
-                                                                            <div className="text-[10px] font-black text-amber-600">발행금액 / 공수 = 쓰꾸미</div>
-                                                                            <div className="font-mono text-sm font-black text-amber-900">
-                                                                                {ssukkumi > 0 ? `${formatNumber(ssukkumi)} 원` : '-'}
-                                                                            </div>
-                                                                            {issuedAmount > 0 && (
-                                                                                <div className="mt-0.5 text-[10px] font-bold text-amber-700">
-                                                                                    발행금액 {formatNumber(issuedAmount)}원
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-
-                                                                    {isSiteExpanded && (
-                                                                        <div className="border-t border-slate-100 bg-slate-50 p-4">
-                                                                            <div className="mb-3">
-                                                                                <h3 className="text-sm font-black text-slate-800">{site.siteName} 작업자 상세</h3>
-                                                                                <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                                                                                    {formatNumber(site.rows.length)}개 투입 행 · {formatManDay(site.totalManDay)}공수 · {formatNumber(site.totalAmount)}원
-                                                                                </p>
-                                                                            </div>
-                                                                            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                                                                                <table className="w-full min-w-[980px] text-xs">
-                                                                                    <thead className="border-b border-slate-100 bg-slate-50 text-slate-500">
-                                                                                        <tr>
-                                                                                            <th className="px-4 py-2.5 text-left">일자</th>
-                                                                                            <th className="px-4 py-2.5 text-left">구분</th>
-                                                                                            <th className="px-4 py-2.5 text-left">작업자</th>
-                                                                                            <th className="px-4 py-2.5 text-left">작업팀</th>
-                                                                                            <th className="px-4 py-2.5 text-left">현장담당팀</th>
-                                                                                            <th className="px-4 py-2.5 text-left">정산주체</th>
-                                                                                            <th className="px-4 py-2.5 text-right">공수</th>
-                                                                                            <th className="px-4 py-2.5 text-right">단가</th>
-                                                                                            <th className="px-4 py-2.5 text-right">금액</th>
-                                                                                            <th className="px-4 py-2.5 text-left">근거</th>
-                                                                                        </tr>
-                                                                                    </thead>
-                                                                                    <tbody>
-                                                                                        {site.rows.map((row) => (
-                                                                                            <tr key={row.rowId} className="border-b border-slate-50 last:border-0">
-                                                                                                <td className="px-4 py-2.5 font-mono text-slate-500">{row.date}</td>
-                                                                                                <td className="px-4 py-2.5"><DirectionBadge direction={row.direction} /></td>
-                                                                                                <td className="px-4 py-2.5 font-black text-slate-800">{row.workerName}</td>
-                                                                                                <td className="px-4 py-2.5 font-bold text-slate-600">{row.sourceTeamName || '-'}</td>
-                                                                                                <td className="px-4 py-2.5 font-bold text-slate-600">{row.responsibleTeamName || '-'}</td>
-                                                                                                <td className="px-4 py-2.5 font-bold text-slate-600">{row.settlementName || '-'}</td>
-                                                                                                <td className="px-4 py-2.5 text-right font-mono font-bold">{formatManDay(row.manDay)}</td>
-                                                                                                <td className="px-4 py-2.5 text-right font-mono text-slate-500">{formatNumber(row.unitPrice)}</td>
-                                                                                                <td className="px-4 py-2.5 text-right font-mono font-black text-slate-800">{formatNumber(row.amount)}</td>
-                                                                                                <td className="px-4 py-2.5 text-slate-500">{row.evidenceNote}</td>
-                                                                                            </tr>
-                                                                                        ))}
-                                                                                    </tbody>
-                                                                                </table>
-                                                                            </div>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
+                                                <>
+                                                    {isExternalClient ? (
+                                                        responsibleTeamGroups.map((teamGroup) => {
+                                                            const isTeamExpanded = expandedResponsibleTeamKeys.has(teamGroup.key);
+                                                            const teamIssuedAmount = teamGroup.sites.reduce(
+                                                                (sum, site) => sum + parseIssuedAmount(issuedAmounts[site.key]),
+                                                                0
                                                             );
-                                                        })}
-                                                    </div>
-                                                </div>
+                                                            const teamSsukkumi = teamIssuedAmount > 0 && teamGroup.totalManDay > 0
+                                                                ? Math.round(teamIssuedAmount / teamGroup.totalManDay)
+                                                                : 0;
+                                                            const teamStatementTarget: SupportStatementTarget = {
+                                                                title: teamGroup.team.name,
+                                                                subtitle: `${EXTERNAL_CLIENT_GROUP_DISPLAY_NAME} · 현장담당팀`,
+                                                                rows: teamGroup.rows,
+                                                                expenseClaims: getSitesExpenseClaims(teamGroup.sites)
+                                                            };
+
+                                                            return (
+                                                                <React.Fragment key={teamGroup.key}>
+                                                                    <tr
+                                                                        onClick={() => toggleResponsibleTeam(teamGroup.key)}
+                                                                        className="cursor-pointer bg-emerald-50 transition-colors hover:bg-emerald-100"
+                                                                    >
+                                                                        <td className="border border-slate-900 px-2 py-2 pl-4 font-black text-slate-900">
+                                                                            <div className="flex min-w-0 items-center gap-2.5">
+                                                                                <AccordionChevron expanded={isTeamExpanded} className="text-sm text-emerald-700" />
+                                                                                <span className="shrink-0 rounded bg-emerald-700 px-2 py-1 text-[12px] font-black text-white">2단</span>
+                                                                                <ResponsibleTeamChips teams={[teamGroup.team]} size="lg" />
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatNumber(teamGroup.siteCount)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-center font-mono">{formatNumber(teamGroup.workerCount)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-center font-mono font-black">{formatManDay(teamGroup.totalManDay)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-right font-mono">{teamGroup.avgUnitPrice > 0 ? formatNumber(teamGroup.avgUnitPrice) : '-'}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black">{formatNumber(teamGroup.totalAmount)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-right font-mono text-sky-700">{teamIssuedAmount > 0 ? formatNumber(teamIssuedAmount) : '-'}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2 text-right font-mono font-black text-amber-800">{teamSsukkumi > 0 ? formatNumber(teamSsukkumi) : '-'}</td>
+                                                                        <td className="border border-slate-900 px-2 py-2">
+                                                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                                                {uniqueValues(teamGroup.rows.map((row) => getOutputTypeDisplayName(row))).map((label) => (
+                                                                                    <OutputTypeBadge key={label} label={label} />
+                                                                                ))}
+                                                                            </div>
+                                                                            <div className="mt-1 text-[11px] font-bold text-slate-500">
+                                                                                3단 현장 {formatNumber(teamGroup.siteCount)}개
+                                                                            </div>
+                                                                        </td>
+                                                                        <td className="border border-slate-900 px-1 py-1 text-center" onClick={(event) => event.stopPropagation()}>
+                                                                            <StatementActionButtons
+                                                                                target={teamStatementTarget}
+                                                                                onOpenLabor={setLaborStatementTarget}
+                                                                                onOpenExpense={setExpenseStatementTarget}
+                                                                            />
+                                                                        </td>
+                                                                    </tr>
+                                                                    {isTeamExpanded && teamGroup.sites.map((site) => renderSiteRows(site, 'pl-9', '3단'))}
+                                                                </React.Fragment>
+                                                            );
+                                                        })
+                                                    ) : (
+                                                        client.sites.map((site) => renderSiteRows(site, 'pl-9', '3단'))
+                                                    )}
+                                                </>
                                             )}
-                                        </section>
+                                        </React.Fragment>
                                     );
                                 })}
+                                    </tbody>
+                                </table>
                             </div>
                         )}
                     </div>
                 </main>
             </div>
+            {laborStatementTarget && (
+                <SupportClientLaborStatementModal
+                    target={laborStatementTarget}
+                    onClose={() => setLaborStatementTarget(null)}
+                />
+            )}
+            {expenseStatementTarget && (
+                <SupportClientExpenseStatementModal
+                    target={expenseStatementTarget}
+                    onClose={() => setExpenseStatementTarget(null)}
+                />
+            )}
         </div>
     );
 };
