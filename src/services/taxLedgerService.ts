@@ -1,5 +1,6 @@
 import {
     collection,
+    deleteDoc,
     doc,
     setDoc,
     getDocs,
@@ -22,9 +23,12 @@ export const taxLedgerService = {
      */
     async saveRecords(records: TaxAffairsRecord[]) {
         const batch = writeBatch(db);
+        const preparedRecords = records.map((record) => ({
+            record,
+            docRef: doc(db, COLLECTION_NAME, record.id)
+        }));
 
-        records.forEach(record => {
-            const docRef = doc(db, COLLECTION_NAME, record.id);
+        preparedRecords.forEach(({ record, docRef }) => {
             // Ensure no undefined values for Firestore
             const safeRecord = JSON.parse(JSON.stringify(record));
             batch.set(docRef, {
@@ -70,5 +74,8 @@ export const taxLedgerService = {
     /**
      * Delete a record.
      */
-    // Implement if needed
+    async deleteRecord(id: string) {
+        const docRef = doc(db, COLLECTION_NAME, id);
+        await deleteDoc(docRef);
+    }
 };

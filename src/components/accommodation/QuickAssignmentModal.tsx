@@ -2,7 +2,9 @@ import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
     faArrowRightFromBracket,
+    faBuilding,
     faCheck,
+    faFileInvoiceDollar,
     faPen,
     faSearch,
     faTimes,
@@ -12,13 +14,15 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { Accommodation } from '../../types/accommodation';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
-import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { BillingModeSelector, BillingStatusSummary } from '../support/BillingModeSelector';
 import { useAccommodationQuickAssignment } from './useAccommodationQuickAssignment';
 
 interface Props {
     accommodation: Accommodation;
     activeAssignments: AccommodationAssignment[];
     isOpen: boolean;
+    initialBillingSplitMode?: boolean;
     onClose: () => void;
     onSuccess: () => void;
 }
@@ -27,6 +31,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     accommodation,
     activeAssignments,
     isOpen,
+    initialBillingSplitMode = false,
     onClose,
     onSuccess
 }) => {
@@ -44,17 +49,19 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         startDate,
         setStartDate,
         editingAssignmentId,
-        billingTargetType,
-        billingTeamId,
-        setBillingTeamId,
-        billingTargetWorkerId,
-        setBillingTargetWorkerId,
-        billingTeamOptions,
-        billingWorkerOptions,
+        billingTargetOptions,
+        billingMode,
+        setBillingMode,
+        selectedBillingTargetKey,
+        setSelectedBillingTargetKey,
+        selectedBillingTarget,
+        showBillingDateFields,
+        billingTargetStartDate,
+        setBillingTargetStartDate,
+        billingTargetEndDate,
+        setBillingTargetEndDate,
         currentBillingTarget,
         currentBillingTargetDisplay,
-        selectTeamBillingTarget,
-        selectWorkerBillingTarget,
         handleEdit,
         handleCancelEdit,
         handleAssign,
@@ -65,26 +72,30 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
         accommodation,
         activeAssignments,
         isOpen,
+        initialBillingSplitMode,
         onSuccess
     });
     const [assignmentWorkerSearch, setAssignmentWorkerSearch] = React.useState('');
-    const [billingWorkerSearch, setBillingWorkerSearch] = React.useState('');
     const normalizedAssignmentWorkerSearch = assignmentWorkerSearch.trim().toLowerCase();
-    const normalizedBillingWorkerSearch = billingWorkerSearch.trim().toLowerCase();
+    const displayDate = (value?: string | null): string => toShortYearDateInputValue(value) || '';
     const handleStartDateChange = (value: string) => {
-        setStartDate(formatTypedDateInput(value));
+        setStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
+    };
+    const handleBillingStartDateChange = (value: string) => {
+        setBillingTargetStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
+    };
+    const handleBillingEndDateChange = (value: string) => {
+        setBillingTargetEndDate(formatTypedDateInput(value, { yearDigits: 2 }));
     };
     const normalizeStartDate = () => {
-        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+        setStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
     };
-    const filteredBillingWorkerOptions = React.useMemo(() => {
-        if (!normalizedBillingWorkerSearch) return billingWorkerOptions;
-        return billingWorkerOptions.filter((workerOption) => {
-            const workerName = String(workerOption.workerName ?? '').toLowerCase();
-            const teamName = String(workerOption.teamName ?? '').toLowerCase();
-            return workerName.includes(normalizedBillingWorkerSearch) || teamName.includes(normalizedBillingWorkerSearch);
-        });
-    }, [billingWorkerOptions, normalizedBillingWorkerSearch]);
+    const normalizeBillingStartDate = () => {
+        setBillingTargetStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
+    };
+    const normalizeBillingEndDate = () => {
+        setBillingTargetEndDate((prev) => prev ? (toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev) : '');
+    };
     const filteredAssignmentWorkerOptions = React.useMemo(() => {
         if (!normalizedAssignmentWorkerSearch) return assignmentWorkerOptions;
         return assignmentWorkerOptions.filter((workerOption) => {
@@ -108,29 +119,44 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
     const canSaveAssignment = assignmentTargetType === 'team'
         ? Boolean(selectedTeamId)
         : Boolean(selectedAssignmentWorkerId);
+    const billingTargetGroups = ['청연이엔지 소속팀', '작업자', '사무실', '사무실직원'];
+    const activeAssignmentSummary = React.useMemo(() => {
+        if (displayActiveAssignments.length === 0) return '미배정';
+        const first = displayActiveAssignments[0];
+        const firstLabel = first.workerName || first.teamName || '이름 없음';
+        return displayActiveAssignments.length > 1
+            ? `${firstLabel} 외 ${displayActiveAssignments.length - 1}명`
+            : firstLabel;
+    }, [displayActiveAssignments]);
+    const canUseSameBillingMode = Boolean(currentBillingTarget || displayActiveAssignments.length > 0);
+    const [activeSection, setActiveSection] = React.useState<'assignment' | 'billing'>(
+        initialBillingSplitMode ? 'billing' : 'assignment'
+    );
 
     React.useEffect(() => {
         if (!isOpen) {
             setAssignmentWorkerSearch('');
-            setBillingWorkerSearch('');
+            return;
         }
-    }, [isOpen]);
+        setActiveSection(initialBillingSplitMode ? 'billing' : 'assignment');
+    }, [initialBillingSplitMode, isOpen]);
 
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-sm animate-fade-in">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden">
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <div className="border-b border-slate-100 bg-white px-5 py-4 sm:px-6">
+                    <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <h2 className="flex items-center gap-2 text-lg font-black text-slate-900 sm:text-xl">
                             <span className="bg-indigo-600 text-white w-8 h-8 rounded-lg flex items-center justify-center text-sm shadow-indigo-200 shadow-md">
-                                <FontAwesomeIcon icon={faUsers} />
+                                <FontAwesomeIcon icon={activeSection === 'billing' ? faFileInvoiceDollar : faUsers} />
                             </span>
-                            숙소 배정/청구관리
+                            <span className="min-w-0 truncate">배정/청구 설정</span>
                         </h2>
-                        <p className="text-sm text-slate-500 mt-1 ml-10">
-                            {accommodation.name} ({accommodation.address})
+                        <p className="mt-2 text-sm font-medium text-slate-500 sm:ml-10">
+                            숙소 · {accommodation.name} ({accommodation.address})
                         </p>
                     </div>
                     <button
@@ -140,11 +166,48 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                     >
                         <FontAwesomeIcon icon={faTimes} className="text-lg" />
                     </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
+                        <button
+                            type="button"
+                            onClick={() => setActiveSection('assignment')}
+                            className={`min-w-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                activeSection === 'assignment'
+                                    ? 'bg-white text-indigo-700 shadow-sm'
+                                    : 'text-slate-500 hover:bg-white/60 hover:text-slate-800'
+                            }`}
+                        >
+                            <div className="flex items-center gap-2 text-sm font-extrabold">
+                                <FontAwesomeIcon icon={faUsers} className="text-xs" />
+                                <span>배정</span>
+                            </div>
+                            <div className="mt-0.5 hidden truncate text-[11px] font-semibold text-slate-400 sm:block">
+                                숙소 입실 인원 관리
+                            </div>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveSection('billing')}
+                            className={`min-w-0 rounded-lg px-3 py-2 text-left transition-all ${
+                                activeSection === 'billing'
+                                    ? 'bg-white text-indigo-700 shadow-sm'
+                                    : 'text-slate-500 hover:bg-white/60 hover:text-slate-800'
+                            }`}
+                        >
+                            <div className="flex items-center gap-2 text-sm font-extrabold">
+                                <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-xs" />
+                                <span>청구</span>
+                            </div>
+                            <div className="mt-0.5 hidden truncate text-[11px] font-semibold text-slate-400 sm:block">
+                                청구대상 설정
+                            </div>
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-                    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="grid grid-cols-1 gap-6 items-start">
+                    <section className={`${activeSection === 'assignment' ? '' : 'hidden'} bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden`}>
                         <header className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                             <h3 className="font-bold text-slate-800 flex items-center gap-2">
                                 <span className="w-1.5 h-5 bg-indigo-500 rounded-full" />
@@ -193,7 +256,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                                     팀: {assign.teamName || '팀 미지정'}
                                                 </div>
                                                 <div className="text-[10px] text-slate-400 mt-1 font-mono pl-9">
-                                                    입실일: {assign.startDate || '-'}
+                                                    입실일: {displayDate(assign.startDate) || '-'}
                                                 </div>
                                             </div>
                                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -333,7 +396,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                             type="text"
                                             inputMode="numeric"
                                             maxLength={10}
-                                            placeholder="YYYY-MM-DD"
+                                            placeholder="YY-MM-DD"
                                             value={startDate}
                                             onChange={(event) => handleStartDateChange(event.target.value)}
                                             onBlur={normalizeStartDate}
@@ -346,11 +409,11 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                         </div>
                     </section>
 
-                    <section className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <section className={`${activeSection === 'billing' ? '' : 'hidden'} bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden`}>
                         <header className="px-5 py-3 bg-slate-50 border-b border-slate-200">
                             <h3 className="font-bold text-slate-800 flex items-center gap-2">
                                 <span className="w-1.5 h-5 bg-indigo-500 rounded-full" />
-                                청구대상 관리 (팀 1개 또는 개인 1명)
+                                청구 관리
                             </h3>
                         </header>
 
@@ -360,20 +423,26 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-2 min-w-0">
                                         <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs ${
-                                            currentBillingTarget?.targetType === 'worker'
+                                            currentBillingTarget?.targetType === 'worker' || currentBillingTarget?.targetType === 'office_staff'
                                                 ? 'bg-slate-200 text-slate-700'
-                                                : 'bg-indigo-200 text-indigo-700'
+                                                : currentBillingTarget?.targetType === 'office'
+                                                    ? 'bg-slate-200 text-slate-700'
+                                                    : 'bg-indigo-200 text-indigo-700'
                                         }`}>
-                                            <FontAwesomeIcon icon={currentBillingTarget?.targetType === 'worker' ? faUser : faUsers} />
+                                            <FontAwesomeIcon icon={
+                                                currentBillingTarget?.targetType === 'worker' || currentBillingTarget?.targetType === 'office_staff'
+                                                    ? faUser
+                                                    : currentBillingTarget?.targetType === 'office'
+                                                        ? faBuilding
+                                                        : faUsers
+                                            } />
                                         </span>
                                         <div className="min-w-0">
                                             <div className="font-bold text-slate-700 truncate">
                                                 {currentBillingTargetDisplay}
                                             </div>
                                             <div className="text-[11px] text-slate-500">
-                                                {currentBillingTarget
-                                                    ? (currentBillingTarget.targetType === 'worker' ? '개인 청구' : '팀 청구')
-                                                    : '청구대상 미설정'}
+                                                {currentBillingTarget ? '전체 청구' : '청구대상 미설정'}
                                             </div>
                                         </div>
                                     </div>
@@ -388,7 +457,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                         }`}
                                     >
                                         <FontAwesomeIcon icon={faTrash} />
-                                        청구대상 삭제
+                                        미청구
                                     </button>
                                 </div>
                             </div>
@@ -400,114 +469,138 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                     </div>
                                 )}
 
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1.5">청구 방식</label>
-                                    <div className="inline-flex bg-white p-1 rounded-lg border border-indigo-100">
-                                        <button
-                                            type="button"
-                                            onClick={selectTeamBillingTarget}
-                                            className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
-                                                billingTargetType === 'team'
-                                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                                    : 'text-slate-600 hover:text-slate-800'
-                                            }`}
-                                        >
-                                            팀 청구
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={selectWorkerBillingTarget}
-                                            className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${
-                                                billingTargetType === 'worker'
-                                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                                    : 'text-slate-600 hover:text-slate-800'
-                                            }`}
-                                        >
-                                            개인 청구
-                                        </button>
-                                    </div>
-                                </div>
+                                <BillingStatusSummary
+                                    items={[
+                                        {
+                                            label: '현재 입실',
+                                            value: activeAssignmentSummary,
+                                            tone: 'slate'
+                                        },
+                                        {
+                                            label: '현재 청구대상',
+                                            value: currentBillingTargetDisplay,
+                                            tone: currentBillingTarget ? 'indigo' : 'emerald'
+                                        },
+                                        {
+                                            label: '청구 시작일',
+                                            value: displayDate(currentBillingTarget?.startDate) || '26-01-01',
+                                            tone: 'amber'
+                                        }
+                                    ]}
+                                />
 
-                                {billingTargetType === 'team' ? (
-                                    <div className="bg-white rounded-xl border border-indigo-100 p-4">
-                                        <div className="text-sm font-bold text-slate-600 mb-2">청구 대상 팀 선택</div>
-                                        {billingTeamOptions.length === 0 ? (
-                                            <div className="text-xs text-slate-400">선택 가능한 팀이 없습니다.</div>
+                                <BillingModeSelector
+                                    value={billingMode}
+                                    onChange={setBillingMode}
+                                    sameLabel={displayActiveAssignments.length > 0 ? '입실자와 동일' : '별도청구 해제'}
+                                    sameDescription={displayActiveAssignments.length > 0 ? '현재 입실자를 기본 청구대상으로 사용' : '26-01-01 이후 별도청구 해제'}
+                                    customDescription="입실자와 다른 팀/사람에게 청구"
+                                    sameDisabled={!canUseSameBillingMode}
+                                />
+
+                                <div className="bg-white rounded-xl border border-indigo-100 p-4 space-y-3">
+                                    {billingMode !== 'same' && (
+                                    <div>
+                                        <div className="text-sm font-bold text-slate-600 mb-2">청구대상 선택</div>
+                                        {billingTargetOptions.length === 0 ? (
+                                            <div className="text-xs text-slate-400">선택 가능한 청구대상이 없습니다.</div>
                                         ) : (
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                {billingTeamOptions.map((teamOption) => {
-                                                    const isSelected = billingTeamId === teamOption.id;
+                                            <select
+                                                value={selectedBillingTargetKey}
+                                                onChange={(event) => setSelectedBillingTargetKey(event.target.value)}
+                                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700 focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                                            >
+                                                <option value="">청구대상을 선택하세요</option>
+                                                {billingTargetGroups.map((group) => {
+                                                    const options = billingTargetOptions.filter((option) => option.group === group);
+                                                    if (options.length === 0) return null;
                                                     return (
-                                                        <button
-                                                            key={`billing-team-${teamOption.id}`}
-                                                            type="button"
-                                                            onClick={() => setBillingTeamId(teamOption.id)}
-                                                            className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
-                                                                isSelected
-                                                                    ? 'border-indigo-400 bg-indigo-50 text-indigo-800'
-                                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40'
-                                                            }`}
-                                                        >
-                                                            <div className="font-bold">{teamOption.name}</div>
-                                                        </button>
+                                                        <optgroup key={group} label={group}>
+                                                            {options.map((option) => (
+                                                                <option key={option.key} value={option.key}>
+                                                                    {option.name}{option.detail ? ` · ${option.detail}` : ''}
+                                                                </option>
+                                                            ))}
+                                                        </optgroup>
                                                     );
                                                 })}
+                                            </select>
+                                        )}
+                                        {selectedBillingTarget && (
+                                            <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                                                {selectedBillingTarget.group} · {selectedBillingTarget.detail || selectedBillingTarget.name}
                                             </div>
                                         )}
                                     </div>
-                                ) : (
-                                    <div className="bg-white rounded-xl border border-indigo-100 p-4">
-                                        <div className="text-sm font-bold text-slate-600 mb-2">청구 대상 개인 선택</div>
-                                        {billingWorkerOptions.length === 0 ? (
-                                            <div className="text-xs text-slate-400">선택 가능한 개인이 없습니다.</div>
-                                        ) : (
-                                            <>
-                                                <div className="relative mb-2">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="이름/팀명 검색"
-                                                        value={billingWorkerSearch}
-                                                        onChange={(event) => setBillingWorkerSearch(event.target.value)}
-                                                        className="w-full pl-8 p-2 text-xs bg-slate-100 rounded-lg outline-none"
-                                                    />
-                                                    <FontAwesomeIcon
-                                                        icon={faSearch}
-                                                        className="absolute left-2.5 top-2.5 text-slate-400 text-xs"
-                                                    />
-                                                </div>
-                                                {filteredBillingWorkerOptions.length === 0 ? (
-                                                    <div className="text-xs text-slate-400">검색 결과가 없습니다.</div>
-                                                ) : (
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                                        {filteredBillingWorkerOptions.map((workerOption) => {
-                                                            const isSelected = billingTargetWorkerId === workerOption.key;
-                                                            return (
-                                                                <button
-                                                                    key={`billing-worker-${workerOption.key}`}
-                                                                    type="button"
-                                                                    onClick={() => setBillingTargetWorkerId(workerOption.key)}
-                                                                    className={`text-left px-3 py-2 rounded-lg border text-sm transition ${
-                                                                        isSelected
-                                                                            ? 'border-indigo-400 bg-indigo-50 text-indigo-800'
-                                                                            : 'border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:bg-indigo-50/40'
-                                                                    }`}
-                                                                >
-                                                                    <div className="font-bold flex items-center gap-1.5">
-                                                                        <FontAwesomeIcon icon={faUser} className="text-[11px]" />
-                                                                        {workerOption.workerName}
-                                                                    </div>
-                                                                    <div className="text-[11px] text-slate-400 mt-0.5">
-                                                                        {workerOption.teamName}
-                                                                    </div>
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </>
-                                        )}
-                                    </div>
-                                )}
+                                    )}
+
+                                    {billingMode !== 'same' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setBillingMode(billingMode === 'split' ? 'custom' : 'split')}
+                                            className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                                                billingMode === 'split'
+                                                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                                                    : 'border-slate-200 bg-white text-slate-600 hover:border-amber-200 hover:bg-amber-50/60'
+                                            }`}
+                                        >
+                                            <span className="min-w-0">
+                                                <span className="block text-sm font-extrabold">기간 지정</span>
+                                                <span className="mt-0.5 block text-xs font-semibold text-slate-500">
+                                                    월 중간에 청구대상이 바뀔 때만 켭니다.
+                                                </span>
+                                            </span>
+                                            <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
+                                                billingMode === 'split' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'
+                                            }`}>
+                                                {billingMode === 'split' ? '분할청구' : '일반청구'}
+                                            </span>
+                                        </button>
+                                    )}
+
+                                    {showBillingDateFields && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">
+                                                    {billingMode === 'split' ? '기간 시작일' : '청구 시작일'}
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    maxLength={10}
+                                                    placeholder="YY-MM-DD"
+                                                    value={billingTargetStartDate}
+                                                    onChange={(event) => handleBillingStartDateChange(event.target.value)}
+                                                    onBlur={normalizeBillingStartDate}
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-bold text-slate-500 mb-1.5">
+                                                    {billingMode === 'split' ? '기간 종료일' : '청구 종료일'}
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    maxLength={10}
+                                                    placeholder="선택"
+                                                    value={billingTargetEndDate}
+                                                    onChange={(event) => handleBillingEndDateChange(event.target.value)}
+                                                    onBlur={normalizeBillingEndDate}
+                                                    className="w-full p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-100 outline-none text-sm font-medium bg-white"
+                                                />
+                                            </div>
+                                            <div className="md:col-span-2 text-[11px] font-semibold text-slate-400">
+                                                기본 청구 시작일은 26-01-01입니다. 기간 지정은 월 중간 변경분을 나눌 때만 사용합니다.
+                                            </div>
+                                        </div>
+                                    )}
+                                    {billingMode === 'same' && (
+                                        <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+                                            별도 청구대상 없이 현재 입실자 기준으로 청구합니다.
+                                        </div>
+                                    )}
+                                </div>
 
                                 <div className="flex justify-end">
                                     <button
@@ -515,18 +608,26 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                                         onClick={handleApplyBillingTarget}
                                         disabled={
                                             billingSubmitting ||
-                                            (billingTargetType === 'team' && !billingTeamId) ||
-                                            (billingTargetType === 'worker' && !billingTargetWorkerId)
+                                            (billingMode === 'same' && !canUseSameBillingMode) ||
+                                            (billingMode !== 'same' && !selectedBillingTargetKey)
                                         }
                                         className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white transition shadow-lg ${
                                             billingSubmitting ||
-                                            (billingTargetType === 'team' && !billingTeamId) ||
-                                            (billingTargetType === 'worker' && !billingTargetWorkerId)
+                                            (billingMode === 'same' && !canUseSameBillingMode) ||
+                                            (billingMode !== 'same' && !selectedBillingTargetKey)
                                                 ? 'bg-indigo-300 cursor-not-allowed shadow-none'
                                                 : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200 hover:-translate-y-0.5'
                                         }`}
                                     >
-                                        {billingSubmitting ? '저장 중...' : '청구대상 등록/수정 저장'}
+                                        {billingSubmitting
+                                            ? '처리 중...'
+                                            : billingMode === 'same'
+                                                ? '입실자 동일 저장'
+                                                : billingMode === 'split' && currentBillingTarget
+                                                ? '기간 나눠 저장'
+                                                : currentBillingTarget
+                                                    ? '청구대상 수정'
+                                                    : '청구대상 저장'}
                                     </button>
                                 </div>
                             </div>
@@ -543,7 +644,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                     >
                         닫기
                     </button>
-                    {editingAssignmentId && (
+                    {activeSection === 'assignment' && editingAssignmentId && (
                         <button
                             type="button"
                             onClick={handleCancelEdit}
@@ -552,6 +653,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                             수정 취소
                         </button>
                     )}
+                    {activeSection === 'assignment' && (
                     <button
                         type="button"
                         onClick={handleAssign}
@@ -573,6 +675,7 @@ const AccommodationQuickAssignmentModal: React.FC<Props> = ({
                             </>
                         )}
                     </button>
+                    )}
                 </div>
             </div>
         </div>

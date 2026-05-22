@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
+  faArrowUpRightFromSquare,
   faCheck,
   faEnvelope,
   faInbox,
@@ -432,6 +433,17 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
     await messageService.markAsRead(selectedMessage.id, currentUser.uid);
   };
 
+  const openMessageAction = (message: ErpMessage) => {
+    if (!message.actionUrl) return;
+
+    if (/^https?:\/\//i.test(message.actionUrl)) {
+      window.open(message.actionUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    navigate(message.actionUrl);
+  };
+
   const markInboxRead = async () => {
     if (!currentUser?.uid) return;
     await messageService.markAllAsRead(inboxMessages, currentUser.uid);
@@ -552,7 +564,22 @@ const MessageCenterPage: React.FC<MessageCenterPageProps> = ({ mode = 'view' }) 
                 </button>
               </div>
 
-              <div className="erp-message-body">{selectedMessage.body}</div>
+              <div className="erp-message-body">
+                <div className="erp-message-body-text">{selectedMessage.body}</div>
+
+                {selectedMessage.actionUrl && (
+                  <div className="erp-message-action-row">
+                    <button
+                      type="button"
+                      className="erp-message-primary-button"
+                      onClick={() => openMessageAction(selectedMessage)}
+                    >
+                      <FontAwesomeIcon icon={faArrowUpRightFromSquare} />
+                      {selectedMessage.actionLabel || '바로가기'}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <section className="erp-message-receipts">
                 <h3 className="erp-message-receipts-title">

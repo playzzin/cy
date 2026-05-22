@@ -3,6 +3,7 @@ import { Timestamp } from './timestamp';
 export type CardType = 'CHECK' | 'CREDIT';
 export type CardStatus = 'ASSIGNED' | 'SUSPENDED' | 'CLOSED' | 'AVAILABLE';
 export type CardAssigneeType = 'WORKER' | 'TEAM';
+export type CardBillingTargetType = CardAssigneeType | 'OFFICE' | 'OFFICE_STAFF';
 export type CardTransactionCategory = 'FUEL' | 'TOLL' | 'MEAL' | 'MATERIAL' | 'OTHER';
 
 export interface Card {
@@ -18,7 +19,7 @@ export interface Card {
     currentAssigneeType?: CardAssigneeType;
     currentAssigneeName?: string;
     billingTargetId?: string | null;
-    billingTargetType?: CardAssigneeType | null;
+    billingTargetType?: CardBillingTargetType | null;
     billingTargetName?: string | null;
     memo?: string;
     legacyId?: string;
@@ -33,6 +34,21 @@ export interface CardAssignmentRecord {
     assigneeId: string;
     assigneeType: CardAssigneeType;
     assigneeName: string;
+    startDate: string;
+    endDate?: string;
+    note?: string;
+    legacyId?: string;
+    createdAt?: Timestamp;
+    updatedAt?: Timestamp;
+}
+
+export interface CardBillingTargetRecord {
+    id: string;
+    cardId: string;
+    cardLabel: string;
+    targetId: string;
+    targetType: CardBillingTargetType;
+    targetName: string;
     startDate: string;
     endDate?: string;
     note?: string;

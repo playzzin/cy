@@ -40,8 +40,14 @@ const ruleModeOptions: Array<{ mode: MessageRecipientMode; label: string }> = [
   { mode: 'allWorkers', label: '전체 작업자' },
   { mode: 'teamMembers', label: '선택 팀 소속' },
   { mode: 'teamLeaders', label: '팀장' },
-  { mode: 'relatedTeamLeaders', label: '로그 해당 팀장' }
+  { mode: 'relatedTeamLeaders', label: '로그 해당 팀장' },
+  { mode: 'noticeTargetPositions', label: '공지 대상 직책' }
 ];
+
+const getRuleModeOptions = (events: SystemMessageEvent[]): typeof ruleModeOptions => {
+  const noticeEventOnly = events.every((event) => event.startsWith('notice.'));
+  return ruleModeOptions.filter((option) => option.mode !== 'noticeTargetPositions' || noticeEventOnly);
+};
 
 const isAdminRole = (role?: string | null): boolean => {
   const normalized = String(role || '').trim().toLowerCase();
@@ -61,6 +67,20 @@ const getSelectedUsers = (users: UserData[], ids: string[]): UserData[] =>
 const getSelectedTeams = (teams: Team[], ids: string[]): Team[] =>
   ids.map((id) => teams.find((team) => getTeamKey(team) === id)).filter((team): team is Team => Boolean(team));
 
+const sameStringList = (left: string[] = [], right: string[] = []): boolean => {
+  if (left.length !== right.length) return false;
+  const leftSet = new Set(left);
+  return right.every((value) => leftSet.has(value));
+};
+
+const sameRecipientRule = (left: MessageRecipientRule, right: MessageRecipientRule): boolean =>
+  left.mode === right.mode &&
+  sameStringList(left.recipientIds, right.recipientIds) &&
+  sameStringList(left.teamIds, right.teamIds);
+
+const uniqueStringValues = (values: string[]): string[] =>
+  Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+
 const MessageAutomationSettingsPage: React.FC = () => {
   const { currentUser } = useAuth();
   const [users, setUsers] = useState<UserData[]>([]);
@@ -68,6 +88,7 @@ const MessageAutomationSettingsPage: React.FC = () => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [currentProfile, setCurrentProfile] = useState<UserData | null>(null);
   const [settings, setSettings] = useState<SystemMessageSettings>(DEFAULT_DAILY_REPORT_SYSTEM_SETTINGS);
+  const [groupDraftRules, setGroupDraftRules] = useState<Record<string, MessageRecipientRule>>({});
   const [recipientSearch, setRecipientSearch] = useState('');
   const [teamSearch, setTeamSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -263,6 +284,120 @@ const MessageAutomationSettingsPage: React.FC = () => {
     });
   };
 
+  const getCommonGroupRule = (events: SystemMessageEvent[]): MessageRecipientRule | null => {
+    const [firstEvent, ...restEvents] = events;
+    if (!firstEvent) return null;
+
+    const firstRule = getEventRule(firstEvent);
+    return restEvents.every((event) => sameRecipientRule(firstRule, getEventRule(event)))
+      ? firstRule
+      : null;
+  };
+
+  const getGroupSeedRule = (events: SystemMessageEvent[]): MessageRecipientRule => {
+    const commonRule = getCommonGroupRule(events);
+    if (commonRule) return commonRule;
+
+    const rules = events.map(getEventRule);
+    const userRules = rules.filter((rule) => rule.mode === 'users');
+    if (userRules.length > 0) {
+      return normalizeRecipientRule({
+        mode: 'users',
+        recipientIds: uniqueStringValues(userRules.flatMap((rule) => rule.recipientIds)),
+        recipientNames: uniqueStringValues(userRules.flatMap((rule) => rule.recipientNames)),
+        teamIds: [],
+        teamNames: []
+      }, 'users');
+    }
+
+    const teamRules = rules.filter((rule) => rule.mode === 'teamMembers' || rule.mode === 'teamLeaders');
+    if (teamRules.length > 0) {
+      return normalizeRecipientRule({
+        mode: teamRules[0].mode,
+        recipientIds: [],
+        recipientNames: [],
+        teamIds: uniqueStringValues(teamRules.flatMap((rule) => rule.teamIds)),
+        teamNames: uniqueStringValues(teamRules.flatMap((rule) => rule.teamNames))
+      }, 'users');
+    }
+
+    return rules[0] || createDefaultRecipientRule('users');
+  };
+
+  const getGroupDraftRule = (groupId: string, events: SystemMessageEvent[]): MessageRecipientRule => {
+    return normalizeRecipientRule(
+      groupDraftRules[groupId] || getGroupSeedRule(events),
+      'users'
+    );
+  };
+
+  const setGroupDraftRule = (
+    groupId: string,
+    events: SystemMessageEvent[],
+    patch: Partial<MessageRecipientRule>
+  ) => {
+    setGroupDraftRules((prev) => {
+      const current = normalizeRecipientRule(
+        prev[groupId] || getGroupSeedRule(events),
+        'users'
+      );
+      return {
+        ...prev,
+        [groupId]: normalizeRecipientRule({ ...current, ...patch }, 'users')
+      };
+    });
+  };
+
+  const setGroupRuleMode = (groupId: string, events: SystemMessageEvent[], mode: MessageRecipientMode) => {
+    const current = getGroupDraftRule(groupId, events);
+    setGroupDraftRules((prev) => ({
+      ...prev,
+      [groupId]: normalizeRecipientRule({
+        ...createDefaultRecipientRule(mode),
+        recipientIds: mode === 'users' ? current.recipientIds : [],
+        recipientNames: mode === 'users' ? current.recipientNames : [],
+        teamIds: mode === 'teamMembers' || mode === 'teamLeaders' ? current.teamIds : [],
+        teamNames: mode === 'teamMembers' || mode === 'teamLeaders' ? current.teamNames : []
+      }, 'users')
+    }));
+  };
+
+  const applyGroupRecipientRule = (events: SystemMessageEvent[], rule: MessageRecipientRule) => {
+    const normalizedRule = normalizeRecipientRule(rule, 'users');
+    setSettings((prev) => ({
+      ...prev,
+      events: events.reduce<SystemMessageSettings['events']>((nextEvents, event) => {
+        nextEvents[event] = {
+          ...prev.events[event],
+          enabled: Boolean(prev.events[event]?.enabled),
+          recipientRule: normalizedRule
+        };
+        return nextEvents;
+      }, { ...prev.events })
+    }));
+  };
+
+  const toggleGroupUser = (groupId: string, events: SystemMessageEvent[], uid: string) => {
+    const current = getGroupDraftRule(groupId, events);
+    setGroupDraftRule(groupId, events, {
+      mode: 'users',
+      recipientIds: current.recipientIds.includes(uid)
+        ? current.recipientIds.filter((id) => id !== uid)
+        : [...current.recipientIds, uid]
+    });
+  };
+
+  const toggleGroupTeam = (groupId: string, events: SystemMessageEvent[], team: Team) => {
+    const key = getTeamKey(team);
+    if (!key) return;
+    const current = getGroupDraftRule(groupId, events);
+    setGroupDraftRule(groupId, events, {
+      teamIds: current.teamIds.includes(key)
+        ? current.teamIds.filter((id) => id !== key)
+        : [...current.teamIds, key]
+    });
+  };
+
   const toggleDefaultRecipient = (uid: string) => {
     setSettings((prev) => ({
       ...prev,
@@ -304,9 +439,64 @@ const MessageAutomationSettingsPage: React.FC = () => {
     }
 
     if (normalized.mode === 'relatedTeamLeaders') return '로그 팀 기준';
+    if (normalized.mode === 'noticeTargetPositions') return '공지 등록 시 대상 직책 기준';
 
     const resolved = resolveMessageRecipients(normalized, recipientData);
     return resolved.recipientScope === 'all' ? `${resolved.description} ${resolved.count}명` : resolved.description;
+  };
+
+  const formatRecipientNames = (names: string[], maxCount = 6): string => {
+    if (names.length === 0) return '대상 없음';
+    const visibleNames = names.slice(0, maxCount).join(', ');
+    return names.length > maxCount ? `${visibleNames} 외 ${names.length - maxCount}명` : visibleNames;
+  };
+
+  const getRecipientUserLabel = (user: UserData): string => {
+    const label = getUserDisplayLabel(user);
+    const duplicatedLabel = users.some((otherUser) => otherUser.uid !== user.uid && getUserDisplayLabel(otherUser) === label);
+    return duplicatedLabel && user.email && user.email !== label ? `${label} (${user.email})` : label;
+  };
+
+  const getRuleRecipientNames = (rule: MessageRecipientRule): string[] => {
+    const normalized = normalizeRecipientRule(rule, 'global');
+
+    if (normalized.mode === 'global') {
+      if (settings.recipientScope === 'all') return users.map(getRecipientUserLabel);
+      const selectedUsers = getSelectedUsers(users, settings.recipientIds).map(getRecipientUserLabel);
+      return selectedUsers.length > 0 ? selectedUsers : settings.recipientNames;
+    }
+
+    if (normalized.mode === 'users') {
+      const selectedUsers = getSelectedUsers(users, normalized.recipientIds).map(getRecipientUserLabel);
+      return selectedUsers.length > 0 ? selectedUsers : normalized.recipientNames;
+    }
+
+    if (normalized.mode === 'relatedTeamLeaders') {
+      return ['로그의 해당 팀장'];
+    }
+
+    if (normalized.mode === 'noticeTargetPositions') {
+      return ['공지에 선택된 대상 직책'];
+    }
+
+    const resolved = resolveMessageRecipients(normalized, recipientData);
+    return resolved.recipientNames.length > 0 ? resolved.recipientNames : resolved.recipientIds;
+  };
+
+  const renderRuleRecipientPreview = (rule: MessageRecipientRule) => {
+    const recipientNames = getRuleRecipientNames(rule);
+    return (
+      <span className="erp-message-rule-recipient-names" title={recipientNames.join(', ')}>
+        {formatRecipientNames(recipientNames)}
+      </span>
+    );
+  };
+
+  const getGroupRecipientNamesLabel = (events: SystemMessageEvent[]): string => {
+    const commonRule = getCommonGroupRule(events);
+    return commonRule
+      ? `${getRulePreview(commonRule)} · ${formatRecipientNames(getRuleRecipientNames(commonRule), 3)}`
+      : '이벤트별 대상 다름';
   };
 
   const buildRuleForSave = (rule: MessageRecipientRule): MessageRecipientRule => {
@@ -546,6 +736,7 @@ const MessageAutomationSettingsPage: React.FC = () => {
           <div className="erp-system-event-groups">
             {SYSTEM_MESSAGE_EVENT_GROUPS.map((group) => {
               const enabledCount = group.events.filter((event) => settings.events[event]?.enabled).length;
+              const groupDraftRule = getGroupDraftRule(group.id, group.events);
               return (
                 <section key={group.id} className="erp-system-event-group automation">
                   <div className="erp-system-event-group-header">
@@ -558,6 +749,47 @@ const MessageAutomationSettingsPage: React.FC = () => {
                       <button type="button" onClick={() => setEventGroup(group.events, false)}>해제</button>
                     </div>
                   </div>
+
+                  <details className="erp-message-group-recipient-panel">
+                    <summary>
+                      <span>그룹 수신자 일괄 설정</span>
+                      <small>{getGroupRecipientNamesLabel(group.events)}</small>
+                    </summary>
+                    <div className="erp-message-group-recipient-toolbar">
+                      <select
+                        className="erp-message-select"
+                        value={groupDraftRule.mode}
+                        onChange={(changeEvent) => setGroupRuleMode(group.id, group.events, changeEvent.target.value as MessageRecipientMode)}
+                      >
+                        {getRuleModeOptions(group.events).map((option) => (
+                          <option key={option.mode} value={option.mode}>{option.label}</option>
+                        ))}
+                      </select>
+                      <div className="erp-message-rule-preview-stack">
+                        <span className="erp-message-rule-preview">{getRulePreview(groupDraftRule)}</span>
+                        {renderRuleRecipientPreview(groupDraftRule)}
+                      </div>
+                      <button
+                        type="button"
+                        className="erp-message-secondary-button compact"
+                        onClick={() => applyGroupRecipientRule(group.events, groupDraftRule)}
+                      >
+                        전체 이벤트에 적용
+                      </button>
+                    </div>
+
+                    {groupDraftRule.mode === 'users' && (
+                      <div className="erp-message-group-recipient-picker">
+                        {renderUserPicker(groupDraftRule.recipientIds, (uid) => toggleGroupUser(group.id, group.events, uid))}
+                      </div>
+                    )}
+
+                    {(groupDraftRule.mode === 'teamMembers' || groupDraftRule.mode === 'teamLeaders') && (
+                      <div className="erp-message-group-recipient-picker">
+                        {renderTeamPicker(groupDraftRule.teamIds, (team) => toggleGroupTeam(group.id, group.events, team))}
+                      </div>
+                    )}
+                  </details>
 
                   <div className="erp-message-automation-list">
                     {group.events.map((event) => {
@@ -581,11 +813,14 @@ const MessageAutomationSettingsPage: React.FC = () => {
                               value={rule.mode}
                               onChange={(changeEvent) => setRuleMode(event, changeEvent.target.value as MessageRecipientMode)}
                             >
-                              {ruleModeOptions.map((option) => (
+                              {getRuleModeOptions([event]).map((option) => (
                                 <option key={option.mode} value={option.mode}>{option.label}</option>
                               ))}
                             </select>
-                            <span className="erp-message-rule-preview">{getRulePreview(rule)}</span>
+                            <div className="erp-message-rule-preview-stack">
+                              <span className="erp-message-rule-preview">{getRulePreview(rule)}</span>
+                              {renderRuleRecipientPreview(rule)}
+                            </div>
                           </div>
 
                           {rule.mode === 'users' && (

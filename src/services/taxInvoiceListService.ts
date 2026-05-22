@@ -184,6 +184,11 @@ export const taxInvoiceListService = {
         return normalizeIssuesForMonth(issues, yearMonth);
     },
 
+    async getDeferredIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
+        const issues = await fetchIssuesByMonth(yearMonth);
+        return sortIssuesByNo(issues.filter(issue => issue.issueStatus === 'deferred'));
+    },
+
     async renumberIssuesByMonth(yearMonth: string): Promise<TaxInvoiceIssue[]> {
         const issues = await fetchIssuesByMonth(yearMonth);
         return normalizeIssuesForMonth(issues, yearMonth);

@@ -9,6 +9,7 @@ import {
     faChevronUp,
     faClipboardList,
     faMapMarkerAlt,
+    faRoute,
     faSpinner,
     faTruck,
     faUsers,
@@ -439,21 +440,60 @@ const BoardAddress = styled.div`
     color: #0f172a;
     font-size: 0.86rem;
     font-weight: 800;
+
+    @media (max-width: 768px) {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+`;
+
+const BoardAddressText = styled.span`
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 `;
 
-const BoardTeamLine = styled.div`
-    display: flex;
+const NavigationButtons = styled.div`
+    display: none;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    border-bottom: 1px solid #cbd5e1;
-    padding: 5px 8px;
-    color: #334155;
-    font-size: 0.78rem;
+    gap: 4px;
+    min-width: max-content;
+
+    @media (max-width: 768px) {
+        display: inline-flex;
+    }
+`;
+
+const NavigationButton = styled.button<{ $variant: 'kakao' | 'tmap' }>`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-height: 26px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    border: 1px solid ${(props) => (props.$variant === 'kakao' ? '#facc15' : '#10b981')};
+    background: ${(props) => (props.$variant === 'kakao' ? '#fef08a' : '#d1fae5')};
+    color: ${(props) => (props.$variant === 'kakao' ? '#713f12' : '#065f46')};
+    font-size: 0.68rem;
     font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: filter 0.15s ease, transform 0.15s ease;
+
+    &:hover:not(:disabled) {
+        filter: brightness(0.97);
+        transform: translateY(-1px);
+    }
+
+    &:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+    }
 `;
 
 const BoardWorkerPanel = styled.div`
@@ -462,12 +502,6 @@ const BoardWorkerPanel = styled.div`
     gap: 6px;
     border-bottom: 1px solid #cbd5e1;
     padding: 8px;
-`;
-
-const BoardColumn = styled.div`
-    display: grid;
-    align-content: start;
-    gap: 6px;
 `;
 
 const BoardNameOuter = styled.div`
@@ -586,6 +620,7 @@ const EMPTY_VIEWER_TEAM_SCOPE: ViewerTeamScope = {
 };
 
 const toText = (value: unknown) => String(value || '').trim();
+const MOBILE_USER_AGENT_PATTERN = /Android|iPhone|iPad|iPod|Windows Phone/i;
 
 const sameText = (a: unknown, b: unknown) => {
     const left = toText(a).toLowerCase();
@@ -896,22 +931,78 @@ const getReadableTextColor = (hex: string) => {
     return luminance > 0.62 ? '#0f172a' : '#ffffff';
 };
 
-const splitColumns = (items: DisplayChip[], columnCount: number) => {
-    const rowsPerColumn = items.length > 0 ? Math.ceil(items.length / columnCount) : 0;
-    return items.reduce<DisplayChip[][]>((columns, item, index) => {
-        const columnIndex = rowsPerColumn > 0 ? Math.floor(index / rowsPerColumn) : 0;
-        if (!columns[columnIndex]) columns[columnIndex] = [];
-        columns[columnIndex].push(item);
-        return columns;
-    }, []);
-};
-
 const formatDateText = (date: string) => {
     try {
         return format(parseISO(date), 'yyyy년 M월 d일 EEEE', { locale: ko });
     } catch {
         return date;
     }
+};
+
+const formatShortDateText = (date: string) => {
+    try {
+        return format(parseISO(date), 'M월 d일', { locale: ko });
+    } catch {
+        return date;
+    }
+};
+
+const getDispatchUpdatedMillis = (dispatch: DailyDispatch): number => {
+    try {
+        return dispatch.updatedAt?.toMillis?.() || 0;
+    } catch {
+        return 0;
+    }
+};
+
+const getDestinationName = (assignment: ExtendedDispatchAssignment) =>
+    toText(assignment.siteName) || toText(assignment.siteAddress) || '현장';
+
+const getDestinationQuery = (assignment: ExtendedDispatchAssignment) => {
+    const siteName = toText(assignment.siteName);
+    const siteAddress = toText(assignment.siteAddress);
+    return [siteName, siteAddress].filter(Boolean).join(' ');
+};
+
+const buildKakaoNaviDeepLink = (assignment: ExtendedDispatchAssignment) => {
+    const params = new URLSearchParams({
+        name: getDestinationName(assignment),
+        coord_type: 'wgs84',
+    });
+    const address = toText(assignment.siteAddress);
+    if (address) params.set('addr', address);
+    return `kakaonavi://navigate?${params.toString()}`;
+};
+
+const buildKakaoFallbackUrl = (assignment: ExtendedDispatchAssignment) =>
+    `https://map.kakao.com/link/search/${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+
+const buildTmapDeepLink = (assignment: ExtendedDispatchAssignment) =>
+    `tmap://search?name=${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+
+const buildTmapFallbackUrl = (assignment: ExtendedDispatchAssignment) =>
+    `https://www.tmap.co.kr/tmap2/mobile/route.jsp?name=${encodeURIComponent(getDestinationQuery(assignment) || getDestinationName(assignment))}`;
+
+const openNavigation = (deepLink: string, fallbackUrl: string) => {
+    if (!MOBILE_USER_AGENT_PATTERN.test(navigator.userAgent)) {
+        window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+        return;
+    }
+
+    let movedToApp = false;
+    const handleVisibilityChange = () => {
+        if (document.hidden) movedToApp = true;
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange, { once: true });
+    window.location.href = deepLink;
+
+    window.setTimeout(() => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        if (!movedToApp && !document.hidden) {
+            window.location.href = fallbackUrl;
+        }
+    }, 1400);
 };
 
 export const TomorrowScheduleWidget: React.FC = () => {
@@ -963,9 +1054,15 @@ export const TomorrowScheduleWidget: React.FC = () => {
                 const allDispatches = await dispatchService.getAllDispatches();
                 if (!isMounted) return;
 
+                const fallbackDispatches = allDispatches
+                    .filter((dispatch) => dispatch.date !== tomorrowDate)
+                    .sort((left, right) => (
+                        getDispatchUpdatedMillis(right) - getDispatchUpdatedMillis(left) ||
+                        (right.date || '').localeCompare(left.date || '', 'en')
+                    ));
                 const latestDispatch =
-                    allDispatches.find((dispatch) => dispatch.date !== tomorrowDate && hasAssignments(dispatch)) ||
-                    allDispatches.find((dispatch) => dispatch.date !== tomorrowDate) ||
+                    fallbackDispatches.find((dispatch) => hasAssignments(dispatch)) ||
+                    fallbackDispatches[0] ||
                     null;
 
                 setState({
@@ -1023,7 +1120,7 @@ export const TomorrowScheduleWidget: React.FC = () => {
         state.source === 'tomorrow'
             ? '내일 일정'
             : state.source === 'fallback'
-                ? '최근 저장 일정'
+                ? `최근 저장 일정 · ${formatShortDateText(state.targetDate)}`
                 : '일정 없음';
 
     const renderChipList = (items: DisplayChip[], emptyText: string) => {
@@ -1096,7 +1193,9 @@ export const TomorrowScheduleWidget: React.FC = () => {
             ) : (
                 <>
                     {state.source === 'fallback' && (
-                        <Notice>내일 저장된 일정이 없어 마지막 저장 일정을 표시합니다.</Notice>
+                        <Notice>
+                            내일 저장된 일정이 없어 마지막 저장 일정({formatDateText(state.targetDate)})을 표시합니다.
+                        </Notice>
                     )}
                     <Metrics>
                         <Metric>
@@ -1136,10 +1235,23 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                     normalizeColor(assignment.teamColor) ||
                                     DEFAULT_RESOURCE_COLOR;
                                 const workerPanelColor = normalizeColor(responsibleTeam.color) || siteColor;
+                                const getWorkerColumnCount = (count: number) =>
+                                    count > 0 ? Math.max(2, Math.ceil(count / BOARD_WORKERS_PER_COLUMN)) : 2;
+                                const workerGroups = workerChips.reduce<Array<{ key: string; rows: DisplayChip[] }>>((groups, worker) => {
+                                    const key = worker.subLabel || worker.color || 'unassigned';
+                                    const existing = groups.find((group) => group.key === key);
+                                    if (existing) {
+                                        existing.rows.push(worker);
+                                        return groups;
+                                    }
+
+                                    groups.push({ key, rows: [worker] });
+                                    return groups;
+                                }, []);
+                                const orderedWorkerChips = workerGroups.flatMap((group) => group.rows);
                                 const workerColumnCount = workerChips.length > 0
                                     ? Math.max(2, Math.ceil(workerChips.length / BOARD_WORKERS_PER_COLUMN))
                                     : 2;
-                                const workerColumns = splitColumns(workerChips, workerColumnCount);
                                 const maxWorkerLabelLength = workerChips.reduce(
                                     (max, row) => Math.max(max, Array.from(row.label).length),
                                     0
@@ -1152,6 +1264,8 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                 );
                                 const vehicleColumnCount =
                                     workerChips.length > BOARD_VEHICLE_TWO_COLUMN_WORKER_THRESHOLD && vehicleChips.length > 1 ? 2 : 1;
+                                const destinationQuery = getDestinationQuery(assignment);
+                                const hasNavigationTarget = destinationQuery.length > 0;
 
                                 return (
                                     <BoardCard
@@ -1170,40 +1284,57 @@ export const TomorrowScheduleWidget: React.FC = () => {
                                             <BoardSiteName>{assignment.siteName || '현장명 미지정'}</BoardSiteName>
                                         </BoardCardHeader>
 
-                                        <BoardAddress>{assignment.siteAddress || '주소 없음'}</BoardAddress>
-                                        <BoardTeamLine>
-                                            <ColorDot $color={responsibleTeam.color} />
-                                            <span>담당팀 {responsibleTeam.label}</span>
-                                        </BoardTeamLine>
-
+                                        <BoardAddress>
+                                            <BoardAddressText title={assignment.siteAddress || '주소 없음'}>
+                                                {assignment.siteAddress || '주소 없음'}
+                                            </BoardAddressText>
+                                            <NavigationButtons aria-label={`${getDestinationName(assignment)} 길안내`}>
+                                                <NavigationButton
+                                                    type="button"
+                                                    $variant="kakao"
+                                                    disabled={!hasNavigationTarget}
+                                                    title="카카오내비로 길안내 열기"
+                                                    onClick={() => openNavigation(buildKakaoNaviDeepLink(assignment), buildKakaoFallbackUrl(assignment))}
+                                                >
+                                                    <FontAwesomeIcon icon={faMapMarkerAlt} />
+                                                    카카오
+                                                </NavigationButton>
+                                                <NavigationButton
+                                                    type="button"
+                                                    $variant="tmap"
+                                                    disabled={!hasNavigationTarget}
+                                                    title="TMAP으로 길안내 열기"
+                                                    onClick={() => openNavigation(buildTmapDeepLink(assignment), buildTmapFallbackUrl(assignment))}
+                                                >
+                                                    <FontAwesomeIcon icon={faRoute} />
+                                                    TMAP
+                                                </NavigationButton>
+                                            </NavigationButtons>
+                                        </BoardAddress>
                                         {workerChips.length > 0 ? (
                                             <BoardWorkerPanel
                                                 style={{
                                                     background: `linear-gradient(180deg, ${hexToRgba(workerPanelColor, 0.28)}, ${hexToRgba(workerPanelColor, 0.62)})`,
-                                                    gridTemplateColumns: `repeat(${workerColumnCount}, minmax(${workerNameMinWidth}px, 1fr))`,
+                                                    gridTemplateColumns: `repeat(${getWorkerColumnCount(orderedWorkerChips.length)}, minmax(${workerNameMinWidth}px, 1fr))`,
                                                 }}
                                             >
-                                                {workerColumns.map((column, columnIndex) => (
-                                                    <BoardColumn key={`worker-column-${columnIndex}`}>
-                                                        {column.map((worker) => {
-                                                            const teamColor = normalizeColor(worker.color) || workerPanelColor;
-                                                            return (
-                                                                <BoardNameOuter
-                                                                    key={worker.key}
-                                                                    style={{
-                                                                        background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
-                                                                        borderColor: teamColor,
-                                                                    }}
-                                                                    title={worker.subLabel ? `${worker.label} · ${worker.subLabel}` : worker.label}
-                                                                >
-                                                                    <BoardNameInner style={{ fontSize: workerNameFontSize }}>
-                                                                        <span>{worker.label}</span>
-                                                                    </BoardNameInner>
-                                                                </BoardNameOuter>
-                                                            );
-                                                        })}
-                                                    </BoardColumn>
-                                                ))}
+                                                {orderedWorkerChips.map((worker) => {
+                                                    const teamColor = normalizeColor(worker.color) || workerPanelColor;
+                                                    return (
+                                                        <BoardNameOuter
+                                                            key={worker.key}
+                                                            style={{
+                                                                background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
+                                                                borderColor: teamColor,
+                                                            }}
+                                                            title={worker.subLabel ? `${worker.label} · ${worker.subLabel}` : worker.label}
+                                                        >
+                                                            <BoardNameInner style={{ fontSize: workerNameFontSize }}>
+                                                                <span>{worker.label}</span>
+                                                            </BoardNameInner>
+                                                        </BoardNameOuter>
+                                                    );
+                                                })}
                                             </BoardWorkerPanel>
                                         ) : (
                                             <BoardEmpty>작업자 미배치</BoardEmpty>

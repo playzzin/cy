@@ -4,14 +4,20 @@ import { cardBillingService } from '../../../services/cardBillingService';
 import { cardService } from '../../../services/cardService';
 import { companyService } from '../../../services/companyService';
 import { siteService, type Site } from '../../../services/siteService';
+import {
+  DEFAULT_TEAM_EXPENSE_CATEGORIES,
+  teamExpenseCategoryService
+} from '../../../services/teamExpenseCategoryService';
 import { teamExpenseLedgerService } from '../../../services/teamExpenseLedgerService';
 import { teamService, type Team } from '../../../services/teamService';
 import { vehicleBillingService } from '../../../services/vehicleBillingService';
 import { toast } from '../../../utils/swal';
+import { appendOfficeAssignmentTeam, isOfficeAssignmentReference } from '../../../utils/supportAssignmentTargets';
 import type { AccommodationBillingDocument } from '../../../types/accommodationBilling';
 import type { Card } from '../../../types/card';
 import type { CardBillingDocument } from '../../../types/cardBilling';
-import type { TeamExpenseClaim, TeamExpenseClaimCategory } from '../../../types/teamExpenseLedger';
+import type { DailyReport } from '../../../services/dailyReportService';
+import type { TeamExpenseCategory, TeamExpenseClaim, TeamExpenseClaimCategory, TeamExpenseClaimType } from '../../../types/teamExpenseLedger';
 import type { VehicleBillingDocument } from '../../../types/vehicleBilling';
 
 export type LedgerSummary = {
@@ -31,6 +37,7 @@ export type LedgerSummary = {
   vehicleOther: number;
   card: number;
   otherClaim: number;
+  officeExpense: number;
   receivable: number;
   payable: number;
 };
@@ -40,7 +47,7 @@ export type BillingScope = 'all' | 'posted';
 export type LedgerClaimGroup = {
   id: string;
   counterpartyTeamName: string;
-  direction: 'receivable' | 'payable' | 'other';
+  direction: 'receivable' | 'payable' | 'other' | 'office';
   rows: TeamExpenseClaim[];
   total: number;
 };
@@ -49,6 +56,7 @@ export type SelectedClaimRows = {
   receivable: TeamExpenseClaim[];
   payable: TeamExpenseClaim[];
   other: TeamExpenseClaim[];
+  office: TeamExpenseClaim[];
 };
 
 export type BillingStatusCounts = {
@@ -79,31 +87,36 @@ export type ExpensePaymentOption = {
   teamIds: string[];
 };
 
-const ALL_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = [
-  { value: 'meal', label: '식대' },
-  { value: 'parking', label: '주차비' },
-  { value: 'fuel', label: '유류비' },
-  { value: 'toll', label: '통행료' },
-  { value: 'material', label: '자재비' },
-  { value: 'tool', label: '공구비' },
-  { value: 'deposit', label: '보증금' },
-  { value: 'marking', label: '마이킹' },
-  { value: 'fieldGoods', label: '현장물품' },
-  { value: 'equipment', label: '장비비' },
-  { value: 'etc', label: '기타' }
-];
+export type ExpenseCategoryOption = {
+  value: TeamExpenseClaimCategory;
+  label: string;
+  scope?: TeamExpenseCategory['scope'];
+  isDefault?: boolean;
+};
 
-const HIDDEN_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['fuel', 'material', 'tool'];
-const OTHER_CLAIM_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'fieldGoods', 'equipment', 'etc'];
-const OTHER_CLAIM_ONLY_CATEGORY_VALUES: TeamExpenseClaimCategory[] = ['deposit', 'marking', 'equipment'];
+const toCategoryOption = (category: TeamExpenseCategory): ExpenseCategoryOption => ({
+  value: category.id,
+  label: category.label,
+  scope: category.scope,
+  isDefault: category.isDefault
+});
 
-export const CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(
-  (option) => !HIDDEN_CATEGORY_VALUES.includes(option.value) && !OTHER_CLAIM_ONLY_CATEGORY_VALUES.includes(option.value)
-);
+const matchesCategoryScope = (category: TeamExpenseCategory, claimType: TeamExpenseClaimType) =>
+  category.isActive && (category.scope === 'both' || category.scope === claimType);
 
-export const OTHER_CLAIM_CATEGORY_OPTIONS: Array<{ value: TeamExpenseClaimCategory; label: string }> = ALL_CATEGORY_OPTIONS.filter(
-  (option) => OTHER_CLAIM_CATEGORY_VALUES.includes(option.value)
-);
+const DEFAULT_ACTIVE_CATEGORY_OPTIONS = DEFAULT_TEAM_EXPENSE_CATEGORIES.filter((category) => category.isActive);
+
+export const CATEGORY_OPTIONS: ExpenseCategoryOption[] = DEFAULT_ACTIVE_CATEGORY_OPTIONS
+  .filter((category) => category.scope === 'both' || category.scope === 'teamCharge')
+  .map(toCategoryOption);
+
+export const OTHER_CLAIM_CATEGORY_OPTIONS: ExpenseCategoryOption[] = DEFAULT_ACTIVE_CATEGORY_OPTIONS
+  .filter((category) => category.scope === 'both' || category.scope === 'otherExpense')
+  .map(toCategoryOption);
+
+export const OFFICE_EXPENSE_CATEGORY_OPTIONS: ExpenseCategoryOption[] = DEFAULT_ACTIVE_CATEGORY_OPTIONS
+  .filter((category) => category.scope === 'both' || category.scope === 'officeExpense')
+  .map(toCategoryOption);
 
 export const buildDefaultYearMonth = () => {
   const now = new Date();
@@ -177,6 +190,7 @@ const makeEmptySummary = (team: Team): LedgerSummary => ({
   vehicleOther: 0,
   card: 0,
   otherClaim: 0,
+  officeExpense: 0,
   receivable: 0,
   payable: 0
 });
@@ -195,11 +209,19 @@ export const getSummaryTotal = (row: LedgerSummary) =>
   row.vehicleOther +
   row.card +
   row.otherClaim +
+  row.officeExpense +
   row.payable -
   row.receivable;
 
-export const getCategoryLabel = (category: TeamExpenseClaimCategory) =>
-  ALL_CATEGORY_OPTIONS.find((option) => option.value === category)?.label ?? '기타';
+export const getCategoryLabel = (category: TeamExpenseClaimCategory, options: ExpenseCategoryOption[] = []) => {
+  const raw = String(category ?? '').trim();
+  if (!raw) return '기타';
+  return (
+    options.find((option) => option.value === raw)?.label ??
+    DEFAULT_TEAM_EXPENSE_CATEGORIES.find((option) => option.id === raw)?.label ??
+    raw
+  );
+};
 
 export const getStatusLabel = (status: TeamExpenseClaim['status']) => {
   if (status === 'charged') return '청구완료';
@@ -220,6 +242,67 @@ const isPostedAccommodation = (doc: AccommodationBillingDocument) => doc.status 
 const isPostedVehicle = (doc: VehicleBillingDocument) => ['CONFIRMED', 'PAID', 'OVERDUE'].includes(String(doc.status ?? ''));
 const isPostedCard = (doc: CardBillingDocument) => ['CONFIRMED', 'PAID', 'OVERDUE'].includes(String(doc.status ?? ''));
 const isPostedClaim = (claim: TeamExpenseClaim) => claim.status === 'charged' || claim.status === 'settled';
+
+const hasChargeTarget = (claim: TeamExpenseClaim) =>
+  Boolean(String(claim.chargeToTeamId ?? '').trim() || String(claim.chargeToTeamName ?? '').trim());
+
+export const isOfficeExpenseClaim = (claim: TeamExpenseClaim) =>
+  claim.claimType === 'officeExpense' ||
+  (
+    (claim.claimType === 'otherExpense' || !hasChargeTarget(claim)) &&
+    isOfficeAssignmentReference(claim.payerTeamId, claim.payerTeamName)
+  );
+
+export const isOtherExpenseClaim = (claim: TeamExpenseClaim) =>
+  !isOfficeExpenseClaim(claim) && (claim.claimType === 'otherExpense' || !hasChargeTarget(claim));
+
+export const getEffectiveClaimType = (claim: TeamExpenseClaim): TeamExpenseClaimType => {
+  if (isOfficeExpenseClaim(claim)) return 'officeExpense';
+  if (isOtherExpenseClaim(claim)) return 'otherExpense';
+  return 'teamCharge';
+};
+
+const hasAttendance = (report: DailyReport) => {
+  if (toFiniteNumber((report as any).totalManDay) > 0) return true;
+
+  return (report.workers ?? []).some((worker) => {
+    const manDay = toFiniteNumber((worker as any).manDay);
+    const status = String((worker as any).status ?? '');
+    return manDay > 0 || status === 'attendance' || status === 'half';
+  });
+};
+
+export const getAttendedSiteOptions = (siteOptions: Site[], dailyReports: DailyReport[], endDate: string) => {
+  const normalizedEndDate = String(endDate ?? '').slice(0, 10);
+  const yearMonth = normalizedEndDate.slice(0, 7);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalizedEndDate) || !yearMonth) return [];
+
+  const startDate = `${yearMonth}-01`;
+  const attendedSiteIds = new Set<string>();
+  const attendedSiteNames = new Set<string>();
+
+  dailyReports.forEach((report) => {
+    const reportDate = String(report.date ?? '').slice(0, 10);
+    if (reportDate < startDate || reportDate > normalizedEndDate) return;
+    if (!hasAttendance(report)) return;
+
+    const siteId = String(report.siteId ?? '').trim();
+    const siteNameKey = normalizeKey(report.siteName);
+    if (siteId) attendedSiteIds.add(siteId);
+    if (siteNameKey) attendedSiteNames.add(siteNameKey);
+  });
+
+  return siteOptions.filter((site) => {
+    const siteId = String(site.id ?? '').trim();
+    const legacyId = String((site as any).legacyId ?? '').trim();
+    const siteNameKey = normalizeKey(site.name);
+    return (
+      (siteId && attendedSiteIds.has(siteId)) ||
+      (legacyId && attendedSiteIds.has(legacyId)) ||
+      (siteNameKey && attendedSiteNames.has(siteNameKey))
+    );
+  });
+};
 
 export const summarizeVehicleBillingCosts = (doc: VehicleBillingDocument): VehicleCostBreakdown => {
   let rent = 0;
@@ -270,7 +353,7 @@ export const summarizeVehicleBillingCosts = (doc: VehicleBillingDocument): Vehic
   };
 };
 
-export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all') => {
+export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, billingScope: BillingScope = 'all', includeDailyReports = false) => {
   const [teams, setTeams] = useState<Team[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [accommodationDocs, setAccommodationDocs] = useState<AccommodationBillingDocument[]>([]);
@@ -278,12 +361,24 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
   const [cardDocs, setCardDocs] = useState<CardBillingDocument[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [claims, setClaims] = useState<TeamExpenseClaim[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<TeamExpenseCategory[]>(DEFAULT_TEAM_EXPENSE_CATEGORIES);
+  const [dailyReports, setDailyReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList] = await Promise.all([
+      const monthStart = `${yearMonth}-01`;
+      const monthEnd = `${yearMonth}-31`;
+      const dailyReportsPromise = includeDailyReports
+        ? import('../../../services/dailyReportService')
+          .then(({ dailyReportService }) => dailyReportService.getReports({ startDate: monthStart, endDate: monthEnd }))
+          .catch((error) => {
+            console.warn('[useExpenseLedgerData] daily reports load failed', error);
+            return [] as DailyReport[];
+          })
+        : Promise.resolve([] as DailyReport[]);
+      const [teamList, siteList, accommodationList, vehicleList, cardBillingList, claimList, companyList, cardMasterList, categoryList, dailyReportList] = await Promise.all([
         teamService.getTeams(),
         siteService.getSites(),
         accommodationBillingService.getBillingDocuments({ teamId: 'all', yearMonth }),
@@ -291,7 +386,12 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         cardBillingService.getBillingsByMonth(yearMonth),
         teamExpenseLedgerService.getClaimsByMonth(yearMonth),
         companyService.getCompanies(),
-        cardService.getCards()
+        cardService.getCards(),
+        teamExpenseCategoryService.getCategories({ includeInactive: true }).catch((error) => {
+          console.warn('[useExpenseLedgerData] expense categories load failed', error);
+          return DEFAULT_TEAM_EXPENSE_CATEGORIES;
+        }),
+        dailyReportsPromise
       ]);
 
       const cheongyeonCompanies = companyList.filter((company) => isCheongyeonCompanyName((company as any).name));
@@ -311,20 +411,22 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         return false;
       });
 
-      setTeams(filteredTeams);
+      setTeams(appendOfficeAssignmentTeam(filteredTeams, teamList));
       setSites(siteList);
       setAccommodationDocs(accommodationList);
       setVehicleDocs(vehicleList);
       setCardDocs(cardBillingList);
       setCards(cardMasterList);
       setClaims(claimList);
+      setExpenseCategories(categoryList);
+      setDailyReports(dailyReportList);
     } catch (error) {
       console.error('[useExpenseLedgerData] load failed', error);
       toast.error('경비내역 데이터를 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
-  }, [yearMonth]);
+  }, [includeDailyReports, yearMonth]);
 
   useEffect(() => {
     void loadData();
@@ -464,7 +566,14 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       const amount = toFiniteNumber(claim.amount);
       const payerTeam = resolveTeam(claim.payerTeamId, claim.payerTeamName);
       const chargeToTeam = resolveTeam(claim.chargeToTeamId, claim.chargeToTeamName);
-      const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+      const isOfficeExpense = isOfficeExpenseClaim(claim);
+      const isOtherExpense = isOtherExpenseClaim(claim);
+
+      if (payerTeam && isOfficeExpense) {
+        const payer = ensure(payerTeam);
+        payer.officeExpense += amount;
+        return;
+      }
 
       if (payerTeam && isOtherExpense) {
         const payer = ensure(payerTeam);
@@ -498,11 +607,12 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
           vehicle: acc.vehicle + row.vehicleRent + row.vehicleFine + row.vehicleRepair + row.vehicleOther,
           card: acc.card + row.card,
           otherClaim: acc.otherClaim + row.otherClaim,
+          officeExpense: acc.officeExpense + row.officeExpense,
           receivable: acc.receivable + row.receivable,
           payable: acc.payable + row.payable,
           total: acc.total + getSummaryTotal(row)
         }),
-        { accommodation: 0, utility: 0, vehicle: 0, card: 0, otherClaim: 0, receivable: 0, payable: 0, total: 0 }
+        { accommodation: 0, utility: 0, vehicle: 0, card: 0, otherClaim: 0, officeExpense: 0, receivable: 0, payable: 0, total: 0 }
       ),
     [summaries]
   );
@@ -516,7 +626,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         const chargeToTeam = resolveTeam(claim.chargeToTeamId, claim.chargeToTeamName);
         const payerId = getTeamStableId(payerTeam);
         const chargeToId = getTeamStableId(chargeToTeam);
-        if (claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim()) return payerId === selectedTeamId;
+        if (getEffectiveClaimType(claim) !== 'teamCharge') return payerId === selectedTeamId;
         return payerId === selectedTeamId || chargeToId === selectedTeamId;
       })
       .forEach((claim) => {
@@ -524,19 +634,24 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         const chargeToTeam = resolveTeam(claim.chargeToTeamId, claim.chargeToTeamName);
         const payerId = getTeamStableId(payerTeam);
         const chargeToId = getTeamStableId(chargeToTeam);
-        const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
-        const direction = isOtherExpense
-          ? 'other'
-          : selectedTeamId !== 'all' && chargeToId === selectedTeamId
-            ? 'payable'
-            : 'receivable';
+        const effectiveClaimType = getEffectiveClaimType(claim);
+        const isStandaloneExpense = effectiveClaimType !== 'teamCharge';
+        const direction = effectiveClaimType === 'officeExpense'
+          ? 'office'
+          : effectiveClaimType === 'otherExpense'
+            ? 'other'
+            : selectedTeamId !== 'all' && chargeToId === selectedTeamId
+              ? 'payable'
+              : 'receivable';
         let counterpartyTeamName = claim.chargeToTeamName || '상대팀 미지정';
-        if (isOtherExpense) {
+        if (effectiveClaimType === 'officeExpense') {
+          counterpartyTeamName = '사무실경비';
+        } else if (effectiveClaimType === 'otherExpense') {
           counterpartyTeamName = '청구대상 없음';
         }
         if (selectedTeamId !== 'all') {
-          counterpartyTeamName = isOtherExpense
-            ? '청구대상 없음'
+          counterpartyTeamName = isStandaloneExpense
+            ? (effectiveClaimType === 'officeExpense' ? '사무실경비' : '청구대상 없음')
             : chargeToId === selectedTeamId
             ? (claim.payerTeamName || '사용팀 미지정')
             : (claim.chargeToTeamName || '상대팀 미지정');
@@ -547,32 +662,33 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
         map.set(key, {
           id: key,
           counterpartyTeamName,
-          direction: isOtherExpense ? 'other' : payerId === chargeToId ? 'payable' : direction,
+          direction: isStandaloneExpense ? direction : payerId === chargeToId ? 'payable' : direction,
           rows: nextRows,
           total: nextRows.reduce((sum, row) => sum + toFiniteNumber(row.amount), 0)
         });
       });
     return Array.from(map.values()).sort((a, b) => {
-      const order = { receivable: 0, payable: 1, other: 2 } as const;
+      const order = { receivable: 0, payable: 1, other: 2, office: 3 } as const;
       if (a.direction !== b.direction) return order[a.direction] - order[b.direction];
       return a.counterpartyTeamName.localeCompare(b.counterpartyTeamName, 'ko-KR');
     });
   }, [includedClaims, resolveTeam, selectedTeamId]);
 
   const selectedClaims = useMemo<SelectedClaimRows>(() => {
-    if (selectedTeamId === 'all') return { receivable: [], payable: [], other: [] };
+    if (selectedTeamId === 'all') return { receivable: [], payable: [], other: [], office: [] };
 
     return includedClaims.reduce(
       (acc, claim) => {
         const payerTeam = resolveTeam(claim.payerTeamId, claim.payerTeamName);
         const chargeToTeam = resolveTeam(claim.chargeToTeamId, claim.chargeToTeamName);
-        const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
-        if (isOtherExpense && getTeamStableId(payerTeam) === selectedTeamId) acc.other.push(claim);
+        const effectiveClaimType = getEffectiveClaimType(claim);
+        if (effectiveClaimType === 'officeExpense' && getTeamStableId(payerTeam) === selectedTeamId) acc.office.push(claim);
+        else if (effectiveClaimType === 'otherExpense' && getTeamStableId(payerTeam) === selectedTeamId) acc.other.push(claim);
         else if (getTeamStableId(payerTeam) === selectedTeamId) acc.receivable.push(claim);
-        if (!isOtherExpense && getTeamStableId(chargeToTeam) === selectedTeamId) acc.payable.push(claim);
+        if (effectiveClaimType === 'teamCharge' && getTeamStableId(chargeToTeam) === selectedTeamId) acc.payable.push(claim);
         return acc;
       },
-      { receivable: [] as TeamExpenseClaim[], payable: [] as TeamExpenseClaim[], other: [] as TeamExpenseClaim[] }
+      { receivable: [] as TeamExpenseClaim[], payable: [] as TeamExpenseClaim[], other: [] as TeamExpenseClaim[], office: [] as TeamExpenseClaim[] }
     );
   }, [includedClaims, resolveTeam, selectedTeamId]);
 
@@ -609,6 +725,31 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     ];
   }, [cards, teams]);
 
+  const activeExpenseCategories = useMemo(
+    () => expenseCategories.filter((category) => category.isActive),
+    [expenseCategories]
+  );
+
+  const allCategoryOptions = useMemo<ExpenseCategoryOption[]>(
+    () => expenseCategories.map(toCategoryOption),
+    [expenseCategories]
+  );
+
+  const categoryOptions = useMemo<ExpenseCategoryOption[]>(
+    () => expenseCategories.filter((category) => matchesCategoryScope(category, 'teamCharge')).map(toCategoryOption),
+    [expenseCategories]
+  );
+
+  const otherClaimCategoryOptions = useMemo<ExpenseCategoryOption[]>(
+    () => expenseCategories.filter((category) => matchesCategoryScope(category, 'otherExpense')).map(toCategoryOption),
+    [expenseCategories]
+  );
+
+  const officeExpenseCategoryOptions = useMemo<ExpenseCategoryOption[]>(
+    () => expenseCategories.filter((category) => matchesCategoryScope(category, 'officeExpense')).map(toCategoryOption),
+    [expenseCategories]
+  );
+
   const selectedRawDocs = useMemo(() => {
     if (selectedTeamId === 'all') {
       return { accommodationDocs: [], vehicleDocs: [], cardDocs: [] };
@@ -642,6 +783,12 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
     selectedClaims,
     statusCounts,
     cardLabelOptions,
+    expenseCategories,
+    activeExpenseCategories,
+    allCategoryOptions,
+    categoryOptions,
+    otherClaimCategoryOptions,
+    officeExpenseCategoryOptions,
     loadData,
     selectedRawDocs,
     rawDocs: {
@@ -649,6 +796,7 @@ export const useExpenseLedgerData = (yearMonth: string, selectedTeamId: string, 
       vehicleDocs: includedVehicleDocs,
       cardDocs: includedCardDocs,
       cards,
+      dailyReports,
       claims: includedClaims
     }
   };

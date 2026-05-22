@@ -661,8 +661,6 @@ const WhiteboardStatusBoard: React.FC = () => {
             const workers = Array.isArray(report.workers) ? report.workers : [];
 
             if (viewMode === 'site') {
-                if (!isWithinCompanyScope(reportWriterTeam?.companyId, siteCompanyId)) return;
-
                 const siteResponsibleId = responsibleTeam.id;
                 const siteResponsibleName = responsibleTeam.name;
 
@@ -693,7 +691,12 @@ const WhiteboardStatusBoard: React.FC = () => {
                     siteItem.responsibleTeamName = siteResponsibleName;
                 }
 
-                siteItem.reportCount = (siteItem.reportCount || 0) + 1;
+                let siteReportContributed = false;
+                const markSiteReportContribution = () => {
+                    if (siteReportContributed) return;
+                    siteItem.reportCount = (siteItem.reportCount || 0) + 1;
+                    siteReportContributed = true;
+                };
 
                 if (workers.length > 0) {
                     workers.forEach((worker: any) => {
@@ -706,10 +709,15 @@ const WhiteboardStatusBoard: React.FC = () => {
                         if (!detailId || !detailName) return;
 
                         const detailCompanyId = String(workerTeam?.companyId ?? '').trim() || undefined;
+                        if (!isWithinCompanyScope(detailCompanyId, siteCompanyId)) return;
+
                         const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
 
                         const workerManDay = Number(worker.manDay ?? 0);
                         const workerAmount = workerManDay * Number(worker.unitPrice ?? 0);
+                        if (workerManDay <= 0) return;
+
+                        markSiteReportContribution();
 
                         detail.manDay += workerManDay;
                         detail.amount += workerAmount;
@@ -734,10 +742,15 @@ const WhiteboardStatusBoard: React.FC = () => {
                     if (!detailId || !detailName) return;
 
                     const detailCompanyId = String(reportWriterTeam?.companyId ?? '').trim() || undefined;
+                    if (!isWithinCompanyScope(detailCompanyId, siteCompanyId)) return;
+
                     const detail = getOrCreateDetail(siteItem, detailId, detailName, detailCompanyId, detailId);
 
                     const reportManDay = Number(report.totalManDay ?? 0);
                     const reportAmount = Number(report.totalAmount ?? 0);
+                    if (reportManDay <= 0) return;
+
+                    markSiteReportContribution();
 
                     detail.manDay += reportManDay;
                     detail.amount += reportAmount;
@@ -1298,8 +1311,19 @@ const WhiteboardStatusBoard: React.FC = () => {
                                 ? siteCompany
                                 : companies.find(c => c.id === item.companyId);
                             const itemCompanyColor = normalizeHexColor(itemCompany?.color);
+                            const responsibleTeamForItem = item.type === 'site'
+                                ? resolveDashboardTeam(item.responsibleTeamId, item.responsibleTeamName)
+                                : undefined;
+                            const responsibleTeamColor = normalizeHexColor(responsibleTeamForItem?.color);
+                            const displayedResponsibleTeamColor = responsibleTeamColor || (item.responsibleTeamName ? '#8b5cf6' : undefined);
+                            const externalSiteTeamColor = item.type === 'site' && isOtherCompany
+                                ? displayedResponsibleTeamColor
+                                : undefined;
+                            const siteCompanyDisplayColor = item.type === 'site' && siteCompany
+                                ? externalSiteTeamColor || itemCompanyColor || '#6b7280'
+                                : undefined;
                             const fallbackColor = isOrangeTheme ? '#f97316' : '#4f46e5';
-                            const brandColor = itemCompanyColor || fallbackColor;
+                            const brandColor = externalSiteTeamColor || itemCompanyColor || fallbackColor;
                             const ringStyle: CSSWithVars | undefined = isItemExpanded
                                 ? { '--tw-ring-color': hexToRgba(brandColor, 0.7) }
                                 : undefined;
@@ -1340,11 +1364,11 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     {siteCompany && (
                                                         <span
                                                             className="text-xs font-medium flex items-center gap-1.5"
-                                                            style={{ color: siteCompany.color || '#6b7280' }}
+                                                            style={{ color: siteCompanyDisplayColor }}
                                                         >
                                                             <span
                                                                 className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
-                                                                style={{ backgroundColor: siteCompany.color || '#3b82f6' }}
+                                                                style={{ backgroundColor: siteCompanyDisplayColor || '#3b82f6' }}
                                                             >
                                                                 <FontAwesomeIcon icon={faBuilding} className="text-[8px] text-white" />
                                                             </span>
@@ -1352,8 +1376,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                         </span>
                                                     )}
                                                     {item.responsibleTeamName && (() => {
-                                                        const responsibleTeam = resolveDashboardTeam(item.responsibleTeamId, item.responsibleTeamName);
-                                                        const teamColor = responsibleTeam?.color || '#8b5cf6';
+                                                        const teamColor = displayedResponsibleTeamColor || '#8b5cf6';
                                                         return (
                                                             <span
                                                                 className="text-xs font-medium flex items-center gap-1.5"
@@ -1390,7 +1413,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                     </div>
                                                     <div
                                                         className={`mt-1 text-3xl md:text-4xl font-extrabold whitespace-nowrap drop-shadow-lg ${item.manDay && item.manDay > 0 ? '' : 'text-slate-300'}`}
-                                                        style={item.manDay && item.manDay > 0 ? { color: brandColor, textShadow: '0 2px 8px rgba(79,70,229,0.18)' } : undefined}
+                                                        style={item.manDay && item.manDay > 0 ? { color: brandColor, textShadow: `0 2px 8px ${hexToRgba(brandColor, 0.18)}` } : undefined}
                                                     >
                                                         {(item.manDay || 0).toFixed(1)}
                                                         <span className="ml-1 text-lg font-bold text-indigo-400 align-top">공수</span>
@@ -1496,6 +1519,16 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                 const isResponsibleTeam = item.responsibleTeamId === detail.targetId;
                                                                 const isInternalSupport = viewMode === 'site' && detail.companyId === item.companyId && !isResponsibleTeam;
                                                                 const isExternalSupport = viewMode === 'site' && detail.companyId !== item.companyId && detail.companyId !== undefined;
+                                                                const detailTeam = viewMode === 'site'
+                                                                    ? resolveDashboardTeam(detail.targetId, detail.targetName)
+                                                                    : undefined;
+                                                                const detailTeamColor = normalizeHexColor(detailTeam?.color) || '#8b5cf6';
+                                                                const detailManDayColor = isExternalSupport ? detailTeamColor : '#4f46e5';
+                                                                const externalSupportBadgeStyle: React.CSSProperties = {
+                                                                    borderColor: hexToRgba(detailTeamColor, 0.28),
+                                                                    backgroundColor: hexToRgba(detailTeamColor, 0.1),
+                                                                    color: detailTeamColor
+                                                                };
                                                                 const detailStatusBadges = viewMode === 'site'
                                                                     ? [
                                                                         isResponsibleTeam ? { label: '담당팀', className: 'border-slate-200 bg-slate-100 text-slate-600' } : undefined,
@@ -1533,12 +1566,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                     if (viewMode === 'site') {
                                                                                         // 현장별 보기 -> 상세는 팀
                                                                                         // Try lookup by ID or Name since targetId can be a Name now
-                                                                                        const detailTeam = resolveDashboardTeam(detail.targetId, detail.targetName);
-                                                                                        const teamColor = detailTeam?.color || '#8b5cf6';
                                                                                         return (
                                                                                             <span
                                                                                                 className={`rounded-full flex items-center justify-center flex-shrink-0 ${isDetailSelected ? 'w-6 h-6' : 'w-4 h-4'}`}
-                                                                                                style={{ backgroundColor: teamColor }}
+                                                                                                style={{ backgroundColor: detailTeamColor }}
                                                                                             >
                                                                                                 <FontAwesomeIcon icon={faUserGroup} className={`text-white ${isDetailSelected ? 'text-[10px]' : 'text-[7px]'}`} />
                                                                                             </span>
@@ -1567,6 +1598,7 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                         <span
                                                                                             key={badge.label}
                                                                                             className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold leading-none whitespace-nowrap ${badge.className}`}
+                                                                                            style={badge.className.includes('orange') ? externalSupportBadgeStyle : undefined}
                                                                                         >
                                                                                             {badge.label}
                                                                                         </span>
@@ -1574,7 +1606,10 @@ const WhiteboardStatusBoard: React.FC = () => {
                                                                                 </div>
                                                                             )}
 
-                                                                            <div className={`font-black transition-colors ${isDetailSelected ? (isExternalSupport ? 'text-3xl text-orange-500' : 'text-3xl text-indigo-600') : (isExternalSupport ? 'text-lg text-orange-500' : 'text-lg text-indigo-500')}`}>
+                                                                            <div
+                                                                                className={`font-black transition-colors ${isDetailSelected ? 'text-3xl' : 'text-lg'}`}
+                                                                                style={{ color: detailManDayColor }}
+                                                                            >
                                                                                 {(detail.manDay || 0).toFixed(1)}
                                                                             </div>
                                                                             {isDetailSelected && <span className="text-xs text-slate-400 mt-1 whitespace-nowrap">클릭하여 접기</span>}

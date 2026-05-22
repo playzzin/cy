@@ -74,6 +74,8 @@ type RowDraft = {
     teamId: string;
     responsibleTeamId: string;
     responsibleTeamName: string;
+    siteManagerId: string;
+    siteManagerName: string;
     workerId?: string; // New Worker ID if changed
     workerName?: string;
     workerTeamName?: string;
@@ -113,6 +115,7 @@ type ColumnFilterKey =
     | 'siteType'
     | 'paymentType'
     | 'teamName'
+    | 'siteManagerName'
     | 'workerName'
     | 'workerTeamName'
     | 'salaryModel'
@@ -594,6 +597,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         constructorCompanyName: String(site?.companyName || site?.constructorCompanyName || '').trim(),
         partnerId: String(site?.partnerId || '').trim(),
         partnerName: String(site?.partnerName || '').trim(),
+        siteManagerId: String((site as any)?.siteManagerId || '').trim(),
+        siteManagerName: String((site as any)?.siteManagerName || '').trim(),
     }), []);
 
     const getRowSiteDetailValues = useCallback((row: DailyReportWorkerRow) => {
@@ -628,6 +633,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                     responsibleTeamId: row.responsibleTeamId ?? row.teamId,
                     responsibleTeamName: row.responsibleTeamName ?? row.teamName
                 });
+            case 'siteManagerName':
+                return row.siteManagerName ?? '';
             case 'workerName':
                 return row.workerName ?? '';
             case 'workerTeamName':
@@ -647,6 +654,35 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 return '';
         }
     }, [getRowSiteDetailValues, resolveWorkerTeamDisplayName, resolveResponsibleTeamDisplayName]);
+
+    const getSiteManagerOptionsForRow = useCallback((row: Pick<DailyReportWorkerRow, 'responsibleTeamId' | 'responsibleTeamName' | 'teamId' | 'teamName'>) => {
+        const responsibleTeamId = resolveResponsibleTeamCanonicalId({
+            responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+            responsibleTeamName: row.responsibleTeamName ?? row.teamName,
+        });
+        const responsibleTeamName = resolveResponsibleTeamDisplayName({
+            responsibleTeamId: row.responsibleTeamId ?? row.teamId,
+            responsibleTeamName: row.responsibleTeamName ?? row.teamName,
+        });
+        const roleRank: Record<string, number> = { '팀장': 0, '반장': 1 };
+
+        return allWorkers
+            .filter((worker) => {
+                const role = String(worker.role ?? '').trim();
+                if (role !== '팀장' && role !== '반장') return false;
+
+                const workerTeamId = normalizeTeamId(worker.teamId ?? '');
+                const workerTeamName = String(worker.teamName ?? '').trim();
+                return (!!responsibleTeamId && workerTeamId === responsibleTeamId) ||
+                    (!!responsibleTeamName && workerTeamName === responsibleTeamName);
+            })
+            .sort((a, b) => {
+                const rankA = roleRank[String(a.role ?? '').trim()] ?? 99;
+                const rankB = roleRank[String(b.role ?? '').trim()] ?? 99;
+                if (rankA !== rankB) return rankA - rankB;
+                return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
+            });
+    }, [allWorkers, normalizeTeamId, resolveResponsibleTeamCanonicalId, resolveResponsibleTeamDisplayName]);
 
     const getFiltered = useCallback((criteria: { teamId?: string; siteId?: string; workerTeamId?: string }) => {
         const wantTeam = criteria.teamId ? normalizeTeamId(criteria.teamId) : '';
@@ -1342,6 +1378,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                 responsibleTeamId: r.responsibleTeamId,
                 responsibleTeamName: r.responsibleTeamName
             }),
+            siteManagerId: String(r.siteManagerId ?? '').trim(),
+            siteManagerName: String(r.siteManagerName ?? '').trim(),
             workerName: r.workerName ?? '',
             workerTeamName: fallbackWorkerTeamName,
             workerTeamId: canonicalWorkerTeamId || undefined,
@@ -1370,6 +1408,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         if (draft.teamId !== initialDraft.teamId) return true;
         if (draft.responsibleTeamId !== initialDraft.responsibleTeamId) return true;
         if (draft.responsibleTeamName !== initialDraft.responsibleTeamName) return true;
+        if (draft.siteManagerId !== initialDraft.siteManagerId) return true;
+        if (draft.siteManagerName !== initialDraft.siteManagerName) return true;
         if (draft.salaryModel !== resolveReportPayType(original)) return true;
         if (Number(draft.manDay) !== (Number.isFinite(original.manDay) ? original.manDay : 0)) return true;
         if (Number(draft.unitPrice) !== (Number.isFinite(original.unitPrice) ? original.unitPrice : 0)) return true;
@@ -1432,6 +1472,8 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         const siteWideKeys = new Set([
             'responsibleTeamId',
             'responsibleTeamName',
+            'siteManagerId',
+            'siteManagerName',
             'companyId',
             'companyName',
             'constructorCompanyId',
@@ -1467,6 +1509,14 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
 
             reportLevelUpdates.responsibleTeamId = matchedTeam?.id ? String(matchedTeam.id) : '';
             reportLevelUpdates.responsibleTeamName = matchedTeam?.name ?? draft.responsibleTeamName ?? '';
+        }
+
+        if (draft.siteManagerId !== initialDraft.siteManagerId || draft.siteManagerName !== initialDraft.siteManagerName) {
+            const matchedWorker = draft.siteManagerId
+                ? allWorkers.find(worker => String(worker.id ?? '') === draft.siteManagerId || String(worker.legacyId ?? '') === draft.siteManagerId)
+                : undefined;
+            reportLevelUpdates.siteManagerId = matchedWorker?.id ? String(matchedWorker.id) : '';
+            reportLevelUpdates.siteManagerName = matchedWorker?.name ?? draft.siteManagerName ?? '';
         }
 
         if (draft.companyId !== initialDraft.companyId || draft.companyName !== initialDraft.companyName) {
@@ -1510,7 +1560,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
         }
 
         return reportLevelUpdates;
-    }, [getRowInitialDraft, normalizeSiteId, normalizeTeamId, resolveCompanySelection, siteOptions, teams]);
+    }, [allWorkers, getRowInitialDraft, normalizeSiteId, normalizeTeamId, resolveCompanySelection, siteOptions, teams]);
 
     const validateWorkerDraft = useCallback((r: DailyReportWorkerRow, draft: RowDraft): WorkerDraftValidation => {
         const workerName = String(draft.workerName ?? '').trim();
@@ -2660,7 +2710,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                     </div>
                 ) : (
                     <div className="sheet-table-wrapper workbook-frozen-table-wrapper daily-report-v2-wrapper" style={{ flex: 1 }}>
-                    <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1640px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
+                    <table className={`sheet-table daily-report-workbook-table ${showSiteDetailColumns ? 'min-w-[1730px]' : 'min-w-[1310px]'} text-left text-slate-700`}>
                         <colgroup>
                             {isEditMode && <col className="daily-report-col-select" />}
                             <col className="daily-report-col-date" />
@@ -2675,6 +2725,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                             <col className="daily-report-col-site-type" />
                             <col className="daily-report-col-payment-type" />
                             <col className="daily-report-col-team" />
+                            {showSiteDetailColumns && <col className="daily-report-col-name" />}
                             <col className="daily-report-col-name" />
                             <col className="daily-report-col-worker-team" />
                             <col className="daily-report-col-salary" />
@@ -2741,6 +2792,11 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                     '현장소속팀',
                                     'px-2.5 py-2 whitespace-nowrap w-[120px] daily-report-header-purple'
                                 )}
+                                {showSiteDetailColumns && renderFilterHeader(
+                                    'siteManagerName',
+                                    '현장책임자',
+                                    'px-2.5 py-2 whitespace-nowrap w-[90px] daily-report-header-purple'
+                                )}
                                 {renderFilterHeader(
                                     'workerName',
                                     '성명',
@@ -2802,6 +2858,7 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                     responsibleTeamId: displayRow.responsibleTeamId ?? displayRow.teamId,
                                     responsibleTeamName: displayRow.responsibleTeamName ?? displayRow.teamName
                                 });
+                                const displaySiteManagerName = String(displayRow.siteManagerName ?? '').trim();
                                 const displayWorkerTeamName = resolveWorkerTeamDisplayName({
                                     workerTeamId: displayRow.workerTeamId,
                                     workerTeamName: displayRow.workerTeamName
@@ -2948,7 +3005,9 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                         const matchedTeam = teams.find(t => String(t.id ?? t.legacyId ?? '') === val);
                                                         setRowDraft(row, {
                                                             responsibleTeamId: val,
-                                                            responsibleTeamName: matchedTeam?.name ?? val
+                                                            responsibleTeamName: matchedTeam?.name ?? val,
+                                                            siteManagerId: '',
+                                                            siteManagerName: ''
                                                         });
                                                     }}
                                                     className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.responsibleTeamId !== resolveResponsibleTeamOptionId(row) ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
@@ -2960,6 +3019,35 @@ const DailyReportListV2: React.FC<DailyReportListV2Props> = ({ initialDate, targ
                                                 <span className="truncate block" title={displayResponsibleTeamName}>{displayResponsibleTeamName}</span>
                                             )}
                                         </td>
+                                        {showSiteDetailColumns && (
+                                            <td className="px-2.5 py-1.5">
+                                                {isEditMode ? (
+                                                    <select
+                                                        value={displayRow.siteManagerId ?? ''}
+                                                        onChange={(e) => {
+                                                            const managerId = e.target.value;
+                                                            const manager = getSiteManagerOptionsForRow(displayRow).find(worker => String(worker.id ?? '') === managerId);
+                                                            setRowDraft(row, {
+                                                                siteManagerId: managerId,
+                                                                siteManagerName: manager?.name ?? ''
+                                                            });
+                                                        }}
+                                                        className={`w-full px-1 py-0.5 border rounded text-sm ${isDirty && draft?.siteManagerId !== initialDraft?.siteManagerId ? 'border-amber-500 bg-amber-50' : 'border-slate-200'}`}
+                                                    >
+                                                        <option value="">-</option>
+                                                        {getSiteManagerOptionsForRow(displayRow).map(worker => (
+                                                            <option key={String(worker.id ?? worker.legacyId ?? worker.name)} value={String(worker.id ?? '')}>
+                                                                {worker.name}{worker.role ? ` (${worker.role})` : ''}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                ) : displaySiteManagerName ? (
+                                                    <span className="truncate block" title={displaySiteManagerName}>{displaySiteManagerName}</span>
+                                                ) : (
+                                                    <span className="text-slate-300">-</span>
+                                                )}
+                                            </td>
+                                        )}
                                         <td className="px-2.5 py-1.5">
                                             {isEditMode && !isEmptyReport ? (
                                                 <input

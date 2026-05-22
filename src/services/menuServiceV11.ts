@@ -2,6 +2,7 @@ import { doc, getDoc, setDoc, onSnapshot, Unsubscribe, updateDoc } from 'firebas
 import { db } from '../config/firebase';
 import { MenuItem, SiteDataType } from '../types/menu';
 import { DEFAULT_MENU_CONFIG } from '../constants/defaultMenu';
+import { DEFAULT_HEADER_ACTIONS } from '../constants/headerActions';
 import { MENU_PATHS } from '../constants/menuPaths';
 import { SiteDataTypeSchema } from '../types/menuSchema';
 
@@ -95,6 +96,14 @@ const sanitizePositionConfig = (input: any): any[] | undefined => {
     return next.length > 0 ? (next as any[]) : undefined;
 };
 
+const normalizeHeaderActions = (input: any, siteKey: string): MenuItem[] => {
+    const source = Array.isArray(input) ? input : deepClone(DEFAULT_HEADER_ACTIONS);
+
+    return source
+        .map((item: any) => normalizeMenuItem(item, `${siteKey}/headerActions`))
+        .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0);
+};
+
 // ALLOWED_MENU_TREE removed to support dynamic menu management
 
 
@@ -179,6 +188,7 @@ const normalizeSiteDataType = (config: SiteDataType): SiteDataType => {
             name: safeName,
             icon: safeIcon,
             order: typeof site.order === 'number' ? site.order : undefined, // Ensure order is preserved
+            headerActions: normalizeHeaderActions(site.headerActions, siteKey),
             menu: rawMenu
                 .map((item: any) => normalizeMenuItem(item, siteKey))
                 .filter((item: MenuItem) => typeof item.text === 'string' && item.text.trim().length > 0),
@@ -238,6 +248,45 @@ const ensureMenuChild = (config: SiteDataType, parentText: string, childText: st
                 changed = true;
             }
         });
+    });
+
+    return changed;
+};
+
+const NOTICE_BOARD_MENU_ITEM: MenuItem = {
+    text: '공지사항',
+    icon: 'fa-bullhorn',
+    path: '/notices'
+};
+
+const menuTreeContainsNoticeBoard = (items: (MenuItem | string)[] = []): boolean =>
+    items.some((item) => {
+        if (typeof item === 'string') {
+            return item === NOTICE_BOARD_MENU_ITEM.text || MENU_PATHS[item] === NOTICE_BOARD_MENU_ITEM.path;
+        }
+
+        if (item.text === NOTICE_BOARD_MENU_ITEM.text || item.path === NOTICE_BOARD_MENU_ITEM.path) {
+            return true;
+        }
+
+        return Array.isArray(item.sub) ? menuTreeContainsNoticeBoard(item.sub) : false;
+    });
+
+const ensureNoticeBoardMenu = (config: SiteDataType): boolean => {
+    let changed = false;
+
+    Object.entries(config).forEach(([siteKey, site]) => {
+        if (siteKey === 'test' || siteKey === 'nation') return;
+        if (!site || !Array.isArray(site.menu)) return;
+        if (menuTreeContainsNoticeBoard(site.menu)) return;
+        if (Array.isArray(site.deletedItems) && site.deletedItems.includes(NOTICE_BOARD_MENU_ITEM.text)) return;
+
+        const dashboardIndex = site.menu.findIndex((item) =>
+            typeof item !== 'string' && (item.path === '/dashboard' || item.text === '대시보드')
+        );
+        const insertIndex = dashboardIndex >= 0 ? dashboardIndex + 1 : 0;
+        site.menu.splice(insertIndex, 0, { ...NOTICE_BOARD_MENU_ITEM });
+        changed = true;
     });
 
     return changed;
@@ -842,9 +891,10 @@ export const menuServiceV11 = {
             if (!config) return;
 
             const addedNationwidePage = ensureMenuChild(config, '현황관리', '전국페이지');
+            const addedNoticeBoard = ensureNoticeBoardMenu(config);
             const ensuredNationSite = ensureCanonicalNationSiteConfig(config);
             const normalizedSupportAssetMenu = normalizeSupportAssetMenu(config);
-            const changed = addedNationwidePage || ensuredNationSite || normalizedSupportAssetMenu;
+            const changed = addedNationwidePage || addedNoticeBoard || ensuredNationSite || normalizedSupportAssetMenu;
             if (changed) {
                 await menuServiceV11.saveMenuConfig(config);
             }

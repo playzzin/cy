@@ -14,6 +14,7 @@ const FIELD_PATH_RESERVED_CHARS = new Set(['.', '[', ']', '*', '/']);
 
 export interface DashboardWidgetPreference {
     selectedKeys: string[];
+    weatherLocationKey?: string;
     updatedAt?: string;
 }
 
@@ -33,6 +34,11 @@ const normalizeSelectedKeys = (value: unknown): string[] => {
     return Array.from(new Set(value.map((key) => String(key || '').trim()).filter(Boolean)));
 };
 
+const normalizeOptionalText = (value: unknown): string | undefined => {
+    const text = String(value ?? '').trim();
+    return text || undefined;
+};
+
 const normalizePreferences = (value: unknown): DashboardWidgetPreferenceMap => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
 
@@ -44,6 +50,7 @@ const normalizePreferences = (value: unknown): DashboardWidgetPreferenceMap => {
 
         acc[positionKey] = {
             selectedKeys,
+            weatherLocationKey: normalizeOptionalText((raw as { weatherLocationKey?: unknown }).weatherLocationKey),
             updatedAt: typeof (raw as { updatedAt?: unknown }).updatedAt === 'string'
                 ? String((raw as { updatedAt?: unknown }).updatedAt)
                 : undefined,
@@ -77,12 +84,18 @@ export const dashboardWidgetPreferenceService = {
         );
     },
 
-    async savePositionSelection(uid: string, positionId: string | null | undefined, selectedKeys: string[]): Promise<void> {
+    async savePositionSelection(
+        uid: string,
+        positionId: string | null | undefined,
+        selectedKeys: string[],
+        options: { weatherLocationKey?: string } = {}
+    ): Promise<void> {
         if (!uid) throw new Error('missing-user');
 
         const positionKey = normalizePositionKey(positionId);
         const cleanedKeys = normalizeSelectedKeys(selectedKeys);
         if (cleanedKeys.length === 0) throw new Error('empty-selection');
+        const weatherLocationKey = normalizeOptionalText(options.weatherLocationKey);
 
         await setDoc(
             getUserRef(uid),
@@ -90,6 +103,7 @@ export const dashboardWidgetPreferenceService = {
                 dashboardWidgets: {
                     [positionKey]: {
                         selectedKeys: cleanedKeys,
+                        ...(weatherLocationKey ? { weatherLocationKey } : {}),
                         updatedAt: new Date().toISOString(),
                     },
                 },

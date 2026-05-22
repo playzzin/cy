@@ -244,6 +244,9 @@ const SortableMenuNode: React.FC<SortableItemProps> = ({ item, depth, onSelect, 
 
 interface SortableTreeCanvasProps {
     siteId?: string; // Made optional as it's not always passed or strictly needed for logic
+    title?: string;
+    emptyMessage?: string;
+    emptyHint?: React.ReactNode;
     items: MenuItem[]; // Enforce strict type
     onItemsChange: (items: MenuItem[]) => void;
     selectedIds: string[];
@@ -255,7 +258,7 @@ interface SortableTreeCanvasProps {
     headerActions?: React.ReactNode;
 }
 
-const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode, headerActions }) => {
+const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, title, emptyMessage, emptyHint, items, onItemsChange, selectedIds, onSelect, onDelete, onIndent, onOutdent, isMultiSelectMode, headerActions }) => {
     // Flatten items to get list of IDs for SortableContext (only top level here, children handled recursively)
     const topLevelIds = items.map(i => i.id || i.text);
 
@@ -272,7 +275,7 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
                 <div className="flex items-center justify-between mb-6 py-4 border-b border-gray-800">
                     <h2 className="text-lg font-bold text-gray-100 flex items-center gap-3">
                         <span className="w-1.5 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
-                        메뉴 구조도 <span className="text-gray-500 text-sm font-normal ml-2">({siteId === 'cheongyeon' ? '청연 본사' : siteId})</span>
+                        {title || '메뉴 구조'} <span className="text-gray-500 text-sm font-normal ml-2">({siteId === 'cheongyeon' ? '청연 본사' : siteId})</span>
                     </h2>
                     {headerActions && <div className="flex shrink-0 items-center gap-2">{headerActions}</div>}
                 </div>
@@ -280,8 +283,8 @@ const SortableTreeCanvas: React.FC<SortableTreeCanvasProps> = ({ siteId, items, 
                 <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
                     {items.length === 0 ? (
                         <div className="text-center py-20 border-2 border-dashed border-gray-800 rounded-xl">
-                            <p className="text-gray-500 mb-2">메뉴가 비어있습니다.</p>
-                            <p className="text-sm text-gray-600">오른쪽 도구 상자에서 메뉴를 드래그하거나<br />빠른 추가 버튼을 사용하세요.</p>
+                            <p className="text-gray-500 mb-2">{emptyMessage || '메뉴가 비어있습니다.'}</p>
+                            <p className="text-sm text-gray-600">{emptyHint || <>오른쪽 도구 상자에서 메뉴를 드래그하거나<br />빠른 추가 버튼을 사용하세요.</>}</p>
                         </div>
                     ) : (
                         items.map((item, idx) => (

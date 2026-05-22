@@ -46,6 +46,8 @@ export interface TaxInvoiceIssue {
     siteName?: string;         // 현장명 (추적용)
     siteType?: string;         // 현장구분: 지원/도급/직영
     paymentType?: string;      // 결제구분: 계산서/노무
+    carriedFromIssueId?: string;   // 전월 이월 원본 발행리스트 ID
+    carriedFromYearMonth?: string; // 전월 이월 원본 월
     createdAt?: any;
     updatedAt?: any;
 }

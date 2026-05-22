@@ -46,10 +46,10 @@ import {
 } from '../support/hooks/useExpenseLedgerData';
 
 type ViewMode = 'all' | 'sales' | 'purchases' | 'receivable' | 'payable';
-type LedgerMonthScope = 'month' | 'monthAndOpen' | 'allMonths';
 type SettlementStatus = 'all' | 'open' | 'partial' | 'settled' | 'overpaid';
-type ModalType = 'salesImport' | 'purchaseImport' | 'manualEntry' | 'settlement' | null;
+type ModalType = 'salesImport' | 'purchaseImport' | 'manualEntry' | 'settlement' | 'paymentMapping' | null;
 type ImportSourceType = 'taxInvoiceIssue' | 'expenseLedger';
+type PaymentMappingStatus = 'linked' | 'auto' | 'ambiguous' | 'none';
 
 interface WorkbookLedgerUpgradePageProps {
   tenantKey?: WorkbookLedgerTenant;
@@ -81,6 +81,27 @@ interface LedgerInvoiceRow {
   settledAmount: number;
   outstandingAmount: number;
   status: Exclude<SettlementStatus, 'all'>;
+}
+
+interface PaymentMatchCandidate {
+  entry: WorkbookLedgerEntry;
+  settledAmount: number;
+  outstandingAmount: number;
+  score: number;
+  reasons: string[];
+}
+
+interface PaymentMappingSuggestion {
+  status: PaymentMappingStatus;
+  candidates: PaymentMatchCandidate[];
+}
+
+interface LedgerInvoiceRowsFilter {
+  startDate?: string;
+  endDate?: string;
+  teamName?: string;
+  partnerName?: string;
+  keyword?: string;
 }
 
 interface ManualEntryDraft {
@@ -315,14 +336,203 @@ const getAppliedParts = (date: string, sourceMonth?: string) => {
   };
 };
 
+const getEntryAppliedParts = (entry: WorkbookLedgerEntry) => {
+  const derived = getAppliedParts(entry.date, entry.sourceMonth);
+  return {
+    appliedYear: entry.appliedYear ?? derived.appliedYear,
+    appliedMonth: entry.appliedMonth ?? derived.appliedMonth
+  };
+};
+
 const getEntryYearMonth = (entry: Pick<WorkbookLedgerEntry, 'date' | 'sourceMonth'>) => {
   const dateMonth = normalizeText(entry.date).match(/^\d{4}-\d{2}/)?.[0];
   return dateMonth || normalizeText(entry.sourceMonth).slice(0, 7);
 };
 
+const isSettlementViewMode = (viewMode: ViewMode) => viewMode === 'receivable' || viewMode === 'payable';
+
+const isDateInRange = (date: unknown, startDate: string, endDate: string) => {
+  const normalizedDate = normalizeText(date).slice(0, 10);
+  if (!normalizedDate) return false;
+  if (startDate && normalizedDate < startDate) return false;
+  if (endDate && normalizedDate > endDate) return false;
+  return true;
+};
+
+const isDateOnOrBefore = (date: unknown, cutoffDate: string) => {
+  const normalizedDate = normalizeText(date).slice(0, 10);
+  return Boolean(normalizedDate && cutoffDate && normalizedDate <= cutoffDate);
+};
+
 const isInvoiceEntry = (entry: WorkbookLedgerEntry) => parseAmount(entry.totalAmount) > 0;
 
+const isNegativeInvoiceEntry = (entry: WorkbookLedgerEntry) => parseAmount(entry.totalAmount) < 0;
+
 const isPaymentEntry = (entry: WorkbookLedgerEntry) => parseAmount(entry.paymentAmount) > 0;
+
+const isStandalonePaymentEntry = (entry: WorkbookLedgerEntry) => isPaymentEntry(entry) && parseAmount(entry.totalAmount) <= 0;
+
+const isUnmappedPaymentEntry = (entry: WorkbookLedgerEntry) => isStandalonePaymentEntry(entry) && !normalizeText(entry.matchedEntryId);
+
+const sortLedgerEntriesByDate = (left: WorkbookLedgerEntry, right: WorkbookLedgerEntry) => {
+  const dateCompare = normalizeText(left.date).localeCompare(normalizeText(right.date), 'ko-KR');
+  if (dateCompare !== 0) return dateCompare;
+  const createdCompare = normalizeText(left.createdAt).localeCompare(normalizeText(right.createdAt), 'ko-KR');
+  if (createdCompare !== 0) return createdCompare;
+  return normalizeText(left.id).localeCompare(normalizeText(right.id), 'ko-KR');
+};
+
+const getWorkbookEntryKey = (entry: Pick<WorkbookLedgerEntry, 'id' | 'date' | 'partnerName' | 'description'>) => (
+  normalizeText(entry.id) || `${normalizeText(entry.date)}-${normalizeText(entry.partnerName)}-${normalizeText(entry.description)}`
+);
+
+const getSettlementStatus = (totalAmount: number, settledAmount: number): Exclude<SettlementStatus, 'all'> => {
+  const outstandingAmount = totalAmount - settledAmount;
+  if (settledAmount - totalAmount > 0) return 'overpaid';
+  if (outstandingAmount <= 0) return 'settled';
+  if (settledAmount > 0) return 'partial';
+  return 'open';
+};
+
+const buildPaymentMatchCandidates = (
+  invoiceRows: LedgerInvoiceRow[],
+  paymentEntry: WorkbookLedgerEntry,
+  options?: { relaxed?: boolean }
+): PaymentMatchCandidate[] => {
+  const paymentAmount = parseAmount(paymentEntry.paymentAmount);
+  const paymentDate = normalizeText(paymentEntry.date);
+  const partnerKey = normalizePartnerMatchKey(paymentEntry.partnerName);
+  const normalizedSiteName = normalizeText(paymentEntry.siteName).toLowerCase();
+  const normalizedTeamName = normalizeText(paymentEntry.teamName).toLowerCase();
+  const paymentApplied = getEntryAppliedParts(paymentEntry);
+  const relaxed = options?.relaxed ?? false;
+
+  if (paymentAmount <= 0 || !partnerKey) return [];
+
+  return invoiceRows
+    .filter((row) => {
+      const entry = row.entry;
+      if (!entry.id || entry.id === paymentEntry.id) return false;
+      if (entry.transactionType !== paymentEntry.transactionType) return false;
+      if (normalizePartnerMatchKey(entry.partnerName) !== partnerKey) return false;
+      if (paymentDate && normalizeText(entry.date) > paymentDate) return false;
+      if (!relaxed && normalizedSiteName && normalizeText(entry.siteName).toLowerCase() !== normalizedSiteName) return false;
+      if (!relaxed && normalizedTeamName && normalizeText(entry.teamName).toLowerCase() !== normalizedTeamName) return false;
+
+      const invoiceApplied = getEntryAppliedParts(entry);
+      if (!relaxed && paymentApplied.appliedYear !== null && invoiceApplied.appliedYear !== paymentApplied.appliedYear) return false;
+      if (!relaxed && paymentApplied.appliedMonth !== null && invoiceApplied.appliedMonth !== paymentApplied.appliedMonth) return false;
+
+      return true;
+    })
+    .map((row) => {
+      const entry = row.entry;
+      const outstandingAmount = Math.max(row.outstandingAmount, 0);
+      const reasons: string[] = [];
+      let score = 0;
+
+      if (Math.abs(parseAmount(entry.totalAmount) - paymentAmount) < 0.5) {
+        score += 1000;
+        reasons.push('합계 일치');
+      }
+
+      if (Math.abs(outstandingAmount - paymentAmount) < 0.5) {
+        score += 900;
+        reasons.push('잔액 일치');
+      }
+
+      if (normalizedSiteName && normalizeText(entry.siteName).toLowerCase() === normalizedSiteName) {
+        score += 120;
+        reasons.push('현장 일치');
+      }
+
+      if (normalizedTeamName && normalizeText(entry.teamName).toLowerCase() === normalizedTeamName) {
+        score += 40;
+        reasons.push('팀 일치');
+      }
+
+      const invoiceApplied = getEntryAppliedParts(entry);
+      if (paymentApplied.appliedYear !== null && invoiceApplied.appliedYear === paymentApplied.appliedYear) score += 30;
+      if (paymentApplied.appliedMonth !== null && invoiceApplied.appliedMonth === paymentApplied.appliedMonth) {
+        score += 80;
+        reasons.push('적용월 일치');
+      }
+
+      if (paymentDate) {
+        const invoiceDate = normalizeText(entry.date);
+        const dayGap = invoiceDate
+          ? Math.abs(new Date(paymentDate).getTime() - new Date(invoiceDate).getTime()) / 86400000
+          : 3650;
+        score += Math.max(0, 70 - Math.min(dayGap, 70));
+      }
+
+      if (outstandingAmount <= 0) score -= 300;
+
+      return {
+        entry,
+        settledAmount: row.settledAmount,
+        outstandingAmount,
+        score,
+        reasons: reasons.length > 0 ? reasons : ['거래처 일치']
+      };
+    })
+    .sort((left, right) => {
+      const scoreCompare = right.score - left.score;
+      if (scoreCompare !== 0) return scoreCompare;
+      const dateCompare = normalizeText(right.entry.date).localeCompare(normalizeText(left.entry.date), 'ko-KR');
+      if (dateCompare !== 0) return dateCompare;
+      return normalizeText(left.entry.id).localeCompare(normalizeText(right.entry.id), 'ko-KR');
+    });
+};
+
+const getPaymentMappingSuggestion = (
+  invoiceRows: LedgerInvoiceRow[],
+  paymentEntry: WorkbookLedgerEntry
+): PaymentMappingSuggestion => {
+  if (normalizeText(paymentEntry.matchedEntryId)) {
+    return { status: 'linked', candidates: [] };
+  }
+
+  const strictCandidates = buildPaymentMatchCandidates(invoiceRows, paymentEntry);
+  const paymentAmount = parseAmount(paymentEntry.paymentAmount);
+  const exactCandidates = strictCandidates.filter((candidate) => (
+    Math.abs(parseAmount(candidate.entry.totalAmount) - paymentAmount) < 0.5 ||
+    Math.abs(candidate.outstandingAmount - paymentAmount) < 0.5
+  ));
+
+  if (exactCandidates.length === 1) {
+    return { status: 'auto', candidates: exactCandidates };
+  }
+
+  if (strictCandidates.length === 1) {
+    return { status: 'auto', candidates: strictCandidates };
+  }
+
+  if (strictCandidates.length > 1) {
+    return { status: 'ambiguous', candidates: strictCandidates };
+  }
+
+  const relaxedCandidates = buildPaymentMatchCandidates(invoiceRows, paymentEntry, { relaxed: true });
+  if (relaxedCandidates.length > 0) {
+    return { status: 'ambiguous', candidates: relaxedCandidates };
+  }
+
+  return { status: 'none', candidates: [] };
+};
+
+const getPaymentMappingStatusLabel = (status: PaymentMappingStatus) => {
+  if (status === 'linked') return '연결됨';
+  if (status === 'auto') return '자동추천';
+  if (status === 'ambiguous') return '후보다수';
+  return '후보없음';
+};
+
+const getPaymentMappingStatusClass = (status: PaymentMappingStatus) => {
+  if (status === 'auto') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'ambiguous') return 'border-amber-200 bg-amber-50 text-amber-700';
+  if (status === 'linked') return 'border-blue-200 bg-blue-50 text-blue-700';
+  return 'border-rose-200 bg-rose-50 text-rose-700';
+};
 
 const buildDuplicateGuards = (ledgerEntries: WorkbookLedgerEntry[]) => {
   const sourceKeys = new Set<string>();
@@ -453,11 +663,11 @@ const summarizeLedgerRows = (rows: LedgerInvoiceRow[]) => rows.reduce(
     if (row.entry.transactionType === '매출') {
       acc.sales += total;
       acc.receivable += row.outstandingAmount;
-      acc.received += Math.min(settled, total);
+      acc.received += total > 0 ? Math.min(settled, total) : 0;
     } else {
       acc.purchases += total;
       acc.payable += row.outstandingAmount;
-      acc.paid += Math.min(settled, total);
+      acc.paid += total > 0 ? Math.min(settled, total) : 0;
     }
     if (row.status === 'overpaid') acc.overpaid += settled - total;
     return acc;
@@ -465,13 +675,416 @@ const summarizeLedgerRows = (rows: LedgerInvoiceRow[]) => rows.reduce(
   { sales: 0, purchases: 0, receivable: 0, payable: 0, received: 0, paid: 0, overpaid: 0 }
 );
 
+const buildLedgerInvoiceRows = (
+  ledgerEntries: WorkbookLedgerEntry[],
+  paymentsByInvoiceId: Map<string, WorkbookLedgerEntry[]>,
+  paymentCutoffDate: string
+): LedgerInvoiceRow[] => {
+  const invoiceRows = ledgerEntries
+    .filter(isInvoiceEntry)
+    .map((entry) => {
+      const linkedPayments = entry.id ? paymentsByInvoiceId.get(entry.id) ?? [] : [];
+      const cutoffLinkedPayments = linkedPayments.filter((payment) => isDateOnOrBefore(payment.date, paymentCutoffDate));
+      const directPaymentAmount = isDateOnOrBefore(entry.date, paymentCutoffDate)
+        ? parseAmount(entry.paymentAmount)
+        : 0;
+      const linkedPaymentAmount = cutoffLinkedPayments.reduce((sum, payment) => sum + parseAmount(payment.paymentAmount), 0);
+      const totalAmount = parseAmount(entry.totalAmount);
+      const settledAmount = directPaymentAmount + linkedPaymentAmount;
+      const outstandingAmount = Math.max(totalAmount - settledAmount, 0);
+
+      return {
+        entry,
+        linkedPayments,
+        directPaymentAmount,
+        settledAmount,
+        outstandingAmount,
+        status: getSettlementStatus(totalAmount, settledAmount)
+      };
+    });
+
+  const invoiceRowById = new Map<string, LedgerInvoiceRow>();
+  const invoiceRowsByPartner = new Map<string, LedgerInvoiceRow[]>();
+
+  invoiceRows.forEach((row) => {
+    const id = normalizeText(row.entry.id);
+    if (id) invoiceRowById.set(id, row);
+
+    const partnerKey = normalizePartnerMatchKey(row.entry.partnerName);
+    if (!partnerKey) return;
+
+    const bucket = invoiceRowsByPartner.get(partnerKey) ?? [];
+    bucket.push(row);
+    invoiceRowsByPartner.set(partnerKey, bucket);
+  });
+
+  const applySettlementToRow = (row: LedgerInvoiceRow, amount: number) => {
+    const totalAmount = parseAmount(row.entry.totalAmount);
+    const outstandingBeforeApply = Math.max(totalAmount - row.settledAmount, 0);
+    const appliedAmount = Math.min(outstandingBeforeApply, amount);
+    if (appliedAmount <= 0) return;
+
+    row.settledAmount += appliedAmount;
+    row.outstandingAmount = Math.max(totalAmount - row.settledAmount, 0);
+    row.status = getSettlementStatus(totalAmount, row.settledAmount);
+  };
+
+  const findLegacyMatchedRow = (settlementEntry: WorkbookLedgerEntry, exactAmount: number) => {
+    const partnerKey = normalizePartnerMatchKey(settlementEntry.partnerName);
+    if (!partnerKey) return null;
+
+    const partnerRows = invoiceRowsByPartner.get(partnerKey) ?? [];
+    if (!partnerRows.length) return null;
+
+    const settlementDate = normalizeText(settlementEntry.date);
+    const normalizedSiteName = normalizeText(settlementEntry.siteName).toLowerCase();
+    const normalizedTeamName = normalizeText(settlementEntry.teamName).toLowerCase();
+    const settlementApplied = getEntryAppliedParts(settlementEntry);
+
+    const matchesBaseConditions = (row: LedgerInvoiceRow) => {
+      if (settlementDate && normalizeText(row.entry.date) > settlementDate) return false;
+      if (normalizedSiteName && normalizeText(row.entry.siteName).toLowerCase() !== normalizedSiteName) return false;
+      if (normalizedTeamName && normalizeText(row.entry.teamName).toLowerCase() !== normalizedTeamName) return false;
+      return true;
+    };
+
+    const resolveExactAmountCandidate = (rows: LedgerInvoiceRow[]) => {
+      if (exactAmount <= 0) return null;
+
+      const exactMatches = rows.filter((row) => (
+        Math.abs(parseAmount(row.entry.totalAmount) - exactAmount) < 0.5 ||
+        Math.abs(row.outstandingAmount - exactAmount) < 0.5
+      ));
+      return exactMatches.length === 1 ? exactMatches[0] : null;
+    };
+
+    const resolveUniqueOutstandingCandidate = (rows: LedgerInvoiceRow[]) => {
+      const outstandingRows = rows.filter((row) => row.outstandingAmount > 0);
+      return outstandingRows.length === 1 ? outstandingRows[0] : null;
+    };
+
+    const strictRows = partnerRows.filter((row) => {
+      if (!matchesBaseConditions(row)) return false;
+
+      const invoiceApplied = getEntryAppliedParts(row.entry);
+      if (settlementApplied.appliedYear !== null && invoiceApplied.appliedYear !== settlementApplied.appliedYear) return false;
+      if (settlementApplied.appliedMonth !== null && invoiceApplied.appliedMonth !== settlementApplied.appliedMonth) return false;
+      return true;
+    });
+
+    if (strictRows.length === 1) return strictRows[0];
+
+    const strictOutstanding = resolveUniqueOutstandingCandidate(strictRows);
+    if (strictOutstanding) return strictOutstanding;
+
+    const strictExact = resolveExactAmountCandidate(strictRows);
+    if (strictExact) return strictExact;
+
+    const relaxedRows = partnerRows.filter(matchesBaseConditions);
+    if (relaxedRows.length === 1) return relaxedRows[0];
+
+    const relaxedOutstanding = resolveUniqueOutstandingCandidate(relaxedRows);
+    if (relaxedOutstanding) return relaxedOutstanding;
+
+    return resolveExactAmountCandidate(relaxedRows);
+  };
+
+  const findDirectOffsetRow = (adjustmentEntry: WorkbookLedgerEntry) => {
+    const exactAmount = Math.abs(parseAmount(adjustmentEntry.totalAmount));
+    const partnerKey = normalizePartnerMatchKey(adjustmentEntry.partnerName);
+    if (exactAmount <= 0 || !partnerKey) return null;
+
+    const adjustmentDate = normalizeText(adjustmentEntry.date);
+    const normalizedSiteName = normalizeText(adjustmentEntry.siteName).toLowerCase();
+    const normalizedDescription = normalizeText(adjustmentEntry.description).toLowerCase();
+    const normalizedTeamName = normalizeText(adjustmentEntry.teamName).toLowerCase();
+    const adjustmentApplied = getEntryAppliedParts(adjustmentEntry);
+
+    const candidates = (invoiceRowsByPartner.get(partnerKey) ?? []).filter((row) => {
+      const entry = row.entry;
+      if (Math.abs(parseAmount(entry.totalAmount) - exactAmount) >= 0.5) return false;
+      if (adjustmentDate && normalizeText(entry.date) !== adjustmentDate) return false;
+      if (normalizedSiteName && normalizeText(entry.siteName).toLowerCase() !== normalizedSiteName) return false;
+      if (normalizedDescription && normalizeText(entry.description).toLowerCase() !== normalizedDescription) return false;
+      if (normalizedTeamName && normalizeText(entry.teamName).toLowerCase() !== normalizedTeamName) return false;
+
+      const invoiceApplied = getEntryAppliedParts(entry);
+      if (adjustmentApplied.appliedYear !== null && invoiceApplied.appliedYear !== adjustmentApplied.appliedYear) return false;
+      if (adjustmentApplied.appliedMonth !== null && invoiceApplied.appliedMonth !== adjustmentApplied.appliedMonth) return false;
+      return true;
+    });
+
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+
+  ledgerEntries
+    .filter(isStandalonePaymentEntry)
+    .filter((entry) => !normalizeText(entry.matchedEntryId))
+    .filter((entry) => isDateOnOrBefore(entry.date, paymentCutoffDate))
+    .sort(sortLedgerEntriesByDate)
+    .forEach((paymentEntry) => {
+      const paymentAmount = parseAmount(paymentEntry.paymentAmount);
+      const matchedRow = findLegacyMatchedRow(paymentEntry, paymentAmount);
+      if (matchedRow) applySettlementToRow(matchedRow, paymentAmount);
+    });
+
+  ledgerEntries
+    .filter(isNegativeInvoiceEntry)
+    .sort(sortLedgerEntriesByDate)
+    .forEach((adjustmentEntry) => {
+      const adjustmentAmount = Math.abs(parseAmount(adjustmentEntry.totalAmount));
+      if (adjustmentAmount <= 0) return;
+
+      const explicitTargetId = normalizeText(adjustmentEntry.matchedEntryId);
+      const explicitTarget = explicitTargetId ? invoiceRowById.get(explicitTargetId) : null;
+      if (explicitTarget) {
+        applySettlementToRow(explicitTarget, adjustmentAmount);
+        return;
+      }
+
+      const directOffsetRow = findDirectOffsetRow(adjustmentEntry);
+      if (directOffsetRow) {
+        applySettlementToRow(directOffsetRow, adjustmentAmount);
+        return;
+      }
+
+      const legacyMatchedRow = findLegacyMatchedRow(adjustmentEntry, adjustmentAmount);
+      if (legacyMatchedRow) applySettlementToRow(legacyMatchedRow, adjustmentAmount);
+    });
+
+  return invoiceRows.sort((a, b) => normalizeText(b.entry.date).localeCompare(normalizeText(a.entry.date), 'ko-KR'));
+};
+
+const buildWorkbookSummaryParityRows = (
+  ledgerEntries: WorkbookLedgerEntry[],
+  paymentsByInvoiceId: Map<string, WorkbookLedgerEntry[]>,
+  paymentCutoffDate: string,
+  filter: LedgerInvoiceRowsFilter = {}
+): LedgerInvoiceRow[] => {
+  const startDate = normalizeText(filter.startDate);
+  const endDate = normalizeText(filter.endDate);
+  const selectedTeam = normalizeText(filter.teamName);
+  const selectedPartner = normalizeText(filter.partnerName);
+  const keyword = normalizeKey(filter.keyword);
+
+  const matchesCalculationFilter = (entry: WorkbookLedgerEntry) => {
+    if (selectedTeam && selectedTeam !== 'all' && normalizeKey(entry.teamName) !== normalizeKey(selectedTeam)) return false;
+    if (selectedPartner && selectedPartner !== 'all' && normalizeKey(entry.partnerName) !== normalizeKey(selectedPartner)) return false;
+    if (!keyword) return true;
+    return [
+      entry.transactionType,
+      entry.partnerName,
+      entry.siteName,
+      entry.description,
+      entry.note,
+      entry.teamName,
+      entry.sourceType,
+      entry.sourceId
+    ].map(normalizeKey).join('|').includes(keyword);
+  };
+
+  const isRowInDateRange = (row: LedgerInvoiceRow) => {
+    const issueDate = normalizeText(row.entry.date).slice(0, 10);
+    if (!issueDate) return false;
+    if (startDate && issueDate < startDate) return false;
+    if (endDate && issueDate > endDate) return false;
+    return true;
+  };
+
+  const resultRows: LedgerInvoiceRow[] = [];
+
+  (['매출', '매입'] as WorkbookTransactionType[]).forEach((transactionType) => {
+    const summaryInvoiceEntries = ledgerEntries
+      .filter((entry) => entry.transactionType === transactionType)
+      .filter((entry) => parseAmount(entry.totalAmount) !== 0)
+      .filter(matchesCalculationFilter)
+      .sort(sortLedgerEntriesByDate);
+    const positiveInvoiceEntries = summaryInvoiceEntries.filter(isInvoiceEntry);
+    const adjustmentInvoiceEntries = summaryInvoiceEntries.filter(isNegativeInvoiceEntry);
+
+    const invoiceRows = positiveInvoiceEntries.map((entry): LedgerInvoiceRow => ({
+      entry,
+      linkedPayments: entry.id ? paymentsByInvoiceId.get(entry.id) ?? [] : [],
+      directPaymentAmount: 0,
+      settledAmount: 0,
+      outstandingAmount: parseAmount(entry.totalAmount),
+      status: 'open'
+    }));
+    const invoiceRowById = new Map<string, LedgerInvoiceRow>();
+    const invoiceRowsByPartner = new Map<string, LedgerInvoiceRow[]>();
+    invoiceRows.forEach((row) => {
+      invoiceRowById.set(getWorkbookEntryKey(row.entry), row);
+      const partnerKey = normalizePartnerMatchKey(row.entry.partnerName);
+      if (!partnerKey) return;
+      const bucket = invoiceRowsByPartner.get(partnerKey) ?? [];
+      bucket.push(row);
+      invoiceRowsByPartner.set(partnerKey, bucket);
+    });
+
+    const applySettlementToRow = (row: LedgerInvoiceRow, amount: number, options?: { direct?: boolean }) => {
+      if (amount <= 0) return;
+      const totalAmount = parseAmount(row.entry.totalAmount);
+      const appliedAmount = Math.min(Math.max(totalAmount - row.settledAmount, 0), amount);
+      if (appliedAmount <= 0) return;
+      row.settledAmount += appliedAmount;
+      if (options?.direct) row.directPaymentAmount += appliedAmount;
+      row.outstandingAmount = Math.max(totalAmount - row.settledAmount, 0);
+      row.status = getSettlementStatus(totalAmount, row.settledAmount);
+    };
+
+    const findLegacyMatchedRow = (settlementEntry: WorkbookLedgerEntry, exactAmount?: number) => {
+      const partnerKey = normalizePartnerMatchKey(settlementEntry.partnerName);
+      const partnerRows = partnerKey ? invoiceRowsByPartner.get(partnerKey) ?? [] : [];
+      if (!partnerRows.length) return null;
+      const settlementDate = normalizeText(settlementEntry.date);
+      const normalizedSiteName = normalizeText(settlementEntry.siteName).toLowerCase();
+      const normalizedTeamName = normalizeText(settlementEntry.teamName).toLowerCase();
+      const settlementApplied = getEntryAppliedParts(settlementEntry);
+      const matchesBase = (row: LedgerInvoiceRow) => {
+        if (settlementDate && normalizeText(row.entry.date) > settlementDate) return false;
+        if (normalizedSiteName && normalizeText(row.entry.siteName).toLowerCase() !== normalizedSiteName) return false;
+        if (normalizedTeamName && normalizeText(row.entry.teamName).toLowerCase() !== normalizedTeamName) return false;
+        return true;
+      };
+      const exact = (rows: LedgerInvoiceRow[]) => {
+        if (!(exactAmount && exactAmount > 0)) return null;
+        const matches = rows.filter((row) => (
+          Math.abs(parseAmount(row.entry.totalAmount) - exactAmount) < 0.5 ||
+          Math.abs(row.outstandingAmount - exactAmount) < 0.5
+        ));
+        return matches.length === 1 ? matches[0] : null;
+      };
+      const uniqueOutstanding = (rows: LedgerInvoiceRow[]) => {
+        const matches = rows.filter((row) => row.outstandingAmount > 0);
+        return matches.length === 1 ? matches[0] : null;
+      };
+      const strictRows = partnerRows.filter((row) => {
+        if (!matchesBase(row)) return false;
+        const invoiceApplied = getEntryAppliedParts(row.entry);
+        if (settlementApplied.appliedYear !== null && invoiceApplied.appliedYear !== settlementApplied.appliedYear) return false;
+        if (settlementApplied.appliedMonth !== null && invoiceApplied.appliedMonth !== settlementApplied.appliedMonth) return false;
+        return true;
+      });
+      if (strictRows.length === 1) return strictRows[0];
+      const strictOutstanding = uniqueOutstanding(strictRows);
+      if (strictOutstanding) return strictOutstanding;
+      const strictExact = exact(strictRows);
+      if (strictExact) return strictExact;
+      const relaxedRows = partnerRows.filter(matchesBase);
+      if (relaxedRows.length === 1) return relaxedRows[0];
+      const relaxedOutstanding = uniqueOutstanding(relaxedRows);
+      if (relaxedOutstanding) return relaxedOutstanding;
+      return exact(relaxedRows);
+    };
+
+    const findDirectOffsetRow = (adjustmentEntry: WorkbookLedgerEntry) => {
+      const exactAmount = Math.abs(parseAmount(adjustmentEntry.totalAmount));
+      const partnerKey = normalizePartnerMatchKey(adjustmentEntry.partnerName);
+      if (exactAmount <= 0 || !partnerKey) return null;
+      const adjustmentDate = normalizeText(adjustmentEntry.date);
+      const normalizedSiteName = normalizeText(adjustmentEntry.siteName).toLowerCase();
+      const normalizedDescription = normalizeText(adjustmentEntry.description).toLowerCase();
+      const normalizedTeamName = normalizeText(adjustmentEntry.teamName).toLowerCase();
+      const adjustmentApplied = getEntryAppliedParts(adjustmentEntry);
+      const candidates = positiveInvoiceEntries.filter((invoiceEntry) => {
+        if (normalizePartnerMatchKey(invoiceEntry.partnerName) !== partnerKey) return false;
+        if (Math.abs(parseAmount(invoiceEntry.totalAmount) - exactAmount) >= 0.5) return false;
+        if (adjustmentDate && normalizeText(invoiceEntry.date) !== adjustmentDate) return false;
+        if (normalizedSiteName && normalizeText(invoiceEntry.siteName).toLowerCase() !== normalizedSiteName) return false;
+        if (normalizedDescription && normalizeText(invoiceEntry.description).toLowerCase() !== normalizedDescription) return false;
+        if (normalizedTeamName && normalizeText(invoiceEntry.teamName).toLowerCase() !== normalizedTeamName) return false;
+        const invoiceApplied = getEntryAppliedParts(invoiceEntry);
+        if (adjustmentApplied.appliedYear !== null && invoiceApplied.appliedYear !== adjustmentApplied.appliedYear) return false;
+        if (adjustmentApplied.appliedMonth !== null && invoiceApplied.appliedMonth !== adjustmentApplied.appliedMonth) return false;
+        return true;
+      });
+      return candidates.length === 1 ? invoiceRowById.get(getWorkbookEntryKey(candidates[0])) ?? null : null;
+    };
+
+    ledgerEntries
+      .filter((entry) => entry.transactionType === transactionType)
+      .filter(isPaymentEntry)
+      .filter((entry) => isDateOnOrBefore(entry.date, paymentCutoffDate))
+      .filter(matchesCalculationFilter)
+      .sort(sortLedgerEntriesByDate)
+      .forEach((paymentEntry) => {
+        const paymentAmount = parseAmount(paymentEntry.paymentAmount);
+        if (paymentAmount <= 0) return;
+        const matchedEntryId = normalizeText(paymentEntry.matchedEntryId);
+        if (matchedEntryId) {
+          const matchedInvoice = invoiceRowById.get(matchedEntryId);
+          if (matchedInvoice) applySettlementToRow(matchedInvoice, paymentAmount);
+          return;
+        }
+        const selfInvoice = isInvoiceEntry(paymentEntry) ? invoiceRowById.get(getWorkbookEntryKey(paymentEntry)) : null;
+        if (selfInvoice) {
+          applySettlementToRow(selfInvoice, paymentAmount, { direct: true });
+          return;
+        }
+        const legacyMatchedRow = findLegacyMatchedRow(paymentEntry, paymentAmount);
+        if (legacyMatchedRow) applySettlementToRow(legacyMatchedRow, paymentAmount);
+      });
+
+    adjustmentInvoiceEntries.forEach((adjustmentEntry) => {
+      const adjustmentAmount = Math.abs(parseAmount(adjustmentEntry.totalAmount));
+      if (adjustmentAmount <= 0) return;
+      const matchedEntryId = normalizeText(adjustmentEntry.matchedEntryId);
+      if (matchedEntryId) {
+        const matchedInvoice = invoiceRowById.get(matchedEntryId);
+        if (matchedInvoice) applySettlementToRow(matchedInvoice, adjustmentAmount);
+        return;
+      }
+      const directOffsetRow = findDirectOffsetRow(adjustmentEntry);
+      if (directOffsetRow) {
+        applySettlementToRow(directOffsetRow, adjustmentAmount);
+        return;
+      }
+      const legacyMatchedRow = findLegacyMatchedRow(adjustmentEntry, adjustmentAmount);
+      if (legacyMatchedRow) applySettlementToRow(legacyMatchedRow, adjustmentAmount);
+    });
+
+    const adjustmentRowsById = new Map<string, LedgerInvoiceRow>();
+    adjustmentInvoiceEntries.forEach((entry) => {
+      adjustmentRowsById.set(getWorkbookEntryKey(entry), {
+        entry,
+        linkedPayments: [],
+        directPaymentAmount: 0,
+        settledAmount: 0,
+        outstandingAmount: 0,
+        status: 'settled'
+      });
+    });
+    resultRows.push(...summaryInvoiceEntries
+      .map((entry) => {
+        const entryId = getWorkbookEntryKey(entry);
+        if (isInvoiceEntry(entry)) return invoiceRowById.get(entryId) ?? null;
+        if (isNegativeInvoiceEntry(entry)) return adjustmentRowsById.get(entryId) ?? null;
+        return null;
+      })
+      .filter((row): row is LedgerInvoiceRow => Boolean(row))
+      .filter(isRowInDateRange));
+  });
+
+  return resultRows.sort((left, right) => {
+    const dateCompare = normalizeText(right.entry.date).localeCompare(normalizeText(left.entry.date), 'ko-KR');
+    if (dateCompare !== 0) return dateCompare;
+    const partnerCompare = normalizeText(left.entry.partnerName).localeCompare(normalizeText(right.entry.partnerName), 'ko-KR', {
+      numeric: true,
+      sensitivity: 'base'
+    });
+    if (partnerCompare !== 0) return partnerCompare;
+    return getWorkbookEntryKey(left.entry).localeCompare(getWorkbookEntryKey(right.entry), 'ko-KR');
+  });
+};
+
 const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   tenantKey = 'cheongyeon',
   companyLabel = '청연'
 }) => {
   const { currentUser } = useAuth();
   const ledgerService = useMemo(() => createWorkbookLedgerService(tenantKey), [tenantKey]);
-  const [ledgerMonth, setLedgerMonth] = useState(buildDefaultYearMonth());
+  const [ledgerStartDate, setLedgerStartDate] = useState(() => `${buildDefaultYearMonth()}-01`);
+  const [ledgerEndDate, setLedgerEndDate] = useState(() => todayString());
   const [salesImportMonth, setSalesImportMonth] = useState(buildDefaultYearMonth());
   const [purchaseImportMonth, setPurchaseImportMonth] = useState(buildDefaultYearMonth());
   const [entries, setEntries] = useState<WorkbookLedgerEntry[]>([]);
@@ -481,8 +1094,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   const [saving, setSaving] = useState(false);
   const [downloadingKb, setDownloadingKb] = useState(false);
   const [modal, setModal] = useState<ModalType>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('all');
-  const [monthScope, setMonthScope] = useState<LedgerMonthScope>('month');
+  const [viewMode, setViewMode] = useState<ViewMode>('receivable');
   const [statusFilter, setStatusFilter] = useState<SettlementStatus>('all');
   const [selectedTeam, setSelectedTeam] = useState('all');
   const [selectedPartner, setSelectedPartner] = useState('all');
@@ -495,6 +1107,10 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   const [settlementDraft, setSettlementDraft] = useState<SettlementDraft>(() => createEmptySettlementDraft());
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingSettlementId, setEditingSettlementId] = useState<string | null>(null);
+  const [showUnmappedPayments, setShowUnmappedPayments] = useState(false);
+  const [mappingPaymentId, setMappingPaymentId] = useState<string | null>(null);
+  const [selectedMappingTargetId, setSelectedMappingTargetId] = useState('');
+  const [manualMappingTargetId, setManualMappingTargetId] = useState('');
   const [selectedPayableRowIds, setSelectedPayableRowIds] = useState<Set<string>>(new Set());
   const [showKbPreview, setShowKbPreview] = useState(false);
   const [kbReceiverDisplay, setKbReceiverDisplay] = useState(() => normalizeText(companyLabel).slice(0, 10) || '청연');
@@ -502,10 +1118,24 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
 
   const expenseLedger = useExpenseLedgerData(purchaseImportMonth, 'all', 'posted');
 
+  const normalizedLedgerDateRange = useMemo(() => {
+    const startDate = normalizeText(ledgerStartDate);
+    const endDate = normalizeText(ledgerEndDate);
+    if (startDate && endDate && startDate > endDate) {
+      return { startDate: endDate, endDate: startDate };
+    }
+    return { startDate, endDate };
+  }, [ledgerEndDate, ledgerStartDate]);
+
+  const todayCutoffDate = todayString();
+
   const closeModal = useCallback(() => {
     setModal(null);
     setEditingEntryId(null);
     setEditingSettlementId(null);
+    setMappingPaymentId(null);
+    setSelectedMappingTargetId('');
+    setManualMappingTargetId('');
   }, []);
 
   const refreshLedger = useCallback(async (force = false) => {
@@ -625,36 +1255,63 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
     return map;
   }, [paymentEntries]);
 
-  const invoiceRows = useMemo<LedgerInvoiceRow[]>(() => (
-    entries
-      .filter(isInvoiceEntry)
-      .map((entry) => {
-        const linkedPayments = entry.id ? paymentsByInvoiceId.get(entry.id) ?? [] : [];
-        const directPaymentAmount = parseAmount(entry.paymentAmount);
-        const linkedPaymentAmount = linkedPayments.reduce((sum, payment) => sum + parseAmount(payment.paymentAmount), 0);
-        const totalAmount = parseAmount(entry.totalAmount);
-        const settledAmount = directPaymentAmount + linkedPaymentAmount;
-        const outstandingAmount = Math.max(totalAmount - settledAmount, 0);
-        const overpaidAmount = settledAmount - totalAmount;
-        const status: LedgerInvoiceRow['status'] = overpaidAmount > 0
-          ? 'overpaid'
-          : outstandingAmount <= 0
-            ? 'settled'
-            : settledAmount > 0
-              ? 'partial'
-              : 'open';
+  const currentInvoiceRows = useMemo<LedgerInvoiceRow[]>(
+    () => buildLedgerInvoiceRows(entries, paymentsByInvoiceId, todayCutoffDate),
+    [entries, paymentsByInvoiceId, todayCutoffDate]
+  );
 
-        return {
-          entry,
-          linkedPayments,
-          directPaymentAmount,
-          settledAmount,
-          outstandingAmount,
-          status
-        };
+  const unmappedPaymentEntries = useMemo(() => (
+    paymentEntries
+      .filter(isUnmappedPaymentEntry)
+      .slice()
+      .sort((left, right) => {
+        const dateCompare = normalizeText(left.date).localeCompare(normalizeText(right.date), 'ko-KR');
+        if (dateCompare !== 0) return dateCompare;
+        return normalizeText(left.id).localeCompare(normalizeText(right.id), 'ko-KR');
       })
-      .sort((a, b) => normalizeText(b.entry.date).localeCompare(normalizeText(a.entry.date), 'ko-KR'))
-  ), [entries, paymentsByInvoiceId]);
+  ), [paymentEntries]);
+
+  const paymentMappingSuggestionsById = useMemo(() => {
+    const nextMap = new Map<string, PaymentMappingSuggestion>();
+    unmappedPaymentEntries.forEach((entry) => {
+      const entryId = normalizeText(entry.id);
+      if (!entryId) return;
+      nextMap.set(entryId, getPaymentMappingSuggestion(currentInvoiceRows, entry));
+    });
+    return nextMap;
+  }, [currentInvoiceRows, unmappedPaymentEntries]);
+
+  const unmappedPaymentStats = useMemo(() => (
+    unmappedPaymentEntries.reduce(
+      (acc, entry) => {
+        const entryId = normalizeText(entry.id);
+        const status = entryId ? paymentMappingSuggestionsById.get(entryId)?.status : 'none';
+        const bucket = status === 'auto' || status === 'ambiguous' || status === 'none' ? status : 'none';
+        acc.count += 1;
+        acc.amount += parseAmount(entry.paymentAmount);
+        acc[bucket] += 1;
+        return acc;
+      },
+      { count: 0, amount: 0, auto: 0, ambiguous: 0, none: 0 }
+    )
+  ), [paymentMappingSuggestionsById, unmappedPaymentEntries]);
+
+  const mappingPaymentEntry = useMemo(() => (
+    mappingPaymentId ? paymentById.get(mappingPaymentId) ?? null : null
+  ), [mappingPaymentId, paymentById]);
+
+  const mappingSuggestion = useMemo(() => (
+    mappingPaymentId ? paymentMappingSuggestionsById.get(mappingPaymentId) ?? null : null
+  ), [mappingPaymentId, paymentMappingSuggestionsById]);
+
+  const mappingCandidates = useMemo(() => {
+    if (!mappingPaymentEntry) return [];
+    const suggestedCandidates = mappingSuggestion?.candidates ?? [];
+    return (suggestedCandidates.length > 0
+      ? suggestedCandidates
+      : buildPaymentMatchCandidates(currentInvoiceRows, mappingPaymentEntry, { relaxed: true }))
+      .slice(0, 30);
+  }, [currentInvoiceRows, mappingPaymentEntry, mappingSuggestion]);
 
   const teamFilterOptions = useMemo(() => {
     const names = new Set<string>();
@@ -662,30 +1319,28 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       const name = normalizeText(team.name);
       if (name) names.add(name);
     });
-    invoiceRows.forEach((row) => {
+    currentInvoiceRows.forEach((row) => {
       const name = normalizeText(row.entry.teamName);
       if (name) names.add(name);
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko-KR'));
-  }, [invoiceRows, teams]);
+  }, [currentInvoiceRows, teams]);
 
   const partnerFilterOptions = useMemo(() => {
     const names = new Set<string>();
-    invoiceRows.forEach((row) => {
+    currentInvoiceRows.forEach((row) => {
       const name = normalizeText(row.entry.partnerName);
       if (name) names.add(name);
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b, 'ko-KR'));
-  }, [invoiceRows]);
+  }, [currentInvoiceRows]);
 
-  const scopedInvoiceRows = useMemo(() => {
+  const filterRowsBySearchRange = useCallback((rows: LedgerInvoiceRow[]) => {
     const keyword = normalizeKey(searchText);
-    return invoiceRows.filter((row) => {
+    return rows.filter((row) => {
       const entry = row.entry;
-      const entryMonth = getEntryYearMonth(entry);
 
-      if (monthScope === 'month' && entryMonth !== ledgerMonth) return false;
-      if (monthScope === 'monthAndOpen' && entryMonth !== ledgerMonth && row.outstandingAmount <= 0) return false;
+      if (!isDateInRange(entry.date, normalizedLedgerDateRange.startDate, normalizedLedgerDateRange.endDate)) return false;
       if (selectedTeam !== 'all' && normalizeKey(entry.teamName) !== normalizeKey(selectedTeam)) return false;
       if (selectedPartner !== 'all' && normalizeKey(entry.partnerName) !== normalizeKey(selectedPartner)) return false;
 
@@ -702,32 +1357,58 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       ].map(normalizeKey).join('|');
       return haystack.includes(keyword);
     });
-  }, [invoiceRows, ledgerMonth, monthScope, searchText, selectedPartner, selectedTeam]);
+  }, [normalizedLedgerDateRange.endDate, normalizedLedgerDateRange.startDate, searchText, selectedPartner, selectedTeam]);
 
-  const summary = useMemo(() => summarizeLedgerRows(scopedInvoiceRows), [scopedInvoiceRows]);
+  const scopedLedgerFilter = useMemo<LedgerInvoiceRowsFilter>(() => ({
+    startDate: normalizedLedgerDateRange.startDate,
+    endDate: normalizedLedgerDateRange.endDate,
+    teamName: selectedTeam,
+    partnerName: selectedPartner,
+    keyword: searchText
+  }), [normalizedLedgerDateRange.endDate, normalizedLedgerDateRange.startDate, searchText, selectedPartner, selectedTeam]);
+
+  const currentScopedInvoiceRows = useMemo(
+    () => buildWorkbookSummaryParityRows(entries, paymentsByInvoiceId, todayCutoffDate, scopedLedgerFilter),
+    [entries, paymentsByInvoiceId, scopedLedgerFilter, todayCutoffDate]
+  );
+
+  const settlementScopedInvoiceRows = useMemo(
+    () => buildWorkbookSummaryParityRows(entries, paymentsByInvoiceId, normalizedLedgerDateRange.endDate || todayCutoffDate, scopedLedgerFilter),
+    [entries, normalizedLedgerDateRange.endDate, paymentsByInvoiceId, scopedLedgerFilter, todayCutoffDate]
+  );
+
+  const scopedInvoiceRows = useMemo(
+    () => (isSettlementViewMode(viewMode) ? settlementScopedInvoiceRows : currentScopedInvoiceRows),
+    [currentScopedInvoiceRows, settlementScopedInvoiceRows, viewMode]
+  );
+  const invoiceRows = scopedInvoiceRows;
+
+  const summary = useMemo(() => {
+    const currentSummary = summarizeLedgerRows(currentScopedInvoiceRows);
+    const settlementSummary = summarizeLedgerRows(settlementScopedInvoiceRows);
+    return {
+      ...currentSummary,
+      receivable: settlementSummary.receivable,
+      payable: settlementSummary.payable
+    };
+  }, [currentScopedInvoiceRows, settlementScopedInvoiceRows]);
 
   const viewModeStats = useMemo<Record<ViewMode, { count: number; amount: number }>>(() => {
-    const salesRows = scopedInvoiceRows.filter((row) => row.entry.transactionType === '매출');
-    const purchaseRows = scopedInvoiceRows.filter((row) => row.entry.transactionType === '매입');
-    const receivableRows = salesRows.filter((row) => row.outstandingAmount > 0);
-    const payableRows = purchaseRows.filter((row) => row.outstandingAmount > 0);
+    const salesRows = currentScopedInvoiceRows.filter((row) => row.entry.transactionType === '매출');
+    const purchaseRows = currentScopedInvoiceRows.filter((row) => row.entry.transactionType === '매입');
+    const receivableRows = settlementScopedInvoiceRows.filter((row) => row.entry.transactionType === '매출' && row.outstandingAmount > 0);
+    const payableRows = settlementScopedInvoiceRows.filter((row) => row.entry.transactionType === '매입' && row.outstandingAmount > 0);
     return {
       all: {
-        count: scopedInvoiceRows.length,
-        amount: scopedInvoiceRows.reduce((sum, row) => sum + parseAmount(row.entry.totalAmount), 0)
+        count: currentScopedInvoiceRows.length,
+        amount: currentScopedInvoiceRows.reduce((sum, row) => sum + parseAmount(row.entry.totalAmount), 0)
       },
       sales: { count: salesRows.length, amount: summary.sales },
       purchases: { count: purchaseRows.length, amount: summary.purchases },
       receivable: { count: receivableRows.length, amount: summary.receivable },
       payable: { count: payableRows.length, amount: summary.payable }
     };
-  }, [scopedInvoiceRows, summary]);
-
-  const monthScopeLabel = {
-    month: '해당 월 거래',
-    monthAndOpen: '해당 월 + 미결',
-    allMonths: '전체 월'
-  }[monthScope];
+  }, [currentScopedInvoiceRows, settlementScopedInvoiceRows, summary]);
 
   const filteredInvoiceRows = useMemo(() => {
     return scopedInvoiceRows.filter((row) => {
@@ -767,8 +1448,10 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
   const paymentHistoryRows = useMemo(() => (
     paymentEntries
       .filter((entry) => {
-        const entryMonth = getEntryYearMonth(entry);
-        if (monthScope !== 'allMonths' && entryMonth !== ledgerMonth) return false;
+        const paymentCutoffDate = isSettlementViewMode(viewMode)
+          ? normalizedLedgerDateRange.endDate
+          : todayCutoffDate;
+        if (paymentCutoffDate && !isDateOnOrBefore(entry.date, paymentCutoffDate)) return false;
         if (selectedTeam !== 'all' && normalizeKey(entry.teamName) !== normalizeKey(selectedTeam)) return false;
         if (selectedPartner !== 'all' && normalizeKey(entry.partnerName) !== normalizeKey(selectedPartner)) return false;
         const keyword = normalizeKey(searchText);
@@ -785,7 +1468,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
       .slice()
       .sort((a, b) => normalizeText(b.date).localeCompare(normalizeText(a.date), 'ko-KR'))
       .slice(0, 80)
-  ), [ledgerMonth, monthScope, paymentEntries, searchText, selectedPartner, selectedTeam]);
+  ), [normalizedLedgerDateRange.endDate, paymentEntries, searchText, selectedPartner, selectedTeam, todayCutoffDate, viewMode]);
 
   const kbPreviewRows = useMemo<KbTransferPreviewRow[]>(() => (
     selectedPayableRows.map((row) => {
@@ -1380,6 +2063,88 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
     return [selectedSettlementTarget, ...outstandingRows];
   }, [outstandingRows, selectedSettlementTarget]);
 
+  const openPaymentMapping = useCallback((entry: WorkbookLedgerEntry) => {
+    const paymentId = normalizeText(entry.id);
+    if (!paymentId || !isStandalonePaymentEntry(entry)) {
+      toast.warning('매핑할 입금/지급 행을 다시 선택해주세요.');
+      return;
+    }
+
+    if (normalizeText(entry.matchedEntryId)) {
+      toast.warning('이미 원본 거래에 연결된 입금/지급 행입니다.');
+      return;
+    }
+
+    const suggestion = getPaymentMappingSuggestion(currentInvoiceRows, entry);
+    const candidates = suggestion.candidates.length > 0
+      ? suggestion.candidates
+      : buildPaymentMatchCandidates(currentInvoiceRows, entry, { relaxed: true });
+
+    setMappingPaymentId(paymentId);
+    setSelectedMappingTargetId(normalizeText(candidates[0]?.entry.id));
+    setManualMappingTargetId('');
+    setEditingEntryId(null);
+    setEditingSettlementId(null);
+    setModal('paymentMapping');
+  }, [currentInvoiceRows]);
+
+  const savePaymentMapping = useCallback(async () => {
+    if (!mappingPaymentEntry?.id) {
+      toast.warning('매핑할 입금/지급 행을 다시 불러와주세요.');
+      return;
+    }
+
+    const targetId = normalizeText(manualMappingTargetId) || normalizeText(selectedMappingTargetId);
+    const targetRow = currentInvoiceRows.find((row) => normalizeText(row.entry.id) === targetId);
+    if (!targetId || !targetRow || !targetRow.entry.id) {
+      toast.warning('매핑할 원본 매출/매입 행을 선택하거나 ID를 입력해주세요.');
+      return;
+    }
+
+    if (targetRow.entry.transactionType !== mappingPaymentEntry.transactionType) {
+      toast.warning('입금/지급 행과 원본 거래의 구분이 다릅니다.');
+      return;
+    }
+
+    const paymentAmount = parseAmount(mappingPaymentEntry.paymentAmount);
+    if (paymentAmount > targetRow.outstandingAmount) {
+      const result = await Swal.fire({
+        icon: 'warning',
+        title: '잔액보다 큰 금액입니다',
+        text: `입금/지급액 ${formatCurrency(paymentAmount)}원이 원본 잔액 ${formatCurrency(targetRow.outstandingAmount)}원을 초과합니다. 그대로 매핑할까요?`,
+        showCancelButton: true,
+        confirmButtonText: '매핑',
+        cancelButtonText: '취소'
+      });
+      if (!result.isConfirmed) return;
+    }
+
+    setSaving(true);
+    try {
+      await ledgerService.updateEntry(mappingPaymentEntry.id, {
+        matchedEntryId: targetRow.entry.id,
+        updatedBy: currentUser?.uid ?? ''
+      });
+      toast.success('입금/지급 내역을 원본 거래에 연결했습니다.');
+      closeModal();
+      await refreshLedger(true);
+    } catch (error) {
+      console.error('[WorkbookLedgerUpgradePage] payment mapping failed', error);
+      toast.error('입금/지급 매핑 저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    closeModal,
+    currentUser?.uid,
+    currentInvoiceRows,
+    ledgerService,
+    manualMappingTargetId,
+    mappingPaymentEntry,
+    refreshLedger,
+    selectedMappingTargetId
+  ]);
+
   const renderCandidateTable = (
     candidates: ImportCandidate[],
     selected: Set<string>,
@@ -1493,7 +2258,9 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-500">
                 <span>원장 기준: 전체 저장 데이터</span>
                 <span className="h-1 w-1 rounded-full bg-slate-300" />
-                <span>표시 기준: {ledgerMonth} · {monthScopeLabel}</span>
+                <span>발행일: {normalizedLedgerDateRange.startDate || '-'} ~ {normalizedLedgerDateRange.endDate || '-'}</span>
+                <span className="h-1 w-1 rounded-full bg-slate-300" />
+                <span>입금/지급: 매출·매입은 현재까지, 미수·미지급은 종료일 기준</span>
                 <Link to="/payroll/workbook-ledger" className="text-blue-700 hover:underline">기존 장부</Link>
               </div>
             </div>
@@ -1501,10 +2268,21 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
               <label className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
                 <CalendarDays size={16} />
                 <input
-                  type="month"
-                  value={ledgerMonth}
-                  onChange={(event) => setLedgerMonth(event.target.value)}
-                  className="w-32 bg-transparent outline-none"
+                  type="date"
+                  value={ledgerStartDate}
+                  onChange={(event) => setLedgerStartDate(event.target.value)}
+                  className="w-36 bg-transparent outline-none"
+                  aria-label="검색시작일"
+                />
+              </label>
+              <label className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700">
+                <CalendarDays size={16} />
+                <input
+                  type="date"
+                  value={ledgerEndDate}
+                  onChange={(event) => setLedgerEndDate(event.target.value)}
+                  className="w-36 bg-transparent outline-none"
+                  aria-label="검색종료일"
                 />
               </label>
               <button
@@ -1619,7 +2397,7 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
               </div>
             </div>
 
-            <div className="grid gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 lg:grid-cols-[minmax(240px,1fr)_170px_190px_160px_150px]">
+            <div className="grid gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 lg:grid-cols-[minmax(240px,1fr)_170px_190px_220px_150px]">
               <label className="flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-600">
                 <Search size={16} />
                 <input
@@ -1655,15 +2433,9 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
                   ))}
                 </select>
               </label>
-              <select
-                value={monthScope}
-                onChange={(event) => setMonthScope(event.target.value as LedgerMonthScope)}
-                className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
-              >
-                <option value="month">해당 월 거래</option>
-                <option value="monthAndOpen">해당 월 + 미결</option>
-                <option value="allMonths">전체 월</option>
-              </select>
+              <div className="flex h-10 items-center rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-500">
+                발행일 기준 조회 · 잔액 기준 {normalizedLedgerDateRange.endDate || '-'}
+              </div>
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value as SettlementStatus)}
@@ -1676,6 +2448,112 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
                 <option value="overpaid">초과</option>
               </select>
             </div>
+
+            <div className="flex flex-col gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-black text-emerald-950">미매핑 입금/지급</span>
+                  <span className="rounded-md border border-emerald-200 bg-white px-2.5 py-1 text-xs font-black tabular-nums text-emerald-700">
+                    {unmappedPaymentStats.count.toLocaleString('ko-KR')}건 · {formatCurrency(unmappedPaymentStats.amount)}원
+                  </span>
+                </div>
+                <div className="mt-1 text-xs font-bold text-emerald-800">
+                  자동추천 {unmappedPaymentStats.auto.toLocaleString('ko-KR')}건 / 후보다수 {unmappedPaymentStats.ambiguous.toLocaleString('ko-KR')}건 / 후보없음 {unmappedPaymentStats.none.toLocaleString('ko-KR')}건
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUnmappedPayments((prev) => !prev)}
+                className="inline-flex h-10 items-center justify-center rounded-md bg-emerald-700 px-4 text-sm font-black text-white shadow-sm hover:bg-emerald-800 disabled:opacity-50"
+                disabled={loading}
+              >
+                {showUnmappedPayments ? '미매핑 닫기' : '미매핑 리스트'}
+              </button>
+            </div>
+
+            {showUnmappedPayments && (
+              <div className="border-b border-slate-200 bg-white">
+                {unmappedPaymentEntries.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm font-bold text-slate-400">매핑되지 않은 입금/지급 내역이 없습니다.</div>
+                ) : (
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full min-w-[1180px] border-collapse text-sm">
+                      <thead className="sticky top-0 z-10 bg-white text-xs text-slate-500 shadow-sm">
+                        <tr>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">상태</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">구분</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">일자</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">거래처명</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">현장/내용</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">팀</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-right">입금/지급</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-left">추천 원본</th>
+                          <th className="border-b border-slate-200 px-3 py-3 text-center">처리</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {unmappedPaymentEntries.map((entry) => {
+                          const entryId = normalizeText(entry.id);
+                          const suggestion = entryId ? paymentMappingSuggestionsById.get(entryId) : undefined;
+                          const status = suggestion?.status ?? 'none';
+                          const topCandidate = suggestion?.candidates[0];
+                          const teamColor = getTeamColor(entry.teamName);
+
+                          return (
+                            <tr key={entryId || `${entry.date}-${entry.partnerName}-${entry.paymentAmount}`} className="bg-amber-50/35 hover:bg-amber-50" style={{ boxShadow: `inset 4px 0 0 ${teamColor}` }}>
+                              <td className="whitespace-nowrap px-3 py-3">
+                                <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-black ${getPaymentMappingStatusClass(status)}`}>
+                                  {getPaymentMappingStatusLabel(status)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-3">
+                                <span className={`inline-flex rounded-md px-2 py-1 text-xs font-black ${
+                                  entry.transactionType === '매출' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'
+                                }`}>
+                                  {entry.transactionType}
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-3 font-bold text-slate-700">{entry.date || '-'}</td>
+                              <td className="px-3 py-3 font-black text-slate-950">{entry.partnerName || '-'}</td>
+                              <td className="max-w-[240px] px-3 py-3 text-slate-700">
+                                <div className="truncate" title={entry.siteName}>{entry.siteName || '-'}</div>
+                                <div className="mt-0.5 truncate text-xs text-slate-400" title={entry.description || entry.note}>
+                                  {entry.description || entry.note || '-'}
+                                </div>
+                              </td>
+                              <td className="px-3 py-3"><TeamBadge name={entry.teamName} color={teamColor} /></td>
+                              <td className="px-3 py-3 text-right font-black tabular-nums text-emerald-700">{formatCurrency(entry.paymentAmount)}</td>
+                              <td className="max-w-[300px] px-3 py-3 text-xs font-bold text-slate-500">
+                                {topCandidate ? (
+                                  <>
+                                    <div className="truncate text-slate-700" title={`${topCandidate.entry.date} / ${topCandidate.entry.partnerName}`}>
+                                      {topCandidate.entry.date} · {topCandidate.entry.partnerName || '-'}
+                                    </div>
+                                    <div className="mt-0.5 truncate" title={topCandidate.reasons.join(', ')}>
+                                      잔액 {formatCurrency(topCandidate.outstandingAmount)}원 · {topCandidate.reasons.join(', ')}
+                                    </div>
+                                  </>
+                                ) : '자동 후보 없음'}
+                              </td>
+                              <td className="px-3 py-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => openPaymentMapping(entry)}
+                                  disabled={saving || !entryId}
+                                  className="inline-flex h-8 items-center rounded-md border border-emerald-200 bg-white px-3 text-xs font-black text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+                                >
+                                  매핑
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
             {viewMode === 'payable' && (
               <div className="flex flex-col gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2223,6 +3101,129 @@ const WorkbookLedgerUpgradePage: React.FC<WorkbookLedgerUpgradePageProps> = ({
               <button type="button" disabled={saving || !settlementDraft.targetId} onClick={saveSettlement} className="inline-flex h-11 items-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">
                 {saving && <Loader2 size={16} className="animate-spin" />}
                 {editingSettlementId ? '수정' : '등록'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === 'paymentMapping' && mappingPaymentEntry && (
+        <div className={modalOverlayClass}>
+          <div className={`${modalPanelClass} max-w-5xl`}>
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm">
+                  <Banknote size={20} />
+                </span>
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">{mappingPaymentEntry.transactionType === '매입' ? '지급' : '입금'} 매핑</h2>
+                  <div className="mt-0.5 text-xs font-bold text-slate-500">매핑되지 않은 입금/지급 내역을 원본 매출/매입 거래에 연결합니다.</div>
+                </div>
+              </div>
+              <button type="button" onClick={closeModal} className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 bg-white hover:bg-slate-50">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-auto bg-slate-50 p-5">
+              <div className="grid gap-4">
+                <section className={modalSectionClass}>
+                  <div className="grid gap-2 text-sm font-bold text-slate-700 md:grid-cols-4">
+                    <div>
+                      <div className="text-xs font-black text-slate-400">일자</div>
+                      <div className="mt-1 text-slate-950">{mappingPaymentEntry.date || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-400">거래처</div>
+                      <div className="mt-1 truncate text-slate-950">{mappingPaymentEntry.partnerName || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-400">현장</div>
+                      <div className="mt-1 truncate text-slate-950">{mappingPaymentEntry.siteName || '-'}</div>
+                    </div>
+                    <div className="text-right md:text-left">
+                      <div className="text-xs font-black text-slate-400">금액</div>
+                      <div className="mt-1 font-black tabular-nums text-emerald-700">{formatCurrency(mappingPaymentEntry.paymentAmount)}원</div>
+                    </div>
+                  </div>
+                  {(mappingPaymentEntry.description || mappingPaymentEntry.note) && (
+                    <div className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+                      {mappingPaymentEntry.description || mappingPaymentEntry.note}
+                    </div>
+                  )}
+                </section>
+
+                <section className={modalSectionClass}>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-black text-slate-900">추천 원본 거래</h3>
+                    <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-black ${getPaymentMappingStatusClass(mappingSuggestion?.status ?? 'none')}`}>
+                      {getPaymentMappingStatusLabel(mappingSuggestion?.status ?? 'none')}
+                    </span>
+                  </div>
+                  {mappingCandidates.length === 0 ? (
+                    <div className="rounded-md border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm font-bold text-slate-400">
+                      자동 후보가 없습니다. 아래에 원본 행 ID를 직접 입력할 수 있습니다.
+                    </div>
+                  ) : (
+                    <div className="max-h-[360px] overflow-auto rounded-md border border-slate-200 bg-white">
+                      {mappingCandidates.map((candidate) => {
+                        const candidateId = normalizeText(candidate.entry.id);
+                        const checked = candidateId && selectedMappingTargetId === candidateId && !normalizeText(manualMappingTargetId);
+                        return (
+                          <label
+                            key={candidateId || `${candidate.entry.date}-${candidate.entry.partnerName}`}
+                            className={`grid cursor-pointer grid-cols-[22px_minmax(0,1fr)_130px] gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 ${
+                              checked ? 'bg-emerald-50' : 'bg-white'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="payment-mapping-target"
+                              className="mt-1 h-4 w-4 accent-emerald-600"
+                              checked={Boolean(checked)}
+                              onChange={() => {
+                                setSelectedMappingTargetId(candidateId);
+                                setManualMappingTargetId('');
+                              }}
+                            />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-black text-slate-950">
+                                {candidate.entry.date} · {candidate.entry.partnerName || '-'}
+                              </span>
+                              <span className="mt-1 block truncate text-xs font-bold text-slate-500">
+                                {candidate.entry.siteName || '-'} · 합계 {formatCurrency(candidate.entry.totalAmount)}원 · 잔액 {formatCurrency(candidate.outstandingAmount)}원
+                              </span>
+                              <span className="mt-1 block truncate text-xs font-bold text-emerald-700">
+                                {candidate.reasons.join(', ')}
+                              </span>
+                            </span>
+                            <span className="text-right text-xs font-black tabular-nums text-slate-500">
+                              점수 {Math.round(candidate.score)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section className={modalSectionClass}>
+                  <label className={modalLabelClass}>
+                    직접 매핑 ID
+                    <input
+                      value={manualMappingTargetId}
+                      onChange={(event) => setManualMappingTargetId(event.target.value)}
+                      placeholder="후보에 없으면 원본 매출/매입 행 ID 입력"
+                      className={modalInputClass}
+                    />
+                  </label>
+                </section>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4">
+              <button type="button" onClick={closeModal} className="h-11 rounded-md border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 hover:bg-slate-50">취소</button>
+              <button type="button" disabled={saving || (!selectedMappingTargetId && !manualMappingTargetId)} onClick={savePaymentMapping} className="inline-flex h-11 items-center gap-2 rounded-md bg-emerald-600 px-5 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">
+                {saving && <Loader2 size={16} className="animate-spin" />}
+                매핑 저장
               </button>
             </div>
           </div>

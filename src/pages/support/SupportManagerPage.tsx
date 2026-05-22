@@ -53,44 +53,46 @@ const SupportManagerPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 xl:p-8">
-      <div className="w-full max-w-none space-y-6">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5">
+    <div className="min-h-screen w-[calc(100vw-30px)] max-w-full overflow-x-hidden bg-slate-50 px-3 py-4 sm:w-full sm:p-6 xl:p-8">
+      <div className="w-full max-w-none min-w-0 space-y-5 sm:space-y-6">
+        <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 shadow-sm p-4 md:p-5">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
+              <div className="shrink-0 p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
                 <FontAwesomeIcon icon={faLifeRing} className="text-white text-xl" />
               </div>
               <div className="min-w-0">
-                <h1 className="text-2xl font-black text-slate-900 tracking-tight">지원관리 통합센터</h1>
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">지원관리 통합센터</h1>
                 <p className="text-sm text-slate-500 font-medium mt-1">
                   차량, 카드, 숙소의 배정 현황과 청구 업무를 같은 흐름으로 관리합니다.
                 </p>
               </div>
             </div>
 
-            <div className="bg-slate-100 p-1 rounded-xl inline-flex w-fit">
-              {tabs.map((tab) => {
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => handleTabChange(tab.id as SupportTabId)}
-                    className={`flex items-center gap-2.5 rounded-lg border px-5 py-2.5 text-sm font-bold transition-all ${
-                      isActive ? 'bg-white shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
-                    }`}
-                    style={isActive ? {
-                      borderColor: hexToRgba(tab.color, 0.35),
-                      color: tab.color,
-                      boxShadow: `0 4px 12px -8px ${tab.color}`
-                    } : undefined}
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tab.color }} />
-                    <FontAwesomeIcon icon={tab.icon} className={isActive ? '' : 'text-slate-400'} />
-                    {tab.label}
-                  </button>
-                );
-              })}
+            <div className="support-scroll-x w-full lg:w-auto">
+              <div className="support-scroll-inner inline-flex rounded-xl bg-slate-100 p-1">
+                {tabs.map((tab) => {
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => handleTabChange(tab.id as SupportTabId)}
+                      className={`flex items-center gap-2.5 whitespace-nowrap rounded-lg border px-4 py-2.5 text-sm font-bold transition-all sm:px-5 ${
+                        isActive ? 'bg-white shadow-sm' : 'border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-700'
+                      }`}
+                      style={isActive ? {
+                        borderColor: hexToRgba(tab.color, 0.35),
+                        color: tab.color,
+                        boxShadow: `0 4px 12px -8px ${tab.color}`
+                      } : undefined}
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: tab.color }} />
+                      <FontAwesomeIcon icon={tab.icon} className={isActive ? '' : 'text-slate-400'} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

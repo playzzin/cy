@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, memo, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSave, faChevronLeft, faChevronRight, faExclamationTriangle, faFileInvoiceDollar, faUsers, faUser, faPen, faRotateRight, faEye, faBan } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faSave, faChevronLeft, faChevronRight, faExclamationTriangle, faFileInvoiceDollar, faUsers, faUser } from '@fortawesome/free-solid-svg-icons';
 import { accommodationService } from '../../services/accommodationService';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
@@ -96,30 +96,20 @@ const EditableCell = memo<EditableCellProps>(({ value, onCommit, className, plac
 
 EditableCell.displayName = 'EditableCell';
 
-type BillingFilter = 'all' | 'unbilled' | 'draft' | 'confirmed' | 'blocked';
-type BillingRowStatus = 'unbilled' | 'draft' | 'confirmed' | 'partial' | 'blocked';
+type BillingFilter = 'all' | 'billed' | 'unbilled';
+type BillingRowStatus = 'unbilled' | 'billed' | 'blocked';
 
 const BILLING_FILTERS: Array<{ value: BillingFilter; label: string }> = [
     { value: 'all', label: '전체' },
-    { value: 'unbilled', label: '미청구' },
-    { value: 'draft', label: '작성중' },
-    { value: 'confirmed', label: '확정' },
-    { value: 'blocked', label: '청구불가' }
+    { value: 'billed', label: '청구' },
+    { value: 'unbilled', label: '미청구' }
 ];
 
 const getBillingStatusBadge = (status: BillingRowStatus) => {
-    switch (status) {
-        case 'confirmed':
-            return { label: '확정', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-        case 'draft':
-            return { label: '작성중', className: 'bg-amber-50 text-amber-700 border-amber-200' };
-        case 'partial':
-            return { label: '일부청구', className: 'bg-sky-50 text-sky-700 border-sky-200' };
-        case 'blocked':
-            return { label: '청구불가', className: 'bg-slate-100 text-slate-500 border-slate-200' };
-        default:
-            return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
+    if (status === 'billed') {
+        return { label: '청구', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
     }
+    return { label: '미청구', className: 'bg-rose-50 text-rose-700 border-rose-200' };
 };
 
 const UTILITY_FIELD_LABELS: Record<Exclude<keyof UtilityRecord['costs'], 'total'>, string> = {
@@ -142,6 +132,72 @@ const UTILITY_FIELD_TO_TARGET: Record<Exclude<keyof UtilityRecord['costs'], 'tot
     other: 'accommodation'
 };
 
+const OFFICE_TARGET_ID = '__office__';
+const OFFICE_TARGET_NAME = '사무실';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+const addDays = (date: Date, days: number): Date => {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+};
+
+const minDate = (...dates: Date[]): Date => dates.reduce((min, date) => date.getTime() < min.getTime() ? date : min);
+const maxDate = (...dates: Date[]): Date => dates.reduce((max, date) => date.getTime() > max.getTime() ? date : max);
+
+const formatYmdDate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const inclusiveDays = (start: Date, end: Date): number => {
+    if (end.getTime() < start.getTime()) return 0;
+    return Math.floor((end.getTime() - start.getTime()) / ONE_DAY_MS) + 1;
+};
+
+const sanitizeBillingIdPart = (value: unknown): string => {
+    const text = String(value ?? '').trim();
+    return ['/', '#', '[', ']', '?'].reduce((safe, char) => safe.split(char).join('_'), text || 'row');
+};
+
+const allocateAmountByDays = (amount: number, dayCounts: number[]): number[] => {
+    if (amount <= 0 || dayCounts.length === 0) return dayCounts.map(() => 0);
+    const totalDays = dayCounts.reduce((sum, days) => sum + Math.max(0, days), 0);
+    if (totalDays <= 0) return dayCounts.map(() => 0);
+
+    let allocated = 0;
+    return dayCounts.map((days, index) => {
+        if (index === dayCounts.length - 1) return amount - allocated;
+        const share = Math.round(amount * (Math.max(0, days) / totalDays));
+        allocated += share;
+        return share;
+    });
+};
+
+interface AccommodationBillingIdentity {
+    issuedToType: AccommodationBillingDocument['issuedToType'];
+    teamId: string;
+    teamName: string;
+    workerId: string;
+    workerName: string;
+    teamIds: Set<string>;
+    teamNames: Set<string>;
+    workerIds: Set<string>;
+    workerNames: Set<string>;
+}
+
+interface AccommodationSplitBillingRange {
+    target?: AccommodationBillingTarget;
+    startDate: Date;
+    endDate: Date;
+    startLabel: string;
+    endLabel: string;
+    overlapDays: number;
+    identityKey: string;
+}
+
 const UtilityLedger: React.FC = () => {
     // State for Year-Month
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -157,6 +213,7 @@ const UtilityLedger: React.FC = () => {
     const [billingDocuments, setBillingDocuments] = useState<AccommodationBillingDocument[]>([]);
     const [billingFilter, setBillingFilter] = useState<BillingFilter>('all');
     const [billingProcessingId, setBillingProcessingId] = useState('');
+    const [bulkBillingAction, setBulkBillingAction] = useState<'bill' | 'unbill' | ''>('');
     const [billingEditor, setBillingEditor] = useState<{
         record: UtilityRecord;
         document: AccommodationBillingDocument;
@@ -167,6 +224,7 @@ const UtilityLedger: React.FC = () => {
     const [isDirty, setIsDirty] = useState(false);
     const [isStickyHeader, setIsStickyHeader] = useState(false); // Sticky header toggle
     const [quickAssignAccommodation, setQuickAssignAccommodation] = useState<Accommodation | null>(null);
+    const [quickAssignSplitMode, setQuickAssignSplitMode] = useState(false);
 
     const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
@@ -290,9 +348,10 @@ const UtilityLedger: React.FC = () => {
         );
     }, [assignments, isMatchingAccommodationAssignment, yearMonth]);
 
-    const handleOpenQuickAssignFromRecord = useCallback((record: UtilityRecord) => {
+    const handleOpenQuickAssignFromRecord = useCallback((record: UtilityRecord, splitMode = false) => {
         const accommodation = resolveAccommodation({ id: record.accommodationId, name: record.accommodationName });
         if (!accommodation) return;
+        setQuickAssignSplitMode(splitMode);
         setQuickAssignAccommodation(accommodation);
     }, [resolveAccommodation]);
 
@@ -414,7 +473,15 @@ const UtilityLedger: React.FC = () => {
         return 'variable';
     };
 
-    type TeamBadge = { key: string; name: string; color: string; icon?: string | null };
+    type TeamBadge = {
+        key: string;
+        name: string;
+        color: string;
+        icon?: string | null;
+        targetType?: AccommodationBillingTarget['targetType'];
+        targetLabel?: string;
+        subLabel?: string;
+    };
 
     const monthRange = useMemo(() => {
         const [y, m] = yearMonth.split('-').map(Number);
@@ -495,7 +562,70 @@ const UtilityLedger: React.FC = () => {
         return map;
     }, [billingTargets, accommodationByAnyId]);
 
+    const parseBillingTargetDate = (value?: string | null): Date | null => {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return null;
+        date.setHours(0, 0, 0, 0);
+        return date;
+    };
+
+    const getBillingTargetsForAccommodation = (
+        canonicalAccommodationId: string,
+        canonicalAccommodationName: string
+    ): AccommodationBillingTarget[] => {
+        const targets = billingTargets.filter((target) => {
+            const rawTargetAccommodationId = normalizeKey(target.accommodationId);
+            const matchedAccommodation = rawTargetAccommodationId ? accommodationByAnyId.get(rawTargetAccommodationId) : undefined;
+            const targetCanonicalId = normalizeKey(matchedAccommodation?.id ?? rawTargetAccommodationId);
+            const targetCanonicalName = normalizeKey(matchedAccommodation?.name ?? target.accommodationName);
+            return Boolean(
+                (canonicalAccommodationId && targetCanonicalId && canonicalAccommodationId === targetCanonicalId) ||
+                (canonicalAccommodationName && targetCanonicalName && canonicalAccommodationName === targetCanonicalName)
+            );
+        });
+
+        return targets.sort((a, b) => {
+            const startDiff = String(a.startDate ?? '').localeCompare(String(b.startDate ?? ''));
+            if (startDiff !== 0) return startDiff;
+            return String(a.id ?? '').localeCompare(String(b.id ?? ''));
+        });
+    };
+
     const resolveBillingTarget = (canonicalAccommodationId: string, canonicalAccommodationName: string): AccommodationBillingTarget | undefined => {
+        if (monthRange) {
+            const targetRanges = getBillingTargetsForAccommodation(canonicalAccommodationId, canonicalAccommodationName)
+                .map((target) => ({
+                    target,
+                    startDate: parseBillingTargetDate(target.startDate),
+                    endDate: parseBillingTargetDate(target.endDate)
+                }))
+                .filter((entry) => {
+                    if (!entry.startDate) return false;
+                    if (entry.startDate.getTime() > monthRange.monthEnd.getTime()) return false;
+                    if (entry.endDate && entry.endDate.getTime() < monthRange.monthStart.getTime()) return false;
+                    return true;
+                });
+
+            if (targetRanges.length > 0) {
+                const activeAtMonthStart = targetRanges
+                    .filter((entry) => (
+                        Boolean(entry.startDate) &&
+                        entry.startDate!.getTime() <= monthRange.monthStart.getTime() &&
+                        (!entry.endDate || entry.endDate.getTime() >= monthRange.monthStart.getTime())
+                    ))
+                    .at(-1);
+                const latestChangeInMonth = targetRanges
+                    .filter((entry) => (
+                        Boolean(entry.startDate) &&
+                        entry.startDate!.getTime() > monthRange.monthStart.getTime() &&
+                        entry.startDate!.getTime() <= monthRange.monthEnd.getTime()
+                    ))
+                    .at(-1);
+                return (latestChangeInMonth ?? activeAtMonthStart ?? targetRanges.at(-1))?.target;
+            }
+        }
+
         if (canonicalAccommodationId) {
             const byId = billingTargetByAccommodationId.get(canonicalAccommodationId);
             if (byId) return byId;
@@ -542,7 +672,6 @@ const UtilityLedger: React.FC = () => {
         const assignedTeamMap = new Map<string, TeamBadge>();
         const billingTeamMap = new Map<string, TeamBadge>();
         const assignedWorkerMap = new Map<string, string>();
-        const billingWorkerMap = new Map<string, string>();
 
         displayCandidates.forEach((assignment) => {
             const teamBadge = resolveTeamBadge(assignment);
@@ -560,42 +689,68 @@ const UtilityLedger: React.FC = () => {
         const separatedBillingTarget = resolveBillingTarget(canonicalAccommodationId, canonicalAccommodationName);
         if (separatedBillingTarget) {
             if (separatedBillingTarget.targetType === 'worker') {
-                const workerName = normalizeKey(separatedBillingTarget.workerName);
-                const workerId = normalizeKey(separatedBillingTarget.workerId);
-                const workerLabel = workerName || (workerId ? `ID:${workerId.slice(0, 8)}` : '');
-                const workerKey = workerId || workerLabel;
-                if (workerLabel && workerKey) {
-                    billingWorkerMap.set(workerKey, workerLabel);
+                const worker = resolveWorkerIdentity(separatedBillingTarget.workerId, separatedBillingTarget.workerName);
+                const targetTeamBadge = resolveTeamBadgeFromTarget(worker.teamId, worker.teamName);
+                const workerName = worker.workerName || normalizeKey(separatedBillingTarget.workerName);
+                if (workerName) {
+                    billingTeamMap.set(`worker:${worker.workerId || workerName}`, {
+                        key: `worker:${worker.workerId || workerName}`,
+                        name: workerName,
+                        color: targetTeamBadge?.color || '#10b981',
+                        targetType: 'worker',
+                        targetLabel: '작업자',
+                        subLabel: targetTeamBadge?.name
+                    });
                 }
+            } else if (separatedBillingTarget.targetType === 'office') {
+                billingTeamMap.set(`office:${OFFICE_TARGET_ID}`, {
+                    key: `office:${OFFICE_TARGET_ID}`,
+                    name: separatedBillingTarget.teamName || OFFICE_TARGET_NAME,
+                    color: '#475569',
+                    targetType: 'office',
+                    targetLabel: '사무실',
+                    subLabel: separatedBillingTarget.startDate || separatedBillingTarget.endDate
+                        ? `${separatedBillingTarget.startDate || '?'}~${separatedBillingTarget.endDate || '계속'}`
+                        : undefined
+                });
+            } else if (separatedBillingTarget.targetType === 'office_staff') {
+                const staffName = normalizeKey(separatedBillingTarget.workerName) || '사무실직원';
+                billingTeamMap.set(`office-staff:${normalizeKey(separatedBillingTarget.workerId) || staffName}`, {
+                    key: `office-staff:${normalizeKey(separatedBillingTarget.workerId) || staffName}`,
+                    name: staffName,
+                    color: '#0891b2',
+                    targetType: 'office_staff',
+                    targetLabel: '사무실직원',
+                    subLabel: separatedBillingTarget.startDate || separatedBillingTarget.endDate
+                        ? `${OFFICE_TARGET_NAME} · ${separatedBillingTarget.startDate || '?'}~${separatedBillingTarget.endDate || '계속'}`
+                        : OFFICE_TARGET_NAME
+                });
             } else {
                 const targetTeamBadge = resolveTeamBadgeFromTarget(
                     separatedBillingTarget.teamId,
                     separatedBillingTarget.teamName
                 );
-                if (targetTeamBadge) billingTeamMap.set(targetTeamBadge.key, targetTeamBadge);
+                if (targetTeamBadge) {
+                    billingTeamMap.set(targetTeamBadge.key, {
+                        ...targetTeamBadge,
+                        targetType: 'team',
+                        targetLabel: '팀',
+                        subLabel: separatedBillingTarget.startDate || separatedBillingTarget.endDate
+                            ? `${separatedBillingTarget.startDate || '?'}~${separatedBillingTarget.endDate || '계속'}`
+                            : undefined
+                    });
+                }
             }
         } else {
             // 분리 저장 도입 전(source 기반) 레거시 데이터 fallback
             displayCandidates.forEach((assignment) => {
                 const teamBadge = resolveTeamBadge(assignment);
-                const workerName = normalizeKey(assignment.workerName);
-                const workerId = normalizeKey(assignment.workerId);
-                const workerLabel = workerName || (workerId ? `ID:${workerId.slice(0, 8)}` : '');
-                const workerKey = workerId || workerLabel;
-
-                const hasTeamIdentity = normalizeKey(assignment.teamId).length > 0 || normalizeKey(assignment.teamName).length > 0;
-                const isWorkerBillingTarget = assignment.source === 'worker' || (!assignment.source && !hasTeamIdentity);
-                if (isWorkerBillingTarget) {
-                    if (workerLabel && workerKey) billingWorkerMap.set(workerKey, workerLabel);
-                    return;
-                }
-
                 if (teamBadge && !billingTeamMap.has(teamBadge.key)) {
                     billingTeamMap.set(teamBadge.key, teamBadge);
                 }
             });
 
-            if (billingTeamMap.size === 0 && billingWorkerMap.size === 0 && assignedTeamMap.size > 0) {
+            if (billingTeamMap.size === 0 && assignedTeamMap.size > 0) {
                 assignedTeamMap.forEach((badge) => billingTeamMap.set(badge.key, badge));
             }
         }
@@ -603,7 +758,7 @@ const UtilityLedger: React.FC = () => {
         const assignedTeams = Array.from(assignedTeamMap.values());
         const assignedWorkers = Array.from(assignedWorkerMap.values());
         const billingTeams = Array.from(billingTeamMap.values());
-        const billingWorkers = Array.from(billingWorkerMap.values());
+        const billingWorkers: string[] = [];
 
         if (
             assignedTeams.length === 0 &&
@@ -684,19 +839,23 @@ const UtilityLedger: React.FC = () => {
         return accommodation ? getActiveAssignmentsForAccommodation(accommodation) : [];
     };
 
-    const resolveAccommodationBillingIdentity = (record: UtilityRecord): {
-        issuedToType: AccommodationBillingDocument['issuedToType'];
-        teamId: string;
-        teamName: string;
-        workerId: string;
-        workerName: string;
-        teamIds: Set<string>;
-        teamNames: Set<string>;
-        workerIds: Set<string>;
-        workerNames: Set<string>;
-    } | null => {
-        const { accommodationId, accommodationName } = getCanonicalAccommodationForRecord(record);
-        const target = resolveBillingTarget(accommodationId, accommodationName);
+    const getAccommodationTargetIdentityKey = (target: AccommodationBillingTarget): string => {
+        if (target.targetType === 'team') {
+            return `team:${normalizeKey(target.teamId) || normalizeKey(target.teamName)}`;
+        }
+        if (target.targetType === 'office') {
+            return `office:${OFFICE_TARGET_ID}`;
+        }
+        if (target.targetType === 'office_staff') {
+            return `office_staff:${normalizeKey(target.workerId) || normalizeKey(target.workerName)}`;
+        }
+        return `worker:${normalizeKey(target.workerId) || normalizeKey(target.workerName)}`;
+    };
+
+    const resolveAccommodationBillingIdentityForTarget = (
+        record: UtilityRecord,
+        target?: AccommodationBillingTarget
+    ): AccommodationBillingIdentity | null => {
         const activeAssignments = getActiveAssignmentsForRecord(record);
         const fallbackTeam = resolveAssignmentTeamIdentity(activeAssignments[0]);
 
@@ -716,10 +875,41 @@ const UtilityLedger: React.FC = () => {
             };
         }
 
+        if (target?.targetType === 'office') {
+            return {
+                issuedToType: 'team',
+                teamId: OFFICE_TARGET_ID,
+                teamName: OFFICE_TARGET_NAME,
+                workerId: '',
+                workerName: '',
+                teamIds: toKeySet([OFFICE_TARGET_ID, target.teamId]),
+                teamNames: toKeySet([OFFICE_TARGET_NAME, target.teamName]),
+                workerIds: new Set<string>(),
+                workerNames: new Set<string>()
+            };
+        }
+
+        if (target?.targetType === 'office_staff') {
+            const workerId = normalizeKey(target.workerId);
+            const workerName = normalizeKey(target.workerName);
+            if (!workerId && !workerName) return null;
+            return {
+                issuedToType: 'worker',
+                teamId: OFFICE_TARGET_ID,
+                teamName: OFFICE_TARGET_NAME,
+                workerId,
+                workerName,
+                teamIds: toKeySet([OFFICE_TARGET_ID]),
+                teamNames: toKeySet([OFFICE_TARGET_NAME]),
+                workerIds: toKeySet([workerId]),
+                workerNames: toKeySet([workerName])
+            };
+        }
+
         if (target?.targetType === 'worker') {
             const worker = resolveWorkerIdentity(target.workerId, target.workerName);
             const team = resolveTeamIdentity(worker.teamId || fallbackTeam.teamId, worker.teamName || fallbackTeam.teamName);
-            if (!worker.workerId || (!team.teamId && !team.teamName)) return null;
+            if (!team.teamId && !team.teamName) return null;
             return {
                 issuedToType: 'worker',
                 teamId: team.teamId,
@@ -731,30 +921,6 @@ const UtilityLedger: React.FC = () => {
                 workerIds: worker.workerIds,
                 workerNames: worker.workerNames
             };
-        }
-
-        const workerBillingAssignment = activeAssignments.find((assignment) => {
-            const hasTeamIdentity = normalizeKey(assignment.teamId).length > 0 || normalizeKey(assignment.teamName).length > 0;
-            return assignment.source === 'worker' || (!assignment.source && !hasTeamIdentity);
-        });
-
-        if (workerBillingAssignment) {
-            const worker = resolveWorkerIdentity(workerBillingAssignment.workerId, workerBillingAssignment.workerName);
-            const fallback = resolveAssignmentTeamIdentity(workerBillingAssignment);
-            const team = resolveTeamIdentity(worker.teamId || fallback.teamId, worker.teamName || fallback.teamName);
-            if (worker.workerId && (team.teamId || team.teamName)) {
-                return {
-                    issuedToType: 'worker',
-                    teamId: team.teamId,
-                    teamName: team.teamName,
-                    workerId: worker.workerId,
-                    workerName: worker.workerName,
-                    teamIds: team.teamIds,
-                    teamNames: team.teamNames,
-                    workerIds: worker.workerIds,
-                    workerNames: worker.workerNames
-                };
-            }
         }
 
         const teamBillingAssignment = activeAssignments.find((assignment) => (
@@ -776,21 +942,30 @@ const UtilityLedger: React.FC = () => {
         };
     };
 
-    const matchesAccommodationTargetDocument = (document: AccommodationBillingDocument, record: UtilityRecord): boolean => {
-        const identity = resolveAccommodationBillingIdentity(record);
+    const resolveAccommodationBillingIdentity = (record: UtilityRecord): AccommodationBillingIdentity | null => {
+        const { accommodationId, accommodationName } = getCanonicalAccommodationForRecord(record);
+        return resolveAccommodationBillingIdentityForTarget(record, resolveBillingTarget(accommodationId, accommodationName));
+    };
+
+    const matchesAccommodationTargetDocument = (
+        document: AccommodationBillingDocument,
+        record: UtilityRecord,
+        identity: AccommodationBillingIdentity | null = resolveAccommodationBillingIdentity(record)
+    ): boolean => {
         if (!identity) return false;
         if (normalizeKey(document.yearMonth) !== normalizeKey(yearMonth)) return false;
         if (normalizeKey(document.issuedToType) !== normalizeKey(identity.issuedToType)) return false;
 
-        const docTeamIds = toKeySet([document.teamId]);
-        const docTeamNames = toKeySet([document.teamName]);
-        const teamMatches = intersects(identity.teamIds, docTeamIds) || intersects(identity.teamNames, docTeamNames);
-        if (!teamMatches) return false;
-
         if (identity.issuedToType === 'worker') {
             const docWorkerIds = toKeySet([document.issuedToWorkerId]);
             const docWorkerNames = toKeySet([document.issuedToWorkerName]);
-            return intersects(identity.workerIds, docWorkerIds) || intersects(identity.workerNames, docWorkerNames);
+            const workerMatches = intersects(identity.workerIds, docWorkerIds) || intersects(identity.workerNames, docWorkerNames);
+            if (!workerMatches) return false;
+        } else {
+            const docTeamIds = toKeySet([document.teamId]);
+            const docTeamNames = toKeySet([document.teamName]);
+            const teamMatches = intersects(identity.teamIds, docTeamIds) || intersects(identity.teamNames, docTeamNames);
+            if (!teamMatches) return false;
         }
 
         return true;
@@ -807,12 +982,16 @@ const UtilityLedger: React.FC = () => {
         return Boolean(accommodationName && label.includes(accommodationName));
     };
 
-    const getTargetDocumentsForRecord = (record: UtilityRecord): AccommodationBillingDocument[] => {
-        return billingDocuments.filter((document) => matchesAccommodationTargetDocument(document, record));
+    const getTargetDocumentsForRecord = (
+        record: UtilityRecord,
+        identity: AccommodationBillingIdentity | null = resolveAccommodationBillingIdentity(record)
+    ): AccommodationBillingDocument[] => {
+        return billingDocuments.filter((document) => matchesAccommodationTargetDocument(document, record, identity));
     };
 
     const getLineItemDocumentsForRecord = (record: UtilityRecord): AccommodationBillingDocument[] => {
-        return getTargetDocumentsForRecord(record).filter((document) =>
+        return billingDocuments.filter((document) =>
+            normalizeKey(document.yearMonth) === normalizeKey(yearMonth) &&
             (document.lineItems ?? []).some((lineItem) => matchesAccommodationRecordLineItem(lineItem, record))
         );
     };
@@ -826,19 +1005,39 @@ const UtilityLedger: React.FC = () => {
         if (!identity) return { status: 'blocked', documents: [], reason: '청구대상 없음' };
         if ((record.costs.total ?? 0) <= 0) return { status: 'blocked', documents: [], reason: '금액 없음' };
 
-        const targetDocuments = getTargetDocumentsForRecord(record);
         const lineItemDocuments = getLineItemDocumentsForRecord(record);
         if (lineItemDocuments.length === 0) {
-            if (targetDocuments.some((document) => document.status === 'confirmed')) {
-                return { status: 'blocked', documents: targetDocuments, reason: '대상 확정됨' };
-            }
             return { status: 'unbilled', documents: [] };
         }
 
-        const confirmedCount = lineItemDocuments.filter((document) => document.status === 'confirmed').length;
-        if (confirmedCount === lineItemDocuments.length) return { status: 'confirmed', documents: lineItemDocuments };
-        if (confirmedCount > 0) return { status: 'partial', documents: lineItemDocuments };
-        return { status: 'draft', documents: lineItemDocuments };
+        return { status: 'billed', documents: lineItemDocuments };
+    };
+
+    const getBillingTargetSortInfo = (record: UtilityRecord) => {
+        const identity = resolveAccommodationBillingIdentity(record);
+        const isPersonalTarget = identity?.issuedToType === 'worker';
+        const targetName = normalizeKey(isPersonalTarget ? identity?.workerName : identity?.teamName);
+
+        return {
+            group: identity ? (isPersonalTarget ? 1 : 0) : 2,
+            name: targetName || 'ZZZ',
+            accommodationName: normalizeKey(record.accommodationName)
+        };
+    };
+
+    const compareBillingRowsByTarget = (
+        left: { record: UtilityRecord },
+        right: { record: UtilityRecord }
+    ): number => {
+        const a = getBillingTargetSortInfo(left.record);
+        const b = getBillingTargetSortInfo(right.record);
+
+        if (a.group !== b.group) return a.group - b.group;
+
+        const targetCmp = a.name.localeCompare(b.name, 'ko-KR', { numeric: true, sensitivity: 'base' });
+        if (targetCmp !== 0) return targetCmp;
+
+        return a.accommodationName.localeCompare(b.accommodationName, 'ko-KR', { numeric: true, sensitivity: 'base' });
     };
 
     const billingRows = useMemo(() => {
@@ -846,10 +1045,21 @@ const UtilityLedger: React.FC = () => {
             .map((record, index) => ({ record, index, billingState: getRowBillingState(record) }))
             .filter(({ billingState }) => {
                 if (billingFilter === 'all') return true;
-                if (billingFilter === 'draft') return billingState.status === 'draft' || billingState.status === 'partial';
+                if (billingFilter === 'unbilled') return billingState.status === 'unbilled' || billingState.status === 'blocked';
                 return billingState.status === billingFilter;
-            });
-    }, [records, billingDocuments, billingFilter, billingTargets, assignments, teams, workers, yearMonth]);
+            })
+            .sort(compareBillingRowsByTarget);
+    }, [records, billingDocuments, billingFilter, billingTargets, assignments, teams, workers, accommodations, yearMonth]);
+
+    const bulkBillableCount = useMemo(
+        () => billingRows.filter(({ billingState }) => billingState.status === 'unbilled').length,
+        [billingRows]
+    );
+
+    const bulkUnbillableCount = useMemo(
+        () => billingRows.filter(({ billingState }) => billingState.status === 'billed').length,
+        [billingRows]
+    );
 
     const hexToRgba = (hex: string, alpha: number) => {
         const r = parseInt(hex.slice(1, 3), 16);
@@ -900,12 +1110,144 @@ const UtilityLedger: React.FC = () => {
             .filter((item): item is AccommodationBillingLineItem => Boolean(item));
     };
 
+    const getSplitBillingRangesForRecord = (record: UtilityRecord): AccommodationSplitBillingRange[] => {
+        if (!monthRange) return [];
+
+        const { accommodationId, accommodationName } = getCanonicalAccommodationForRecord(record);
+        const targetRanges = getBillingTargetsForAccommodation(accommodationId, accommodationName)
+            .map((target) => ({
+                target,
+                startDate: parseBillingTargetDate(target.startDate),
+                endDate: parseBillingTargetDate(target.endDate),
+                identityKey: getAccommodationTargetIdentityKey(target)
+            }))
+            .filter((entry) => {
+                if (!entry.startDate) return false;
+                if (entry.startDate.getTime() > monthRange.monthEnd.getTime()) return false;
+                if (entry.endDate && entry.endDate.getTime() < monthRange.monthStart.getTime()) return false;
+                return true;
+            });
+
+        if (targetRanges.length === 0) return [];
+
+        const activeAtMonthStart = targetRanges
+            .filter((entry) => (
+                Boolean(entry.startDate) &&
+                entry.startDate!.getTime() <= monthRange.monthStart.getTime() &&
+                (!entry.endDate || entry.endDate.getTime() >= monthRange.monthStart.getTime())
+            ))
+            .at(-1);
+        const changesInMonth = targetRanges.filter((entry) => (
+            Boolean(entry.startDate) &&
+                entry.startDate!.getTime() > monthRange.monthStart.getTime() &&
+                entry.startDate!.getTime() <= monthRange.monthEnd.getTime()
+        ));
+        const getBillingIdentityKey = (identity: AccommodationBillingIdentity): string => (
+            identity.issuedToType === 'worker'
+                ? `worker:${normalizeKey(identity.workerId) || normalizeKey(identity.workerName)}`
+                : `team:${normalizeKey(identity.teamId) || normalizeKey(identity.teamName)}`
+        );
+        const firstChangeInMonth = changesInMonth[0];
+        const fallbackIdentity = !activeAtMonthStart && firstChangeInMonth?.startDate
+            ? resolveAccommodationBillingIdentityForTarget(record, undefined)
+            : null;
+        const fallbackEntry = fallbackIdentity && firstChangeInMonth?.startDate
+            ? {
+                target: undefined,
+                startDate: monthRange.monthStart,
+                endDate: addDays(firstChangeInMonth.startDate, -1),
+                identityKey: getBillingIdentityKey(fallbackIdentity)
+            }
+            : null;
+        const timelineEntries = [
+            ...(activeAtMonthStart ? [activeAtMonthStart] : []),
+            ...(fallbackEntry ? [fallbackEntry] : []),
+            ...changesInMonth
+        ].filter((entry, index, entries) => (
+            index === 0 || entry.identityKey !== entries[index - 1].identityKey
+        ));
+
+        if (new Set(timelineEntries.map((entry) => entry.identityKey)).size <= 1) {
+            return [];
+        }
+
+        return timelineEntries
+            .map((entry, index): AccommodationSplitBillingRange | null => {
+                const nextStartDate = timelineEntries[index + 1]?.startDate ?? null;
+                const explicitEndDate = entry.endDate ?? monthRange.monthEnd;
+                const handoffEndDate = nextStartDate ? addDays(nextStartDate, -1) : monthRange.monthEnd;
+                const segmentStart = index === 0
+                    ? monthRange.monthStart
+                    : maxDate(entry.startDate ?? monthRange.monthStart, monthRange.monthStart);
+                const segmentEnd = minDate(explicitEndDate, handoffEndDate, monthRange.monthEnd);
+                const overlapDays = inclusiveDays(segmentStart, segmentEnd);
+                if (overlapDays <= 0) return null;
+
+                return {
+                    target: entry.target,
+                    startDate: segmentStart,
+                    endDate: segmentEnd,
+                    startLabel: formatYmdDate(segmentStart),
+                    endLabel: formatYmdDate(segmentEnd),
+                    overlapDays,
+                    identityKey: entry.identityKey
+                };
+            })
+            .filter((range): range is AccommodationSplitBillingRange => Boolean(range));
+    };
+
+    const buildSplitLineItemGroupsForRecord = (
+        record: UtilityRecord,
+        ranges: AccommodationSplitBillingRange[]
+    ): Array<{ range: AccommodationSplitBillingRange; lineItems: AccommodationBillingLineItem[] }> => {
+        const { accommodationId } = getCanonicalAccommodationForRecord(record);
+        const fields = Object.keys(UTILITY_FIELD_LABELS) as Array<Exclude<keyof UtilityRecord['costs'], 'total'>>;
+        const groups = ranges.map((range) => ({ range, lineItems: [] as AccommodationBillingLineItem[] }));
+
+        fields.forEach((field) => {
+            const amount = Number(record.costs[field] ?? 0);
+            if (!Number.isFinite(amount) || amount <= 0) return;
+
+            const shares = allocateAmountByDays(amount, ranges.map((range) => range.overlapDays));
+            shares.forEach((share, index) => {
+                if (share <= 0) return;
+                const range = ranges[index];
+                groups[index].lineItems.push({
+                    id: `utility-${sanitizeBillingIdPart(record.id)}-${field}-split-${index}`,
+                    label: `${record.accommodationName} ${UTILITY_FIELD_LABELS[field]} ${range.startLabel}~${range.endLabel}`,
+                    amount: share,
+                    targetField: UTILITY_FIELD_TO_TARGET[field],
+                    sourceType: 'utility_ledger',
+                    sourceAccommodationId: accommodationId || record.accommodationId,
+                    sourceUtilityRecordId: record.id
+                });
+            });
+        });
+
+        return groups.filter((group) => group.lineItems.length > 0);
+    };
+
+    const removeRecordLineItemsFromDocument = (
+        document: AccommodationBillingDocument,
+        record: UtilityRecord
+    ): AccommodationBillingDocument | null => {
+        const preserved = (document.lineItems ?? []).filter((lineItem) =>
+            !matchesAccommodationRecordLineItem(lineItem, record)
+        );
+        if (preserved.length === 0) return null;
+        return {
+            ...document,
+            status: 'draft',
+            lineItems: preserved
+        };
+    };
+
     const buildDocumentForRecord = (
         record: UtilityRecord,
         lineItems: AccommodationBillingLineItem[],
-        existing?: AccommodationBillingDocument
+        existing?: AccommodationBillingDocument,
+        identity: AccommodationBillingIdentity | null = resolveAccommodationBillingIdentity(record)
     ): AccommodationBillingDocument | null => {
-        const identity = resolveAccommodationBillingIdentity(record);
         if (!identity) return null;
         const documentId = existing?.id ?? accommodationBillingService.buildBillingDocumentId({
             teamId: identity.teamId,
@@ -945,11 +1287,8 @@ const UtilityLedger: React.FC = () => {
             return;
         }
 
-        const targetDocument = state.documents[0] ?? getTargetDocumentsForRecord(record)[0];
-        if (targetDocument?.status === 'confirmed') {
-            alert('확정된 청구서는 대장에서 재계산할 수 없습니다.');
-            return;
-        }
+        const identity = resolveAccommodationBillingIdentity(record);
+        const targetDocument = getTargetDocumentsForRecord(record, identity)[0];
 
         setBillingProcessingId(record.id);
         try {
@@ -960,18 +1299,101 @@ const UtilityLedger: React.FC = () => {
                 return;
             }
 
-            const next = buildDocumentForRecord(record, lineItems, targetDocument);
+            const next = buildDocumentForRecord(record, lineItems, targetDocument, identity);
             if (!next) {
                 alert('청구대상을 확인할 수 없습니다.');
                 return;
             }
 
+            const staleDocuments = getLineItemDocumentsForRecord(record).filter((document) => document.id !== next.id);
+            for (const document of staleDocuments) {
+                const cleaned = removeRecordLineItemsFromDocument(document, record);
+                if (cleaned) {
+                    await accommodationBillingService.upsertBillingDocument(cleaned);
+                } else {
+                    await accommodationBillingService.deleteBillingDocument(document.id);
+                }
+            }
+
             await accommodationBillingService.upsertBillingDocument(next);
             await loadLedger();
-            alert(mode === 'recalculate' ? '청구서가 재계산되었습니다.' : '청구서가 생성되었습니다.');
+            alert(mode === 'recalculate' ? '청구가 다시 처리되었습니다.' : '청구 처리되었습니다.');
         } catch (error) {
             console.error(error);
             alert('청구 처리에 실패했습니다.');
+        } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const handleCreateSplitBilling = async (record: UtilityRecord) => {
+        if (isDirty) {
+            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
+            return;
+        }
+
+        const ranges = getSplitBillingRangesForRecord(record);
+        if (ranges.length <= 1) {
+            alert('분할청구할 기간이 없습니다.');
+            return;
+        }
+        if ((record.costs.total ?? 0) <= 0) {
+            alert('청구할 금액 항목이 없습니다.');
+            return;
+        }
+
+        setBillingProcessingId(record.id);
+        try {
+            await accommodationService.saveUtilityRecord(record);
+            const lineItemGroups = buildSplitLineItemGroupsForRecord(record, ranges);
+            const documentGroups = new Map<string, {
+                identity: AccommodationBillingIdentity;
+                lineItems: AccommodationBillingLineItem[];
+            }>();
+
+            lineItemGroups.forEach((group) => {
+                const identity = resolveAccommodationBillingIdentityForTarget(record, group.range.target);
+                if (!identity) return;
+                const current = documentGroups.get(group.range.identityKey);
+                if (current) {
+                    current.lineItems.push(...group.lineItems);
+                } else {
+                    documentGroups.set(group.range.identityKey, {
+                        identity,
+                        lineItems: [...group.lineItems]
+                    });
+                }
+            });
+
+            const nextDocuments: AccommodationBillingDocument[] = [];
+            documentGroups.forEach((group) => {
+                const existing = getTargetDocumentsForRecord(record, group.identity)[0];
+                const next = buildDocumentForRecord(record, group.lineItems, existing, group.identity);
+                if (next) nextDocuments.push(next);
+            });
+
+            if (nextDocuments.length === 0) {
+                alert('청구대상을 확인할 수 없습니다.');
+                return;
+            }
+
+            const keepDocumentIds = new Set(nextDocuments.map((document) => document.id));
+            const staleDocuments = getLineItemDocumentsForRecord(record).filter((document) => !keepDocumentIds.has(document.id));
+            for (const document of staleDocuments) {
+                const cleaned = removeRecordLineItemsFromDocument(document, record);
+                if (cleaned) {
+                    await accommodationBillingService.upsertBillingDocument(cleaned);
+                } else {
+                    await accommodationBillingService.deleteBillingDocument(document.id);
+                }
+            }
+
+            await Promise.all(nextDocuments.map((document) => accommodationBillingService.upsertBillingDocument(document)));
+            await loadLedger();
+            alert(`분할청구 처리되었습니다. (${nextDocuments.length}건)`);
+        } catch (error) {
+            console.error(error);
+            alert('분할청구 처리에 실패했습니다.');
         } finally {
             setBillingProcessingId('');
         }
@@ -1018,35 +1440,133 @@ const UtilityLedger: React.FC = () => {
     };
 
     const handleCancelBilling = async (record: UtilityRecord, document?: AccommodationBillingDocument) => {
-        if (!document) return;
-        if (document.status === 'confirmed') {
-            alert('확정된 청구서는 취소할 수 없습니다.');
-            return;
-        }
-        if (!window.confirm('작성중 청구서를 취소할까요?')) return;
+        const documents = document ? [document] : getRowBillingState(record).documents;
+        if (documents.length === 0) return;
+        if (!window.confirm('청구 상태를 미청구로 변경할까요?')) return;
 
         setBillingProcessingId(record.id);
         try {
-            const preserved = (document.lineItems ?? []).filter((lineItem) =>
-                !matchesAccommodationRecordLineItem(lineItem, record)
-            );
+            for (const item of documents) {
+                const preserved = (item.lineItems ?? []).filter((lineItem) =>
+                    !matchesAccommodationRecordLineItem(lineItem, record)
+                );
 
-            if (preserved.length > 0) {
-                await accommodationBillingService.upsertBillingDocument({
-                    ...document,
-                    status: 'draft',
-                    lineItems: preserved
-                });
-            } else {
-                await accommodationBillingService.deleteBillingDocument(document.id);
+                if (preserved.length > 0) {
+                    await accommodationBillingService.upsertBillingDocument({
+                        ...item,
+                        status: 'draft',
+                        lineItems: preserved
+                    });
+                } else {
+                    await accommodationBillingService.deleteBillingDocument(item.id);
+                }
             }
 
             await loadLedger();
-            alert('청구가 취소되었습니다.');
+            alert('미청구 처리되었습니다.');
         } catch (error) {
             console.error(error);
-            alert('청구 취소에 실패했습니다.');
+            alert('미청구 처리에 실패했습니다.');
         } finally {
+            setBillingProcessingId('');
+        }
+    };
+
+    const handleBulkBilling = async (action: 'bill' | 'unbill') => {
+        if (isDirty) {
+            alert('청구 전 변경사항을 먼저 전체 저장해주세요.');
+            return;
+        }
+
+        const targets = billingRows.filter(({ billingState }) => (
+            action === 'bill'
+                ? billingState.status === 'unbilled'
+                : billingState.status === 'billed'
+        ));
+
+        if (targets.length === 0) {
+            alert(action === 'bill' ? '일괄 청구할 행이 없습니다.' : '일괄 미청구 처리할 행이 없습니다.');
+            return;
+        }
+
+        const actionLabel = action === 'bill' ? '청구' : '미청구';
+        if (!window.confirm(`현재 필터 목록의 ${targets.length}건을 일괄 ${actionLabel} 처리합니다.\n저장하지 않은 셀 변경사항은 반영되지 않습니다.\n계속할까요?`)) return;
+
+        setBulkBillingAction(action);
+        setBillingProcessingId('__bulk__');
+        let processed = 0;
+        let skipped = 0;
+        const workingDocuments = new Map(billingDocuments.map((document) => [document.id, document]));
+
+        try {
+            for (const { record, billingState } of targets) {
+                try {
+                    if (action === 'bill') {
+                        await accommodationService.saveUtilityRecord(record);
+                        const lineItems = buildLineItemsForRecord(record);
+                        const identity = resolveAccommodationBillingIdentity(record);
+                        const targetDocument = Array.from(workingDocuments.values())
+                            .find((document) => matchesAccommodationTargetDocument(document, record, identity));
+                        const next = buildDocumentForRecord(record, lineItems, targetDocument, identity);
+                        if (!next || lineItems.length === 0) {
+                            skipped += 1;
+                            continue;
+                        }
+                        const staleDocuments = Array.from(workingDocuments.values()).filter((document) => (
+                            document.id !== next.id &&
+                            normalizeKey(document.yearMonth) === normalizeKey(yearMonth) &&
+                            (document.lineItems ?? []).some((lineItem) => matchesAccommodationRecordLineItem(lineItem, record))
+                        ));
+                        for (const document of staleDocuments) {
+                            const cleaned = removeRecordLineItemsFromDocument(document, record);
+                            if (cleaned) {
+                                await accommodationBillingService.upsertBillingDocument(cleaned);
+                                workingDocuments.set(cleaned.id, cleaned);
+                            } else {
+                                await accommodationBillingService.deleteBillingDocument(document.id);
+                                workingDocuments.delete(document.id);
+                            }
+                        }
+                        await accommodationBillingService.upsertBillingDocument(next);
+                        workingDocuments.set(next.id, next);
+                    } else {
+                        if (billingState.documents.length === 0) {
+                            skipped += 1;
+                            continue;
+                        }
+                        for (const item of billingState.documents) {
+                            const current = workingDocuments.get(item.id);
+                            if (!current) continue;
+
+                            const preserved = (current.lineItems ?? []).filter((lineItem) =>
+                                !matchesAccommodationRecordLineItem(lineItem, record)
+                            );
+
+                            if (preserved.length > 0) {
+                                const next: AccommodationBillingDocument = {
+                                    ...current,
+                                    status: 'draft',
+                                    lineItems: preserved
+                                };
+                                await accommodationBillingService.upsertBillingDocument(next);
+                                workingDocuments.set(next.id, next);
+                            } else {
+                                await accommodationBillingService.deleteBillingDocument(current.id);
+                                workingDocuments.delete(current.id);
+                            }
+                        }
+                    }
+                    processed += 1;
+                } catch (error) {
+                    console.error(error);
+                    skipped += 1;
+                }
+            }
+
+            await loadLedger();
+            alert(`${actionLabel} 처리 ${processed}건 완료${skipped > 0 ? `, ${skipped}건 제외` : ''}`);
+        } finally {
+            setBulkBillingAction('');
             setBillingProcessingId('');
         }
     };
@@ -1054,7 +1574,7 @@ const UtilityLedger: React.FC = () => {
     return (
         <div className="flex flex-col h-full space-y-5 min-w-0">
             {/* Toolbar */}
-            <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-indigo-100 shadow-sm">
+            <div className="flex flex-col 2xl:flex-row 2xl:flex-wrap 2xl:items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-indigo-100 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 min-w-0">
                     <div className="flex items-center bg-slate-100 rounded-full p-1">
                         <button onClick={() => handleMonthChange(-1)} className="w-8 h-8 flex items-center justify-center hover:bg-white hover:shadow-sm rounded-full transition text-slate-500">
@@ -1104,6 +1624,26 @@ const UtilityLedger: React.FC = () => {
                             </button>
                         ))}
                     </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => handleBulkBilling('bill')}
+                            disabled={isDirty || bulkBillingAction !== '' || bulkBillableCount === 0}
+                            title="현재 필터 목록의 미청구 행을 청구 처리"
+                            className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-extrabold shadow-sm hover:bg-indigo-700 disabled:bg-indigo-200 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                            {bulkBillingAction === 'bill' ? '처리중...' : `일괄 청구 (${bulkBillableCount})`}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleBulkBilling('unbill')}
+                            disabled={isDirty || bulkBillingAction !== '' || bulkUnbillableCount === 0}
+                            title="현재 필터 목록의 청구 행을 미청구 처리"
+                            className="px-4 py-2 rounded-xl bg-rose-50 text-rose-700 text-xs font-extrabold border border-rose-100 hover:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-300 disabled:border-slate-100 disabled:cursor-not-allowed whitespace-nowrap"
+                        >
+                            {bulkBillingAction === 'unbill' ? '처리중...' : `일괄 미청구 (${bulkUnbillableCount})`}
+                        </button>
+                    </div>
                     <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-xl border border-indigo-100 hover:bg-gray-50 shadow-sm whitespace-nowrap">
                         <input
                             type="checkbox"
@@ -1121,8 +1661,11 @@ const UtilityLedger: React.FC = () => {
                         `}
                     >
                         <FontAwesomeIcon icon={faSave} />
-                        {saving ? '저장 중...' : '전체 저장'}
+                        {saving ? '저장 중...' : isDirty ? '변경사항 저장' : '전체 저장'}
                     </button>
+                </div>
+                <div className="w-full text-xs font-medium text-slate-400">
+                    변경한 셀은 <span className="font-bold text-slate-600">변경사항 저장</span> 후 청구할 수 있습니다. 일괄 작업은 현재 필터 목록에만 적용됩니다.
                 </div>
             </div>
 
@@ -1140,7 +1683,6 @@ const UtilityLedger: React.FC = () => {
                                 <col style={{ width: '8%' }} />
                                 <col style={{ width: '6%' }} />
                                 <col style={{ width: '8%' }} />
-                                <col style={{ width: '6%' }} />
                                 <col style={{ width: '8.5%' }} />
                                 <col style={{ width: '4.1%' }} />
                                 <col style={{ width: '4.1%' }} />
@@ -1152,15 +1694,14 @@ const UtilityLedger: React.FC = () => {
                                 <col style={{ width: '5.3%' }} />
                                 <col style={{ width: '6%' }} />
                                 <col style={{ width: '7%' }} />
-                                <col style={{ width: '5.5%' }} />
-                                <col style={{ width: '11%' }} />
+                                <col style={{ width: '8%' }} />
+                                <col style={{ width: '8.5%' }} />
                             </colgroup>
                             <thead className={`bg-indigo-600 text-white font-bold text-xs uppercase shadow-md ${isStickyHeader ? 'sticky top-0 z-20' : ''}`}>
                                 <tr>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">배정팀</th>
                                     <th className="px-4 py-4 text-left w-40 tracking-wider bg-indigo-700 border-r border-indigo-500">배정 인원</th>
-                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 팀</th>
-                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상 개인</th>
+                                    <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700 border-r border-indigo-500">청구대상</th>
                                     <th className="px-4 py-4 text-left w-52 tracking-wider bg-indigo-700">숙소명</th>
                                     <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">월세</th>
                                     <th className="px-2 py-4 text-center w-28 border-l border-indigo-500">전기세</th>
@@ -1183,8 +1724,8 @@ const UtilityLedger: React.FC = () => {
                                     const assignedWorkers = assignmentSummary?.assignedWorkers ?? [];
                                     const visibleAssignedWorkers = assignedWorkers.slice(0, 3);
                                     const billingBadge = getBillingStatusBadge(billingState.status);
-                                    const firstBillingDocument = billingState.documents.find((document) => document.status !== 'confirmed') ?? billingState.documents[0];
-                                    const isProcessing = billingProcessingId === rec.id;
+                                    const isProcessing = billingProcessingId === rec.id || bulkBillingAction !== '';
+                                    const canSplitBill = getSplitBillingRangesForRecord(rec).length > 1;
 
                                     return (
                                         <tr key={`${rec.accommodationId}-${idx}`} className="group hover:bg-blue-50/40 transition-colors">
@@ -1201,10 +1742,21 @@ const UtilityLedger: React.FC = () => {
                                                             <div key={team.key} className="flex items-center gap-2 min-w-0">
                                                                 <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0"
                                                                     style={{ backgroundColor: team.color }}>
-                                                                    <FontAwesomeIcon icon={iconMap[team.icon || ''] || faUsers} />
+                                                                    <FontAwesomeIcon icon={
+                                                                        team.targetType === 'worker' || team.targetType === 'office_staff'
+                                                                            ? faUser
+                                                                            : team.targetType === 'office'
+                                                                                ? faBuilding
+                                                                                : iconMap[team.icon || ''] || faUsers
+                                                                    } />
                                                                 </span>
                                                                 <span className="font-bold text-slate-700 truncate max-w-[160px]" title={team.name}>
                                                                     {team.name}
+                                                                    {(team.targetLabel || team.subLabel) && (
+                                                                        <span className="block text-[10px] font-semibold text-slate-400">
+                                                                            {team.targetLabel ? `${team.targetLabel} · ` : ''}{team.subLabel || ''}
+                                                                        </span>
+                                                                    )}
                                                                 </span>
                                                             </div>
                                                         ))}
@@ -1275,25 +1827,6 @@ const UtilityLedger: React.FC = () => {
                                                 )}
                                             </td>
 
-                                            <td className="px-4 py-3 border-r border-indigo-50 bg-white">
-                                                {assignmentSummary && assignmentSummary.billingWorkers.length > 0 ? (
-                                                    <div className="flex flex-col gap-1.5">
-                                                        {assignmentSummary.billingWorkers.map((workerName, workerIdx) => (
-                                                            <div key={`billing-worker-${workerName}-${workerIdx}`} className="flex items-center gap-2 min-w-0">
-                                                                <span className="w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] shrink-0 bg-slate-500">
-                                                                    <FontAwesomeIcon icon={faUser} />
-                                                                </span>
-                                                                <span className="font-bold text-slate-700 text-xs leading-tight break-all">
-                                                                    {workerName}
-                                                                </span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-slate-300 text-xs">-</span>
-                                                )}
-                                            </td>
-
                                             <td className="px-4 py-3 border-r border-indigo-50 font-bold text-slate-700 bg-white group-hover:bg-blue-50/40">
                                                 <div className='flex items-center'>
                                                     <span>{rec.accommodationName}</span>
@@ -1350,50 +1883,48 @@ const UtilityLedger: React.FC = () => {
                                             <td className="px-2 py-3 border-l border-indigo-50 bg-white">
                                                 <div className="flex items-center justify-center gap-1.5">
                                                     {billingState.status === 'blocked' ? (
-                                                        <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
+                                                        <>
+                                                            <span className="text-[11px] font-bold text-slate-400">{billingState.reason}</span>
+                                                            <button
+                                                                type="button"
+                                                                disabled={isProcessing}
+                                                                onClick={() => handleOpenQuickAssignFromRecord(rec, true)}
+                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
+                                                                title="분할청구 대상 기간 만들기"
+                                                            >
+                                                                분할청구
+                                                            </button>
+                                                        </>
                                                     ) : billingState.status === 'unbilled' ? (
-                                                        <button
-                                                            type="button"
-                                                            disabled={isProcessing}
-                                                            onClick={() => handleCreateOrRecalculateBilling(rec, 'create')}
-                                                            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300"
-                                                        >
-                                                            {isProcessing ? '처리중' : '청구'}
-                                                        </button>
-                                                    ) : (
                                                         <>
                                                             <button
                                                                 type="button"
-                                                                disabled={!firstBillingDocument}
-                                                                onClick={() => firstBillingDocument && openBillingEditor(rec, firstBillingDocument)}
-                                                                className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:text-slate-300"
-                                                                title={firstBillingDocument?.status === 'confirmed' ? '청구서 보기' : '청구서 수정'}
+                                                                disabled={isProcessing}
+                                                                onClick={() => handleCreateOrRecalculateBilling(rec, 'create')}
+                                                                className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:bg-indigo-300 whitespace-nowrap"
                                                             >
-                                                                <FontAwesomeIcon icon={firstBillingDocument?.status === 'confirmed' ? faEye : faPen} />
+                                                                {isProcessing ? '처리중' : '청구'}
                                                             </button>
-                                                            {firstBillingDocument?.status !== 'confirmed' && (
-                                                                <>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={isProcessing}
-                                                                    onClick={() => handleCreateOrRecalculateBilling(rec, 'recalculate')}
-                                                                    className="w-8 h-8 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:text-amber-300"
-                                                                    title="대장 기준 재계산"
-                                                                >
-                                                                    <FontAwesomeIcon icon={faRotateRight} />
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={isProcessing}
-                                                                    onClick={() => handleCancelBilling(rec, firstBillingDocument)}
-                                                                    className="w-8 h-8 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:text-rose-300"
-                                                                    title="청구 취소"
-                                                                >
-                                                                    <FontAwesomeIcon icon={faBan} />
-                                                                </button>
-                                                                </>
-                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                disabled={isProcessing}
+                                                                onClick={() => canSplitBill ? handleCreateSplitBilling(rec) : handleOpenQuickAssignFromRecord(rec, true)}
+                                                                className="px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 text-xs font-bold border border-amber-200 hover:bg-amber-100 disabled:text-amber-300 disabled:bg-amber-50 whitespace-nowrap"
+                                                                title={canSplitBill ? '분할된 청구대상 기간으로 금액을 나누어 청구' : '분할청구 대상 기간 만들기'}
+                                                            >
+                                                                분할청구
+                                                            </button>
                                                         </>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            disabled={isProcessing}
+                                                            onClick={() => handleCancelBilling(rec)}
+                                                            className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 text-xs font-bold hover:bg-rose-100 disabled:text-rose-300"
+                                                            title="미청구"
+                                                        >
+                                                            미청구
+                                                        </button>
                                                     )}
                                                 </div>
                                             </td>
@@ -1476,6 +2007,7 @@ const UtilityLedger: React.FC = () => {
                     <p className="text-xs text-amber-700 leading-relaxed">
                         * 10만 원을 초과하는 공과금은 <strong className="text-rose-600">빨간색 굵은 글씨</strong>로 표시됩니다.<br />
                         * <strong>고정(Fixed)</strong> 항목은 자동으로 입력되지만, 필요 시 수정할 수 있습니다.<br />
+                        * 같은 달에 청구대상이 나뉜 숙소는 <strong>[분할청구]</strong>로 금액을 기간별 일할 배분합니다.<br />
                         * 모든 변경사항은 <strong>[전체 저장]</strong> 버튼을 눌러야 반영됩니다.
                     </p>
                 </div>
@@ -1486,10 +2018,15 @@ const UtilityLedger: React.FC = () => {
                     accommodation={quickAssignAccommodation}
                     activeAssignments={getActiveAssignmentsForAccommodation(quickAssignAccommodation)}
                     isOpen={!!quickAssignAccommodation}
-                    onClose={() => setQuickAssignAccommodation(null)}
+                    initialBillingSplitMode={quickAssignSplitMode}
+                    onClose={() => {
+                        setQuickAssignAccommodation(null);
+                        setQuickAssignSplitMode(false);
+                    }}
                     onSuccess={async () => {
                         await loadLedger();
                         setQuickAssignAccommodation(null);
+                        setQuickAssignSplitMode(false);
                     }}
                 />
             )}

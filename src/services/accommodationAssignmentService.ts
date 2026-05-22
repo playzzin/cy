@@ -156,7 +156,7 @@ const normalizeStatus = (value?: string | null): AccommodationAssignmentStatus =
 };
 
 const normalizeSource = (value?: string | null): AccommodationAssignmentSource | undefined => {
-    if (value === 'team' || value === 'worker') return value;
+    if (value === 'team' || value === 'worker' || value === 'office_staff') return value;
     return undefined;
 };
 
@@ -204,8 +204,8 @@ const StatusSchema = z.string().refine(
 );
 
 const SourceSchema = z.string().refine(
-    (val): val is AccommodationAssignmentSource => val === 'team' || val === 'worker',
-    { message: 'source??team ?먮뒗 worker?댁뼱???⑸땲??' }
+    (val): val is AccommodationAssignmentSource => val === 'team' || val === 'worker' || val === 'office_staff',
+    { message: 'source는 team, worker 또는 office_staff여야 합니다.' }
 );
 
 const AssignmentSchema = z.object({
@@ -272,7 +272,12 @@ export const accommodationAssignmentService = {
 
         validateAssignmentTarget(parsed);
         const storeWithoutWorker = shouldStoreWithoutWorker(parsed);
-        const workerUuid = storeWithoutWorker ? null : await resolveWorkerUuid(String(parsed.workerId));
+        const storeOfficeStaff = parsed.source === 'office_staff';
+        const workerUuid = storeWithoutWorker
+            ? null
+            : storeOfficeStaff
+                ? String(parsed.workerId)
+                : await resolveWorkerUuid(String(parsed.workerId));
         if (!storeWithoutWorker && !workerUuid) throw new Error('작업자를 찾을 수 없습니다.');
         const teamUuid = parsed.teamId ? await resolveTeamUuid(String(parsed.teamId)) : null;
         const accommodationUuid = await resolveAccommodationUuid(String(parsed.accommodationId));
@@ -334,7 +339,12 @@ export const accommodationAssignmentService = {
             const chunk = parsed.slice(i, i + chunkSize);
             const results = await Promise.all(chunk.map(async (item) => {
                 const storeWithoutWorker = item.source === 'team' && !String(item.workerId ?? '').trim();
-                const workerUuid = storeWithoutWorker ? null : await resolveWorkerUuid(String(item.workerId));
+                const storeOfficeStaff = item.source === 'office_staff';
+                const workerUuid = storeWithoutWorker
+                    ? null
+                    : storeOfficeStaff
+                        ? String(item.workerId)
+                        : await resolveWorkerUuid(String(item.workerId));
                 if (!storeWithoutWorker && !workerUuid) return null;
                 const teamUuid = item.teamId ? await resolveTeamUuid(String(item.teamId)) : null;
                 const accommodationUuid = await resolveAccommodationUuid(String(item.accommodationId));
@@ -381,7 +391,9 @@ export const accommodationAssignmentService = {
         if (Object.keys(data).length === 0) return;
 
         const vars: any = { id: uuid };
-        if (data.workerId !== undefined) vars.workerId = data.workerId ? (await resolveWorkerUuid(String(data.workerId))) : null;
+        if (data.workerId !== undefined) vars.workerId = data.workerId
+            ? (data.source === 'office_staff' ? String(data.workerId) : await resolveWorkerUuid(String(data.workerId)))
+            : null;
         if (data.workerName !== undefined) vars.workerName = data.workerName ?? null;
         if (data.teamId !== undefined) vars.teamId = data.teamId ? (await resolveTeamUuid(String(data.teamId))) : null;
         if (data.teamName !== undefined) vars.teamName = data.teamName ?? null;

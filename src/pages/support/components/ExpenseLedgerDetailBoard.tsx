@@ -11,6 +11,7 @@ import {
   hexToRgba,
   summarizeVehicleBillingCosts
 } from '../hooks/useExpenseLedgerData';
+import type { ExpenseCategoryOption } from '../hooks/useExpenseLedgerData';
 
 interface ExpenseLedgerDetailBoardProps {
   teamName: string;
@@ -21,10 +22,12 @@ interface ExpenseLedgerDetailBoardProps {
   receivableClaims: TeamExpenseClaim[];
   payableClaims: TeamExpenseClaim[];
   otherClaims: TeamExpenseClaim[];
+  officeClaims?: TeamExpenseClaim[];
+  categoryOptions?: ExpenseCategoryOption[];
 }
 
 type ClaimSection = {
-  key: 'receivable' | 'payable' | 'other';
+  key: 'receivable' | 'payable' | 'other' | 'office';
   title: string;
   description: string;
   colorClass: string;
@@ -43,7 +46,9 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
   cardDocs,
   receivableClaims,
   payableClaims,
-  otherClaims
+  otherClaims,
+  officeClaims = [],
+  categoryOptions = []
 }) => {
   const teamSectionHeaderStyle: React.CSSProperties = {
     backgroundColor: hexToRgba(color, 0.15),
@@ -163,9 +168,20 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
           ...claim,
           counterparty: ''
         }))
+      },
+      {
+        key: 'office',
+        title: '사무실경비',
+        description: '기타청구와 분리해 사무실 비용으로 별도 집계되는 금액',
+        colorClass: 'bg-sky-50 text-sky-800',
+        totalClass: 'bg-sky-50 text-sky-800',
+        rows: sortClaims(officeClaims).map((claim) => ({
+          ...claim,
+          counterparty: ''
+        }))
       }
     ];
-  }, [otherClaims, payableClaims, receivableClaims]);
+  }, [officeClaims, otherClaims, payableClaims, receivableClaims]);
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto pb-4 pr-2">
@@ -329,10 +345,10 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
 
       {claimSections.map((section) => {
         const subtotal = section.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        const isOtherSection = section.key === 'other';
-        const tableMinWidth = isOtherSection ? 'min-w-[520px]' : 'min-w-[760px]';
-        const emptyColSpan = isOtherSection ? 5 : 8;
-        const footerLabelColSpan = isOtherSection ? 3 : 6;
+        const isStandaloneSection = section.key === 'other' || section.key === 'office';
+        const tableMinWidth = isStandaloneSection ? 'min-w-[520px]' : 'min-w-[760px]';
+        const emptyColSpan = isStandaloneSection ? 5 : 8;
+        const footerLabelColSpan = isStandaloneSection ? 3 : 6;
 
         return (
           <div key={section.key} className="overflow-hidden border border-slate-300 bg-white shadow-sm">
@@ -350,11 +366,11 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                 <thead>
                   <tr className="bg-slate-100 text-slate-600">
                     <th className="border border-slate-200 px-2 py-1.5 text-center">날짜</th>
-                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">상대팀</th>}
-                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">현장</th>}
+                    {!isStandaloneSection && <th className="border border-slate-200 px-2 py-1.5 text-center">상대팀</th>}
+                    {!isStandaloneSection && <th className="border border-slate-200 px-2 py-1.5 text-center">현장</th>}
                     <th className="border border-slate-200 px-2 py-1.5 text-center">구분</th>
                     <th className="border border-slate-200 px-2 py-1.5 text-left">내용</th>
-                    {!isOtherSection && <th className="border border-slate-200 px-2 py-1.5 text-center">결제</th>}
+                    {!isStandaloneSection && <th className="border border-slate-200 px-2 py-1.5 text-center">결제</th>}
                     <th className="border border-slate-200 px-2 py-1.5 text-right">금액</th>
                     <th className="border border-slate-200 px-2 py-1.5 text-center">상태</th>
                   </tr>
@@ -363,11 +379,11 @@ export const ExpenseLedgerDetailBoard: React.FC<ExpenseLedgerDetailBoardProps> =
                   {section.rows.length > 0 ? section.rows.map((claim) => (
                     <tr key={`${section.key}-${claim.id}`} className="hover:bg-slate-50">
                       <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.date?.slice(5) || '-'}</td>
-                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700">{claim.counterparty || '-'}</td>}
-                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.siteName || '-'}</td>}
-                      <td className="border border-slate-200 px-2 py-1.5 text-center">{getCategoryLabel(claim.category)}</td>
+                      {!isStandaloneSection && <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-700">{claim.counterparty || '-'}</td>}
+                      {!isStandaloneSection && <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.siteName || '-'}</td>}
+                      <td className="border border-slate-200 px-2 py-1.5 text-center">{getCategoryLabel(claim.category, categoryOptions)}</td>
                       <td className="border border-slate-200 px-2 py-1.5 font-bold text-slate-800">{claim.description}</td>
-                      {!isOtherSection && <td className="border border-slate-200 px-2 py-1.5 text-center text-slate-500">{claim.cardLabel || '-'}</td>}
+                      {!isStandaloneSection && <td className="border border-slate-200 px-2 py-1.5 text-center text-slate-500">{claim.cardLabel || '-'}</td>}
                       <td className="border border-slate-200 px-2 py-1.5 text-right font-black tabular-nums">{formatCurrency(claim.amount)}</td>
                       <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-500">{getStatusLabel(claim.status)}</td>
                     </tr>

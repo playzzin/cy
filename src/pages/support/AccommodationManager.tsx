@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory } from '@fortawesome/free-solid-svg-icons';
+import { faBuilding, faFileInvoiceDollar, faPlus, faChartPie, faMapMarkerAlt, faUser, faBed, faWonSign, faExclamationTriangle, faBell, faTrash, faList, faTh, faUsers, faStickyNote, faPen, faRotateRight, faHistory, faSearch } from '@fortawesome/free-solid-svg-icons';
 import Swal from 'sweetalert2';
 import { iconMap } from '../../constants/iconMap';
 import { accommodationService } from '../../services/accommodationService';
@@ -9,6 +9,7 @@ import { Accommodation, UtilityRecord } from '../../types/accommodation';
 import AccommodationForm from '../../components/accommodation/AccommodationForm';
 import AccommodationQuickAssignmentModal from '../../components/accommodation/QuickAssignmentModal';
 import UtilityLedger from '../../components/accommodation/UtilityLedger';
+import { SupportTeamFilterTabs } from '../../components/support/SupportTeamFilterTabs';
 import { useAuth } from '../../contexts/AuthContext';
 import { userService } from '../../services/userService';
 import { teamService, Team } from '../../services/teamService';
@@ -17,10 +18,50 @@ import { UserRole } from '../../types/roles';
 import { AccommodationAssignment } from '../../types/accommodationAssignment';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { AccommodationBillingTarget } from '../../types/accommodationBillingTarget';
+import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
+import { appendOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 
 interface AccommodationManagerProps {
     embedded?: boolean;
 }
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+const getInitialSupportViewMode = (): 'list' | 'card' => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches) {
+        return 'card';
+    }
+    return 'list';
+};
+
+const getContractEndDateInfo = (rawDate?: string) => {
+    if (!rawDate) return null;
+    const endDate = new Date(rawDate);
+    if (Number.isNaN(endDate.getTime())) return null;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    endDate.setHours(0, 0, 0, 0);
+
+    const daysLeft = Math.ceil((endDate.getTime() - today.getTime()) / DAY_MS);
+    return {
+        daysLeft,
+        isExpired: daysLeft < 0,
+        label: daysLeft < 0 ? '만료됨' : daysLeft === 0 ? '오늘 만료' : `${daysLeft}일 남음`
+    };
+};
+
+const normalizeSortKey = (value: unknown): string => String(value ?? '').trim();
+
+const compareTeamThenAccommodation = (leftTeam: string, rightTeam: string, leftName: string, rightName: string): number => {
+    const normalizedLeftTeam = normalizeSortKey(leftTeam);
+    const normalizedRightTeam = normalizeSortKey(rightTeam);
+    if (normalizedLeftTeam && !normalizedRightTeam) return -1;
+    if (!normalizedLeftTeam && normalizedRightTeam) return 1;
+    const teamCompare = normalizedLeftTeam.localeCompare(normalizedRightTeam, 'ko-KR');
+    if (teamCompare !== 0) return teamCompare;
+    return normalizeSortKey(leftName).localeCompare(normalizeSortKey(rightName), 'ko-KR');
+};
 
 const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = false }) => {
     const navigate = useNavigate();
@@ -37,12 +78,13 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const [editingItem, setEditingItem] = useState<Accommodation | undefined>(undefined);
     const [quickAssignItem, setQuickAssignItem] = useState<Accommodation | null>(null);
     const [filterStatus, setFilterStatus] = useState<'active' | 'inactive'>('active');
-    const [viewMode, setViewMode] = useState<'list' | 'card'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'card'>(getInitialSupportViewMode);
 
     // Team Search State
     const [teams, setTeams] = useState<Team[]>([]);
     const [selectableTeams, setSelectableTeams] = useState<Team[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
+    const [searchTerm, setSearchTerm] = useState('');
 
     // Expiration Alert State
     const [dismissedExpirationAlerts, setDismissedExpirationAlerts] = useState(false);
@@ -102,23 +144,17 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                 })
             ]);
 
-            // Filter teams (Cheongyeon Only)
-            const cheongyeonCompanies = companies.filter((c: any) => c.name.includes('청연'));
-            const cheongyeonIdSet = new Set(cheongyeonCompanies.map((c: any) => c.id).filter((id: any) => !!id));
-            const cheongyeonNameSet = new Set(cheongyeonCompanies.map((c: any) => c.name));
-
-            const allowedTeams = teamList.filter((t: Team) => {
-                if (t.companyId && cheongyeonIdSet.has(t.companyId)) return true;
-                if (t.companyName && cheongyeonNameSet.has(t.companyName)) return true;
-                return false;
-            }).sort((a: Team, b: Team) => (a.name || '').localeCompare(b.name || ''));
+            const allowedTeams = buildCheongyeonEngTeams(teamList, companies);
+            const sortedTeams = teamList
+                .slice()
+                .sort((a: Team, b: Team) => String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko-KR'));
 
             setAccommodations(accommodationList);
             setAssignments(assignmentList);
             setBillingTargets(billingTargetList);
             setCurrentMonthLedgerRecords(ledgerList);
-            setTeams(teamList.sort((a: Team, b: Team) => a.name.localeCompare(b.name))); // Full list for state
-            setSelectableTeams(allowedTeams); // Filtered list for assignment
+            setTeams(appendOfficeAssignmentTeam(sortedTeams, sortedTeams)); // Full list for state
+            setSelectableTeams(appendOfficeAssignmentTeam(allowedTeams, sortedTeams)); // Filtered list for assignment
         } catch (error) {
             console.error("Failed to load accommodations", error);
         } finally {
@@ -329,23 +365,33 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     // Calculate Expirations (Within 1 Month)
     const upcomingExpirations = useMemo(() => {
         const now = new Date();
+        now.setHours(0, 0, 0, 0);
         const oneMonthLater = new Date();
         oneMonthLater.setMonth(now.getMonth() + 1);
 
         return accommodations.filter(a => {
             if (a.status !== 'active' || !a.contract.endDate) return false;
             const endDate = new Date(a.contract.endDate);
+            if (Number.isNaN(endDate.getTime())) return false;
+            endDate.setHours(0, 0, 0, 0);
             return endDate <= oneMonthLater;
         }).sort((a, b) => new Date(a.contract.endDate || '').getTime() - new Date(b.contract.endDate || '').getTime());
     }, [accommodations]);
 
+    const visibleExpirationAlerts = upcomingExpirations.slice(0, 6);
+    const hiddenExpirationAlertCount = Math.max(0, upcomingExpirations.length - visibleExpirationAlerts.length);
+
     // Unified Filtered Data
     const filteredAccommodations = useMemo(() => {
+        const query = searchTerm.trim().toLowerCase();
+
         return accommodations.filter(acc => {
             if (acc.status !== filterStatus) return false;
+
+            const activeList = getActiveAssignmentsForAccommodation(acc);
+
             if (filterStatus === 'active' && selectedTeamId) {
-                const activeList = getActiveAssignmentsForAccommodation(acc);
-                return activeList.some((assignment) => {
+                const teamMatches = activeList.some((assignment) => {
                     const resolvedTeam = resolveCanonicalTeam(assignment);
                     const matchesById = Boolean(
                         selectedTeamCanonicalId &&
@@ -360,10 +406,68 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                         resolvedTeam.teamName === selectedTeamCanonicalName
                     );
                 });
+                if (!teamMatches) return false;
             }
-            return true;
+
+            if (!query) return true;
+
+            const accommodationId = normalizeKey(acc.id);
+            const accommodationName = normalizeKey(acc.name);
+            const matchedBillingTargets = billingTargets.filter((target) => {
+                const rawTargetAccommodationId = normalizeKey(target.accommodationId);
+                const matchedById = rawTargetAccommodationId ? accommodationByAnyId.get(rawTargetAccommodationId) : undefined;
+                const canonicalTargetAccommodationId = normalizeKey(matchedById?.id ?? rawTargetAccommodationId);
+                const targetAccommodationName = normalizeKey(target.accommodationName);
+
+                return Boolean(
+                    (accommodationId && canonicalTargetAccommodationId === accommodationId) ||
+                    (accommodationName && targetAccommodationName === accommodationName)
+                );
+            });
+
+            const assignmentSearchValues = activeList.flatMap((assignment) => {
+                const resolvedTeam = resolveCanonicalTeam(assignment);
+                return [
+                    assignment.workerName,
+                    assignment.workerId,
+                    assignment.teamName,
+                    assignment.teamId,
+                    assignment.memo,
+                    resolvedTeam.teamName,
+                    resolvedTeam.teamId
+                ];
+            });
+
+            const billingTargetSearchValues = matchedBillingTargets.flatMap((target) => [
+                target.workerName,
+                target.workerId,
+                target.teamName,
+                target.teamId,
+                target.targetType,
+                target.memo
+            ]);
+
+            return [
+                acc.name,
+                acc.address,
+                acc.type,
+                acc.status,
+                acc.ownership,
+                acc.currentOccupantName,
+                acc.currentOccupantPhone,
+                acc.memo,
+                acc.contract?.landlordName,
+                acc.contract?.landlordContact,
+                acc.contract?.bankName,
+                acc.contract?.accountHolder,
+                acc.contract?.accountNumber,
+                acc.contract?.startDate,
+                acc.contract?.endDate,
+                ...assignmentSearchValues,
+                ...billingTargetSearchValues
+            ].some(value => String(value ?? '').toLowerCase().includes(query));
         });
-    }, [accommodations, filterStatus, selectedTeamId, selectedTeamCanonicalId, selectedTeamCanonicalName, activeAssignmentsByAccommodationId]);
+    }, [accommodations, filterStatus, selectedTeamId, selectedTeamCanonicalId, selectedTeamCanonicalName, activeAssignmentsByAccommodationId, searchTerm, billingTargets, accommodationByAnyId]);
 
     const ownershipSummary = useMemo(() => {
         const summary: Record<string, { count: number; rent: number; deposit: number; occupants: number }> = {
@@ -469,10 +573,52 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         return undefined;
     };
 
+    const getBillingTargetsForAccommodation = (accommodation: Accommodation): AccommodationBillingTarget[] => {
+        const accommodationId = normalizeKey(accommodation.id);
+        const accommodationName = normalizeKey(accommodation.name);
+
+        return billingTargets.filter((target) => {
+            const rawTargetAccommodationId = normalizeKey(target.accommodationId);
+            const matchedById = rawTargetAccommodationId ? accommodationByAnyId.get(rawTargetAccommodationId) : undefined;
+            const canonicalTargetAccommodationId = normalizeKey(matchedById?.id ?? rawTargetAccommodationId);
+            const targetAccommodationName = normalizeKey(target.accommodationName);
+
+            return Boolean(
+                (accommodationId && canonicalTargetAccommodationId === accommodationId) ||
+                (accommodationName && targetAccommodationName === accommodationName)
+            );
+        });
+    };
+
+    const getBillingModeBadge = (
+        accommodation: Accommodation,
+        separatedTarget: AccommodationBillingTarget | undefined,
+        hasAssignment: boolean
+    ) => {
+        const targetRows = getBillingTargetsForAccommodation(accommodation);
+        const isSplit = targetRows.length > 1 || targetRows.some((target) => Boolean(normalizeKey(target.endDate)));
+        if (isSplit) {
+            return { label: '분할', className: 'bg-amber-50 text-amber-700 border-amber-100' };
+        }
+
+        if (separatedTarget) {
+            return { label: '별도', className: 'bg-blue-50 text-blue-700 border-blue-100' };
+        }
+
+        if (hasAssignment) {
+            return { label: '동일', className: 'bg-emerald-50 text-emerald-700 border-emerald-100' };
+        }
+
+        return { label: '미지정', className: 'bg-slate-50 text-slate-400 border-slate-100' };
+    };
+
     const buildBillingTargetLabel = (accommodation: Accommodation, items: AccommodationAssignment[]): string => {
         const separatedTarget = getBillingTargetForAccommodation(accommodation);
         if (separatedTarget) {
-            return separatedTarget.targetType === 'worker' ? '개인' : '팀';
+            if (separatedTarget.targetType === 'worker') return '개인';
+            if (separatedTarget.targetType === 'office') return '사무실';
+            if (separatedTarget.targetType === 'office_staff') return '사무실직원';
+            return '팀';
         }
 
         if (items.length === 0) return '-';
@@ -491,6 +637,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
     const buildBillingTargetWorkerList = (accommodation: Accommodation, items: AccommodationAssignment[]): string => {
         const separatedTarget = getBillingTargetForAccommodation(accommodation);
         if (separatedTarget?.targetType === 'worker') {
+            const workerName = normalizeKey(separatedTarget.workerName);
+            if (workerName) return workerName;
+            const workerId = normalizeKey(separatedTarget.workerId);
+            return workerId ? `ID:${workerId.slice(0, 8)}` : '';
+        }
+        if (separatedTarget?.targetType === 'office_staff') {
             const workerName = normalizeKey(separatedTarget.workerName);
             if (workerName) return workerName;
             const workerId = normalizeKey(separatedTarget.workerId);
@@ -561,6 +713,64 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
 
         return 0;
     }
+
+    const getAssignedTeamNameForAccommodation = (accommodation: Accommodation): string => {
+        const activeList = getActiveAssignmentsForAccommodation(accommodation);
+        const primaryTeamAssign = activeList.find((assignment) => (
+            Boolean(normalizeKey(assignment.teamId)) || Boolean(normalizeKey(assignment.teamName))
+        ));
+        if (!primaryTeamAssign) return '';
+        const resolvedTeam = resolveCanonicalTeam(primaryTeamAssign);
+        return normalizeKey(resolvedTeam.teamName || primaryTeamAssign.teamName);
+    };
+
+    const getBillingTeamNameForAccommodation = (accommodation: Accommodation): string => {
+        const separatedTarget = getBillingTargetForAccommodation(accommodation);
+        if (!separatedTarget) return getAssignedTeamNameForAccommodation(accommodation);
+
+        if (separatedTarget.targetType === 'team') {
+            const teamId = normalizeKey(separatedTarget.teamId);
+            const teamName = normalizeKey(separatedTarget.teamName);
+            const team = teamId ? teamByAnyId.get(teamId) : (teamName ? teamByName.get(teamName) : undefined);
+            return normalizeKey(team?.name || teamName);
+        }
+
+        if (separatedTarget.targetType === 'office' || separatedTarget.targetType === 'office_staff') {
+            return '사무실';
+        }
+
+        const targetWorkerId = normalizeKey(separatedTarget.workerId);
+        const targetWorkerName = normalizeKey(separatedTarget.workerName);
+        const activeList = getActiveAssignmentsForAccommodation(accommodation);
+        const matchedAssignment = activeList.find((assignment) => (
+            Boolean(targetWorkerId && normalizeKey(assignment.workerId) === targetWorkerId) ||
+            Boolean(targetWorkerName && normalizeKey(assignment.workerName) === targetWorkerName)
+        ));
+        if (!matchedAssignment) return getAssignedTeamNameForAccommodation(accommodation);
+
+        const resolvedTeam = resolveCanonicalTeam(matchedAssignment);
+        return normalizeKey(resolvedTeam.teamName || matchedAssignment.teamName);
+    };
+
+    const sortedFilteredAccommodations = useMemo(() => (
+        [...filteredAccommodations].sort((left, right) => {
+            const teamCompare = compareTeamThenAccommodation(
+                getBillingTeamNameForAccommodation(left),
+                getBillingTeamNameForAccommodation(right),
+                normalizeKey(left.name) || normalizeKey(left.address),
+                normalizeKey(right.name) || normalizeKey(right.address)
+            );
+            if (teamCompare !== 0) return teamCompare;
+            return normalizeKey(left.address).localeCompare(normalizeKey(right.address), 'ko-KR');
+        })
+    ), [
+        filteredAccommodations,
+        activeAssignmentsByAccommodationId,
+        billingTargetByAccommodationId,
+        billingTargetByAccommodationName,
+        teamByAnyId,
+        teamByName
+    ]);
 
     const handleAddClick = () => {
         setEditingItem(undefined);
@@ -754,30 +964,33 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
         return diff >= 0 && diff <= 3;
     });
 
+    const visibleUpcomingRentAccommodations = upcomingRentAccommodations.slice(0, 6);
+    const hiddenUpcomingRentCount = Math.max(0, upcomingRentAccommodations.length - visibleUpcomingRentAccommodations.length);
+
 
 
     // Calculate Occupancy Rate
     const occupancyRate = totalCount > 0 ? Math.round((occupiedCount / totalCount) * 100) : 0;
 
     return (
-        <div className={embedded ? 'space-y-6 bg-transparent min-h-full w-full min-w-0' : 'p-6 space-y-6 bg-slate-50 min-h-full w-full min-w-0'}>
-            <div className={embedded ? 'space-y-6 w-full min-w-0' : 'space-y-6 w-full min-w-0'}>
+        <div className={embedded ? 'space-y-5 sm:space-y-6 bg-transparent min-h-full w-full min-w-0 max-w-full overflow-x-hidden' : 'p-3 sm:p-6 space-y-5 sm:space-y-6 bg-slate-50 min-h-full w-full max-w-[calc(100vw-30px)] sm:max-w-full min-w-0 overflow-x-hidden'}>
+            <div className={embedded ? 'space-y-5 sm:space-y-6 w-full min-w-0' : 'space-y-5 sm:space-y-6 w-full min-w-0'}>
 
                 {/* Header Section */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <div className="shrink-0 p-3 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-100">
                             <FontAwesomeIcon icon={faBuilding} className="text-white text-xl" />
                         </div>
-                        <div>
-                            <h1 className="text-2xl font-black text-slate-900 tracking-tight">숙소 통합관리</h1>
+                        <div className="min-w-0">
+                            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">숙소 통합관리</h1>
                             <p className="text-sm text-slate-500 font-medium">숙소 배정 현황 및 공과금/청구 내역을 관리합니다.</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                         <button
                             onClick={() => navigate('/support/accommodation/logs')}
-                            className="flex items-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm"
+                            className="flex flex-1 items-center justify-center gap-2 px-4 py-2.5 bg-white text-slate-700 rounded-xl font-bold hover:text-indigo-700 hover:border-indigo-200 transition-all border border-slate-200 shadow-sm sm:flex-none"
                         >
                             <FontAwesomeIcon icon={faHistory} />
                             <span>청구 로그</span>
@@ -785,13 +998,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                         <button
                             onClick={loadData}
                             className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
+                            aria-label="새로고침"
                             title="새로고침"
                         >
                             <FontAwesomeIcon icon={faRotateRight} className={loading ? 'spin' : ''} />
                         </button>
                         <button
                             onClick={handleAddClick}
-                            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95"
+                            className="flex flex-1 items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95 sm:flex-none"
                         >
                             <FontAwesomeIcon icon={faPlus} />
                             신규 숙소 등록
@@ -800,39 +1014,53 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                 </div>
 
                 {/* 필터 및 탭 섹션 */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex flex-wrap p-1 bg-slate-100 rounded-xl w-full lg:w-fit gap-1">
-                        <button
-                            onClick={() => setActiveTab('status')}
-                            className={`flex-1 lg:flex-none min-w-[150px] px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <FontAwesomeIcon icon={faChartPie} className="mr-2" />
-                            배정 및 청구현황
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('ledger')}
-                            className={`flex-1 lg:flex-none min-w-[170px] px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                        >
-                            <FontAwesomeIcon icon={faFileInvoiceDollar} className="mr-2" />
-                            숙소 통합관리대장
-                        </button>
+                <div className="flex max-w-full flex-col gap-2 overflow-hidden bg-white p-2 rounded-2xl border border-slate-200 shadow-sm xl:flex-row xl:items-center">
+                    <div className="flex min-w-0 flex-1 flex-col gap-2 lg:flex-row lg:items-center">
+                        <div className="support-scroll-x w-full lg:w-auto lg:shrink-0">
+                            <div className="support-scroll-inner flex p-1 bg-slate-100 rounded-xl">
+                                <button
+                                    onClick={() => setActiveTab('status')}
+                                    className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'status' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    <FontAwesomeIcon icon={faChartPie} className="mr-2" />
+                                    배정 및 청구현황
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('ledger')}
+                                    className={`whitespace-nowrap px-4 py-2 rounded-lg text-sm font-bold transition-all sm:px-6 ${activeTab === 'ledger' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    <FontAwesomeIcon icon={faFileInvoiceDollar} className="mr-2" />
+                                    숙소 통합관리대장
+                                </button>
+                            </div>
+                        </div>
+
+                        <SupportTeamFilterTabs
+                            teams={selectableTeams}
+                            selectedTeamId={selectedTeamId}
+                            onChange={setSelectedTeamId}
+                            disabled={activeTab !== 'status' || filterStatus !== 'active'}
+                            className="flex-1"
+                        />
                     </div>
 
-                    <div className="flex items-center gap-3 px-2 min-w-0">
-                        <span className="text-sm font-bold text-slate-500 whitespace-nowrap">팀별 필터:</span>
-                        <select
-                            value={selectedTeamId}
-                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                            disabled={activeTab !== 'status' || filterStatus !== 'active'}
-                            className="bg-slate-50 border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-48 p-2 outline-none disabled:text-slate-300"
-                        >
-                            <option value="">전체 팀 보기</option>
-                            {selectableTeams.map((team) => (
-                                <option key={team.id} value={team.id}>
-                                    {team.name}
-                                </option>
-                            ))}
-                        </select>
+                    <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end xl:w-auto">
+                        {activeTab === 'status' && (
+                            <span className="whitespace-nowrap px-1 text-xs font-bold text-slate-400">
+                                조회 {filteredAccommodations.length} / {accommodations.length}
+                            </span>
+                        )}
+
+                        <label className="relative block w-full sm:min-w-[240px] xl:w-72">
+                            <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400" />
+                            <input
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                disabled={activeTab !== 'status'}
+                                placeholder="숙소명, 주소, 배정자 검색"
+                                className="block w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm font-bold text-slate-700 outline-none focus:border-indigo-500 focus:ring-indigo-500 disabled:text-slate-300"
+                            />
+                        </label>
                     </div>
                 </div>
 
@@ -844,30 +1072,35 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             <div className="space-y-4">
                                 {/* Expiration Alert (Priority) */}
                                 {upcomingExpirations.length > 0 && !dismissedExpirationAlerts && (
-                                    <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-4 shadow-sm animate-fade-in-down">
-                                        <div className="bg-red-100 p-2 rounded-full text-red-600">
+                                    <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm animate-fade-in-down sm:flex-row sm:items-start">
+                                        <div className="w-fit bg-red-100 p-2 rounded-full text-red-600">
                                             <FontAwesomeIcon icon={faExclamationTriangle} className="animate-pulse" />
                                         </div>
-                                        <div className="flex-1">
-                                            <div className="flex justify-between items-start">
-                                                <h3 className="font-bold text-red-800 text-sm mb-1">계약 만료 예정인 숙소가 있습니다! (1개월 내)</h3>
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                                <h3 className="font-bold text-red-800 text-sm">계약 만료 확인 필요 ({upcomingExpirations.length}건)</h3>
                                                 <button
                                                     onClick={() => setDismissedExpirationAlerts(true)}
-                                                    className="text-xs font-bold text-red-400 hover:text-red-600 underline"
+                                                    className="w-fit text-xs font-bold text-red-500 hover:text-red-700 underline"
                                                 >
-                                                    확인 (닫기)
+                                                    알림 숨기기
                                                 </button>
                                             </div>
                                             <div className="flex flex-wrap gap-2 mt-1">
-                                                {upcomingExpirations.map(acc => {
-                                                    const daysLeft = Math.ceil((new Date(acc.contract.endDate || '').getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                                                {visibleExpirationAlerts.map(acc => {
+                                                    const endDateInfo = getContractEndDateInfo(acc.contract.endDate);
                                                     return (
-                                                        <span key={acc.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-red-200 text-xs font-bold text-red-700 shadow-sm">
+                                                        <span key={acc.id} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-bold shadow-sm ${endDateInfo?.isExpired ? 'bg-red-100 border-red-300 text-red-800' : 'bg-white border-red-200 text-red-700'}`}>
                                                             <FontAwesomeIcon icon={faBuilding} className="text-red-400" />
-                                                            {acc.name} ({acc.contract.endDate} / {daysLeft}일 남음)
+                                                            {acc.name} ({acc.contract.endDate} / {endDateInfo?.label ?? '날짜 확인 필요'})
                                                         </span>
                                                     );
                                                 })}
+                                                {hiddenExpirationAlertCount > 0 && (
+                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-red-100 text-xs font-bold text-red-700">
+                                                        외 {hiddenExpirationAlertCount}건
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -875,19 +1108,24 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
 
                                 {/* Rent Due Alert */}
                                 {upcomingRentAccommodations.length > 0 && (
-                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-4 shadow-sm animate-fade-in-down">
-                                        <div className="bg-amber-100 p-2 rounded-full text-amber-600">
+                                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col gap-3 shadow-sm animate-fade-in-down sm:flex-row sm:items-start">
+                                        <div className="w-fit bg-amber-100 p-2 rounded-full text-amber-600">
                                             <FontAwesomeIcon icon={faBell} className="animate-swing" />
                                         </div>
-                                        <div className="flex-1">
-                                            <h3 className="font-bold text-amber-800 text-sm mb-1">곧 월세 납부일인 숙소가 있습니다!</h3>
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="font-bold text-amber-800 text-sm mb-1">월세 납부일 임박 ({upcomingRentAccommodations.length}건)</h3>
                                             <div className="flex flex-wrap gap-2">
-                                                {upcomingRentAccommodations.map(acc => (
+                                                {visibleUpcomingRentAccommodations.map(acc => (
                                                     <span key={acc.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-amber-200 text-xs font-bold text-amber-700 shadow-sm">
                                                         <FontAwesomeIcon icon={faBuilding} className="text-amber-400" />
                                                         {acc.name} (매월 {acc.contract.rentPayDate}일)
                                                     </span>
                                                 ))}
+                                                {hiddenUpcomingRentCount > 0 && (
+                                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-100 text-xs font-bold text-amber-700">
+                                                        외 {hiddenUpcomingRentCount}건
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -1068,14 +1306,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">보증금</th>
                                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">배정인원</th>
                                                     <th className="text-left px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">청구대상</th>
+                                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">청구방식</th>
                                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">이체/월세일</th>
                                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">계약만료</th>
-                                                    <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider">임대인</th>
                                                     <th className="text-center px-4 py-3 font-bold text-slate-500 text-xs uppercase tracking-wider w-20"></th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-100">
-                                                {filteredAccommodations
+                                                {sortedFilteredAccommodations
                                                     .map((acc, rowIdx) => {
                                                         const activeList = getActiveAssignmentsForAccommodation(acc);
                                                         const assignedWorkerNames = Array.from(
@@ -1137,14 +1375,27 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                 || ''
                                                             ).trim()
                                                             : '';
+                                                        const billingTargetOfficeName = separatedBillingTarget?.targetType === 'office'
+                                                            ? String(separatedBillingTarget.teamName || '사무실').trim()
+                                                            : '';
+                                                        const billingTargetOfficeStaffName = separatedBillingTarget?.targetType === 'office_staff'
+                                                            ? String(separatedBillingTarget.workerName || '사무실직원').trim()
+                                                            : '';
                                                         const billingTargetType = separatedBillingTarget?.targetType
                                                             ?? (billingTargetWorkerName ? 'worker' : billingTargetTeamName ? 'team' : undefined);
                                                         const billingTargetName = billingTargetType === 'worker'
                                                             ? billingTargetWorkerName
-                                                            : billingTargetTeamName;
+                                                            : billingTargetType === 'team'
+                                                                ? billingTargetTeamName
+                                                                : billingTargetType === 'office'
+                                                                    ? billingTargetOfficeName
+                                                                    : billingTargetType === 'office_staff'
+                                                                        ? billingTargetOfficeStaffName
+                                                                        : '';
                                                         const billingTargetTeamInfo = billingTargetType === 'team'
                                                             ? getTeamInfo(separatedTeam?.id ?? primaryTeamAssign?.teamId, billingTargetName)
                                                             : undefined;
+                                                        const billingModeBadge = getBillingModeBadge(acc, separatedBillingTarget, activeList.length > 0);
                                                         const tc = primaryTeamInfo?.color;
                                                         const paymentDay = acc.contract.paymentDay || acc.contract.rentPayDate;
                                                         const isContractExpired = acc.contract.endDate && new Date(acc.contract.endDate) < new Date();
@@ -1159,7 +1410,20 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                 <td className="px-4 py-3 text-xs text-slate-400 font-mono">{rowIdx + 1}</td>
                                                                 <td className="px-4 py-3">
                                                                     <div className="flex items-center gap-2 group/name">
-                                                                        <span className="font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">
+                                                                        <span
+                                                                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-xs text-slate-400"
+                                                                            style={tc ? {
+                                                                                backgroundColor: hexToRgba(tc, 0.1),
+                                                                                color: tc,
+                                                                                borderColor: hexToRgba(tc, 0.22),
+                                                                            } : undefined}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faBuilding} />
+                                                                        </span>
+                                                                        <span
+                                                                            className="truncate font-bold text-slate-800 transition-colors group-hover:text-indigo-600"
+                                                                            style={tc ? { color: tc } : undefined}
+                                                                        >
                                                                             {acc.name}
                                                                         </span>
                                                                         <button
@@ -1263,7 +1527,11 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                                 : undefined}
                                                                         >
                                                                             <FontAwesomeIcon
-                                                                                icon={billingTargetType === 'team' ? getTeamFaIcon(billingTargetTeamInfo?.icon) : faUser}
+                                                                                icon={billingTargetType === 'team'
+                                                                                    ? getTeamFaIcon(billingTargetTeamInfo?.icon)
+                                                                                    : billingTargetType === 'office'
+                                                                                        ? faBuilding
+                                                                                        : faUser}
                                                                                 className="text-[10px]"
                                                                             />
                                                                             {billingTargetName}
@@ -1271,6 +1539,11 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     ) : (
                                                                         <span className="text-xs text-slate-300">-</span>
                                                                     )}
+                                                                </td>
+                                                                <td className="px-4 py-3 text-center">
+                                                                    <span className={`inline-flex min-w-[46px] items-center justify-center rounded-md border px-2 py-1 text-[11px] font-extrabold ${billingModeBadge.className}`}>
+                                                                        {billingModeBadge.label}
+                                                                    </span>
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <div className="flex flex-col items-center gap-1">
@@ -1297,9 +1570,6 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                     ) : (
                                                                         <span className="text-xs text-slate-300">-</span>
                                                                     )}
-                                                                </td>
-                                                                <td className="px-4 py-3 text-center text-xs text-slate-500">
-                                                                    {acc.contract.landlordName || '-'}
                                                                 </td>
                                                                 <td className="px-4 py-3 text-center">
                                                                     <div className="flex items-center justify-center gap-1.5">
@@ -1340,12 +1610,14 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                             ) : (
                                 /* ── 카드형 (Grid) ── */
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                                    {filteredAccommodations.map(acc => (
+                                    {sortedFilteredAccommodations.map(acc => (
                                         (() => {
                                             const activeList = getActiveAssignmentsForAccommodation(acc);
                                             const checkedInCount = activeList.length;
+                                            const separatedBillingTarget = getBillingTargetForAccommodation(acc);
                                             const billingTargetLabel = buildBillingTargetLabel(acc, activeList);
                                             const billingTargetWorkers = buildBillingTargetWorkerList(acc, activeList);
+                                            const billingModeBadge = getBillingModeBadge(acc, separatedBillingTarget, activeList.length > 0);
                                             const isExpired = acc.status === 'inactive';
 
                                             const primaryTeamAssign = activeList.find(
@@ -1434,8 +1706,21 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                             </div>
                                                         )}
 
-                                                        <div className="flex items-center gap-2 mb-1 group/cardname">
-                                                            <h3 className="text-lg font-bold text-slate-800 group-hover:text-indigo-700 transition-colors truncate">
+                                                        <div className="flex min-w-0 items-center gap-2 mb-1 group/cardname">
+                                                            <span
+                                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-400"
+                                                                style={tc ? {
+                                                                    backgroundColor: hexToRgba(tc, 0.1),
+                                                                    color: tc,
+                                                                    borderColor: hexToRgba(tc, 0.22),
+                                                                } : undefined}
+                                                            >
+                                                                <FontAwesomeIcon icon={faBuilding} />
+                                                            </span>
+                                                            <h3
+                                                                className="min-w-0 flex-1 truncate text-lg font-bold text-slate-800 transition-colors group-hover:text-indigo-700"
+                                                                style={tc ? { color: tc } : undefined}
+                                                            >
                                                                 {acc.name}
                                                             </h3>
                                                             <button
@@ -1512,6 +1797,12 @@ const AccommodationManager: React.FC<AccommodationManagerProps> = ({ embedded = 
                                                                 <span className="text-slate-400 font-medium text-xs">청구 대상</span>
                                                                 <span className="font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded text-xs">
                                                                     {billingTargetLabel}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex justify-between items-center text-sm">
+                                                                <span className="text-slate-400 font-medium text-xs">청구 방식</span>
+                                                                <span className={`inline-flex min-w-[46px] items-center justify-center rounded-md border px-2 py-0.5 text-[11px] font-extrabold ${billingModeBadge.className}`}>
+                                                                    {billingModeBadge.label}
                                                                 </span>
                                                             </div>
                                                             {billingTargetWorkers && (

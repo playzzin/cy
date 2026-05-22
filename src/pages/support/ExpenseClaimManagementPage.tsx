@@ -15,25 +15,29 @@ import {
 } from 'lucide-react';
 import { CurrencyInput } from '../../components/common/CurrencyInput';
 import { YearMonthPicker } from '../../components/common/YearMonthPicker';
+import { teamExpenseCategoryService } from '../../services/teamExpenseCategoryService';
 import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { toast } from '../../utils/swal';
+import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME, isOfficeAssignmentReference } from '../../utils/supportAssignmentTargets';
 import {
-  CATEGORY_OPTIONS,
-  OTHER_CLAIM_CATEGORY_OPTIONS,
   buildDefaultDate,
   buildDefaultYearMonth,
   formatCurrency,
+  getAttendedSiteOptions,
   getCategoryLabel,
+  getEffectiveClaimType,
   hexToRgba,
   normalizeColor,
   useExpenseLedgerData
 } from './hooks/useExpenseLedgerData';
-import type { ExpensePaymentOption } from './hooks/useExpenseLedgerData';
+import type { ExpenseCategoryOption, ExpensePaymentOption } from './hooks/useExpenseLedgerData';
 import type { Site } from '../../services/siteService';
 import type { Team } from '../../services/teamService';
 import type {
   TeamExpenseClaim,
   TeamExpenseClaimCategory,
+  TeamExpenseCategory,
+  TeamExpenseCategoryScope,
   TeamExpenseClaimStatus,
   TeamExpenseClaimType
 } from '../../types/teamExpenseLedger';
@@ -57,30 +61,27 @@ type ClaimFormState = {
   memo: string;
 };
 
+type CategoryFormState = {
+  id?: string;
+  label: string;
+  scope: TeamExpenseCategoryScope;
+};
+
 const inputClass = 'h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-slate-400';
 const labelClass = 'mb-1.5 block text-xs font-black text-slate-600';
 
 const claimTypeOptions: Array<{ value: TeamExpenseClaimType; label: string; description: string }> = [
   { value: 'teamCharge', label: '후청구', description: '사용팀과 청구대상팀을 함께 기록' },
-  { value: 'otherExpense', label: '기타청구', description: '해당 팀에게만 청구, 현장/결제수단 없음' }
+  { value: 'otherExpense', label: '기타청구', description: '해당 팀에게만 청구, 현장/결제수단 없음' },
+  { value: 'officeExpense', label: '사무실경비', description: '사무실 비용으로 별도 집계' }
 ];
-
-const defaultCategoryByClaimType: Record<TeamExpenseClaimType, TeamExpenseClaimCategory> = {
-  teamCharge: 'meal',
-  otherExpense: 'deposit'
-};
-
-const categoryValuesByClaimType: Record<TeamExpenseClaimType, TeamExpenseClaimCategory[]> = {
-  teamCharge: CATEGORY_OPTIONS.map((option) => option.value),
-  otherExpense: OTHER_CLAIM_CATEGORY_OPTIONS.map((option) => option.value)
-};
 
 const normalizeCategoryForType = (
   category: TeamExpenseClaimCategory | undefined,
-  claimType: TeamExpenseClaimType
+  options: ExpenseCategoryOption[],
+  fallback: TeamExpenseClaimCategory
 ): TeamExpenseClaimCategory => {
-  const allowedValues = categoryValuesByClaimType[claimType];
-  return category && allowedValues.includes(category) ? category : defaultCategoryByClaimType[claimType];
+  return category && options.some((option) => option.value === category) ? category : fallback;
 };
 
 const normalizeKey = (value: unknown) => String(value ?? '').replace(/\s+/g, '').toLowerCase();
@@ -91,6 +92,16 @@ const getTeamColor = (team: Team | undefined | null) => normalizeColor((team as 
 
 const getTeamKeys = (team: Team | undefined | null) =>
   [team?.id, (team as any)?.legacyId, team?.name].map((value) => normalizeKey(value)).filter(Boolean);
+
+const isOfficeTeamReference = (teamId?: unknown, teamName?: unknown) =>
+  isOfficeAssignmentReference(teamId, teamName);
+
+const getCategoryScopeLabel = (scope: TeamExpenseCategoryScope) => {
+  if (scope === 'teamCharge') return '후청구';
+  if (scope === 'otherExpense') return '기타청구';
+  if (scope === 'officeExpense') return '사무실경비';
+  return '공통';
+};
 
 const TeamColorBadge: React.FC<{ name?: string; color?: string }> = ({ name, color }) => {
   if (!String(name ?? '').trim()) return <span className="font-bold text-slate-400">-</span>;
@@ -144,9 +155,11 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const [yearMonth, setYearMonth] = useState(buildDefaultYearMonth());
   const [form, setForm] = useState<ClaimFormState>(() => createDefaultForm(buildDefaultYearMonth()));
   const [saving, setSaving] = useState(false);
+  const [categorySaving, setCategorySaving] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState('all');
   const [typeFilter, setTypeFilter] = useState<TeamExpenseClaimType | 'all'>('all');
   const [searchText, setSearchText] = useState('');
+  const [categoryForm, setCategoryForm] = useState<CategoryFormState>({ label: '', scope: 'teamCharge' });
   const formRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -154,9 +167,15 @@ const ExpenseClaimManagementPage: React.FC = () => {
     teamOptions,
     siteOptions,
     cardLabelOptions,
+    expenseCategories,
+    activeExpenseCategories,
+    allCategoryOptions,
+    categoryOptions,
+    otherClaimCategoryOptions,
+    officeExpenseCategoryOptions,
     rawDocs,
     loadData
-  } = useExpenseLedgerData(yearMonth, 'all', 'all');
+  } = useExpenseLedgerData(yearMonth, 'all', 'all', true);
 
   const selectedFilterTeam = useMemo(
     () => teamOptions.find((team) => getTeamId(team) === selectedTeamId),
@@ -171,16 +190,44 @@ const ExpenseClaimManagementPage: React.FC = () => {
     () => teamOptions.find((team) => getTeamId(team) === form.chargeToTeamId),
     [form.chargeToTeamId, teamOptions]
   );
+  const officeTeam = useMemo(
+    () => teamOptions.find((team) => getTeamId(team) === OFFICE_ASSIGNMENT_TEAM_ID || normalizeKey(getTeamName(team)) === normalizeKey(OFFICE_ASSIGNMENT_TEAM_NAME)),
+    [teamOptions]
+  );
+  const nonOfficeTeamOptions = useMemo(
+    () => teamOptions.filter((team) => !isOfficeTeamReference(getTeamId(team), getTeamName(team))),
+    [teamOptions]
+  );
   const isOtherClaim = form.claimType === 'otherExpense';
+  const officeTeamId = getTeamId(officeTeam) || OFFICE_ASSIGNMENT_TEAM_ID;
+  const officeTeamName = getTeamName(officeTeam) || OFFICE_ASSIGNMENT_TEAM_NAME;
+  const isOfficeExpense = form.claimType === 'officeExpense';
+  const isStandaloneClaim = form.claimType !== 'teamCharge';
   const payerTeamColor = getTeamColor(payerTeam);
   const chargeToTeamColor = getTeamColor(chargeToTeam);
-  const categoryOptions = useMemo(
-    () => (isOtherClaim ? OTHER_CLAIM_CATEGORY_OPTIONS : CATEGORY_OPTIONS),
-    [isOtherClaim]
+  const formCategoryOptions = useMemo(
+    () => (isOfficeExpense ? officeExpenseCategoryOptions : isOtherClaim ? otherClaimCategoryOptions : categoryOptions),
+    [categoryOptions, isOfficeExpense, isOtherClaim, officeExpenseCategoryOptions, otherClaimCategoryOptions]
   );
+  const defaultTeamChargeCategory = categoryOptions[0]?.value || 'etc';
+  const defaultOtherClaimCategory = otherClaimCategoryOptions[0]?.value || 'etc';
+  const defaultOfficeExpenseCategory = officeExpenseCategoryOptions.find((option) => option.value === 'officeExpense')?.value || officeExpenseCategoryOptions[0]?.value || 'officeExpense';
+  const defaultCategoryForCurrentType = isOfficeExpense ? defaultOfficeExpenseCategory : isOtherClaim ? defaultOtherClaimCategory : defaultTeamChargeCategory;
+  const getCategoryOptionsForType = (claimType: TeamExpenseClaimType) => {
+    if (claimType === 'officeExpense') return officeExpenseCategoryOptions;
+    if (claimType === 'otherExpense') return otherClaimCategoryOptions;
+    return categoryOptions;
+  };
+  const getDefaultCategoryForType = (claimType: TeamExpenseClaimType) => {
+    if (claimType === 'officeExpense') return defaultOfficeExpenseCategory;
+    if (claimType === 'otherExpense') return defaultOtherClaimCategory;
+    return defaultTeamChargeCategory;
+  };
+  const normalizeFormCategory = (category: TeamExpenseClaimCategory | undefined, claimType: TeamExpenseClaimType) =>
+    normalizeCategoryForType(category, getCategoryOptionsForType(claimType), getDefaultCategoryForType(claimType));
 
   const visiblePaymentOptions = useMemo(() => {
-    if (form.claimType === 'otherExpense') return [];
+    if (isStandaloneClaim) return [];
     if (!form.payerTeamId) return cardLabelOptions;
     const teamKeys = new Set([form.payerTeamId, ...getTeamKeys(payerTeam)].map((value) => String(value).trim()).filter(Boolean));
 
@@ -189,7 +236,24 @@ const ExpenseClaimManagementPage: React.FC = () => {
       if (option.teamIds.length === 0) return true;
       return option.teamIds.some((id) => teamKeys.has(String(id).trim()) || teamKeys.has(normalizeKey(id)));
     });
-  }, [cardLabelOptions, form.claimType, form.payerTeamId, payerTeam]);
+  }, [cardLabelOptions, form.payerTeamId, isStandaloneClaim, payerTeam]);
+
+  const attendedSiteOptions = useMemo(
+    () => getAttendedSiteOptions(siteOptions, rawDocs.dailyReports, form.date || buildDefaultDate(yearMonth)),
+    [form.date, rawDocs.dailyReports, siteOptions, yearMonth]
+  );
+
+  const findAttendedSite = (siteId?: unknown, siteName?: unknown) =>
+    attendedSiteOptions.find((site) => {
+      const candidateId = String(site.id ?? '').trim();
+      const candidateLegacyId = String((site as any).legacyId ?? '').trim();
+      const targetId = String(siteId ?? '').trim();
+      const targetName = normalizeKey(siteName);
+      return (
+        (targetId && (candidateId === targetId || candidateLegacyId === targetId)) ||
+        (targetName && normalizeKey(site.name) === targetName)
+      );
+    });
 
   useEffect(() => {
     setForm((current) => {
@@ -204,6 +268,17 @@ const ExpenseClaimManagementPage: React.FC = () => {
     if (!stillVisible) setForm((current) => ({ ...current, cardLabel: '현찰' }));
   }, [form.cardLabel, visiblePaymentOptions]);
 
+  useEffect(() => {
+    if (loading || isStandaloneClaim || !form.siteId) return;
+    if (findAttendedSite(form.siteId, form.siteName)) return;
+
+    setForm((current) => ({
+      ...current,
+      siteId: '',
+      siteName: ''
+    }));
+  }, [attendedSiteOptions, form.siteId, form.siteName, isStandaloneClaim, loading]);
+
   const updateForm = <K extends keyof ClaimFormState>(key: K, value: ClaimFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -216,7 +291,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
     });
 
   const applyResponsibleTeam = (site: Site | undefined) => {
-    if (!site || form.claimType === 'otherExpense') return;
+    if (!site || isStandaloneClaim) return;
 
     const responsibleTeamId = String((site as any)?.responsibleTeamId ?? '').trim();
     const responsibleTeamName = String((site as any)?.responsibleTeamName ?? '').trim();
@@ -236,12 +311,25 @@ const ExpenseClaimManagementPage: React.FC = () => {
 
   const handlePayerTeamChange = (teamId: string) => {
     const team = findTeam(teamId);
-    setForm((current) => ({
-      ...current,
-      payerTeamId: teamId,
-      payerTeamName: getTeamName(team),
-      cardLabel: current.claimType === 'otherExpense' ? '' : current.cardLabel || '현찰'
-    }));
+    const teamName = getTeamName(team);
+    setForm((current) => {
+      if (current.claimType === 'officeExpense') {
+        return {
+          ...current,
+          payerTeamId: officeTeamId,
+          payerTeamName: officeTeamName,
+          cardLabel: '',
+          category: normalizeFormCategory(current.category, 'officeExpense')
+        };
+      }
+
+      return {
+        ...current,
+        payerTeamId: teamId,
+        payerTeamName: teamName,
+        cardLabel: current.claimType !== 'teamCharge' ? '' : current.cardLabel || '현찰'
+      };
+    });
   };
 
   const handleChargeTeamChange = (teamId: string) => {
@@ -254,20 +342,31 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
 
   const handleClaimTypeChange = (claimType: TeamExpenseClaimType) => {
+    const nextIsStandalone = claimType !== 'teamCharge';
     setForm((current) => ({
       ...current,
       claimType,
-      chargeToTeamId: claimType === 'otherExpense' ? '' : current.chargeToTeamId,
-      chargeToTeamName: claimType === 'otherExpense' ? '' : current.chargeToTeamName,
-      siteId: claimType === 'otherExpense' ? '' : current.siteId,
-      siteName: claimType === 'otherExpense' ? '' : current.siteName,
-      cardLabel: claimType === 'otherExpense' ? '' : current.cardLabel || '현찰',
-      category: normalizeCategoryForType(current.category, claimType)
+      payerTeamId: claimType === 'officeExpense'
+        ? officeTeamId
+        : isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
+          ? ''
+          : current.payerTeamId,
+      payerTeamName: claimType === 'officeExpense'
+        ? officeTeamName
+        : isOfficeTeamReference(current.payerTeamId, current.payerTeamName)
+          ? ''
+          : current.payerTeamName,
+      chargeToTeamId: nextIsStandalone || isOfficeTeamReference(current.chargeToTeamId, current.chargeToTeamName) ? '' : current.chargeToTeamId,
+      chargeToTeamName: nextIsStandalone || isOfficeTeamReference(current.chargeToTeamId, current.chargeToTeamName) ? '' : current.chargeToTeamName,
+      siteId: nextIsStandalone ? '' : current.siteId,
+      siteName: nextIsStandalone ? '' : current.siteName,
+      cardLabel: nextIsStandalone ? '' : current.cardLabel || '현찰',
+      category: normalizeFormCategory(current.category, claimType)
     }));
   };
 
   const handleSiteSelect = (siteId: string) => {
-    const site = siteOptions.find((item) => String(item.id ?? '') === siteId);
+    const site = findAttendedSite(siteId);
     setForm((current) => ({
       ...current,
       siteId,
@@ -277,7 +376,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
 
   const handleSiteNameBlur = () => {
-    const site = siteOptions.find((item) => normalizeKey(item.name) === normalizeKey(form.siteName));
+    const site = findAttendedSite(undefined, form.siteName);
     if (!site) return;
 
     setForm((current) => ({
@@ -291,15 +390,19 @@ const ExpenseClaimManagementPage: React.FC = () => {
   const validateForm = () => {
     const errors: string[] = [];
     if (!form.date) errors.push('사용일자를 입력해주세요.');
-    if (!form.payerTeamId) errors.push(form.claimType === 'otherExpense' ? '청구팀을 선택해주세요.' : '사용팀을 선택해주세요.');
-    if (form.claimType !== 'otherExpense' && !form.cardLabel) errors.push('결제수단을 선택해주세요.');
-    if (!categoryValuesByClaimType[form.claimType].includes(form.category)) errors.push('구분을 선택해주세요.');
+    if (!form.payerTeamId) errors.push(isStandaloneClaim ? '청구팀을 선택해주세요.' : '사용팀을 선택해주세요.');
+    if (form.claimType === 'officeExpense' && !isOfficeTeamReference(form.payerTeamId, form.payerTeamName)) errors.push('사무실경비는 청구팀을 사무실로 선택해주세요.');
+    if (form.claimType !== 'officeExpense' && isOfficeTeamReference(form.payerTeamId, form.payerTeamName)) errors.push('사무실은 사무실경비에서만 선택할 수 있습니다.');
+    if (!isStandaloneClaim && !form.cardLabel) errors.push('결제수단을 선택해주세요.');
+    if (!String(form.category ?? '').trim()) errors.push('구분을 선택해주세요.');
     if (!form.description.trim()) errors.push('내용을 입력해주세요.');
     if (form.amount <= 0) errors.push('금액을 입력해주세요.');
 
     if (form.claimType === 'teamCharge') {
       if (!form.chargeToTeamId && !form.chargeToTeamName.trim()) errors.push('청구대상팀을 선택해주세요.');
+      if (isOfficeTeamReference(form.chargeToTeamId, form.chargeToTeamName)) errors.push('후청구 청구대상팀에는 사무실을 선택할 수 없습니다.');
       if (!form.siteName.trim()) errors.push('현장명을 입력하거나 선택해주세요.');
+      else if (!findAttendedSite(form.siteId, form.siteName)) errors.push('사용일자 기준 월초부터 해당일까지 출역이 입력된 현장만 선택할 수 있습니다.');
     }
 
     return errors;
@@ -315,8 +418,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
         claimType: current.claimType,
         payerTeamId: current.payerTeamId,
         payerTeamName: current.payerTeamName,
-        cardLabel: current.claimType === 'otherExpense' ? '' : current.cardLabel || '현찰',
-        category: normalizeCategoryForType(current.category, current.claimType),
+        cardLabel: current.claimType !== 'teamCharge' ? '' : current.cardLabel || '현찰',
+        category: normalizeFormCategory(current.category, current.claimType),
         status: current.status
       };
     });
@@ -332,9 +435,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
 
     setSaving(true);
     try {
-      const isOther = form.claimType === 'otherExpense';
+      const isStandalone = form.claimType !== 'teamCharge';
       const payer = findTeam(form.payerTeamId);
-      const chargeTo = isOther ? undefined : findTeam(form.chargeToTeamId);
+      const chargeTo = isStandalone ? undefined : findTeam(form.chargeToTeamId);
       const claimYearMonth = form.yearMonth || yearMonth;
 
       await teamExpenseLedgerService.saveClaim({
@@ -344,12 +447,12 @@ const ExpenseClaimManagementPage: React.FC = () => {
         claimType: form.claimType,
         payerTeamId: form.payerTeamId,
         payerTeamName: getTeamName(payer) || form.payerTeamName,
-        chargeToTeamId: isOther ? '' : form.chargeToTeamId,
-        chargeToTeamName: isOther ? '' : getTeamName(chargeTo) || form.chargeToTeamName,
-        siteId: isOther ? '' : form.siteId,
-        siteName: isOther ? '' : form.siteName.trim(),
-        cardLabel: isOther ? '' : form.cardLabel,
-        category: normalizeCategoryForType(form.category, form.claimType),
+        chargeToTeamId: isStandalone ? '' : form.chargeToTeamId,
+        chargeToTeamName: isStandalone ? '' : getTeamName(chargeTo) || form.chargeToTeamName,
+        siteId: isStandalone ? '' : form.siteId,
+        siteName: isStandalone ? '' : form.siteName.trim(),
+        cardLabel: isStandalone ? '' : form.cardLabel,
+        category: String(form.category ?? '').trim() || defaultCategoryForCurrentType,
         description: form.description.trim(),
         amount: form.amount,
         status: form.status,
@@ -368,8 +471,8 @@ const ExpenseClaimManagementPage: React.FC = () => {
   };
 
   const handleEdit = (claim: TeamExpenseClaim) => {
-    const claimType = claim.claimType || 'teamCharge';
-    const isOther = claimType === 'otherExpense';
+    const claimType = getEffectiveClaimType(claim);
+    const isStandalone = claimType !== 'teamCharge';
 
     setForm({
       id: claim.id,
@@ -378,12 +481,12 @@ const ExpenseClaimManagementPage: React.FC = () => {
       claimType,
       payerTeamId: claim.payerTeamId || '',
       payerTeamName: claim.payerTeamName || '',
-      chargeToTeamId: isOther ? '' : claim.chargeToTeamId || '',
-      chargeToTeamName: isOther ? '' : claim.chargeToTeamName || '',
-      siteId: isOther ? '' : claim.siteId || '',
-      siteName: isOther ? '' : claim.siteName || '',
-      cardLabel: isOther ? '' : claim.cardLabel || '현찰',
-      category: normalizeCategoryForType(claim.category, claimType),
+      chargeToTeamId: isStandalone ? '' : claim.chargeToTeamId || '',
+      chargeToTeamName: isStandalone ? '' : claim.chargeToTeamName || '',
+      siteId: isStandalone ? '' : claim.siteId || '',
+      siteName: isStandalone ? '' : claim.siteName || '',
+      cardLabel: isStandalone ? '' : claim.cardLabel || '현찰',
+      category: claim.category || getDefaultCategoryForType(claimType),
       description: claim.description || '',
       amount: Number(claim.amount || 0),
       status: claim.status || 'charged',
@@ -407,13 +510,83 @@ const ExpenseClaimManagementPage: React.FC = () => {
     }
   };
 
+  const resetCategoryForm = () => {
+    setCategoryForm({ label: '', scope: 'teamCharge' });
+  };
+
+  const handleEditCategory = (category: TeamExpenseCategory) => {
+    setCategoryForm({
+      id: category.id,
+      label: category.label,
+      scope: category.scope
+    });
+  };
+
+  const handleSaveCategory = async () => {
+    const label = categoryForm.label.trim();
+    if (!label) {
+      toast.error('구분명을 입력해주세요.');
+      return;
+    }
+
+    const duplicate = activeExpenseCategories.some(
+      (category) => category.id !== categoryForm.id && normalizeKey(category.label) === normalizeKey(label)
+    );
+    if (duplicate) {
+      toast.error('이미 같은 구분명이 있습니다.');
+      return;
+    }
+
+    setCategorySaving(true);
+    try {
+      await teamExpenseCategoryService.saveCategory({
+        id: categoryForm.id,
+        label,
+        scope: categoryForm.scope,
+        order: categoryForm.id ? expenseCategories.find((category) => category.id === categoryForm.id)?.order : activeExpenseCategories.length * 10 + 100
+      });
+      toast.success(categoryForm.id ? '경비 구분을 수정했습니다.' : '경비 구분을 추가했습니다.');
+      resetCategoryForm();
+      await loadData();
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] category save failed', error);
+      toast.error('구분 저장에 실패했습니다.');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const handleDeleteCategory = async (category: TeamExpenseCategory) => {
+    const ok = window.confirm(`${category.label} 구분을 삭제할까요? 기존 경비 내역은 삭제되지 않습니다.`);
+    if (!ok) return;
+
+    setCategorySaving(true);
+    try {
+      await teamExpenseCategoryService.deleteCategory(category.id);
+      toast.success('경비 구분을 삭제했습니다.');
+      if (categoryForm.id === category.id) resetCategoryForm();
+      if (form.category === category.id) {
+        setForm((current) => ({
+          ...current,
+          category: getDefaultCategoryForType(current.claimType)
+        }));
+      }
+      await loadData();
+    } catch (error) {
+      console.error('[ExpenseClaimManagementPage] category delete failed', error);
+      toast.error('구분 삭제에 실패했습니다.');
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
   const filteredClaims = useMemo(() => {
     const query = normalizeKey(searchText);
 
     return rawDocs.claims
       .filter((claim) => {
         if (selectedTeamId !== 'all' && !matchesTeam(claim, selectedFilterTeam)) return false;
-        if (typeFilter !== 'all' && claim.claimType !== typeFilter) return false;
+        if (typeFilter !== 'all' && getEffectiveClaimType(claim) !== typeFilter) return false;
         if (!query) return true;
 
         return [
@@ -422,17 +595,17 @@ const ExpenseClaimManagementPage: React.FC = () => {
           claim.chargeToTeamName,
           claim.siteName,
           claim.cardLabel,
-          getCategoryLabel(claim.category),
+          getCategoryLabel(claim.category, allCategoryOptions),
           claim.description,
           claim.memo
         ].some((value) => normalizeKey(value).includes(query));
       })
       .sort((a, b) => String(b.date).localeCompare(String(a.date), 'ko-KR'));
-  }, [rawDocs.claims, searchText, selectedFilterTeam, selectedTeamId, typeFilter]);
+  }, [allCategoryOptions, rawDocs.claims, searchText, selectedFilterTeam, selectedTeamId, typeFilter]);
 
   const quickTotals = useMemo(() => {
     const scoped = rawDocs.claims.filter((claim) => selectedTeamId === 'all' || matchesTeam(claim, selectedFilterTeam));
-    const teamChargeRows = scoped.filter((claim) => claim.claimType !== 'otherExpense' && String(claim.chargeToTeamId ?? '').trim());
+    const teamChargeRows = scoped.filter((claim) => getEffectiveClaimType(claim) === 'teamCharge' && String(claim.chargeToTeamId ?? '').trim());
 
     return {
       total: scoped.reduce((sum, claim) => sum + Number(claim.amount || 0), 0),
@@ -443,7 +616,10 @@ const ExpenseClaimManagementPage: React.FC = () => {
         .filter((claim) => selectedTeamId === 'all' || matchesTeam({ ...claim, payerTeamId: '', payerTeamName: '' }, selectedFilterTeam))
         .reduce((sum, claim) => sum + Number(claim.amount || 0), 0),
       other: scoped
-        .filter((claim) => claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim())
+        .filter((claim) => getEffectiveClaimType(claim) === 'otherExpense')
+        .reduce((sum, claim) => sum + Number(claim.amount || 0), 0),
+      office: scoped
+        .filter((claim) => getEffectiveClaimType(claim) === 'officeExpense')
         .reduce((sum, claim) => sum + Number(claim.amount || 0), 0)
     };
   }, [rawDocs.claims, selectedFilterTeam, selectedTeamId]);
@@ -476,12 +652,13 @@ const ExpenseClaimManagementPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           {[
             ['전체 후청구', quickTotals.total, 'bg-slate-900 text-white'],
             ['받을 후청구', quickTotals.receivable, 'bg-emerald-600 text-white'],
             ['내야 할 후청구', quickTotals.payable, 'bg-rose-600 text-white'],
-            ['기타청구', quickTotals.other, 'bg-amber-500 text-white']
+            ['기타청구', quickTotals.other, 'bg-amber-500 text-white'],
+            ['사무실경비', quickTotals.office, 'bg-sky-600 text-white']
           ].map(([label, value, tone]) => (
             <div key={String(label)} className={`border border-slate-200 px-4 py-3 shadow-sm ${tone}`}>
               <div className="text-xs font-black opacity-80">{label}</div>
@@ -514,7 +691,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleSave} className="space-y-4 p-4">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 {claimTypeOptions.map((option) => {
                   const active = form.claimType === option.value;
 
@@ -548,7 +725,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                 </label>
 
                 <label className="relative">
-                  <span className={labelClass}>{isOtherClaim ? '청구팀' : '사용팀'}</span>
+                  <span className={labelClass}>{isStandaloneClaim ? '청구팀' : '사용팀'}</span>
                   {payerTeam && (
                     <span
                       className="pointer-events-none absolute left-3 top-9 h-3 w-3 rounded-full border border-white shadow-sm"
@@ -558,6 +735,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                   <select
                     value={form.payerTeamId}
                     onChange={(event) => handlePayerTeamChange(event.target.value)}
+                    disabled={isOfficeExpense}
                     className={inputClass}
                     style={payerTeam ? {
                       borderColor: hexToRgba(payerTeamColor, 0.35),
@@ -567,7 +745,11 @@ const ExpenseClaimManagementPage: React.FC = () => {
                     } : undefined}
                   >
                     <option value="">팀 선택</option>
-                    {teamOptions.map((team) => (
+                    {isOfficeExpense ? (
+                      <option value={officeTeamId} style={{ color: getTeamColor(officeTeam) }}>
+                        {officeTeamName}
+                      </option>
+                    ) : nonOfficeTeamOptions.map((team) => (
                       <option key={`payer-${getTeamId(team) || getTeamName(team)}`} value={getTeamId(team)} style={{ color: getTeamColor(team) }}>
                         {getTeamName(team)}
                       </option>
@@ -575,13 +757,13 @@ const ExpenseClaimManagementPage: React.FC = () => {
                   </select>
                 </label>
 
-                {!isOtherClaim && (
+                {!isStandaloneClaim && (
                   <>
                     <label>
                       <span className={labelClass}>현장 선택</span>
                       <select value={form.siteId} onChange={(event) => handleSiteSelect(event.target.value)} className={inputClass}>
-                        <option value="">현장 선택</option>
-                        {siteOptions.map((site) => (
+                        <option value="">{attendedSiteOptions.length > 0 ? '현장 선택' : '출역 현장 없음'}</option>
+                        {attendedSiteOptions.map((site) => (
                           <option key={site.id || site.name} value={site.id || ''}>
                             {site.name}{(site as any).responsibleTeamName ? ` - 담당 ${(site as any).responsibleTeamName}` : ''}
                           </option>
@@ -620,7 +802,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                         } : undefined}
                       >
                         <option value="">팀 선택</option>
-                        {teamOptions.map((team) => (
+                        {nonOfficeTeamOptions.map((team) => (
                           <option key={`charge-${getTeamId(team) || getTeamName(team)}`} value={getTeamId(team)} style={{ color: getTeamColor(team) }}>
                             {getTeamName(team)}
                           </option>
@@ -643,9 +825,9 @@ const ExpenseClaimManagementPage: React.FC = () => {
                 )}
 
                 <div className="sm:col-span-2">
-                  <span className={labelClass}>{isOtherClaim ? '기타청구 구분' : '경비 구분'}</span>
+                  <span className={labelClass}>{isOfficeExpense ? '사무실경비 구분' : isOtherClaim ? '기타청구 구분' : '경비 구분'}</span>
                   <div className={isOtherClaim ? 'grid grid-cols-2 gap-2 sm:grid-cols-4' : 'grid grid-cols-2 gap-2 sm:grid-cols-4'}>
-                    {categoryOptions.map((option) => {
+                    {formCategoryOptions.map((option) => {
                       const active = form.category === option.value;
 
                       return (
@@ -663,6 +845,76 @@ const ExpenseClaimManagementPage: React.FC = () => {
                         </button>
                       );
                     })}
+                  </div>
+
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-black text-slate-700">경비 구분 관리</div>
+                      {categoryForm.id && (
+                        <button
+                          type="button"
+                          onClick={resetCategoryForm}
+                          className="text-xs font-black text-slate-500 hover:text-slate-900"
+                        >
+                          수정 취소
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_auto]">
+                      <input
+                        value={categoryForm.label}
+                        onChange={(event) => setCategoryForm((current) => ({ ...current, label: event.target.value }))}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
+                        placeholder="구분명"
+                      />
+                      <select
+                        value={categoryForm.scope}
+                        onChange={(event) => setCategoryForm((current) => ({ ...current, scope: event.target.value as TeamExpenseCategoryScope }))}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-800 outline-none focus:border-blue-500"
+                      >
+                        <option value="teamCharge">후청구</option>
+                        <option value="otherExpense">기타청구</option>
+                        <option value="officeExpense">사무실경비</option>
+                        <option value="both">공통</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleSaveCategory}
+                        disabled={categorySaving}
+                        className="inline-flex h-9 items-center justify-center gap-1 rounded-lg bg-slate-900 px-3 text-xs font-black text-white hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        <Save size={13} />
+                        {categoryForm.id ? '수정' : '추가'}
+                      </button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {activeExpenseCategories.map((category) => (
+                        <span
+                          key={category.id}
+                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700"
+                        >
+                          <span>{category.label}</span>
+                          <span className="text-slate-400">{getCategoryScopeLabel(category.scope)}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleEditCategory(category)}
+                            className="ml-1 text-slate-400 hover:text-blue-600"
+                            title="수정"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(category)}
+                            disabled={categorySaving}
+                            className="text-slate-400 hover:text-red-600 disabled:opacity-40"
+                            title="삭제"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -700,15 +952,19 @@ const ExpenseClaimManagementPage: React.FC = () => {
 
               <div
                 className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${
-                  form.claimType === 'otherExpense'
-                    ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  form.claimType === 'officeExpense'
+                    ? 'border-sky-200 bg-sky-50 text-sky-800'
+                    : form.claimType === 'otherExpense'
+                      ? 'border-amber-200 bg-amber-50 text-amber-800'
                     : 'border-blue-200 bg-blue-50 text-blue-800'
                 }`}
               >
-                {form.claimType === 'otherExpense' ? <AlertCircle size={15} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={15} className="mt-0.5 shrink-0" />}
+                {isStandaloneClaim ? <AlertCircle size={15} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={15} className="mt-0.5 shrink-0" />}
                 <span>
-                  {form.claimType === 'otherExpense'
-                    ? '기타청구는 선택한 청구팀에게만 반영되며 현장과 결제수단은 저장하지 않습니다.'
+                  {form.claimType === 'officeExpense'
+                    ? '사무실경비는 기타청구와 분리해 사무실 비용으로 별도 집계되며 현장과 결제수단은 저장하지 않습니다.'
+                    : form.claimType === 'otherExpense'
+                      ? '기타청구는 선택한 청구팀에게만 반영되며 현장과 결제수단은 저장하지 않습니다.'
                     : form.chargeToTeamName
                       ? `현재 청구대상: ${form.chargeToTeamName}`
                       : '현장을 선택하면 담당팀이 청구대상으로 자동 반영됩니다.'}
@@ -761,6 +1017,7 @@ const ExpenseClaimManagementPage: React.FC = () => {
                     <option value="all">전체 구분</option>
                     <option value="teamCharge">후청구</option>
                     <option value="otherExpense">기타청구</option>
+                    <option value="officeExpense">사무실경비</option>
                   </select>
                 </div>
               </div>
@@ -796,32 +1053,39 @@ const ExpenseClaimManagementPage: React.FC = () => {
                     const chargeTo = findTeamByReference(claim.chargeToTeamId, claim.chargeToTeamName);
                     const payerColor = getTeamColor(payer);
                     const chargeToColor = getTeamColor(chargeTo);
-                    const isOther = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+                    const claimType = getEffectiveClaimType(claim);
+                    const isStandalone = claimType !== 'teamCharge';
+                    const typeLabel = claimType === 'officeExpense' ? '사무실경비' : claimType === 'otherExpense' ? '기타청구' : '후청구';
+                    const typeClass = claimType === 'officeExpense'
+                      ? 'bg-sky-50 text-sky-700'
+                      : claimType === 'otherExpense'
+                        ? 'bg-amber-50 text-amber-700'
+                        : 'bg-indigo-50 text-indigo-700';
 
                     return (
                       <tr key={claim.id} className={`hover:bg-slate-50 ${form.id === claim.id ? 'bg-blue-50/60' : ''}`}>
                         <td className="border border-slate-200 px-2 py-2 text-center font-bold tabular-nums">{claim.date?.slice(5) || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2 text-center">
-                          <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${isOther ? 'bg-amber-50 text-amber-700' : 'bg-indigo-50 text-indigo-700'}`}>
-                            {isOther ? '기타청구' : '후청구'}
+                          <span className={`inline-flex rounded-full px-2 py-1 text-[11px] font-black ${typeClass}`}>
+                            {typeLabel}
                           </span>
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-center">
                           <TeamColorBadge name={claim.payerTeamName} color={payerColor} />
                         </td>
                         <td className="border border-slate-200 px-2 py-2 text-center">
-                          {isOther ? <span className="font-bold text-slate-400">-</span> : <TeamColorBadge name={claim.chargeToTeamName} color={chargeToColor} />}
+                          {isStandalone ? <span className="font-bold text-slate-400">-</span> : <TeamColorBadge name={claim.chargeToTeamName} color={chargeToColor} />}
                         </td>
-                        <td className="border border-slate-200 px-2 py-2 text-center">{isOther ? '-' : claim.siteName || '-'}</td>
+                        <td className="border border-slate-200 px-2 py-2 text-center">{isStandalone ? '-' : claim.siteName || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2">
                           <div className="font-black text-slate-900">{claim.description}</div>
                           <div className="mt-0.5 flex items-center gap-2 text-[11px] font-bold text-slate-500">
                             <WalletCards size={12} />
-                            <span>{getCategoryLabel(claim.category)}</span>
+                            <span>{getCategoryLabel(claim.category, allCategoryOptions)}</span>
                             {claim.memo ? <span className="truncate">· {claim.memo}</span> : null}
                           </div>
                         </td>
-                        <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-500">{isOther ? '-' : claim.cardLabel || '-'}</td>
+                        <td className="border border-slate-200 px-2 py-2 text-center font-bold text-slate-500">{isStandalone ? '-' : claim.cardLabel || '-'}</td>
                         <td className="border border-slate-200 px-2 py-2 text-right font-black tabular-nums text-slate-900">{formatCurrency(claim.amount)}</td>
                         <td className="border border-slate-200 px-2 py-2 text-center">
                           <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">

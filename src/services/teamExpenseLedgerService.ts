@@ -45,17 +45,20 @@ const stripUndefined = <T extends Record<string, unknown>>(value: T): Record<str
 
 const normalizeCategory = (value: unknown): TeamExpenseClaim['category'] => {
   const raw = String(value ?? '').trim();
-  if (['meal', 'parking', 'fuel', 'toll', 'material', 'tool', 'deposit', 'marking', 'fieldGoods', 'equipment', 'etc'].includes(raw)) {
-    return raw as TeamExpenseClaim['category'];
-  }
-  return 'etc';
+  return raw || 'etc';
+};
+
+const normalizeClaimType = (value: unknown, data: Record<string, unknown>): TeamExpenseClaim['claimType'] => {
+  const raw = String(value ?? '').trim();
+  if (raw === 'teamCharge' || raw === 'otherExpense' || raw === 'officeExpense') return raw;
+  return data.chargeToTeamId ? 'teamCharge' : 'otherExpense';
 };
 
 const mapClaim = (id: string, data: Record<string, unknown>): TeamExpenseClaim => ({
   id,
   yearMonth: String(data.yearMonth ?? ''),
   date: String(data.date ?? ''),
-  claimType: (data.claimType ? String(data.claimType) : (data.chargeToTeamId ? 'teamCharge' : 'otherExpense')) as TeamExpenseClaim['claimType'],
+  claimType: normalizeClaimType(data.claimType, data),
   payerTeamId: String(data.payerTeamId ?? ''),
   payerTeamName: String(data.payerTeamName ?? ''),
   chargeToTeamId: String(data.chargeToTeamId ?? ''),

@@ -6,7 +6,7 @@ import { accountLinkService } from '../../services/accountLinkService';
 import { AccountLink, ACCOUNT_RELATION_ROLE_LABELS, ACCOUNT_TYPE_LABELS } from '../../types/accountLink';
 import AccountLinkingModal from '../../components/manpower/AccountLinkingModal';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faCalendar, faShieldAlt } from '@fortawesome/free-solid-svg-icons';
+import { faUser, faEnvelope, faPhone, faBuilding, faLink, faEdit, faSave, faTimes, faHardHat, faCalendar, faShieldAlt, faChartLine } from '@fortawesome/free-solid-svg-icons';
 
 const getWorkerTeamName = (worker: Worker): string => {
     const teamName = String(worker.teamName || '').trim();
@@ -15,6 +15,17 @@ const getWorkerTeamName = (worker: Worker): string => {
     const teamId = String(worker.teamId || '').trim();
     return teamId || '팀 미배정';
 };
+
+const toManDayNumber = (value: unknown): number => {
+    const numericValue = Number(value ?? 0);
+    return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
+const formatManDay = (value: number): string =>
+    value.toLocaleString('ko-KR', {
+        minimumFractionDigits: Number.isInteger(value) ? 0 : 1,
+        maximumFractionDigits: 1,
+    });
 
 const ProfilePage: React.FC = () => {
     const { currentUser } = useAuth();
@@ -57,6 +68,11 @@ const ProfilePage: React.FC = () => {
 
         return teamNames.length > 0 ? teamNames.join(', ') : '연결된 작업자 없음';
     }, [linkedWorkers]);
+
+    const linkedWorkerTotalManDay = useMemo(
+        () => linkedWorkers.reduce((total, worker) => total + toManDayNumber(worker.totalManDay), 0),
+        [linkedWorkers]
+    );
 
     const visibleAccountLinks = useMemo(
         () => accountLinks.filter((link) => link.status !== 'inactive' && link.status !== 'rejected'),
@@ -362,6 +378,28 @@ const ProfilePage: React.FC = () => {
                     {/* 연결된 작업자 */}
                     <div className="space-y-6">
                         <div className="bg-white rounded-lg border border-slate-200 p-6">
+                            <div className="flex items-start justify-between gap-4">
+                                <div>
+                                    <p className="text-sm font-medium text-slate-500">누적공수</p>
+                                    <div className="mt-2 flex items-baseline gap-1">
+                                        <span className="text-3xl font-bold text-blue-600">
+                                            {formatManDay(linkedWorkerTotalManDay)}
+                                        </span>
+                                        <span className="text-sm font-semibold text-blue-600">공수</span>
+                                    </div>
+                                    <p className="mt-2 text-xs text-slate-500">
+                                        {linkedWorkers.length > 0
+                                            ? `연결된 작업자 ${linkedWorkers.length}명 기준`
+                                            : '연결된 작업자 기준으로 집계됩니다'}
+                                    </p>
+                                </div>
+                                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                                    <FontAwesomeIcon icon={faChartLine} />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-lg border border-slate-200 p-6">
                             <div className="flex justify-between items-center mb-4">
                                 <h3 className="text-lg font-semibold text-slate-800">연결된 작업자</h3>
                             </div>
@@ -381,6 +419,9 @@ const ProfilePage: React.FC = () => {
                                                             {worker.rank && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200">{worker.rank}</span>}
                                                         </p>
                                                         <p className="text-xs text-slate-500 mt-0.5">{worker.teamName || '팀 미배정'}</p>
+                                                        <p className="text-xs font-semibold text-blue-600 mt-1">
+                                                            누적 {formatManDay(toManDayNumber(worker.totalManDay))}공수
+                                                        </p>
                                                     </div>
                                                     <span className="text-xs bg-slate-200 text-slate-600 px-2 py-1 rounded-full">
                                                         {worker.role || '작업자'}

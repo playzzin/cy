@@ -21,6 +21,8 @@ import {
     faUpload,
     faXmark,
 } from '@fortawesome/free-solid-svg-icons';
+import ExcelJS from 'exceljs';
+import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import fieldGoodsService, {
@@ -29,7 +31,9 @@ import fieldGoodsService, {
     FieldGoodsTransactionInput,
     FieldGoodsTransactionKind,
 } from '../../services/fieldGoodsService';
+import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
 import { normalizeHexColor } from '../../utils/color';
+import { OFFICE_ASSIGNMENT_TEAM_ID, OFFICE_ASSIGNMENT_TEAM_NAME } from '../../utils/supportAssignmentTargets';
 
 type ProgramView = 'input' | 'billing' | 'ledger' | 'master';
 
@@ -87,12 +91,28 @@ const kindLabels: Record<FieldGoodsTransactionKind, string> = {
 
 const OFFICE_STOCK_ID = '__field_goods_office__';
 const OFFICE_STOCK_NAME = '사무실';
+const FIELD_GOODS_CLAIM_CATEGORY = 'fieldGoods';
+const EXCEL_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
 const money = (value: number): string => Math.round(value).toLocaleString('ko-KR');
 
 const quantityText = (value: number): string => value.toLocaleString('ko-KR');
+
+const getFieldGoodsClaimIdForKind = (transactionId: string, kind: FieldGoodsTransactionKind): string =>
+    `field-goods-${kind}-${transactionId}`;
+
+const getFieldGoodsClaimId = (transaction: Pick<FieldGoodsTransaction, 'id' | 'kind'>): string =>
+    getFieldGoodsClaimIdForKind(transaction.id, transaction.kind);
+
+const getFieldGoodsClaimIds = (transactionId: string): string[] => [
+    getFieldGoodsClaimIdForKind(transactionId, 'purchase'),
+    getFieldGoodsClaimIdForKind(transactionId, 'issue'),
+];
+
+const getTransactionYearMonth = (transaction: Pick<FieldGoodsTransaction, 'date'>): string =>
+    /^\d{4}-\d{2}/.test(transaction.date) ? transaction.date.slice(0, 7) : today().slice(0, 7);
 
 const normalizeNumber = (value: unknown): number => {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -240,6 +260,101 @@ const createSnapshotItem = (transaction: FieldGoodsTransaction): FieldGoodsItem 
     createdAt: transaction.createdAt,
     updatedAt: transaction.updatedAt,
 });
+
+type ExcelCellValue = string | number | boolean | Date | null;
+
+interface ExcelTableSheetOptions {
+    sheetName: string;
+    tableName: string;
+    title: string;
+    metadataRows?: ExcelCellValue[][];
+    headers: string[];
+    rows: ExcelCellValue[][];
+    columnWidths: number[];
+    numberColumnIndexes?: number[];
+}
+
+const addExcelTableSheet = (workbook: ExcelJS.Workbook, options: ExcelTableSheetOptions) => {
+    const worksheet = workbook.addWorksheet(options.sheetName);
+    const metadataRows = options.metadataRows ?? [];
+    const tableStartRow = metadataRows.length + 3;
+    const dataRows = options.rows.length ? options.rows : [options.headers.map(() => '')];
+
+    worksheet.mergeCells(1, 1, 1, options.headers.length);
+    const titleCell = worksheet.getCell(1, 1);
+    titleCell.value = options.title;
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FF0F172A' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+    worksheet.getRow(1).height = 24;
+
+    metadataRows.forEach((row, rowIndex) => {
+        const worksheetRow = worksheet.getRow(rowIndex + 2);
+        row.forEach((value, columnIndex) => {
+            const cell = worksheetRow.getCell(columnIndex + 1);
+            cell.value = value;
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+                right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+            };
+            if (columnIndex === 0) {
+                cell.font = { bold: true, color: { argb: 'FF334155' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+            }
+        });
+    });
+
+    worksheet.addTable({
+        name: options.tableName,
+        ref: `A${tableStartRow}`,
+        headerRow: true,
+        totalsRow: false,
+        style: {
+            theme: 'TableStyleMedium2',
+            showRowStripes: true,
+        },
+        columns: options.headers.map((header) => ({
+            name: header,
+            filterButton: true,
+        })),
+        rows: dataRows,
+    });
+
+    options.columnWidths.forEach((width, index) => {
+        worksheet.getColumn(index + 1).width = width;
+    });
+
+    const headerRow = worksheet.getRow(tableStartRow);
+    headerRow.height = 22;
+    headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+
+    const numberColumnIndexes = new Set(options.numberColumnIndexes ?? []);
+    for (let rowNumber = tableStartRow + 1; rowNumber <= tableStartRow + dataRows.length; rowNumber += 1) {
+        const row = worksheet.getRow(rowNumber);
+        row.eachCell((cell, columnNumber) => {
+            cell.border = {
+                top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+                right: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            };
+            cell.alignment = {
+                vertical: 'middle',
+                horizontal: numberColumnIndexes.has(columnNumber) ? 'right' : 'left',
+            };
+            if (numberColumnIndexes.has(columnNumber)) {
+                cell.numFmt = '#,##0';
+            }
+        });
+    }
+
+    worksheet.views = [{ state: 'frozen', ySplit: tableStartRow }];
+};
 
 const FieldGoodsProgramPage: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -510,10 +625,11 @@ const FieldGoodsProgramPage: React.FC = () => {
 
     const stockByItemId = useMemo(() => new Map(stockRows.map((row) => [row.item.id, row.stockQty])), [stockRows]);
 
-    const billingRows = useMemo(() => {
+    const billingIssueTransactions = useMemo(() => {
         const billingTeam = teamMap.get(billingTeamId);
         const billingTeamNameKey = normalizeIdentity(billingTeam?.name);
-        const filtered = transactions.filter((transaction) => {
+
+        return transactions.filter((transaction) => {
             if (transaction.kind !== 'issue') return false;
             if (
                 billingTeamId &&
@@ -525,9 +641,19 @@ const FieldGoodsProgramPage: React.FC = () => {
             if (transaction.date < billingStartDate || transaction.date > billingEndDate) return false;
             return true;
         });
+    }, [billingEndDate, billingStartDate, billingTeamId, teamMap, transactions]);
 
+    const billingPurchaseTransactions = useMemo(() => {
+        return transactions.filter((transaction) => {
+            if (transaction.kind !== 'purchase') return false;
+            if (transaction.date < billingStartDate || transaction.date > billingEndDate) return false;
+            return true;
+        });
+    }, [billingEndDate, billingStartDate, transactions]);
+
+    const billingRows = useMemo(() => {
         return reportItems.map((item) => {
-            const itemTransactions = filtered.filter((transaction) => transaction.itemId === item.id);
+            const itemTransactions = billingIssueTransactions.filter((transaction) => transaction.itemId === item.id);
             const quantity = itemTransactions.reduce((sum, transaction) => sum + transaction.quantity, 0);
             const revenue = itemTransactions.reduce((sum, transaction) => sum + transaction.quantity * transaction.salePrice, 0);
             const cost = itemTransactions.reduce((sum, transaction) => sum + transaction.quantity * transaction.purchasePrice, 0);
@@ -542,7 +668,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                 profit: revenue - cost,
             };
         });
-    }, [billingEndDate, billingStartDate, billingTeamId, reportItems, teamMap, transactions]);
+    }, [billingIssueTransactions, reportItems]);
 
     const visibleBillingRows = useMemo(() => billingRows.filter((row) => row.quantity > 0), [billingRows]);
 
@@ -557,6 +683,13 @@ const FieldGoodsProgramPage: React.FC = () => {
             { quantity: 0, revenue: 0, cost: 0, profit: 0 }
         );
     }, [billingRows]);
+
+    const purchaseClaimTotal = useMemo(() => {
+        return billingPurchaseTransactions.reduce(
+            (total, transaction) => total + transaction.quantity * transaction.purchasePrice,
+            0
+        );
+    }, [billingPurchaseTransactions]);
 
     const visibleLedgerRows = useMemo(() => {
         const keyword = normalizeIdentity(ledgerKeyword);
@@ -780,15 +913,13 @@ const FieldGoodsProgramPage: React.FC = () => {
 
     const handleDeleteItem = async (item: FieldGoodsItem) => {
         const relatedCount = transactions.filter((transaction) => transaction.itemId === item.id).length;
-        const suffix = relatedCount > 0 ? `\n기존 원장 ${relatedCount}건은 유지되고, 신규 입력 목록에서만 제외됩니다.` : '';
+        const suffix = relatedCount > 0 ? `\n기존 원장 ${relatedCount}건은 유지되고, 품목 목록에서는 바로 삭제됩니다.` : '';
         if (!window.confirm(`'${item.name}' 품목을 삭제하시겠습니까?${suffix}`)) return;
 
         setSaving(true);
         try {
             await fieldGoodsService.deleteItem(item.id);
-            setItems((prev) =>
-                sortItems(prev.map((entry) => (entry.id === item.id ? { ...entry, active: false } : entry)))
-            );
+            setItems((prev) => prev.filter((entry) => entry.id !== item.id));
         } catch (error) {
             console.error('Failed to delete field goods item:', error);
             alert('품목 삭제에 실패했습니다.');
@@ -886,6 +1017,9 @@ const FieldGoodsProgramPage: React.FC = () => {
         setSaving(true);
         try {
             await fieldGoodsService.updateTransaction(transaction.id, updates);
+            if (transaction.kind !== updates.kind) {
+                await teamExpenseLedgerService.deleteClaim(getFieldGoodsClaimIdForKind(transaction.id, transaction.kind));
+            }
             const updatedAt = new Date().toISOString();
             setTransactions((prev) =>
                 sortTransactions(
@@ -906,7 +1040,10 @@ const FieldGoodsProgramPage: React.FC = () => {
 
         setSaving(true);
         try {
-            await fieldGoodsService.deleteTransaction(transaction.id);
+            await Promise.all([
+                fieldGoodsService.deleteTransaction(transaction.id),
+                ...getFieldGoodsClaimIds(transaction.id).map((claimId) => teamExpenseLedgerService.deleteClaim(claimId)),
+            ]);
             setTransactions((prev) => prev.filter((entry) => entry.id !== transaction.id));
         } catch (error) {
             console.error('Failed to delete field goods transaction:', error);
@@ -1099,58 +1236,153 @@ const FieldGoodsProgramPage: React.FC = () => {
         void parseWorkbook(file);
     };
 
-    const handleExportExcel = () => {
-        const workbook = XLSX.utils.book_new();
-        const itemSheetRows = [
-            ['품목 관리'],
-            ['품목', '단위', '매입단가', '판매단가', '사용여부'],
-            ...items.map((item) => [
-                item.name,
-                item.unit,
-                item.purchasePrice,
-                item.salePrice,
-                item.active ? '사용' : '삭제',
-            ]),
-        ];
+    const handleExportExcel = async () => {
+        setSaving(true);
+        try {
+            const workbook = new ExcelJS.Workbook();
+            workbook.creator = 'Smart Construction';
+            workbook.created = new Date();
+            workbook.modified = new Date();
+            addExcelTableSheet(workbook, {
+                sheetName: '품목',
+                tableName: 'FieldGoodsItemsTable',
+                title: '품목 관리',
+                headers: ['품목', '단위', '매입단가', '판매단가', '사용여부'],
+                rows: items.map((item) => [
+                    item.name,
+                    item.unit,
+                    item.purchasePrice,
+                    item.salePrice,
+                    item.active ? '사용' : '삭제',
+                ]),
+                columnWidths: [28, 10, 14, 14, 12],
+                numberColumnIndexes: [3, 4],
+            });
 
-        const ledgerRows = [
-            ['일자', '팀', '구분', '품목', '단위', '수량', '매입단가', '판매단가', '금액', '비고', '입력방식'],
-            ...sortTransactions(transactions).map((transaction) => [
-                transaction.date,
-                getTransactionTeamName(transaction),
-                kindLabels[transaction.kind],
-                transaction.itemName,
-                transaction.unit,
-                transaction.quantity,
-                transaction.purchasePrice,
-                transaction.salePrice,
-                transaction.quantity * (transaction.kind === 'issue' ? transaction.salePrice : transaction.purchasePrice),
-                transaction.memo,
-                transaction.source === 'excel' ? '엑셀' : '수기',
-            ]),
-        ];
+            addExcelTableSheet(workbook, {
+                sheetName: 'DB',
+                tableName: 'FieldGoodsLedgerTable',
+                title: 'DB 원장',
+                headers: ['일자', '팀', '구분', '품목', '단위', '수량', '매입단가', '판매단가', '금액', '비고', '입력방식'],
+                rows: sortTransactions(transactions).map((transaction) => [
+                    transaction.date,
+                    getTransactionTeamName(transaction),
+                    kindLabels[transaction.kind],
+                    transaction.itemName,
+                    transaction.unit,
+                    transaction.quantity,
+                    transaction.purchasePrice,
+                    transaction.salePrice,
+                    transaction.quantity * (transaction.kind === 'issue' ? transaction.salePrice : transaction.purchasePrice),
+                    transaction.memo,
+                    transaction.source === 'excel' ? '엑셀' : '수기',
+                ]),
+                columnWidths: [13, 18, 10, 28, 10, 10, 14, 14, 16, 32, 12],
+                numberColumnIndexes: [6, 7, 8, 9],
+            });
 
-        const billingSheetRows = [
-            ['팀별 반출 청구'],
-            ['팀 선택', teamMap.get(billingTeamId)?.name || ''],
-            ['검색 시작', billingStartDate],
-            ['검색 종료', billingEndDate],
-            ['품목', '수량', '판매단가', '청구금액', '매입원가', '이익'],
-            ...visibleBillingRows.map((row) => [
-                row.item.name,
-                row.quantity,
-                row.salePrice,
-                row.revenue,
-                row.cost,
-                row.profit,
-            ]),
-            ['합계', billingTotals.quantity, '', billingTotals.revenue, billingTotals.cost, billingTotals.profit],
-        ];
+            addExcelTableSheet(workbook, {
+                sheetName: '청구',
+                tableName: 'FieldGoodsBillingTable',
+                title: '팀별 반출 청구',
+                metadataRows: [
+                    ['팀 선택', teamMap.get(billingTeamId)?.name || ''],
+                    ['검색 시작', billingStartDate],
+                    ['검색 종료', billingEndDate],
+                ],
+                headers: ['품목', '수량', '판매단가', '청구금액', '매입원가', '이익'],
+                rows: [
+                    ...visibleBillingRows.map((row) => [
+                        row.item.name,
+                        row.quantity,
+                        row.salePrice,
+                        row.revenue,
+                        row.cost,
+                        row.profit,
+                    ]),
+                    ['합계', billingTotals.quantity, '', billingTotals.revenue, billingTotals.cost, billingTotals.profit],
+                ],
+                columnWidths: [30, 12, 14, 16, 16, 16],
+                numberColumnIndexes: [2, 3, 4, 5, 6],
+            });
 
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(itemSheetRows), '품목');
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(ledgerRows), 'DB');
-        XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(billingSheetRows), '청구');
-        XLSX.writeFile(workbook, `현장물품_프로그램_${today()}.xlsx`);
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: EXCEL_MIME_TYPE });
+            saveAs(blob, `현장물품_프로그램_${today()}.xlsx`);
+        } catch (error) {
+            console.error('Field goods Excel export failed:', error);
+            alert('엑셀 파일을 내보내지 못했습니다.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const createExpenseClaimFromTransaction = async (transaction: FieldGoodsTransaction) => {
+        const isPurchase = transaction.kind === 'purchase';
+        const amount = Math.round(transaction.quantity * (isPurchase ? transaction.purchasePrice : transaction.salePrice));
+        const teamName = isPurchase ? OFFICE_ASSIGNMENT_TEAM_NAME : getTransactionTeamName(transaction);
+        const description = `${transaction.itemName} ${quantityText(transaction.quantity)}${transaction.unit} ${isPurchase ? '매입' : '반출'}`;
+        const memoLines = [
+            isPurchase ? '현장물품 매입 전표' : '현장물품 반출 청구 전표',
+            `현장물품 원장 ID: ${transaction.id}`,
+            transaction.memo ? `메모: ${transaction.memo}` : '',
+        ].filter(Boolean);
+
+        await teamExpenseLedgerService.saveClaim({
+            id: getFieldGoodsClaimId(transaction),
+            yearMonth: getTransactionYearMonth(transaction),
+            date: transaction.date || today(),
+            claimType: isPurchase ? 'officeExpense' : 'otherExpense',
+            payerTeamId: isPurchase ? OFFICE_ASSIGNMENT_TEAM_ID : transaction.teamId,
+            payerTeamName: teamName,
+            chargeToTeamId: '',
+            chargeToTeamName: '',
+            siteId: '',
+            siteName: '',
+            cardLabel: '',
+            category: FIELD_GOODS_CLAIM_CATEGORY,
+            description,
+            amount,
+            status: 'charged',
+            memo: memoLines.join('\n'),
+        });
+    };
+
+    const handleCreateFieldGoodsClaims = async (kind: FieldGoodsTransactionKind) => {
+        const sourceRows = kind === 'purchase' ? billingPurchaseTransactions : billingIssueTransactions;
+        const validRows = sourceRows.filter((transaction) =>
+            transaction.quantity * (kind === 'purchase' ? transaction.purchasePrice : transaction.salePrice) > 0
+        );
+        const total = validRows.reduce(
+            (sum, transaction) => sum + transaction.quantity * (kind === 'purchase' ? transaction.purchasePrice : transaction.salePrice),
+            0
+        );
+
+        if (!validRows.length) {
+            alert(kind === 'purchase' ? '전표로 생성할 매입 내역이 없습니다.' : '전표로 생성할 반출 내역이 없습니다.');
+            return;
+        }
+
+        const targetLabel = kind === 'purchase'
+            ? '사무실경비'
+            : `${teamMap.get(billingTeamId)?.name || '선택 팀'} 기타청구`;
+        const confirmed = window.confirm(
+            `${billingStartDate} ~ ${billingEndDate} 기간의 현장물품 ${kindLabels[kind]} ${validRows.length}건을 ${targetLabel}로 생성/갱신합니다.\n금액 합계: ${money(total)}원`
+        );
+        if (!confirmed) return;
+
+        setSaving(true);
+        try {
+            for (const transaction of validRows) {
+                await createExpenseClaimFromTransaction(transaction);
+            }
+            alert(`${validRows.length}건의 경비 전표를 생성/갱신했습니다.`);
+        } catch (error) {
+            console.error('Failed to create field goods expense claims:', error);
+            alert('경비 전표 생성에 실패했습니다. Firebase 권한과 네트워크 상태를 확인해 주세요.');
+        } finally {
+            setSaving(false);
+        }
     };
 
     const renderMetric = (label: string, value: string, icon: IconDefinition, accent: string, sub?: string) => (
@@ -1261,7 +1493,7 @@ const FieldGoodsProgramPage: React.FC = () => {
                     </button>
                     <button
                         type="button"
-                        onClick={handleExportExcel}
+                        onClick={() => void handleExportExcel()}
                         disabled={saving}
                         className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-40"
                     >
@@ -1582,8 +1814,41 @@ const FieldGoodsProgramPage: React.FC = () => {
                             <FontAwesomeIcon icon={faSearch} />
                             조회
                         </button>
-                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
-                            청구 합계 {money(billingTotals.revenue)}원 / 이익 {money(billingTotals.profit)}원
+                        <div className="flex flex-col gap-2">
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
+                                청구 합계 {money(billingTotals.revenue)}원 / 이익 {money(billingTotals.profit)}원
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-white p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                    <div>
+                                        <div className="text-sm font-black text-slate-900">경비전표 생성</div>
+                                        <div className="mt-0.5 text-xs font-bold text-slate-500">
+                                            매입은 사무실경비, 반출은 선택팀 기타청구로 생성합니다.
+                                        </div>
+                                    </div>
+                                    <FontAwesomeIcon icon={faFileInvoiceDollar} className="text-emerald-600" />
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleCreateFieldGoodsClaims('purchase')}
+                                        disabled={saving || billingPurchaseTransactions.length === 0 || purchaseClaimTotal <= 0}
+                                        className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg bg-sky-600 px-3 py-2 text-xs font-black text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                    >
+                                        <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                                        매입 전표 생성
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => void handleCreateFieldGoodsClaims('issue')}
+                                        disabled={saving || billingIssueTransactions.length === 0 || billingTotals.revenue <= 0}
+                                        className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                    >
+                                        <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                                        반출 청구 생성
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -2050,27 +2315,15 @@ const FieldGoodsProgramPage: React.FC = () => {
                                                             >
                                                                 <FontAwesomeIcon icon={faSave} />
                                                             </button>
-                                                            {item.active ? (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => void handleDeleteItem(item)}
-                                                                    disabled={saving}
-                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40"
-                                                                    title="삭제"
-                                                                >
-                                                                    <FontAwesomeIcon icon={faTrash} />
-                                                                </button>
-                                                            ) : (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => void handleRestoreItem(item)}
-                                                                    disabled={saving}
-                                                                    className="inline-flex h-8 w-8 items-center justify-center rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
-                                                                    title="복구"
-                                                                >
-                                                                    <FontAwesomeIcon icon={faRotateRight} />
-                                                                </button>
-                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void handleDeleteItem(item)}
+                                                                disabled={saving}
+                                                                className="inline-flex h-8 w-8 items-center justify-center rounded bg-red-50 text-red-600 hover:bg-red-100 disabled:opacity-40"
+                                                                title="삭제"
+                                                            >
+                                                                <FontAwesomeIcon icon={faTrash} />
+                                                            </button>
                                                         </div>
                                                     </td>
                                                 </tr>

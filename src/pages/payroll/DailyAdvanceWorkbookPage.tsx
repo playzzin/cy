@@ -191,8 +191,10 @@ const sanitizeFileName = (value: string): string =>
 type ExcelCellValue = string | number;
 
 type ExcelStyleOptions = {
+  titleRowIndex?: number;
   headerRowIndex?: number;
   totalRowIndex?: number;
+  titleFill?: string;
   headerFill?: string;
   totalFill?: string;
   bodyAlternateFill?: string;
@@ -204,6 +206,7 @@ type ExcelStyleOptions = {
   rightColumns?: Set<number>;
   moneyColumns?: Set<number>;
   manDayColumns?: Set<number>;
+  titleHeight?: number;
   headerHeight?: number;
   rowHeight?: number;
   merges?: XLSX.Range[];
@@ -228,8 +231,14 @@ const downloadAoaAsExcel = (
   if (options.merges?.length) {
     worksheet['!merges'] = options.merges;
   }
+  const titleRowIndex = options.titleRowIndex;
+  const headerRowIndex = options.headerRowIndex ?? 0;
   worksheet['!rows'] = rows.map((_, index) => ({
-    hpt: index === (options.headerRowIndex ?? 0) ? options.headerHeight ?? 24 : options.rowHeight ?? 22,
+    hpt: index === titleRowIndex
+      ? options.titleHeight ?? 28
+      : index === headerRowIndex
+        ? options.headerHeight ?? 24
+        : options.rowHeight ?? 22,
   }));
 
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
@@ -239,7 +248,6 @@ const downloadAoaAsExcel = (
     left: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
     right: { style: 'thin' as const, color: { rgb: 'D5CCB0' } },
   };
-  const headerRowIndex = options.headerRowIndex ?? 0;
 
   for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
     for (let columnIndex = range.s.c; columnIndex <= range.e.c; columnIndex += 1) {
@@ -249,9 +257,12 @@ const downloadAoaAsExcel = (
       }
 
       const cell = worksheet[address] as XLSX.CellObject & { s?: unknown };
+      const isTitle = rowIndex === titleRowIndex;
       const isHeader = rowIndex === headerRowIndex;
       const isTotal = rowIndex === options.totalRowIndex;
-      const horizontal = isTotal && columnIndex === 0
+      const horizontal = isTitle
+        ? 'center'
+        : isTotal && columnIndex === 0
         ? 'left'
         : options.rightColumns?.has(columnIndex)
         ? 'right'
@@ -259,7 +270,9 @@ const downloadAoaAsExcel = (
           ? 'center'
           : 'left';
 
-      const fillColor = isHeader
+      const fillColor = isTitle
+        ? options.titleFill ?? options.headerFill
+        : isHeader
         ? options.specialHeaderFills?.[columnIndex] ?? options.headerFill
         : isTotal
           ? options.totalFill
@@ -276,9 +289,9 @@ const downloadAoaAsExcel = (
         fill: fillColor ? makeExcelFill(fillColor) : undefined,
         font: {
           name: '맑은 고딕',
-          sz: isHeader || isTotal ? 10 : 9,
-          bold: isHeader || isTotal || options.highlightedCells?.has(`${rowIndex}:${columnIndex}`),
-          color: isHeader ? { rgb: 'FFFFFF' } : undefined,
+          sz: isTitle ? 12 : isHeader || isTotal ? 10 : 9,
+          bold: isTitle || isHeader || isTotal || options.highlightedCells?.has(`${rowIndex}:${columnIndex}`),
+          color: isTitle || isHeader ? { rgb: 'FFFFFF' } : undefined,
         },
         alignment: {
           horizontal,
@@ -1164,20 +1177,33 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     }
 
     const dayHeaders = statementDayNumbers.map((day) => `${day}`);
-    const dayStartColumn = 5;
+    const dayStartColumn = 2;
     const totalManDayColumn = dayStartColumn + statementDayNumbers.length;
     const recruiterFeeColumn = totalManDayColumn + 1;
     const amountColumn = recruiterFeeColumn + 1;
+    const totalColumnCount = amountColumn + 1;
     const dayColumns = statementDayNumbers.map((_, index) => dayStartColumn + index);
-    const centerColumns = new Set([0, 2, 3, ...dayColumns]);
+    const centerColumns = new Set([0, ...dayColumns]);
     const rightColumns = new Set([totalManDayColumn, recruiterFeeColumn, amountColumn]);
+    const statementCompanyName = displayText(
+      statementTeamOption?.team?.companyName ||
+      statementEntries.find((entry) => displayText(entry.companyName))?.companyName ||
+      '청연이엔지'
+    );
+    const statementTeamName = statementTeamOption?.name || statementEntries[0]?.teamName || '-';
+    const statementPeriod = monthToPeriod(month);
+    const statementPeriodLabel = statementPeriod.startDate && statementPeriod.endDate
+      ? `${getMonthTitle(month)} (${statementPeriod.startDate} ~ ${statementPeriod.endDate})`
+      : getMonthTitle(month);
+    const titleRow = [
+      `${statementCompanyName} / ${statementTeamName} / 청구기간: ${statementPeriodLabel}`,
+      ...Array.from({ length: totalColumnCount - 1 }, () => ''),
+    ];
     const rows: Array<Array<ExcelCellValue>> = [
+      titleRow,
       [
         '번호',
         '이름',
-        '주민등록번호',
-        '급여구분',
-        '주소',
         ...dayHeaders,
         '출역',
         '인력소개비',
@@ -1193,9 +1219,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         return [
           index + 1,
           row.workerName,
-          row.idNumber || '-',
-          row.salaryType || '-',
-          row.address || '-',
           ...row.days.map((value) => (value ? Number(value.toFixed(1)) : '-')),
           Number(row.totalManDay.toFixed(1)),
           recruiterFee ? Math.round(recruiterFee) : '',
@@ -1204,9 +1227,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       }),
       [
         '일자별 공수합계',
-        '',
-        '',
-        '',
         '',
         ...statementDailyTotals.map((value) => (value ? Number(value.toFixed(1)) : '-')),
         Number(statementRows.reduce((sum, row) => sum + row.totalManDay, 0).toFixed(1)),
@@ -1233,8 +1253,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       `${month}_${statementTeamOption?.name || '청구서'}_청구서_${getTodayStamp()}`,
       '청구서',
       rows,
-      [8, 16, 18, 14, 30, ...statementDayNumbers.map(() => 7), 10, 14, 18],
+      [8, 16, ...statementDayNumbers.map(() => 5), 9, 12, 14],
       {
+        titleRowIndex: 0,
+        headerRowIndex: 1,
+        titleFill: COLORS.darkBrown,
         headerFill: COLORS.darkBrown,
         totalFill: COLORS.pink,
         bodyAlternateFill: '#FAF8EF',
@@ -1249,8 +1272,12 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
         totalRowIndex: rows.length - 1,
         merges: [
           {
+            s: { r: 0, c: 0 },
+            e: { r: 0, c: amountColumn },
+          },
+          {
             s: { r: rows.length - 1, c: 0 },
-            e: { r: rows.length - 1, c: 4 },
+            e: { r: rows.length - 1, c: 1 },
           },
         ],
       }
@@ -1262,7 +1289,9 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
     statementRecruiterFeeDrafts,
     statementRows,
     statementTeamKey,
+    statementEntries,
     statementTeamOption?.name,
+    statementTeamOption?.team?.companyName,
   ]);
 
   const handleDownloadServiceTeamExcel = useCallback(() => {
@@ -1797,7 +1826,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
             <div className="text-xs font-bold text-[#4A452A]">회사</div>
             <div className="mt-2 text-base font-black text-[#1E1C11]">
-              {statementTeamOption?.team?.companyName || filteredEntries.find(e => e.teamKey === statementTeamKey)?.companyName || '-'}
+              {statementTeamOption?.team?.companyName || filteredEntries.find(e => e.teamKey === statementTeamKey)?.companyName || '청연이엔지'}
             </div>
           </div>
           <div className="rounded-lg border border-[#d5ccb0] p-4" style={{ backgroundColor: COLORS.orange }}>
@@ -1812,14 +1841,11 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="min-w-[1800px] border-collapse text-sm">
+        <table className="min-w-[1280px] border-collapse text-sm">
           <thead>
             <tr style={{ backgroundColor: COLORS.darkBrown }} className="text-white">
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">번호</th>
               <th className="border border-[#d5ccb0] px-3 py-2 font-bold">이름</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 font-bold">주민등록번호</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 font-bold">급여구분</th>
-              <th className="border border-[#d5ccb0] px-3 py-2 font-bold">주소</th>
               {statementDayNumbers.map((day) => (
                 <th key={day} className="border border-[#d5ccb0] px-2 py-2 font-bold">
                   {day}
@@ -1838,7 +1864,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             {statementRows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={statementDayNumbers.length + 8}
+                  colSpan={statementDayNumbers.length + 5}
                   className="px-4 py-10 text-center text-sm text-slate-500"
                 >
                   청구서로 만들 데이터가 없습니다.
@@ -1857,9 +1883,6 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
                   <tr key={row.workerId || row.workerName} className="odd:bg-white even:bg-[#faf8ef]">
                     <td className="border border-[#e3dcc4] px-3 py-2 text-center">{index + 1}</td>
                     <td className="border border-[#e3dcc4] px-3 py-2 font-semibold">{row.workerName}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{row.idNumber || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{row.salaryType || '-'}</td>
-                    <td className="border border-[#e3dcc4] px-3 py-2">{row.address || '-'}</td>
                     {row.days.map((value, dayIndex) => (
                       <td
                         key={`${row.workerId}-${dayIndex}`}
@@ -1889,7 +1912,7 @@ const DailyAdvanceWorkbookPage: React.FC = () => {
             )}
             {statementRows.length > 0 && (
               <tr style={{ backgroundColor: COLORS.pink }}>
-                <td colSpan={5} className="border border-[#d5ccb0] px-3 py-2 font-black">
+                <td colSpan={2} className="border border-[#d5ccb0] px-3 py-2 font-black">
                   일자별 공수합계
                 </td>
                 {statementDailyTotals.map((value, index) => (

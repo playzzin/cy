@@ -4,8 +4,10 @@ import { z } from 'zod';
 export const VehicleTypeSchema = z.enum(['RENT', 'LEASE', 'OWNED']);
 export const VehicleStatusSchema = z.enum(['AVAILABLE', 'ASSIGNED', 'MAINTENANCE', 'DISPOSED']);
 export const VehicleAssigneeTypeSchema = z.enum(['TEAM', 'WORKER']);
+export const VehicleBillingTargetTypeSchema = z.enum(['TEAM', 'WORKER', 'OFFICE', 'OFFICE_STAFF']);
 export const VehicleExpenseTypeSchema = z.enum(['FUEL', 'REPAIR', 'TOLL', 'FINE', 'OTHER']);
 export const VehicleExpensePayerSchema = z.enum(['COMPANY', 'DRIVER']);
+export const VehicleFineChargeTargetSchema = z.enum(['BILLING_TARGET', 'DRIVER']);
 
 // Vehicle Contract Schema
 export const VehicleContractSchema = z.object({
@@ -48,8 +50,9 @@ export const vehicleSchema = z.object({
     currentAssigneeType: VehicleAssigneeTypeSchema.optional(),
     currentAssigneeName: z.string().optional(),
     billingTargetId: z.string().nullable().optional(),
-    billingTargetType: VehicleAssigneeTypeSchema.nullable().optional(),
+    billingTargetType: VehicleBillingTargetTypeSchema.nullable().optional(),
     billingTargetName: z.string().nullable().optional(),
+    fineChargeTarget: VehicleFineChargeTargetSchema.optional().default('BILLING_TARGET'),
     memo: z.string().optional(),
     createdAt: z.any().optional(),
     updatedAt: z.any().optional(),
@@ -70,6 +73,21 @@ export const vehicleAssignmentSchema = z.object({
     updatedAt: z.any().optional(),
 });
 
+// Vehicle Billing Target History Schema
+export const vehicleBillingTargetSchema = z.object({
+    id: z.string(),
+    vehicleId: z.string(),
+    vehiclePlate: z.string(),
+    targetId: z.string(),
+    targetType: VehicleBillingTargetTypeSchema,
+    targetName: z.string(),
+    startDate: z.string(),
+    endDate: z.string().optional(),
+    note: z.string().optional(),
+    createdAt: z.any().optional(),
+    updatedAt: z.any().optional(),
+});
+
 // Vehicle Expense Record Schema
 export const vehicleExpenseSchema = z.object({
     id: z.string(),
@@ -79,6 +97,7 @@ export const vehicleExpenseSchema = z.object({
     type: VehicleExpenseTypeSchema,
     amount: z.number().default(0),
     payer: VehicleExpensePayerSchema.default('COMPANY'),
+    fineChargeTarget: VehicleFineChargeTargetSchema.optional().default('BILLING_TARGET'),
     note: z.string().optional(),
     evidenceUrl: z.string().optional(),
     createdAt: z.any().optional(),
@@ -86,4 +105,5 @@ export const vehicleExpenseSchema = z.object({
 
 export type VehicleSchema = z.infer<typeof vehicleSchema>;
 export type VehicleAssignmentSchema = z.infer<typeof vehicleAssignmentSchema>;
+export type VehicleBillingTargetSchema = z.infer<typeof vehicleBillingTargetSchema>;
 export type VehicleExpenseSchema = z.infer<typeof vehicleExpenseSchema>;

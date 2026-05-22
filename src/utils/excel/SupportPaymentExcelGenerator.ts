@@ -190,7 +190,7 @@ const writeWorkerRows = (
 
     worksheet.getCell(rowNumber, COLUMN.no).value = sequence;
     worksheet.getCell(rowNumber, COLUMN.name).value = row.workerName || '-';
-    worksheet.getCell(rowNumber, COLUMN.identity).value = maskIdNumber(row.idNumber) || '-';
+    worksheet.getCell(rowNumber, COLUMN.identity).value = formatFullIdNumber(row.idNumber) || '-';
     worksheet.getCell(rowNumber + 1, COLUMN.identity).value = row.contact || '-';
     worksheet.getCell(rowNumber, COLUMN.address).value = row.address || '-';
 
@@ -324,11 +324,12 @@ const formatDayValue = (value: number): string => {
 
 const roundOneDecimal = (value: number): number => Math.round((value || 0) * 10) / 10;
 
-const maskIdNumber = (value?: string): string => {
-    if (!value) return '';
-    const digits = value.replace(/[^0-9]/g, '');
-    if (digits.length < 7) return value;
-    return `${digits.slice(0, 6)}-${digits.slice(6, 7)}******`;
+const formatFullIdNumber = (value?: string): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length === 13) return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+    return raw;
 };
 
 const solidFill = (argb: string): ExcelJS.Fill => ({

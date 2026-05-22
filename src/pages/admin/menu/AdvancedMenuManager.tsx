@@ -24,7 +24,9 @@ import {
     faGlobe,
     faArrowRight,
     faArrowLeft,
-    faCopy
+    faCopy,
+    faList,
+    faGrip
 } from '@fortawesome/free-solid-svg-icons';
 import { arrayMove } from '@dnd-kit/sortable';
 
@@ -173,6 +175,19 @@ const getPositionSiteKey = (positionId: string | null) => {
     return id.startsWith('pos_') ? id : `pos_${id}`;
 };
 
+type MenuSurface = 'menu' | 'headerActions';
+
+const getSurfaceItems = (data: SiteDataType | null, siteKey: string, surface: MenuSurface): MenuItem[] => {
+    const site = data?.[siteKey] as any;
+    const items = site?.[surface];
+    return Array.isArray(items) ? items : [];
+};
+
+const setSurfaceItems = (data: SiteDataType, siteKey: string, surface: MenuSurface, items: MenuItem[]) => {
+    if (!data[siteKey]) return;
+    (data[siteKey] as any)[surface] = items;
+};
+
 const getInitialMenuSite = (requestedSite: string | null) => {
     if (requestedSite) return requestedSite;
 
@@ -204,6 +219,7 @@ const AdvancedMenuManager: React.FC = () => {
     // --- State ---
     const [menuData, setMenuData] = useState<SiteDataType | null>(null);
     const [selectedSite, setSelectedSite] = useState<string>(initialSite);
+    const [selectedSurface, setSelectedSurface] = useState<MenuSurface>('menu');
     const [leftPanelOpen, setLeftPanelOpen] = useState(true);
     const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
@@ -211,13 +227,14 @@ const AdvancedMenuManager: React.FC = () => {
     // Derived state: Get actual item objects from IDs
     const selectedItems = useMemo(() => {
         if (!menuData) return [];
+        const surfaceItems = getSurfaceItems(menuData, selectedSite, selectedSurface);
         const items: MenuItem[] = [];
         selectedIds.forEach(id => {
-            const item = findMenuItemInTree(menuData[selectedSite]?.menu || [], id);
+            const item = findMenuItemInTree(surfaceItems, id);
             if (item) items.push(item);
         });
         return items;
-    }, [menuData, selectedSite, selectedIds]);
+    }, [menuData, selectedSite, selectedSurface, selectedIds]);
 
     const activeItem = selectedItems.length === 1 ? selectedItems[0] : undefined;
 
@@ -271,7 +288,7 @@ const AdvancedMenuManager: React.FC = () => {
 
     const handleIndent = useCallback((id: string) => {
         if (!menuData) return;
-        const currentMenu = [...(menuData[selectedSite]?.menu || [])];
+        const currentMenu = [...getSurfaceItems(menuData, selectedSite, selectedSurface)];
         const ref = findRef(currentMenu, id);
 
         if (!ref || ref.index <= 0) return; // Can't indent if first item
@@ -288,10 +305,10 @@ const AdvancedMenuManager: React.FC = () => {
 
         // Update state
         const newData = { ...menuData };
-        newData[selectedSite].menu = currentMenu;
+        setSurfaceItems(newData, selectedSite, selectedSurface, currentMenu as MenuItem[]);
         setMenuData(newData);
         persistMenuData(newData);
-    }, [menuData, selectedSite, persistMenuData]);
+    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
 
     const handleDeleteItem = useCallback((id: string) => {
         if (!window.confirm('정말 삭제하시겠습니까? 휴지통으로 이동하지 않고 즉시 삭제됩니다.')) return;
@@ -299,7 +316,7 @@ const AdvancedMenuManager: React.FC = () => {
         
         // Deep clone to ensure immutable update and prevent side effects in nested structures
         const newData = JSON.parse(JSON.stringify(menuData));
-        const result = findRef(newData[selectedSite]?.menu || [], id);
+        const result = findRef(getSurfaceItems(newData, selectedSite, selectedSurface), id);
         
         if (result) {
             result.list.splice(result.index, 1);
@@ -312,11 +329,11 @@ const AdvancedMenuManager: React.FC = () => {
         } else {
             console.warn(`[MenuManager] Failed to find item with ID: ${id} for deletion`);
         }
-    }, [menuData, selectedSite, persistMenuData]);
+    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
 
     const handleOutdent = useCallback((id: string) => {
         if (!menuData) return;
-        const currentMenu = [...(menuData[selectedSite]?.menu || [])];
+        const currentMenu = [...getSurfaceItems(menuData, selectedSite, selectedSurface)];
         const ref = findRef(currentMenu, id);
 
         if (!ref || !ref.parent) return; // Can't outdent if root
@@ -332,10 +349,10 @@ const AdvancedMenuManager: React.FC = () => {
 
         // Update state
         const newData = { ...menuData };
-        newData[selectedSite].menu = currentMenu;
+        setSurfaceItems(newData, selectedSite, selectedSurface, currentMenu as MenuItem[]);
         setMenuData(newData);
         persistMenuData(newData);
-    }, [menuData, selectedSite, persistMenuData]);
+    }, [menuData, selectedSite, selectedSurface, persistMenuData]);
 
     const handleBatchUpdate = (updates: Partial<MenuItem>) => {
         if (!menuData) return;
@@ -356,17 +373,17 @@ const AdvancedMenuManager: React.FC = () => {
             });
         };
 
-        const newMenu = updateRecursive(menuData[selectedSite].menu);
+        const newMenu = updateRecursive(getSurfaceItems(menuData, selectedSite, selectedSurface));
         const newData = { ...menuData };
-        newData[selectedSite].menu = newMenu as MenuItem[];
+        setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
         updateMenuData(newData);
     };
 
     const handleInspectorUpdate = (updatedItem: MenuItem) => {
         if (!menuData) return;
-        const newMenu = updateMenuItemInTree(menuData[selectedSite].menu, updatedItem);
+        const newMenu = updateMenuItemInTree(getSurfaceItems(menuData, selectedSite, selectedSurface), updatedItem);
         const newData = { ...menuData };
-        newData[selectedSite].menu = newMenu as MenuItem[];
+        setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
         updateMenuData(newData);
     };
 
@@ -438,7 +455,7 @@ const AdvancedMenuManager: React.FC = () => {
     // Reset selection when site changes (Fix for: "Menu structure doesn't seem to change")
     useEffect(() => {
         setSelectedIds([]);
-    }, [selectedSite]);
+    }, [selectedSite, selectedSurface]);
 
     // --- Actions ---
 
@@ -560,7 +577,7 @@ const AdvancedMenuManager: React.FC = () => {
         if (!over || !menuData) return;
 
         // Clone for mutation
-        let newMenu = JSON.parse(JSON.stringify(menuData[selectedSite]?.menu || []));
+        let newMenu = JSON.parse(JSON.stringify(getSurfaceItems(menuData, selectedSite, selectedSurface)));
         const activeId = String(active.id);
         const overId = String(over.id);
 
@@ -570,7 +587,7 @@ const AdvancedMenuManager: React.FC = () => {
             if (src) {
                 src.list.splice(src.index, 1);
                 const newData = { ...menuData };
-                newData[selectedSite].menu = newMenu;
+                setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
                 updateMenuData(newData);
             }
             return;
@@ -609,7 +626,7 @@ const AdvancedMenuManager: React.FC = () => {
             }
 
             const newData = { ...menuData };
-            newData[selectedSite].menu = newMenu;
+            setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
             updateMenuData(newData);
             return;
         }
@@ -635,7 +652,7 @@ const AdvancedMenuManager: React.FC = () => {
                 }
 
                 const newData = { ...menuData };
-                newData[selectedSite].menu = newMenu;
+                setSurfaceItems(newData, selectedSite, selectedSurface, newMenu as MenuItem[]);
                 updateMenuData(newData);
             }
         }
@@ -776,12 +793,15 @@ const AdvancedMenuManager: React.FC = () => {
                         <div className="absolute inset-0 bg-[radial-gradient(#1f2937_1px,transparent_1px)] [background-size:16px_16px] opacity-20 pointer-events-none" />
 
                         <SortableTreeCanvas
-                            key={selectedSite}
+                            key={`${selectedSite}-${selectedSurface}`}
                             siteId={selectedSite}
-                            items={menuData[selectedSite]?.menu || []}
+                            title={selectedSurface === 'headerActions' ? '상단 아이콘 구조' : '메뉴 구조'}
+                            emptyMessage={selectedSurface === 'headerActions' ? '상단 아이콘이 비어있습니다.' : undefined}
+                            emptyHint={selectedSurface === 'headerActions' ? '기본 아이콘은 메뉴 설정 초기화로 복구할 수 있습니다.' : undefined}
+                            items={getSurfaceItems(menuData, selectedSite, selectedSurface)}
                             onItemsChange={(newItems: MenuItem[]) => {
                                 const newData = { ...menuData };
-                                newData[selectedSite].menu = newItems;
+                                setSurfaceItems(newData, selectedSite, selectedSurface, newItems);
                                 updateMenuData(newData);
                             }}
                             selectedIds={selectedIds}
@@ -790,15 +810,37 @@ const AdvancedMenuManager: React.FC = () => {
                             onIndent={handleIndent}
                             onOutdent={handleOutdent}
                             headerActions={(
-                                <button
-                                    type="button"
-                                    onClick={() => setIsCopyModalOpen(true)}
-                                    className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
-                                    title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
-                                >
-                                    <FontAwesomeIcon icon={faCopy} />
-                                    다른 직책에서 복사
-                                </button>
+                                <>
+                                    <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/50 p-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedSurface('menu')}
+                                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${selectedSurface === 'menu' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                                        >
+                                            <FontAwesomeIcon icon={faList} />
+                                            좌측 메뉴
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectedSurface('headerActions')}
+                                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${selectedSurface === 'headerActions' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                                        >
+                                            <FontAwesomeIcon icon={faGrip} />
+                                            상단 아이콘
+                                        </button>
+                                    </div>
+                                    {selectedSurface === 'menu' && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsCopyModalOpen(true)}
+                                            className="flex items-center gap-2 rounded-lg border border-blue-500/40 bg-blue-600/15 px-3 py-2 text-xs font-bold text-blue-200 transition-colors hover:border-blue-400 hover:bg-blue-600/25 hover:text-white"
+                                            title="다른 직책에 있는 메뉴를 선택해서 현재 메뉴로 복사"
+                                        >
+                                            <FontAwesomeIcon icon={faCopy} />
+                                            다른 직책에서 복사
+                                        </button>
+                                    )}
+                                </>
                             )}
                         />
                     </main>

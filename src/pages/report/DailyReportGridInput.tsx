@@ -45,6 +45,8 @@ interface Ledger {
     description: string; // Ledger-level Work Content
     responsibleTeamId?: string;
     responsibleTeamName?: string;
+    siteManagerId?: string;
+    siteManagerName?: string;
 }
 
 type ReviewCandidateSource = 'schedule' | 'kakao';
@@ -385,16 +387,20 @@ const DailyReportTable: React.FC<{
         fallback: {
             responsibleTeamId: ledger.responsibleTeamId,
             responsibleTeamName: ledger.responsibleTeamName,
+            siteManagerId: ledger.siteManagerId,
+            siteManagerName: ledger.siteManagerName,
         },
-    }), [companies, ledger.responsibleTeamId, ledger.responsibleTeamName, normalizedLedgerSiteId, selectedSite, teams]);
+    }), [companies, ledger.responsibleTeamId, ledger.responsibleTeamName, ledger.siteManagerId, ledger.siteManagerName, normalizedLedgerSiteId, selectedSite, teams]);
     const ledgerResponsibleTeamId = selectedSiteSnapshot.responsibleTeamId;
     const ledgerResponsibleTeamName = selectedSiteSnapshot.responsibleTeamName;
+    const ledgerSiteManagerName = selectedSiteSnapshot.siteManagerName;
     const ledgerSiteType = selectedSiteSnapshot.siteType;
     const ledgerPaymentMethod = selectedSiteSnapshot.paymentType;
     const siteSnapshotDisplayItems = [
         { label: '발주', title: '발주사', value: selectedSiteSnapshot.clientCompanyName },
         { label: '시공', title: '시공사', value: selectedSiteSnapshot.constructorCompanyName },
         { label: '협력', title: '협력사', value: selectedSiteSnapshot.partnerName },
+        { label: '책임자', title: '현장책임자', value: ledgerSiteManagerName },
         { label: '구분', title: '현장 구분', value: ledgerSiteType },
         { label: '결제방식', title: '결제방식', value: ledgerPaymentMethod },
     ];
@@ -475,7 +481,9 @@ const DailyReportTable: React.FC<{
                                     onUpdate(ledger.id, {
                                         siteId: nextSiteId,
                                         responsibleTeamId: String(nextSite?.responsibleTeamId ?? '').trim(),
-                                        responsibleTeamName: String(nextSite?.responsibleTeamName ?? '').trim()
+                                        responsibleTeamName: String(nextSite?.responsibleTeamName ?? '').trim(),
+                                        siteManagerId: String((nextSite as any)?.siteManagerId ?? '').trim(),
+                                        siteManagerName: String((nextSite as any)?.siteManagerName ?? '').trim()
                                     });
                                 }}
                                 renderSelected={(selectedOption) => (
@@ -1935,6 +1943,8 @@ const DailyReportGridInput: React.FC = () => {
                         siteId: normalizedLedgerSiteId,
                         responsibleTeamId: ledger.responsibleTeamId,
                         responsibleTeamName: ledger.responsibleTeamName,
+                        siteManagerId: ledger.siteManagerId,
+                        siteManagerName: ledger.siteManagerName,
                     },
                 });
                 const siteType = siteSnapshot.siteType;

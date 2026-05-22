@@ -365,6 +365,8 @@ const toDbExportRows = (reports: DailyReport[]) => {
             '현장명': report.siteName ?? '',
             '담당팀ID': report.responsibleTeamId ?? report.teamId ?? '',
             '담당팀명': report.responsibleTeamName ?? report.teamName ?? '',
+            '현장책임자ID': (report as any).siteManagerId ?? '',
+            '현장책임자': (report as any).siteManagerName ?? '',
             '현장구분': report.siteType ?? '',
             '결제구분': report.paymentType ?? '',
             '작업자내역': report.workers ?? [],
@@ -389,6 +391,8 @@ const toDbDetailRows = (reports: DailyReport[]) => {
             '날짜': report.date ?? '',
             '담당팀ID': report.responsibleTeamId ?? report.teamId ?? '',
             '현장담당팀': report.responsibleTeamName ?? report.teamName ?? '',
+            '현장책임자ID': (report as any).siteManagerId ?? '',
+            '현장책임자': (report as any).siteManagerName ?? '',
             '현장ID': report.siteId ?? '',
             '현장명': report.siteName ?? '',
             '작업자ID': worker.workerId ?? '',
@@ -505,7 +509,7 @@ export const dailyReportTransferService = {
         XLSX.utils.book_append_sheet(
             workbook,
             await createWorksheetFromRows(detailRows, [
-                '일보ID', '날짜', '담당팀ID', '현장담당팀', '현장ID', '현장명',
+                '일보ID', '날짜', '담당팀ID', '현장담당팀', '현장책임자ID', '현장책임자', '현장ID', '현장명',
                 '작업자ID', '이름', '소속팀ID', '소속팀', '급여방식',
                 '공수', '단가', '금액', '비고'
             ]),
@@ -615,6 +619,7 @@ export const dailyReportTransferService = {
             '현장구분': row.siteType ?? '',
             '결제구분': row.paymentType ?? '',
             '현장담당팀': row.responsibleTeamName ?? row.teamName ?? '',
+            '현장책임자': row.siteManagerName ?? '',
             '이름': row.workerName ?? '',
             '소속팀': row.workerTeamName ?? '',
             '급여방식': resolveReportPayType(row),
@@ -627,7 +632,7 @@ export const dailyReportTransferService = {
 
         const worksheet = XLSX.utils.json_to_sheet(exportRows, {
             header: [
-                '날짜', '현장', '현장구분', '결제구분', '현장담당팀', '이름', '소속팀', '급여방식', '상태', '공수', '단가', '금액', '비고'
+                '날짜', '현장', '현장구분', '결제구분', '현장담당팀', '현장책임자', '이름', '소속팀', '급여방식', '상태', '공수', '단가', '금액', '비고'
             ]
         });
         const workbook = XLSX.utils.book_new();

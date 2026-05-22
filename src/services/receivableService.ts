@@ -174,9 +174,14 @@ export const receivableService = {
 
             const ledgerSnap = await transaction.get(ledgerRef);
             if (!ledgerSnap.exists()) throw new Error("Receivable not found");
+            const paymentSnap = await transaction.get(paymentRef);
 
             const ledger = ledgerSnap.data() as ReceivableLedger;
-            const newTotalPaid = ledger.totalPaidAmount - amount;
+            const paymentData = paymentSnap.exists()
+                ? ({ id: paymentSnap.id, ...paymentSnap.data() } as ReceivablePayment)
+                : ({ id: paymentId, receivableId, amount, type: 'MANUAL', method: 'Manual', paymentDate: '', createdAt: null } as ReceivablePayment);
+            const paymentAmount = Number(paymentData.amount || amount || 0);
+            const newTotalPaid = ledger.totalPaidAmount - paymentAmount;
             const newOutstanding = ledger.invoiceData.totalAmount - newTotalPaid;
 
             let newStatus: ReceivableLedger['status'] = '미수';
@@ -227,7 +232,8 @@ export const receivableService = {
      * Delete Receivable Ledger
      */
     async deleteReceivable(id: string) {
-        await deleteDoc(doc(db, RECEIVABLE_COLLECTION, id));
+        const ref = doc(db, RECEIVABLE_COLLECTION, id);
+        await deleteDoc(ref);
         // Optionally delete payments, but usually keeping themorphaned is safer or we use cloud functions
         // For now, simple delete of the ledger
     }

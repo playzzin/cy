@@ -74,6 +74,8 @@ const normalizeMessage = (id: string, data: DocumentData): ErpMessage => {
     readBy: uniqueStrings(data.readBy || []),
     readAtBy: (data.readAtBy || {}) as ErpMessage['readAtBy'],
     pinned: Boolean(data.pinned),
+    actionLabel: data.actionLabel ? String(data.actionLabel) : null,
+    actionUrl: data.actionUrl ? String(data.actionUrl) : null,
     createdAt: asTimestamp(data.createdAt, now),
     updatedAt: asTimestamp(data.updatedAt, now),
     expiresAt: data.expiresAt ? asTimestamp(data.expiresAt) : null
@@ -197,6 +199,8 @@ export const messageService = {
       readBy: initialReadBy,
       readAtBy,
       pinned: Boolean(input.pinned),
+      actionLabel: input.actionLabel?.trim() || null,
+      actionUrl: input.actionUrl?.trim() || null,
       createdAt: now,
       updatedAt: now,
       expiresAt: input.expiresAt || null

@@ -6,19 +6,22 @@ import {
     getDocs,
     setDoc,
     deleteDoc,
+    deleteField,
     query,
     where,
     orderBy,
     serverTimestamp,
+    writeBatch,
     limit as firestoreLimit
 } from 'firebase/firestore';
 import { createConverter } from '../utils/firestoreConverter';
 import { stripUndefinedFields } from '../utils/stripUndefinedFields';
-import { vehicleSchema, vehicleAssignmentSchema, vehicleExpenseSchema } from '../types/zod/vehicleSchema';
-import { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord } from '../types/vehicle';
+import { vehicleSchema, vehicleAssignmentSchema, vehicleBillingTargetSchema, vehicleExpenseSchema } from '../types/zod/vehicleSchema';
+import { Vehicle, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleExpenseRecord } from '../types/vehicle';
 
 const VEHICLE_COLLECTION = 'vehicles';
 const ASSIGNMENT_COLLECTION = 'vehicleAssignments';
+const BILLING_TARGET_COLLECTION = 'vehicleBillingTargets';
 const EXPENSE_COLLECTION = 'vehicleExpenses';
 
 export const vehicleFirestoreService = {
@@ -78,6 +81,94 @@ export const vehicleFirestoreService = {
         return snapshot.docs
             .map(doc => doc.data() as VehicleAssignmentRecord)
             .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+    },
+
+    saveVehicleAssignment: async (data: Partial<VehicleAssignmentRecord> & { id: string }) => {
+        const ref = doc(db, ASSIGNMENT_COLLECTION, data.id).withConverter(createConverter(vehicleAssignmentSchema));
+        await setDoc(ref, stripUndefinedFields({
+            ...data,
+            updatedAt: serverTimestamp()
+        }), { merge: true });
+    },
+
+    /**
+     * 차량 청구대상 이력 조회
+     */
+    listVehicleBillingTargets: async (vehicleId?: string) => {
+        let q = query(collection(db, BILLING_TARGET_COLLECTION).withConverter(createConverter(vehicleBillingTargetSchema)));
+        if (vehicleId) {
+            q = query(q, where('vehicleId', '==', vehicleId));
+        } else {
+            q = query(q, orderBy('startDate', 'desc'));
+        }
+        const snapshot = await getDocs(q);
+        return snapshot.docs
+            .map(doc => doc.data() as VehicleBillingTargetRecord)
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+    },
+
+    /**
+     * 차량 청구대상 이력 저장
+     */
+    saveVehicleBillingTarget: async (data: Partial<VehicleBillingTargetRecord> & { id: string }) => {
+        const ref = doc(db, BILLING_TARGET_COLLECTION, data.id).withConverter(createConverter(vehicleBillingTargetSchema));
+        await setDoc(ref, stripUndefinedFields({
+            ...data,
+            updatedAt: serverTimestamp()
+        }), { merge: true });
+    },
+
+    /**
+     * 차량 청구대상 이력 삭제
+     */
+    deleteVehicleBillingTarget: async (id: string) => {
+        const ref = doc(db, BILLING_TARGET_COLLECTION, id);
+        await deleteDoc(ref);
+    },
+
+    applyVehicleBillingTargetChanges: async (params: {
+        vehicleId: string;
+        upserts?: Array<Partial<VehicleBillingTargetRecord> & { id: string }>;
+        closeRecords?: Array<{ id: string; endDate: string }>;
+        deleteIds?: string[];
+        clearSnapshot?: boolean;
+    }): Promise<void> => {
+        const batch = writeBatch(db);
+
+        (params.closeRecords ?? []).forEach((record) => {
+            if (!record.id) return;
+            batch.update(doc(db, BILLING_TARGET_COLLECTION, record.id), {
+                endDate: record.endDate,
+                updatedAt: serverTimestamp()
+            });
+        });
+
+        (params.upserts ?? []).forEach((record) => {
+            const parsed = vehicleBillingTargetSchema.parse(record);
+            batch.set(doc(db, BILLING_TARGET_COLLECTION, record.id), stripUndefinedFields({
+                ...parsed,
+                createdAt: parsed.createdAt ?? serverTimestamp(),
+                updatedAt: serverTimestamp()
+            }), { merge: true });
+        });
+
+        (params.deleteIds ?? []).forEach((id) => {
+            if (!id) return;
+            batch.delete(doc(db, BILLING_TARGET_COLLECTION, id));
+        });
+
+        if (params.clearSnapshot) {
+            batch.update(doc(db, VEHICLE_COLLECTION, params.vehicleId), {
+                billingTargetId: deleteField(),
+                billingTargetType: deleteField(),
+                billingTargetName: deleteField(),
+                billingTargetStartDate: deleteField(),
+                billingTargetEndDate: deleteField(),
+                updatedAt: serverTimestamp()
+            });
+        }
+
+        await batch.commit();
     },
 
     /**

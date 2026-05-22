@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const CardTypeSchema = z.enum(['CREDIT', 'CHECK']);
 export const CardStatusSchema = z.enum(['AVAILABLE', 'ASSIGNED', 'SUSPENDED', 'CLOSED']);
 export const CardAssigneeTypeSchema = z.enum(['TEAM', 'WORKER']);
+export const CardBillingTargetTypeSchema = z.enum(['TEAM', 'WORKER', 'OFFICE', 'OFFICE_STAFF']);
 
 // --- Card Transaction Enum ---
 export const CardTransactionCategorySchema = z.enum(['FUEL', 'TOLL', 'MEAL', 'MATERIAL', 'OTHER']);
@@ -26,7 +27,7 @@ export const CardSchema = z.object({
     currentAssigneeType: CardAssigneeTypeSchema.nullable().optional(),
     currentAssigneeName: z.string().nullable().optional(),
     billingTargetId: z.string().nullable().optional(),
-    billingTargetType: CardAssigneeTypeSchema.nullable().optional(),
+    billingTargetType: CardBillingTargetTypeSchema.nullable().optional(),
     billingTargetName: z.string().nullable().optional(),
     memo: z.string().nullable().optional(),
     legacyId: z.string().optional(),
@@ -38,6 +39,18 @@ export const CardAssignmentRecordSchema = z.object({
     assigneeId: z.string(),
     assigneeType: CardAssigneeTypeSchema,
     assigneeName: z.string(),
+    startDate: z.string(),
+    endDate: z.string().optional(),
+    note: z.string().nullable().optional(),
+    legacyId: z.string().optional(),
+});
+
+export const CardBillingTargetRecordSchema = z.object({
+    cardId: z.string(),
+    cardLabel: z.string(),
+    targetId: z.string(),
+    targetType: CardBillingTargetTypeSchema,
+    targetName: z.string(),
     startDate: z.string(),
     endDate: z.string().optional(),
     note: z.string().nullable().optional(),
@@ -63,6 +76,11 @@ export const CardBillingCostItemSchema = z.object({
     amount: z.number(),
     type: z.string().optional(), // 'VARIABLE', 'FIXED' 등
     category: z.string().optional(),
+    sourceType: z.string().optional(),
+    sourceLedgerRowId: z.string().optional(),
+    sourceSegmentId: z.string().optional(),
+    sourceStartDate: z.string().optional(),
+    sourceEndDate: z.string().optional(),
 });
 
 export const CardBillingDocumentSchema = z.object({

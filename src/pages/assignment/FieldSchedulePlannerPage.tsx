@@ -9,8 +9,6 @@ import {
     closestCenter,
     useDraggable,
     useDroppable,
-    useSensor,
-    useSensors,
 } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import {
@@ -33,10 +31,12 @@ import {
     Truck,
     Upload,
     UserPlus,
+    UserX,
     UsersRound,
     X,
 } from 'lucide-react';
 import { dispatchService, DispatchAssignment } from '../../services/dispatchService';
+import { fieldScheduleRequestService, FieldScheduleRequest, isOffDutyOnlyFieldScheduleRequest } from '../../services/fieldScheduleRequestService';
 import { scheduleConfirmationBoardService } from '../../services/scheduleConfirmationBoardService';
 import { dailyReportService, DailyReport } from '../../services/dailyReportService';
 import { AnalyzedDailyReport, geminiService, KakaoAnalyzeContext } from '../../services/geminiService';
@@ -82,6 +82,8 @@ interface ScheduleItem {
     paymentType?: string;
     responsibleTeamId?: string;
     responsibleTeamName?: string;
+    siteManagerId?: string;
+    siteManagerName?: string;
     workerIds: string[];
     supportTeams: ScheduleSupportTeam[];
     vehicleIds: string[];
@@ -96,6 +98,14 @@ interface ScheduleItem {
     workerWorkContents?: Record<string, string>;
     workerTeamIds?: Record<string, string>;
     workerTeamNames?: Record<string, string>;
+    requestId?: string;
+    requestedHeadcount?: number;
+    requestedRoles?: string[];
+    requestMemo?: string;
+    requestPriority?: 'normal' | 'urgent';
+    requestStatus?: string;
+    offDutyWorkerIds?: string[];
+    offDutyWorkerNames?: string[];
 }
 
 interface ScheduleSupportTeam {
@@ -215,6 +225,9 @@ const getScheduleVehicleIds = (schedule: Partial<ScheduleItem>) =>
 const makeSiteKey = (schedule: Pick<ScheduleItem, 'siteId' | 'siteName'>) =>
     schedule.siteId ? `id:${schedule.siteId}` : schedule.siteName.trim() ? `name:${schedule.siteName.trim()}` : '';
 
+const getAssignedHeadcount = (schedule: Pick<ScheduleItem, 'workerIds' | 'supportTeams'>) =>
+    cleanIds(schedule.workerIds || []).length + (schedule.supportTeams || []).length;
+
 const makeSiteSelectionKey = (site: Site) =>
     makeSiteKey({ siteId: site.id || '', siteName: site.name });
 
@@ -314,6 +327,14 @@ const mergeScheduleEntries = (base: ScheduleItem, incoming: ScheduleItem): Sched
         paymentType: base.paymentType || incoming.paymentType,
         responsibleTeamId: base.responsibleTeamId || incoming.responsibleTeamId,
         responsibleTeamName: base.responsibleTeamName || incoming.responsibleTeamName,
+        siteManagerId: base.siteManagerId || incoming.siteManagerId,
+        siteManagerName: base.siteManagerName || incoming.siteManagerName,
+        requestId: base.requestId || incoming.requestId,
+        requestedHeadcount: base.requestedHeadcount ?? incoming.requestedHeadcount,
+        requestedRoles: cleanIds([...(base.requestedRoles || []), ...(incoming.requestedRoles || [])]),
+        requestMemo: base.requestMemo || incoming.requestMemo,
+        requestPriority: base.requestPriority || incoming.requestPriority,
+        requestStatus: base.requestStatus || incoming.requestStatus,
         workerIds: cleanIds([...base.workerIds, ...incoming.workerIds]),
         supportTeams: mergeSupportTeams([...(base.supportTeams || []), ...(incoming.supportTeams || [])]),
         vehicleIds,
@@ -662,6 +683,8 @@ const mapDailyReportsToSchedules = (
             paymentType: siteSnapshot.paymentType,
             responsibleTeamId,
             responsibleTeamName: siteSnapshot.responsibleTeamName,
+            siteManagerId: siteSnapshot.siteManagerId,
+            siteManagerName: siteSnapshot.siteManagerName,
             workerIds: cleanWorkerIds,
             workerManDays,
             workerUnitPrices,
@@ -708,6 +731,12 @@ const scheduleToDispatchAssignment = (schedule: ScheduleItem): DispatchAssignmen
     vehicleId: getScheduleVehicleIds(schedule)[0] || '',
     vehicleLabel: schedule.vehicleLabels[0] || schedule.vehicleLabel,
     vehicleLabels: schedule.vehicleLabels,
+    requestId: schedule.requestId,
+    requestedHeadcount: schedule.requestedHeadcount,
+    requestedRoles: schedule.requestedRoles,
+    requestMemo: schedule.requestMemo,
+    requestPriority: schedule.requestPriority,
+    requestStatus: schedule.requestStatus,
     status: schedule.status,
     note: schedule.memo,
 } as DispatchAssignment & Partial<ScheduleItem>);
@@ -1541,6 +1570,7 @@ const ScheduleCard: React.FC<{
         { label: '구분', value: schedule.siteType },
         { label: '결제방식', value: schedule.paymentType },
         { label: '현장담당팀', value: schedule.responsibleTeamName },
+        { label: '현장책임자', value: schedule.siteManagerName },
     ];
 
     const setRefs = (node: HTMLDivElement | null) => {
@@ -1619,6 +1649,28 @@ const ScheduleCard: React.FC<{
                     <GripVertical size={17} />
                 </button>
             </div>
+
+            {schedule.requestId || Number(schedule.requestedHeadcount || 0) > 0 ? (
+                <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-black text-blue-800">
+                        <span>요청 {Number(schedule.requestedHeadcount || 0)}명</span>
+                        <span>배치 {getAssignedHeadcount(schedule)}명</span>
+                        {Number(schedule.requestedHeadcount || 0) > getAssignedHeadcount(schedule) ? (
+                            <span className="rounded-full bg-white px-2 py-0.5 text-rose-600">
+                                부족 {Number(schedule.requestedHeadcount || 0) - getAssignedHeadcount(schedule)}명
+                            </span>
+                        ) : null}
+                        {getAssignedHeadcount(schedule) > Number(schedule.requestedHeadcount || 0) && Number(schedule.requestedHeadcount || 0) > 0 ? (
+                            <span className="rounded-full bg-white px-2 py-0.5 text-amber-700">
+                                초과 {getAssignedHeadcount(schedule) - Number(schedule.requestedHeadcount || 0)}명
+                            </span>
+                        ) : null}
+                    </div>
+                    {schedule.requestMemo ? (
+                        <div className="mt-2 text-xs font-semibold text-blue-900">{schedule.requestMemo}</div>
+                    ) : null}
+                </div>
+            ) : null}
 
             {schedule.workerIds.length > 0 ? (
                 <div
@@ -1987,6 +2039,7 @@ const BoardViewScheduleCard: React.FC<{
             payType: row.payType,
             teamColor: row.teamColor,
             teamName: row.teamName,
+            teamId: row.teamId,
         };
     });
 
@@ -2001,18 +2054,33 @@ const BoardViewScheduleCard: React.FC<{
 
     const hasAssignedRows = workerNameRows.length > 0 || supportNameRows.length > 0;
     const workerPanelColor = normalizeColor(schedule.teamColor) || siteColor;
-    const workerGridColumnCount = workerNameRows.length > 0
-        ? Math.max(2, Math.ceil(workerNameRows.length / BOARD_WORKERS_PER_COLUMN))
-        : 2;
-    const workerRowsPerColumn = workerNameRows.length > 0
-        ? Math.ceil(workerNameRows.length / workerGridColumnCount)
-        : 0;
-    const workerColumnGroups = workerNameRows.reduce<Array<typeof workerNameRows>>((columns, row, index) => {
-        const columnIndex = workerRowsPerColumn > 0 ? Math.floor(index / workerRowsPerColumn) : 0;
-        if (!columns[columnIndex]) columns[columnIndex] = [];
-        columns[columnIndex].push(row);
-        return columns;
+    const getWorkerGridColumnCount = (count: number) =>
+        count > 0 ? Math.max(2, Math.ceil(count / BOARD_WORKERS_PER_COLUMN)) : 2;
+    const workerTeamGroups = workerNameRows.reduce<Array<{
+        key: string;
+        teamName: string;
+        teamColor: string;
+        rows: typeof workerNameRows;
+    }>>((groups, row) => {
+        const key = row.teamId || row.teamName || row.teamColor || 'unassigned';
+        const existing = groups.find((group) => group.key === key);
+        if (existing) {
+            existing.rows.push(row);
+            return groups;
+        }
+
+        groups.push({
+            key,
+            teamName: row.teamName,
+            teamColor: row.teamColor,
+            rows: [row],
+        });
+        return groups;
     }, []);
+    const workerGridColumnCount = workerTeamGroups.length > 0
+        ? getWorkerGridColumnCount(workerNameRows.length)
+        : 2;
+    const orderedWorkerNameRows = workerTeamGroups.flatMap((group) => group.rows);
     const maxWorkerLabelLength = workerNameRows.reduce((max, row) => Math.max(max, Array.from(row.label).length), 0);
     const workerNameFontSize = maxWorkerLabelLength >= 5 || workerGridColumnCount >= 3 ? 11 : 12;
     const workerNamePaddingX = maxWorkerLabelLength >= 5 || workerGridColumnCount >= 3 ? 2 : 4;
@@ -2067,6 +2135,12 @@ const BoardViewScheduleCard: React.FC<{
                 <div className="truncate text-sm font-bold text-slate-900">{schedule.siteAddress || '주소 없음'}</div>
             </div>
 
+            {schedule.requestId || Number(schedule.requestedHeadcount || 0) > 0 ? (
+                <div className="border-b border-slate-300 bg-blue-50 px-2 py-1.5 text-center text-xs font-black text-blue-800">
+                    요청 {Number(schedule.requestedHeadcount || 0)}명 / 배치 {getAssignedHeadcount(schedule)}명
+                </div>
+            ) : null}
+
             {hasAssignedRows ? (
                 <div className="border-b border-slate-300">
                     {workerNameRows.length > 0 ? (
@@ -2077,41 +2151,37 @@ const BoardViewScheduleCard: React.FC<{
                                 gridTemplateColumns: `repeat(${workerGridColumnCount}, minmax(${workerNameCellMinWidth}px, 1fr))`,
                             }}
                         >
-                            {workerColumnGroups.map((workerColumn, columnIndex) => (
-                                <div key={`worker-column-${columnIndex}`} className="grid content-start gap-1.5">
-                                    {workerColumn.map((row) => {
-                                        const style = getBoardPayTypeStyle(row.payType);
-                                        const teamColor = normalizeColor(row.teamColor) || workerPanelColor;
-                                        return (
-                                            <div
-                                                key={row.id}
-                                                className="min-w-0 border p-1 shadow-sm"
-                                                style={{
-                                                    background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
-                                                    borderColor: teamColor,
-                                                }}
-                                                title={`${row.label} · ${row.teamName || '팀 미지정'} · ${style.label}`}
-                                            >
-                                                <div
-                                                    className="min-w-0 border py-0.5 text-center font-black leading-tight shadow-sm"
-                                                    style={{
-                                                        background: style.background,
-                                                        borderColor: style.borderColor,
-                                                        color: style.color,
-                                                        fontSize: workerNameFontSize,
-                                                        boxShadow: style.shadow,
-                                                        letterSpacing: 0,
-                                                        paddingLeft: workerNamePaddingX,
-                                                        paddingRight: workerNamePaddingX,
-                                                    }}
-                                                >
-                                                    <span className="block truncate">{row.label}</span>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            ))}
+                            {orderedWorkerNameRows.map((row) => {
+                                const style = getBoardPayTypeStyle(row.payType);
+                                const teamColor = normalizeColor(row.teamColor) || workerPanelColor;
+                                return (
+                                    <div
+                                        key={row.id}
+                                        className="min-w-0 border p-1 shadow-sm"
+                                        style={{
+                                            background: `linear-gradient(180deg, ${hexToRgba(teamColor, 0.9)}, ${teamColor})`,
+                                            borderColor: teamColor,
+                                        }}
+                                        title={`${row.label} · ${row.teamName || '팀 미지정'} · ${style.label}`}
+                                    >
+                                        <div
+                                            className="min-w-0 border py-0.5 text-center font-black leading-tight shadow-sm"
+                                            style={{
+                                                background: style.background,
+                                                borderColor: style.borderColor,
+                                                color: style.color,
+                                                fontSize: workerNameFontSize,
+                                                boxShadow: style.shadow,
+                                                letterSpacing: 0,
+                                                paddingLeft: workerNamePaddingX,
+                                                paddingRight: workerNamePaddingX,
+                                            }}
+                                        >
+                                            <span className="block truncate">{row.label}</span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     ) : null}
 
@@ -2217,6 +2287,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
     const [selectedSupportTeamIds, setSelectedSupportTeamIds] = useState<string[]>([]);
     const [selectedVehicleIds, setSelectedVehicleIds] = useState<string[]>([]);
+    const [offDutyWorkerIds, setOffDutyWorkerIds] = useState<string[]>([]);
+    const [offDutySelectionMode, setOffDutySelectionMode] = useState(false);
+    const [offDutyDraftWorkerIds, setOffDutyDraftWorkerIds] = useState<string[]>([]);
     const [recentlyUpdatedSiteKey, setRecentlyUpdatedSiteKey] = useState('');
     const [leftPanelTab, setLeftPanelTab] = useState<LeftPanelTab>('sites');
     const [searchTerm, setSearchTerm] = useState('');
@@ -2246,9 +2319,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         }
     }, [isPersonnelInputMode, leftPanelTab]);
 
-    const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-        useSensor(KeyboardSensor)
+    const sensors = useMemo(
+        () => [
+            { sensor: PointerSensor, options: { activationConstraint: { distance: 6 } } },
+            { sensor: KeyboardSensor, options: {} },
+        ],
+        []
     );
 
     const { setNodeRef: setBoardDropRef, isOver: isBoardOver } = useDroppable({
@@ -2394,6 +2470,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 paymentType: siteSnapshot.paymentType,
                 responsibleTeamId: siteSnapshot.responsibleTeamId,
                 responsibleTeamName: siteSnapshot.responsibleTeamName,
+                siteManagerId: siteSnapshot.siteManagerId,
+                siteManagerName: siteSnapshot.siteManagerName,
                 workerIds: cleanIds(workerIds),
                 supportTeams,
                 vehicleIds: [],
@@ -2459,6 +2537,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         schedules.forEach((schedule) => schedule.workerIds.forEach((workerId) => workerId && set.add(workerId)));
         return set;
     }, [schedules]);
+    const offDutyWorkerIdSet = useMemo(() => new Set(offDutyWorkerIds), [offDutyWorkerIds]);
 
     const assignedSupportTeamKeySet = useMemo(() => {
         const set = new Set<string>();
@@ -2540,7 +2619,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             rosters
                 .map((roster) => {
                     if (roster.kind === 'support') {
-                        const availableWorkers = roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id));
+                        const availableWorkers = roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id) && !offDutyWorkerIdSet.has(worker.id));
                         return isPersonnelInputMode || roster.workers.length > 0
                             ? {
                                 ...roster,
@@ -2550,7 +2629,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     }
                     return {
                         ...roster,
-                        workers: roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id)),
+                        workers: roster.workers.filter((worker) => worker.id && !assignedWorkerIdSet.has(worker.id) && !offDutyWorkerIdSet.has(worker.id)),
                     };
                 })
                 .filter((roster) => {
@@ -2561,7 +2640,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     }
                     return roster.workers.length > 0;
                 }),
-        [assignedSupportTeamKeySet, assignedWorkerIdSet, isPersonnelInputMode, rosters]
+        [assignedSupportTeamKeySet, assignedWorkerIdSet, isPersonnelInputMode, offDutyWorkerIdSet, rosters]
     );
 
     const panelRosters = useMemo(
@@ -2580,6 +2659,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             return `${roster.name} ${roster.sourceLabel || ''} ${roster.leaderName || ''} ${workerNames}`.toLowerCase().includes(term);
         }).sort(compareRosterPanelOrder);
     }, [panelRosters, searchTerm]);
+    const displayFilteredRosters = useMemo(
+        () => offDutySelectionMode ? filteredRosters.filter((roster) => roster.workers.length > 0) : filteredRosters,
+        [filteredRosters, offDutySelectionMode]
+    );
 
     const filteredVehicles = useMemo(() => {
         const term = searchTerm.trim().toLowerCase();
@@ -2656,12 +2739,35 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         [availableRosters, selectedTeamId]
     );
     const selectedWorkerIdSet = useMemo(() => new Set(selectedWorkerIds), [selectedWorkerIds]);
+    const offDutyDraftWorkerIdSet = useMemo(() => new Set(offDutyDraftWorkerIds), [offDutyDraftWorkerIds]);
     const selectedSupportTeamIdSet = useMemo(() => new Set(selectedSupportTeamIds), [selectedSupportTeamIds]);
     const selectedVehicleIdSet = useMemo(() => new Set(selectedVehicleIds), [selectedVehicleIds]);
     const selectedWorkers = useMemo(
         () => selectedWorkerIds.map((workerId) => workersById.get(workerId)).filter((worker): worker is Worker => Boolean(worker)),
         [selectedWorkerIds, workersById]
     );
+    const offDutyWorkers = useMemo(
+        () =>
+            offDutyWorkerIds
+                .map((workerId) => workersById.get(workerId))
+                .filter((worker): worker is Worker => Boolean(worker))
+                .sort((left, right) => compareKoreanName(left.name, right.name)),
+        [offDutyWorkerIds, workersById]
+    );
+    const offDutyWorkerGroups = useMemo(() => {
+        const groups = new Map<string, { id: string; name: string; color: string; workers: Worker[] }>();
+        offDutyWorkers.forEach((worker) => {
+            const assignedTeam = getWorkerAssignedTeam(worker, teamsById, teams);
+            const groupId = assignedTeam?.id || toTrimmedText(worker.teamId) || toTrimmedText(worker.teamName) || 'unassigned';
+            const groupName = assignedTeam?.name || toTrimmedText(worker.teamName) || '팀 미지정';
+            const groupColor = getTeamColor(assignedTeam);
+            if (!groups.has(groupId)) {
+                groups.set(groupId, { id: groupId, name: groupName, color: groupColor, workers: [] });
+            }
+            groups.get(groupId)?.workers.push(worker);
+        });
+        return Array.from(groups.values()).sort((left, right) => compareKoreanName(left.name, right.name));
+    }, [offDutyWorkers, teams, teamsById]);
     const selectedSupportTeams = useMemo(
         () => selectedSupportTeamIds.map((teamId) => availableRosters.find((roster) => roster.id === teamId)).filter((team): team is TeamRoster => Boolean(team)),
         [availableRosters, selectedSupportTeamIds]
@@ -2683,6 +2789,22 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const issues: string[] = [];
             const isSupportSchedule = isSupportScheduleItem(schedule);
             if (!schedule.siteId && !schedule.siteName.trim()) issues.push('현장이 선택되지 않았습니다.');
+
+            const requestedHeadcount = Number(schedule.requestedHeadcount || 0);
+            if (requestedHeadcount > 0) {
+                const assignedHeadcount = getAssignedHeadcount(schedule);
+                if (assignedHeadcount < requestedHeadcount) {
+                    issues.push(`요청 ${requestedHeadcount}명 / 배치 ${assignedHeadcount}명`);
+                }
+                if (assignedHeadcount > requestedHeadcount) {
+                    issues.push(`요청보다 ${assignedHeadcount - requestedHeadcount}명 초과`);
+                }
+            }
+            schedule.workerIds.forEach((workerId) => {
+                if (!offDutyWorkerIdSet.has(workerId)) return;
+                const workerName = workersById.get(workerId)?.name || '휴무자';
+                issues.push(`${workerName} 휴무 요청자 배치`);
+            });
 
             if (isPersonnelInputMode) {
                 if (schedule.workerIds.length === 0 && schedule.supportTeams.length === 0) {
@@ -2718,7 +2840,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
             return Array.from(new Set(issues));
         },
-        [isPersonnelInputMode, isScheduleConfirmationInput, isSupportScheduleItem, schedules, vehiclesById, workersById]
+        [isPersonnelInputMode, isScheduleConfirmationInput, isSupportScheduleItem, offDutyWorkerIdSet, schedules, vehiclesById, workersById]
     );
 
     const totalIssues = useMemo(
@@ -2772,6 +2894,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 paymentType: getPaymentType(site, raw.paymentType),
                 responsibleTeamId: toTrimmedText(site?.responsibleTeamId) || raw.responsibleTeamId,
                 responsibleTeamName: toTrimmedText(site?.responsibleTeamName) || raw.responsibleTeamName,
+                siteManagerId: toTrimmedText((site as any)?.siteManagerId) || raw.siteManagerId,
+                siteManagerName: toTrimmedText((site as any)?.siteManagerName) || raw.siteManagerName,
+                requestId: raw.requestId,
+                requestedHeadcount: raw.requestedHeadcount,
+                requestedRoles: raw.requestedRoles,
+                requestMemo: raw.requestMemo,
+                requestPriority: raw.requestPriority,
+                requestStatus: raw.requestStatus,
                 workerIds,
                 supportTeams,
                 vehicleIds,
@@ -3071,6 +3201,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
 
                 return fallbackColor;
             };
+            const requestRows: FieldScheduleRequest[] = !isDailyReportInput && !isScheduleConfirmationInput
+                ? await fieldScheduleRequestService.listByDate(date)
+                : [];
 
             if (isDailyReportInput) {
                 const reports = await dailyReportService.getReports(date);
@@ -3132,6 +3265,14 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                     paymentType: getPaymentType(site, raw.paymentType),
                     responsibleTeamId: toTrimmedText(site?.responsibleTeamId) || raw.responsibleTeamId,
                     responsibleTeamName: toTrimmedText(site?.responsibleTeamName) || raw.responsibleTeamName,
+                    siteManagerId: toTrimmedText((site as any)?.siteManagerId) || raw.siteManagerId,
+                    siteManagerName: toTrimmedText((site as any)?.siteManagerName) || raw.siteManagerName,
+                    requestId: raw.requestId,
+                    requestedHeadcount: raw.requestedHeadcount,
+                    requestedRoles: raw.requestedRoles,
+                    requestMemo: raw.requestMemo,
+                    requestPriority: raw.requestPriority,
+                    requestStatus: raw.requestStatus,
                     workerIds,
                     supportTeams,
                     vehicleIds,
@@ -3157,7 +3298,70 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 } satisfies ScheduleItem;
             });
 
-            setSchedules(mergeSchedulesBySite(nextSchedules));
+            const requestSchedules: ScheduleItem[] = requestRows
+                .filter((request) =>
+                    request.status !== 'cancelled' &&
+                    !isOffDutyOnlyFieldScheduleRequest(request) &&
+                    Number(request.requestedHeadcount || 0) > 0
+                )
+                .map((request, index) => {
+                    const site = siteMap.get(request.siteId) || siteRows.find((entry) => entry.name === request.siteName);
+                    const responsibleTeam =
+                        (request.responsibleTeamId ? teamMap.get(request.responsibleTeamId) : undefined) ||
+                        (site?.responsibleTeamId ? teamMap.get(site.responsibleTeamId) : undefined) ||
+                        teamRows.find((team) => team.name === request.responsibleTeamName || team.name === site?.responsibleTeamName);
+                    const siteColor = request.siteColor || getLoadedSiteColor(site, getTeamColor(responsibleTeam));
+                    return {
+                        id: `request-${request.id || `${date}-${index}`}`,
+                        date,
+                        teamId: '',
+                        teamName: '',
+                        teamColor: siteColor,
+                        siteId: request.siteId || site?.id || '',
+                        siteName: request.siteName || site?.name || '',
+                        siteAddress: request.siteAddress || site?.address || '',
+                        siteColor,
+                        clientCompanyName: toTrimmedText(site?.clientCompanyName),
+                        constructorCompanyName: toTrimmedText(site?.companyName) || toTrimmedText(site?.constructorCompanyName),
+                        partnerName: toTrimmedText(site?.partnerName),
+                        siteType: getSiteType(site),
+                        paymentType: getPaymentType(site),
+                        responsibleTeamId: request.responsibleTeamId || toTrimmedText(site?.responsibleTeamId),
+                        responsibleTeamName: request.responsibleTeamName || toTrimmedText(site?.responsibleTeamName),
+                        siteManagerId: request.siteManagerId || toTrimmedText((site as any)?.siteManagerId),
+                        siteManagerName: request.siteManagerName || toTrimmedText((site as any)?.siteManagerName),
+                        workerIds: [],
+                        supportTeams: [],
+                        vehicleIds: [],
+                        vehicleLabels: [],
+                        vehicleId: '',
+                        vehicleLabel: '',
+                        status: 'draft',
+                        memo: '',
+                        workerManDays: {},
+                        workerUnitPrices: {},
+                        workerPayTypes: {},
+                        workerWorkContents: {},
+                        workerTeamIds: {},
+                        workerTeamNames: {},
+                        requestId: request.id,
+                        requestedHeadcount: request.requestedHeadcount,
+                        requestedRoles: request.requestedRoles,
+                        requestMemo: request.memo,
+                        requestPriority: request.priority,
+                        requestStatus: request.status,
+                    };
+                });
+            if (!isScheduleConfirmationInput) {
+                setOffDutyWorkerIds(cleanIds([
+                    ...requestRows.flatMap((request) => request.offDutyWorkerIds || []),
+                    ...savedAssignments.flatMap((assignment) => {
+                        const raw = assignment as Partial<ScheduleItem>;
+                        return raw.offDutyWorkerIds || [];
+                    }),
+                ]));
+            }
+            setSchedules(mergeSchedulesBySite([...nextSchedules, ...requestSchedules]));
             const defaultTeamId = nextViewerTeamScope.teamIds.find((teamId) => teamMap.has(teamId)) || teamRows[0]?.id || UNASSIGNED_TEAM_ID;
             setSelectedTeamId((prev) => prev || defaultTeamId);
             setSelectedSiteId((prev) => (prev && siteRows.some((site) => site.id === prev) ? prev : ''));
@@ -3180,6 +3384,12 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     }, [date, mode]);
 
     useEffect(() => {
+        setOffDutyWorkerIds([]);
+        setOffDutyDraftWorkerIds([]);
+        setOffDutySelectionMode(false);
+    }, [date, mode]);
+
+    useEffect(() => {
         if (!selectedTeamId && rosters[0]) {
             setSelectedTeamId(rosters[0].id);
         }
@@ -3196,10 +3406,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     }, [selectedRoster]);
 
     useEffect(() => {
-        setSelectedWorkerIds((prev) => prev.filter((workerId) => !assignedWorkerIdSet.has(workerId)));
+        setSelectedWorkerIds((prev) => prev.filter((workerId) => !assignedWorkerIdSet.has(workerId) && !offDutyWorkerIdSet.has(workerId)));
+        setOffDutyDraftWorkerIds((prev) =>
+            prev.filter((workerId) => workersById.has(workerId) && !assignedWorkerIdSet.has(workerId) && !offDutyWorkerIdSet.has(workerId))
+        );
         setSelectedSupportTeamIds((prev) => prev.filter((teamId) => !assignedSupportTeamKeySet.has(teamId)));
         setSelectedVehicleIds((prev) => prev.filter((vehicleId) => !assignedVehicleIdSet.has(vehicleId)));
-    }, [assignedSupportTeamKeySet, assignedVehicleIdSet, assignedWorkerIdSet]);
+    }, [assignedSupportTeamKeySet, assignedVehicleIdSet, assignedWorkerIdSet, offDutyWorkerIdSet, workersById]);
+
+    useEffect(() => {
+        setOffDutyWorkerIds((prev) => prev.filter((workerId) => workersById.has(workerId) && !assignedWorkerIdSet.has(workerId)));
+    }, [assignedWorkerIdSet, workersById]);
 
     useEffect(() => {
         if (!recentlyUpdatedSiteKey) return;
@@ -3229,6 +3446,73 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const allSelected = workerIds.length > 0 && workerIds.every((workerId) => current.includes(workerId));
             return allSelected ? [] : workerIds;
         });
+    };
+
+    const startOffDutySelection = () => {
+        setOffDutySelectionMode(true);
+        setOffDutyDraftWorkerIds([]);
+        setSelectedWorkerIds([]);
+        setSelectedSupportTeamIds([]);
+        setSelectedVehicleIds([]);
+        setLeftPanelTab((prev) => prev === 'sites' || prev === 'vehicles' ? 'teams' : prev);
+        setMessage('휴무 처리할 작업자를 체크한 뒤 휴무자로 분리하세요.');
+    };
+
+    const cancelOffDutySelection = () => {
+        setOffDutySelectionMode(false);
+        setOffDutyDraftWorkerIds([]);
+        setMessage('휴무자 선택을 취소했습니다.');
+    };
+
+    const toggleOffDutyDraftWorker = (workerId: string) => {
+        setSelectedWorkerIds([]);
+        setSelectedSupportTeamIds([]);
+        setSelectedVehicleIds([]);
+        setOffDutyDraftWorkerIds((prev) =>
+            prev.includes(workerId) ? prev.filter((id) => id !== workerId) : [...prev, workerId]
+        );
+    };
+
+    const toggleAllOffDutyDraftWorkers = (roster: TeamRoster) => {
+        const workerIds = cleanIds(roster.workers.map((worker) => worker.id))
+            .filter((workerId) => !assignedWorkerIdSet.has(workerId) && !offDutyWorkerIdSet.has(workerId));
+        setSelectedWorkerIds([]);
+        setSelectedSupportTeamIds([]);
+        setSelectedVehicleIds([]);
+        setOffDutyDraftWorkerIds((prev) => {
+            const allSelected = workerIds.length > 0 && workerIds.every((workerId) => prev.includes(workerId));
+            return allSelected
+                ? prev.filter((workerId) => !workerIds.includes(workerId))
+                : cleanIds([...prev, ...workerIds]);
+        });
+    };
+
+    const applyOffDutySelection = () => {
+        const workerIds = cleanIds(offDutyDraftWorkerIds)
+            .filter((workerId) => workersById.has(workerId) && !assignedWorkerIdSet.has(workerId));
+        if (workerIds.length === 0) {
+            setMessage('휴무자로 분리할 작업자를 먼저 선택하세요.');
+            return;
+        }
+
+        setOffDutyWorkerIds((prev) => cleanIds([...prev, ...workerIds]));
+        setOffDutyDraftWorkerIds([]);
+        setOffDutySelectionMode(false);
+        setSelectedWorkerIds((prev) => prev.filter((workerId) => !workerIds.includes(workerId)));
+        setMessage(`휴무자 ${workerIds.length}명을 명단에서 별도 분리했습니다.`);
+    };
+
+    const restoreOffDutyWorker = (workerId: string) => {
+        const workerName = workersById.get(workerId)?.name || '작업자';
+        setOffDutyWorkerIds((prev) => prev.filter((id) => id !== workerId));
+        setOffDutyDraftWorkerIds((prev) => prev.filter((id) => id !== workerId));
+        setMessage(`${workerName}을 휴무자에서 제외했습니다.`);
+    };
+
+    const clearOffDutyWorkers = () => {
+        setOffDutyWorkerIds([]);
+        setOffDutyDraftWorkerIds([]);
+        setMessage('휴무자 분리를 모두 해제했습니다.');
     };
 
     const toggleSupportTeamSelection = (roster: TeamRoster) => {
@@ -3321,6 +3605,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             paymentType: overrides.paymentType ?? getPaymentType(site),
             responsibleTeamId: overrides.responsibleTeamId ?? toTrimmedText(site?.responsibleTeamId),
             responsibleTeamName: overrides.responsibleTeamName ?? toTrimmedText(site?.responsibleTeamName),
+            siteManagerId: overrides.siteManagerId ?? toTrimmedText((site as any)?.siteManagerId),
+            siteManagerName: overrides.siteManagerName ?? toTrimmedText((site as any)?.siteManagerName),
             workerIds,
             supportTeams,
             vehicleIds,
@@ -3425,6 +3711,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             paymentType: getPaymentType(site),
             responsibleTeamId: toTrimmedText(site.responsibleTeamId),
             responsibleTeamName: toTrimmedText(site.responsibleTeamName),
+            siteManagerId: toTrimmedText((site as any).siteManagerId),
+            siteManagerName: toTrimmedText((site as any).siteManagerName),
             workerIds: [],
             supportTeams: [],
             vehicleIds: [],
@@ -3541,6 +3829,10 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
     };
 
     const moveSelectedToBoard = () => {
+        if (offDutySelectionMode) {
+            setMessage('휴무자 선택 중에는 작업자를 보드에 추가할 수 없습니다.');
+            return;
+        }
         if (!selectedSiteId || !selectedSite) {
             setMessage(isPersonnelInputMode ? '입력할 현장을 먼저 선택하세요.' : '이동 대상 현장을 먼저 선택하세요.');
             return;
@@ -3682,6 +3974,8 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                 paymentType: getPaymentType(site),
                 responsibleTeamId: toTrimmedText(site?.responsibleTeamId),
                 responsibleTeamName: toTrimmedText(site?.responsibleTeamName),
+                siteManagerId: toTrimmedText((site as any)?.siteManagerId),
+                siteManagerName: toTrimmedText((site as any)?.siteManagerName),
             };
             const key = makeSiteKey(patched);
             const existingIndex = key ? prev.findIndex((entry) => entry.id !== scheduleId && makeSiteKey(entry) === key) : -1;
@@ -4261,6 +4555,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             date,
             savedAt: new Date().toISOString(),
             selectedSiteId,
+            offDutyWorkerIds,
             schedules: normalizedSchedules,
         };
 
@@ -4283,10 +4578,17 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
             const parsed = JSON.parse(raw) as {
                 schedules?: ScheduleItem[];
                 selectedSiteId?: string;
+                offDutyWorkerIds?: string[];
             };
             const draftSchedules = Array.isArray(parsed.schedules) ? parsed.schedules : [];
             setSchedules(mergeSchedulesBySite(draftSchedules));
             setSelectedSiteId(parsed.selectedSiteId || '');
+            setOffDutyWorkerIds(cleanIds([
+                ...(Array.isArray(parsed.offDutyWorkerIds) ? parsed.offDutyWorkerIds : []),
+                ...draftSchedules.flatMap((schedule) => schedule.offDutyWorkerIds || []),
+            ]));
+            setOffDutyDraftWorkerIds([]);
+            setOffDutySelectionMode(false);
             setDirty(true);
             setMessage('임시저장을 불러왔습니다.');
         } catch (error) {
@@ -4405,7 +4707,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         ? selectedWorkerIds.length
         : selectedWorkerIds.length + selectedSupportTeamIds.length + selectedVehicleIds.length;
     const canMoveSelected =
-        Boolean(selectedSiteId) && selectedResourceCount > 0;
+        !offDutySelectionMode && Boolean(selectedSiteId) && selectedResourceCount > 0;
     const moveTargetLabel = selectedSite?.name || '현장 선택';
     const moveSourceLabel =
         selectedWorkerIds.length > 0
@@ -4475,7 +4777,9 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
         ? '팀/작업자 또는 지원팀 탭에서 인원을 선택하세요.'
         : '팀/작업자, 지원팀, 차량 탭에서 항목을 선택하세요.';
     const mobileSelectionButtonLabel = isPersonnelInputMode ? '선택 인원 추가하기' : '선택 항목 추가하기';
-    const showMobileSelectionSummary = isScheduleConfirmationInput || !isPersonnelInputMode;
+    const offDutyDraftCount = offDutyDraftWorkerIds.length;
+    const showOffDutyControls = leftPanelTab === 'teams' || leftPanelTab === 'support';
+    const showMobileSelectionSummary = !offDutySelectionMode && (isScheduleConfirmationInput || !isPersonnelInputMode);
     const showDisplayBoardCards = boardViewMode && !isScheduleConfirmationInput;
     const showCopyControls = !isDailyReportInput && !isScheduleConfirmationInput;
     const viewToggleLabel = isScheduleConfirmationInput
@@ -4752,6 +5056,99 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     </div>
                                 ) : null}
 
+                                {showOffDutyControls ? (
+                                    <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50/70 p-2">
+                                        {!offDutySelectionMode ? (
+                                            <button
+                                                type="button"
+                                                onClick={startOffDutySelection}
+                                                className="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-rose-200 bg-white text-xs font-black text-rose-700 hover:bg-rose-50"
+                                            >
+                                                <UserX size={15} />
+                                                휴무자 선택
+                                                {offDutyWorkers.length > 0 ? (
+                                                    <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px]">
+                                                        {offDutyWorkers.length}명
+                                                    </span>
+                                                ) : null}
+                                            </button>
+                                        ) : (
+                                            <div className="grid gap-2">
+                                                <div className="flex items-center justify-between gap-2 px-1 text-xs font-black text-rose-800">
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                        <UserX size={14} />
+                                                        휴무자 선택 중
+                                                    </span>
+                                                    <span>{offDutyDraftCount}명 체크</span>
+                                                </div>
+                                                <div className="grid grid-cols-[1fr_auto] gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={applyOffDutySelection}
+                                                        disabled={offDutyDraftCount === 0}
+                                                        className="flex h-9 items-center justify-center rounded-md bg-rose-600 px-3 text-xs font-black text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                                                    >
+                                                        휴무자로 분리
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={cancelOffDutySelection}
+                                                        className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 hover:bg-slate-50"
+                                                    >
+                                                        취소
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {offDutyWorkers.length > 0 ? (
+                                            <div className="mt-2 rounded-md bg-white px-2 py-2">
+                                                <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-black text-slate-500">
+                                                    <span>휴무자 {offDutyWorkers.length}명</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={clearOffDutyWorkers}
+                                                        className="text-rose-600 hover:text-rose-700"
+                                                    >
+                                                        전체 해제
+                                                    </button>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {offDutyWorkerGroups.map((group) => (
+                                                        <div key={group.id} className="rounded-md border border-rose-100 bg-rose-50/70 px-2 py-1.5">
+                                                            <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-black text-rose-700">
+                                                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
+                                                                    <span className="truncate">{group.name}</span>
+                                                                </span>
+                                                                <span className="shrink-0">{group.workers.length}명</span>
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1.5">
+                                                                {group.workers.map((worker) => (
+                                                                    <span
+                                                                        key={worker.id}
+                                                                        className="inline-flex max-w-full items-center gap-1 rounded-md border border-rose-100 bg-white px-2 py-1 text-xs font-bold text-rose-700"
+                                                                    >
+                                                                        <span className="truncate">{worker.name}</span>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => worker.id && restoreOffDutyWorker(worker.id)}
+                                                                            className="shrink-0 text-rose-400 hover:text-rose-700"
+                                                                            title="휴무자에서 제외"
+                                                                        >
+                                                                            <X size={12} />
+                                                                        </button>
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
                                 {showMobileSelectionSummary ? (
                                     <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm lg:hidden">
                                         <div className="flex items-center justify-between gap-2">
@@ -4817,7 +5214,7 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                     </div>
                                 ) : null}
 
-                                {leftPanelTab !== 'sites' ? (
+                                {leftPanelTab !== 'sites' && !offDutySelectionMode ? (
                                     <div className={`mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2 ${showMobileSelectionSummary ? 'hidden lg:block' : ''}`}>
                                         <div className="mb-2 flex min-w-0 items-center gap-2 px-1 text-xs font-bold text-slate-600">
                                             <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: selectedSiteColor || '#cbd5e1' }} />
@@ -4869,23 +5266,23 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         </div>
                                     )
                                 ) : leftPanelTab === 'support' ? (
-                                    filteredRosters.length > 0 ? (
+                                    displayFilteredRosters.length > 0 ? (
                                         <div className="space-y-2">
-                                            {filteredRosters.map((roster) => {
+                                            {displayFilteredRosters.map((roster) => {
                                                 const useSupportWorkerSelection = isPersonnelInputMode || roster.workers.length > 0;
                                                 return useSupportWorkerSelection ? (
                                                     <TeamRosterCard
                                                         key={roster.id}
                                                         roster={roster}
-                                                        selected={selectedRoster?.id === roster.id}
+                                                        selected={offDutySelectionMode ? roster.workers.some((worker) => Boolean(worker.id && offDutyDraftWorkerIdSet.has(worker.id))) : selectedRoster?.id === roster.id}
                                                         onSelect={() => setSelectedTeamId(roster.id)}
-                                                        selectedWorkerIds={selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
-                                                        supportSelected={!isPersonnelInputMode && selectedSupportTeamIdSet.has(roster.id)}
+                                                        selectedWorkerIds={offDutySelectionMode ? offDutyDraftWorkerIdSet : selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
+                                                        supportSelected={!offDutySelectionMode && !isPersonnelInputMode && selectedSupportTeamIdSet.has(roster.id)}
                                                         forceWorkerSelection
-                                                        showSupportTeamToggle={!isPersonnelInputMode}
-                                                        onToggleSupportTeam={() => toggleSupportTeamSelection(roster)}
-                                                        onToggleWorker={(workerId) => toggleWorkerSelection(roster.id, workerId)}
-                                                        onToggleAllWorkers={() => toggleAllWorkers(roster)}
+                                                        showSupportTeamToggle={!offDutySelectionMode && !isPersonnelInputMode}
+                                                        onToggleSupportTeam={() => !offDutySelectionMode && toggleSupportTeamSelection(roster)}
+                                                        onToggleWorker={(workerId) => offDutySelectionMode ? toggleOffDutyDraftWorker(workerId) : toggleWorkerSelection(roster.id, workerId)}
+                                                        onToggleAllWorkers={() => offDutySelectionMode ? toggleAllOffDutyDraftWorkers(roster) : toggleAllWorkers(roster)}
                                                     />
                                                 ) : (
                                                     <SupportRosterLineCard
@@ -4900,27 +5297,27 @@ export default function FieldSchedulePlannerPage({ mode = 'dispatch' }: FieldSch
                                         </div>
                                     ) : (
                                         <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
-                                            표시할 지원팀이 없습니다.
+                                            {offDutySelectionMode ? '휴무 처리할 지원팀 작업자가 없습니다.' : '표시할 지원팀이 없습니다.'}
                                         </div>
                                     )
                                 ) : leftPanelTab !== 'vehicles' ? (
-                                    filteredRosters.length > 0 ? (
-                                        filteredRosters.map((roster) => (
+                                    displayFilteredRosters.length > 0 ? (
+                                        displayFilteredRosters.map((roster) => (
                                             <TeamRosterCard
                                                 key={roster.id}
                                                 roster={roster}
-                                                selected={selectedRoster?.id === roster.id}
+                                                selected={offDutySelectionMode ? roster.workers.some((worker) => Boolean(worker.id && offDutyDraftWorkerIdSet.has(worker.id))) : selectedRoster?.id === roster.id}
                                                 onSelect={() => setSelectedTeamId(roster.id)}
-                                                selectedWorkerIds={selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
-                                                supportSelected={selectedSupportTeamIdSet.has(roster.id)}
-                                                onToggleSupportTeam={() => toggleSupportTeamSelection(roster)}
-                                                onToggleWorker={(workerId) => toggleWorkerSelection(roster.id, workerId)}
-                                                onToggleAllWorkers={() => toggleAllWorkers(roster)}
+                                                selectedWorkerIds={offDutySelectionMode ? offDutyDraftWorkerIdSet : selectedRoster?.id === roster.id ? selectedWorkerIdSet : new Set()}
+                                                supportSelected={!offDutySelectionMode && selectedSupportTeamIdSet.has(roster.id)}
+                                                onToggleSupportTeam={() => !offDutySelectionMode && toggleSupportTeamSelection(roster)}
+                                                onToggleWorker={(workerId) => offDutySelectionMode ? toggleOffDutyDraftWorker(workerId) : toggleWorkerSelection(roster.id, workerId)}
+                                                onToggleAllWorkers={() => offDutySelectionMode ? toggleAllOffDutyDraftWorkers(roster) : toggleAllWorkers(roster)}
                                             />
                                         ))
                                     ) : (
                                         <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500">
-                                            표시할 팀이나 작업자가 없습니다.
+                                            {offDutySelectionMode ? '휴무 처리할 작업자가 없습니다.' : '표시할 팀이나 작업자가 없습니다.'}
                                         </div>
                                     )
                                 ) : filteredVehicles.length > 0 ? (

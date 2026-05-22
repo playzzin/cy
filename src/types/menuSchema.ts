@@ -6,6 +6,7 @@ export const MenuItemSchema: z.ZodType<any> = z.lazy(() =>
         text: z.string().min(1, "메뉴명은 필수입니다."), // Text is required
         icon: z.string().optional(),
         path: z.string().optional(),
+        action: z.string().optional(),
         id: z.string().optional(), // ID might be missing in legacy data, but we encourage it
         roles: z.array(z.string()).optional(),
         hoverColor: z.string().optional(), // Rollover Color
@@ -22,6 +23,7 @@ export const SiteDataSchema = z.object({
     order: z.number().optional(),
     delegationTemplatePath: z.string().optional(),
     menu: z.array(MenuItemSchema),
+    headerActions: z.array(MenuItemSchema).optional(),
     trash: z.array(MenuItemSchema).optional(),
     deletedItems: z.array(z.string()).optional(),
     positionConfig: z.array(z.object({

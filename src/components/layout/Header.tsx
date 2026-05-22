@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
@@ -19,8 +19,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../config/firebase';
 import { resolveIcon } from '../../constants/iconMap';
+import { DEFAULT_HEADER_ACTIONS } from '../../constants/headerActions';
 import { manpowerService } from '../../services/manpowerService';
 import { userService, type UserData } from '../../services/userService';
+import { userMenuPositionService } from '../../services/userMenuPositionService';
 import MessageIndicator from '../messages/MessageIndicator';
 import PositionPanel from './PositionPanel';
 import { PositionItem, SiteDataType, MenuItem } from '../../types/menu';
@@ -60,6 +62,45 @@ interface HeaderProps {
 }
 
 type QuickTool = 'calculator' | 'camera';
+
+const normalizeAccessRole = (role: unknown): string => String(role || '').trim();
+const normalizeAccessRoleKey = (role: unknown): string => normalizeAccessRole(role).toLowerCase();
+
+const toRoleList = (value: unknown): string[] => {
+    if (Array.isArray(value)) {
+        return value.map(normalizeAccessRole).filter(Boolean);
+    }
+    const normalized = normalizeAccessRole(value);
+    return normalized ? [normalized] : [];
+};
+
+const uniqueRoles = (roles: unknown[]): string[] => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+
+    roles.flatMap(toRoleList).forEach((role) => {
+        const key = normalizeAccessRoleKey(role);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        result.push(role);
+    });
+
+    return result;
+};
+
+const roleListIncludes = (actualRoles: string[], allowedRoles: string[]): boolean => {
+    const actualKeys = new Set(actualRoles.map(normalizeAccessRoleKey));
+    return allowedRoles.some((role) => actualKeys.has(normalizeAccessRoleKey(role)));
+};
+
+const isPrivilegedRole = (role: unknown): boolean => {
+    const normalized = normalizeAccessRoleKey(role);
+    return ['admin', 'super_admin', 'administrator', 'owner'].includes(normalized)
+        || ['관리자', '사장', '실장'].includes(normalizeAccessRole(role));
+};
+
+const isQuickToolAction = (action: string): action is QuickTool =>
+    action === 'calculator' || action === 'camera';
 
 const getMenuDisplayText = (text: string): string => {
     return text === '일보목록v2' ? '일보목록' : text;
@@ -135,15 +176,25 @@ const Header: React.FC<HeaderProps> = ({
     const [activeTopNavKey, setActiveTopNavKey] = useState<string | null>(null);
     const [userProfile, setUserProfile] = useState<UserData | null>(null);
     const [linkedWorkerRole, setLinkedWorkerRole] = useState('');
+    const [additionalMenuPositions, setAdditionalMenuPositions] = useState<string[]>([]);
     const topNavCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const profileRef = useRef<HTMLDivElement>(null);
     const positionPanelRef = useRef<HTMLDivElement>(null);
     const safeCurrentSiteData = currentSiteData || {
         name: '청연ENG ERP',
         icon: 'fa-shield-halved',
-        menu: []
+        menu: [],
+        headerActions: DEFAULT_HEADER_ACTIONS
     };
     const userPositionLabel = resolveUserPositionLabel(userProfile, linkedWorkerRole, positions);
+    const userAccessRoles = useMemo(() => uniqueRoles([
+        userProfile?.position,
+        linkedWorkerRole,
+        userProfile?.role,
+        additionalMenuPositions,
+        isAdmin ? 'admin' : '',
+        'user'
+    ]), [userProfile, linkedWorkerRole, additionalMenuPositions, isAdmin]);
 
     const clearTopNavCloseTimer = () => {
         if (topNavCloseTimerRef.current) {
@@ -251,6 +302,17 @@ const Header: React.FC<HeaderProps> = ({
         };
     }, [currentUser?.uid]);
 
+    useEffect(() => {
+        if (!currentUser?.uid) {
+            setAdditionalMenuPositions([]);
+            return;
+        }
+
+        return userMenuPositionService.subscribe((map) => {
+            setAdditionalMenuPositions(map[currentUser.uid] || []);
+        });
+    }, [currentUser?.uid]);
+
     const handleLogout = async () => {
         try {
             await logout();
@@ -355,6 +417,134 @@ const Header: React.FC<HeaderProps> = ({
         return section.children.some((child) => location.pathname.startsWith(child.path));
     };
 
+    const configuredHeaderActions: MenuItem[] = Array.isArray(safeCurrentSiteData.headerActions)
+        ? safeCurrentSiteData.headerActions
+        : DEFAULT_HEADER_ACTIONS;
+
+    const hasHeaderActionAccess = (item: MenuItem): boolean => {
+        if (item.hide) return false;
+        if (userAccessRoles.some(isPrivilegedRole)) return true;
+
+        const allowedRoles = Array.isArray(item.roles)
+            ? item.roles.map(normalizeAccessRole).filter(Boolean)
+            : [];
+
+        return allowedRoles.length === 0 || roleListIncludes(userAccessRoles, allowedRoles);
+    };
+
+    const getHeaderActionFallbackIcon = (action: string) => {
+        if (action === 'position') return faIdBadge;
+        if (action === 'admin') return faUserShield;
+        if (action === 'messages') return faEnvelope;
+        if (action === 'camera') return faCamera;
+        if (action === 'calculator') return faCalculator;
+        if (action === 'theme') return isDarkMode ? faSun : faMoon;
+        return faGear;
+    };
+
+    const handleHeaderActionRoute = (path: string) => {
+        if (!path) return;
+        if (shouldOpenInNewTab(path)) {
+            window.open(path, '_blank', 'noopener,noreferrer');
+            return;
+        }
+        navigate(path);
+    };
+
+    const renderHeaderAction = (item: MenuItem, index: number): React.ReactNode => {
+        const action = String(item.action || '').trim();
+        const key = item.id || item.action || item.path || `${item.text}-${index}`;
+        const label = item.text || action || '상단 아이콘';
+        const iconStyle = item.iconColor ? { color: item.iconColor } : undefined;
+
+        if (action === 'theme') {
+            if (!isSiteLayerMode || !toggleDarkMode) return null;
+            return (
+                <button
+                    key={key}
+                    className="header-btn header-tool-btn cheongyeon-theme-toggle"
+                    onClick={toggleDarkMode}
+                    title={label}
+                    aria-label={label}
+                    style={{ color: item.iconColor || (isDarkMode ? '#fbbf24' : '#64748b') }}
+                >
+                    <FontAwesomeIcon icon={isDarkMode ? faSun : faMoon} />
+                </button>
+            );
+        }
+
+        if (isQuickToolAction(action)) {
+            return (
+                <button
+                    key={key}
+                    type="button"
+                    className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === action ? 'active' : ''}`}
+                    onClick={() => openQuickTool(action)}
+                    title={label}
+                    aria-label={`${label} 열기`}
+                    aria-pressed={isQuickPanelOpen && activeQuickTool === action}
+                >
+                    <FontAwesomeIcon icon={resolveIcon(item.icon, getHeaderActionFallbackIcon(action))} style={iconStyle} />
+                </button>
+            );
+        }
+
+        if (action === 'position') {
+            return (
+                <div key={key} className="relative" ref={positionPanelRef}>
+                    <button className="header-btn header-tool-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title={label} aria-label={`${label} 열기`}>
+                        <FontAwesomeIcon icon={resolveIcon(item.icon, faIdBadge)} style={iconStyle} />
+                    </button>
+                    {isPositionPanelOpen && (
+                        <PositionPanel
+                            isOpen={isPositionPanelOpen}
+                            togglePanel={togglePanel}
+                            currentPosition={currentPosition}
+                            changePosition={changePosition}
+                            positions={positions}
+                            siteData={siteData}
+                            currentSite={currentSite}
+                            changeSite={changeSite}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        if (action === 'admin') {
+            return (
+                <button key={key} className="header-btn header-tool-btn text-red-400 hover:bg-white/10" onClick={() => togglePanel('admin')} title={label} aria-label={`${label} 열기`}>
+                    <FontAwesomeIcon icon={resolveIcon(item.icon, faUserShield)} style={iconStyle} />
+                </button>
+            );
+        }
+
+        if (action === 'messages') {
+            return <MessageIndicator key={key} />;
+        }
+
+        const path = item.path || '';
+        if (!path) return null;
+
+        return (
+            <button
+                key={key}
+                type="button"
+                className="header-btn header-tool-btn"
+                onClick={() => handleHeaderActionRoute(path)}
+                title={label}
+                aria-label={`${label} 열기`}
+            >
+                <FontAwesomeIcon icon={resolveIcon(item.icon, getHeaderActionFallbackIcon(action))} style={iconStyle} />
+            </button>
+        );
+    };
+
+    const renderedHeaderActions = configuredHeaderActions
+        .filter(hasHeaderActionAccess)
+        .map(renderHeaderAction)
+        .filter(Boolean);
+
     return (
         <header id="main-header" style={headerStyle} className={isSiteLayerMode ? 'cheongyeon-header' : ''}>
             <div className="header-left-group">
@@ -449,67 +639,11 @@ const Header: React.FC<HeaderProps> = ({
             )}
 
             <div className="header-right-group">
-                {isSiteLayerMode && toggleDarkMode && (
-                    <button
-                        className="header-btn cheongyeon-theme-toggle"
-                        onClick={toggleDarkMode}
-                        title={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
-                        aria-label={isDarkMode ? '라이트 모드로 전환' : '다크 모드로 전환'}
-                        style={{ color: isDarkMode ? '#fbbf24' : '#64748b' }}
-                    >
-                        <FontAwesomeIcon icon={isDarkMode ? faSun : faMoon} />
-                    </button>
-                )}
-                <div className="header-quick-tool-group" role="group" aria-label="빠른 도구">
-                    <button
-                        type="button"
-                        className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === 'calculator' ? 'active' : ''}`}
-                        onClick={() => openQuickTool('calculator')}
-                        title="계산기"
-                        aria-label="계산기 열기"
-                        aria-pressed={isQuickPanelOpen && activeQuickTool === 'calculator'}
-                    >
-                        <FontAwesomeIcon icon={faCalculator} />
-                    </button>
-                    <button
-                        type="button"
-                        className={`header-btn header-tool-btn ${isQuickPanelOpen && activeQuickTool === 'camera' ? 'active' : ''}`}
-                        onClick={() => openQuickTool('camera')}
-                        title="카메라"
-                        aria-label="카메라 열기"
-                        aria-pressed={isQuickPanelOpen && activeQuickTool === 'camera'}
-                    >
-                        <FontAwesomeIcon icon={faCamera} />
-                    </button>
-                </div>
-
-                {isAdmin && (
-                    <div className="relative" ref={positionPanelRef}>
-                        <button className="header-btn text-indigo-400 hover:bg-white/10" onClick={() => togglePanel('position')} title="모드 선택" aria-label="모드 선택 열기">
-                            <FontAwesomeIcon icon={faIdBadge} />
-                        </button>
-                        {isPositionPanelOpen && (
-                            <PositionPanel
-                                isOpen={isPositionPanelOpen}
-                                togglePanel={togglePanel}
-                                currentPosition={currentPosition}
-                                changePosition={changePosition}
-                                positions={positions}
-                                siteData={siteData}
-                                currentSite={currentSite}
-                                changeSite={changeSite}
-                            />
-                        )}
+                {renderedHeaderActions.length > 0 && (
+                    <div className="header-quick-tool-group" role="group" aria-label="상단 아이콘 메뉴">
+                        {renderedHeaderActions}
                     </div>
                 )}
-
-                {isAdmin && (
-                    <button className="header-btn text-red-400 hover:bg-white/10" onClick={() => togglePanel('admin')} title="관리자 메뉴" aria-label="관리자 메뉴 열기">
-                        <FontAwesomeIcon icon={faUserShield} />
-                    </button>
-                )}
-
-                <MessageIndicator />
 
                 <div className="profile-menu-container" ref={profileRef}>
                     <button

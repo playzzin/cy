@@ -57,6 +57,23 @@ const mapBoard = (id: string, data: Record<string, unknown>): ScheduleConfirmati
     updatedAt: data.updatedAt,
 });
 
+const notifyScheduleBoardSystemMessage = async (
+    event: 'scheduleBoard.confirmed' | 'scheduleBoard.updated' | 'scheduleBoard.deleted',
+    payload: {
+        date: string;
+        assignments: DispatchAssignment[];
+        previousAssignments?: DispatchAssignment[];
+        occurredAt?: string;
+    }
+): Promise<void> => {
+    try {
+        const { systemMessageService } = await import('./systemMessageService');
+        await systemMessageService.notifyScheduleBoardEvent(event, payload);
+    } catch (error) {
+        console.warn('[scheduleConfirmationBoardService] system message notification failed:', error);
+    }
+};
+
 export const scheduleConfirmationBoardService = {
     getBoardByDate: async (date: string): Promise<ScheduleConfirmationBoard | null> => {
         const ref = doc(db, COLLECTION_NAME, date);
@@ -75,6 +92,9 @@ export const scheduleConfirmationBoardService = {
     saveBoard: async (date: string, assignments: DispatchAssignment[]): Promise<void> => {
         const ref = doc(db, COLLECTION_NAME, date);
         const existing = await getDoc(ref);
+        const beforeBoard = existing.exists()
+            ? mapBoard(existing.id, existing.data() as Record<string, unknown>)
+            : null;
         const now = new Date().toISOString();
         const payload = stripUndefined({
             date,
@@ -86,9 +106,31 @@ export const scheduleConfirmationBoardService = {
         }) as Record<string, unknown>;
 
         await setDoc(ref, payload, { merge: true });
+        await notifyScheduleBoardSystemMessage(
+            beforeBoard ? 'scheduleBoard.updated' : 'scheduleBoard.confirmed',
+            {
+                date,
+                assignments,
+                previousAssignments: beforeBoard?.assignments,
+                occurredAt: now,
+            }
+        );
     },
 
     deleteBoard: async (date: string): Promise<void> => {
-        await deleteDoc(doc(db, COLLECTION_NAME, date));
+        const ref = doc(db, COLLECTION_NAME, date);
+        const existing = await getDoc(ref);
+        const beforeBoard = existing.exists()
+            ? mapBoard(existing.id, existing.data() as Record<string, unknown>)
+            : null;
+
+        await deleteDoc(ref);
+        if (beforeBoard) {
+            await notifyScheduleBoardSystemMessage('scheduleBoard.deleted', {
+                date,
+                assignments: beforeBoard.assignments,
+                occurredAt: new Date().toISOString(),
+            });
+        }
     },
 };

@@ -6,6 +6,7 @@ import {
     setDoc,
     updateDoc,
     deleteDoc,
+    deleteField,
     query,
     where,
     orderBy,
@@ -19,14 +20,16 @@ import {
     Card,
     CardAssignmentRecord,
     CardTransaction,
-    CardAssigneeType
+    CardAssigneeType,
+    CardBillingTargetRecord
 } from '../types/card';
 import { CardBillingDocument } from '../types/cardBilling';
 import {
     CardSchema,
     CardAssignmentRecordSchema,
     CardTransactionSchema,
-    CardBillingDocumentSchema
+    CardBillingDocumentSchema,
+    CardBillingTargetRecordSchema
 } from '../types/zod/cardSchema';
 import {
     listCards,
@@ -37,8 +40,20 @@ import {
 
 const CARDS_COLLECTION = 'cards';
 const ASSIGNMENTS_COLLECTION = 'cardAssignments';
+const BILLING_TARGETS_COLLECTION = 'cardBillingTargets';
 const TRANSACTIONS_COLLECTION = 'cardTransactions';
 const BILLINGS_COLLECTION = 'cardBillings';
+
+const getDayBefore = (dateText: string): string => {
+    const [year, month, day] = dateText.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    if (Number.isNaN(date.getTime())) return dateText;
+    date.setDate(date.getDate() - 1);
+    const outputYear = date.getFullYear();
+    const outputMonth = String(date.getMonth() + 1).padStart(2, '0');
+    const outputDay = String(date.getDate()).padStart(2, '0');
+    return `${outputYear}-${outputMonth}-${outputDay}`;
+};
 
 export const cardFirestoreService = {
     // --- Cards ---
@@ -91,6 +106,16 @@ export const cardFirestoreService = {
         return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CardAssignmentRecord));
     },
 
+    async saveCardAssignment(data: Partial<CardAssignmentRecord> & { id: string }): Promise<void> {
+        const { id, createdAt, updatedAt, ...payload } = data;
+        const validated = CardAssignmentRecordSchema.parse(payload);
+        await setDoc(doc(db, ASSIGNMENTS_COLLECTION, id), {
+            ...validated,
+            ...(createdAt ? { createdAt } : {}),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+    },
+
     async assignCard(params: {
         cardId: string;
         assigneeId: string;
@@ -99,9 +124,23 @@ export const cardFirestoreService = {
         startDate: string;
         cardLabel: string;
     }): Promise<void> {
+        const activeSnapshot = await getDocs(query(
+            collection(db, ASSIGNMENTS_COLLECTION),
+            where('cardId', '==', params.cardId)
+        ));
+        const activeAssignments = activeSnapshot.docs.filter(d => !d.data().endDate);
+        const previousEndDate = getDayBefore(params.startDate);
+
         await runTransaction(db, async (transaction) => {
             const cardRef = doc(db, CARDS_COLLECTION, params.cardId);
             const assignmentRef = doc(collection(db, ASSIGNMENTS_COLLECTION));
+
+            activeAssignments.forEach((assignmentDoc) => {
+                transaction.update(assignmentDoc.ref, {
+                    endDate: previousEndDate,
+                    updatedAt: serverTimestamp(),
+                });
+            });
 
             transaction.update(cardRef, {
                 status: 'ASSIGNED',
@@ -125,23 +164,21 @@ export const cardFirestoreService = {
     },
 
     async unassignCard(cardId: string, endDate: string): Promise<void> {
+        const activeSnapshot = await getDocs(query(
+            collection(db, ASSIGNMENTS_COLLECTION),
+            where('cardId', '==', cardId)
+        ));
+        const activeAssignments = activeSnapshot.docs.filter(d => !d.data().endDate);
+
         await runTransaction(db, async (transaction) => {
             const cardRef = doc(db, CARDS_COLLECTION, cardId);
 
-            // 1. ?꾩옱 吏꾪뻾 以묒씤 諛곗젙 ?덉퐫??李얘린
-            const q = query(
-                collection(db, ASSIGNMENTS_COLLECTION),
-                where('cardId', '==', cardId)
-            );
-            const snapshot = await getDocs(q);
-            const activeAssignment = snapshot.docs.find(d => !d.data().endDate);
-
-            if (activeAssignment) {
-                transaction.update(activeAssignment.ref, {
+            activeAssignments.forEach((assignmentDoc) => {
+                transaction.update(assignmentDoc.ref, {
                     endDate,
                     updatedAt: serverTimestamp(),
                 });
-            }
+            });
 
             // 2. 移대뱶 ?곹깭 ?낅뜲?댄듃
             transaction.update(cardRef, {
@@ -152,6 +189,78 @@ export const cardFirestoreService = {
                 updatedAt: serverTimestamp(),
             });
         });
+    },
+
+    // --- Card Billing Targets ---
+    async listCardBillingTargets(cardId?: string): Promise<CardBillingTargetRecord[]> {
+        const baseRef = collection(db, BILLING_TARGETS_COLLECTION);
+        const q = cardId
+            ? query(baseRef, where('cardId', '==', cardId))
+            : query(baseRef, orderBy('startDate', 'desc'));
+        const snapshot = await getDocs(q);
+        return snapshot.docs
+            .map(doc => ({ id: doc.id, ...doc.data() } as CardBillingTargetRecord))
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')));
+    },
+
+    async saveCardBillingTarget(data: Partial<CardBillingTargetRecord> & { id: string }): Promise<void> {
+        const { id, createdAt, updatedAt, ...payload } = data;
+        const validated = CardBillingTargetRecordSchema.parse(payload);
+        await setDoc(doc(db, BILLING_TARGETS_COLLECTION, id), {
+            ...validated,
+            createdAt: createdAt ?? serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+    },
+
+    async deleteCardBillingTarget(id: string): Promise<void> {
+        await deleteDoc(doc(db, BILLING_TARGETS_COLLECTION, id));
+    },
+
+    async applyCardBillingTargetChanges(params: {
+        cardId: string;
+        upserts?: Array<Partial<CardBillingTargetRecord> & { id: string }>;
+        closeRecords?: Array<{ id: string; endDate: string }>;
+        deleteIds?: string[];
+        clearSnapshot?: boolean;
+    }): Promise<void> {
+        const batch = writeBatch(db);
+
+        (params.closeRecords ?? []).forEach((record) => {
+            if (!record.id) return;
+            batch.update(doc(db, BILLING_TARGETS_COLLECTION, record.id), {
+                endDate: record.endDate,
+                updatedAt: serverTimestamp()
+            });
+        });
+
+        (params.upserts ?? []).forEach((record) => {
+            const { id, createdAt, updatedAt, ...payload } = record;
+            const validated = CardBillingTargetRecordSchema.parse(payload);
+            batch.set(doc(db, BILLING_TARGETS_COLLECTION, id), {
+                ...validated,
+                ...(createdAt ? { createdAt } : { createdAt: serverTimestamp() }),
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+        });
+
+        (params.deleteIds ?? []).forEach((id) => {
+            if (!id) return;
+            batch.delete(doc(db, BILLING_TARGETS_COLLECTION, id));
+        });
+
+        if (params.clearSnapshot) {
+            batch.update(doc(db, CARDS_COLLECTION, params.cardId), {
+                billingTargetId: deleteField(),
+                billingTargetType: deleteField(),
+                billingTargetName: deleteField(),
+                billingTargetStartDate: deleteField(),
+                billingTargetEndDate: deleteField(),
+                updatedAt: serverTimestamp()
+            });
+        }
+
+        await batch.commit();
     },
 
     // --- Transactions ---

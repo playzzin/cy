@@ -4,7 +4,7 @@ import { manpowerService, Worker } from '../../services/manpowerService';
 import { teamService, Team } from '../../services/teamService';
 import { companyService } from '../../services/companyService';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCopy, faSearch, faCheckSquare, faSquare, faFilter, faIdCard, faImage, faDownload } from '@fortawesome/free-solid-svg-icons';
+import { faCopy, faSearch, faCheckSquare, faSquare, faFilter, faIdCard, faImage, faDownload, faPaperPlane } from '@fortawesome/free-solid-svg-icons';
 import { toast } from '../../utils/swal';
 import Swal from 'sweetalert2';
 import { storage } from '../../config/firebase';
@@ -238,6 +238,8 @@ const HeaderTitle = styled.h3`
 const ActionButtons = styled.div`
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 `;
 
 const ActionButton = styled.button`
@@ -254,7 +256,7 @@ const ActionButton = styled.button`
     transition: all 0.2s;
     font-size: 14px;
 
-    &:hover {
+    &:hover:not(:disabled) {
         background: #228be6;
         transform: translateY(-1px);
         box-shadow: 0 4px 6px rgba(51, 154, 240, 0.2);
@@ -263,14 +265,31 @@ const ActionButton = styled.button`
     &:active {
         transform: translateY(0);
     }
+
+    &:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+    }
     
     &.secondary {
         background: #fff;
         color: #339af0;
         border: 1px solid #339af0;
         
-        &:hover {
+        &:hover:not(:disabled) {
             background: #e7f5ff;
+        }
+    }
+
+    &.kakao {
+        background: #fee500;
+        color: #191919;
+
+        &:hover:not(:disabled) {
+            background: #f7d900;
+            box-shadow: 0 4px 6px rgba(254, 229, 0, 0.25);
         }
     }
 `;
@@ -374,6 +393,7 @@ const WorkerSummaryPage: React.FC = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedWorkerIds, setSelectedWorkerIds] = useState<Set<string>>(new Set());
     const [showIdCards, setShowIdCards] = useState(true);
+    const [isSendingImage, setIsSendingImage] = useState(false);
 
     // Store resolved image download URLs
     const [idCardUrls, setIdCardUrls] = useState<Record<string, string>>({});
@@ -566,36 +586,107 @@ const WorkerSummaryPage: React.FC = () => {
 
     }, [selectedWorkerIds, workers]);
 
+    const captureSummaryImageBlob = async (): Promise<Blob> => {
+        if (!summaryRef.current) {
+            throw new Error('요약 테이블을 찾을 수 없습니다.');
+        }
+
+        const canvas = await html2canvas(summaryRef.current, {
+            useCORS: true,
+            allowTaint: true,
+            background: '#ffffff',
+            scale: 2 // High quality
+        } as any);
+
+        return await new Promise<Blob>((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    resolve(blob);
+                    return;
+                }
+                reject(new Error('이미지 변환 실패'));
+            }, 'image/png');
+        });
+    };
+
+    const writeImageBlobToClipboard = async (blob: Blob) => {
+        const item = new ClipboardItem({ 'image/png': blob });
+        await navigator.clipboard.write([item]);
+    };
+
+    const buildSummaryImageFileName = () => {
+        const today = new Date().toISOString().slice(0, 10);
+        return `작업자요약_${today}_${selectedWorkerIds.size}명.png`;
+    };
+
     const handleCopyImage = async () => {
         if (selectedWorkerIds.size === 0) {
             toast.warning('선택된 작업자가 없습니다.');
             return;
         }
 
-        if (!summaryRef.current) return;
-
         try {
             toast.info('이미지 생성 중...');
-            const canvas = await html2canvas(summaryRef.current, {
-                useCORS: true,
-                allowTaint: true,
-                background: '#ffffff',
-                scale: 2 // Hight quality
-            } as any);
-
-            canvas.toBlob(async (blob) => {
-                if (!blob) {
-                    toast.error('이미지 변환 실패');
-                    return;
-                }
-                const item = new ClipboardItem({ 'image/png': blob });
-                await navigator.clipboard.write([item]);
-                toast.success('이미지가 클립보드에 복사되었습니다.');
-            });
-
+            const blob = await captureSummaryImageBlob();
+            await writeImageBlobToClipboard(blob);
+            toast.success('이미지가 클립보드에 복사되었습니다.');
         } catch (error) {
             console.error('Image Copy Error:', error);
             toast.error('이미지 복사에 실패했습니다.');
+        }
+    };
+
+    const handleSendKakao = async () => {
+        if (selectedWorkerIds.size === 0) {
+            toast.warning('선택된 작업자가 없습니다.');
+            return;
+        }
+
+        const shareNavigator = navigator as Navigator & {
+            canShare?: (data: { files?: File[] }) => boolean;
+            share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>;
+        };
+        const title = `작업자 요약 ${selectedWorkerIds.size}명`;
+        const imageFileName = buildSummaryImageFileName();
+
+        let blob: Blob | null = null;
+
+        try {
+            setIsSendingImage(true);
+            toast.info('카톡으로 보낼 이미지 생성 중...');
+            blob = await captureSummaryImageBlob();
+            const file = new File([blob], imageFileName, { type: 'image/png' });
+
+            if (shareNavigator.share && (!shareNavigator.canShare || shareNavigator.canShare({ files: [file] }))) {
+                await shareNavigator.share({
+                    title,
+                    text: '작업자 요약 이미지입니다.',
+                    files: [file]
+                });
+                toast.success('공유창을 열었습니다. 카카오톡을 선택해서 보내세요.');
+                return;
+            }
+
+            try {
+                await writeImageBlobToClipboard(blob);
+                toast.info('이 브라우저는 바로 공유를 지원하지 않아 이미지를 복사했습니다. 카카오톡 채팅방에 붙여넣어 보내세요.');
+            } catch (clipboardError) {
+                console.warn('Kakao Share clipboard fallback failed:', clipboardError);
+                saveAs(blob, imageFileName);
+                toast.info('이 브라우저는 바로 공유와 이미지 복사를 지원하지 않아 PNG 파일로 저장했습니다. 카카오톡에서 파일을 첨부해 보내세요.');
+            }
+        } catch (error) {
+            if ((error as DOMException)?.name === 'AbortError') return;
+
+            console.error('Kakao Share Error:', error);
+            if (blob) {
+                saveAs(blob, imageFileName);
+                toast.info('공유창을 열지 못해 PNG 파일로 저장했습니다. 카카오톡에서 파일을 첨부해 보내세요.');
+                return;
+            }
+            toast.error('카톡 보내기를 시작하지 못했습니다.');
+        } finally {
+            setIsSendingImage(false);
         }
     };
 
@@ -797,6 +888,15 @@ const WorkerSummaryPage: React.FC = () => {
                             <ActionButton onClick={handleCopyImage}>
                                 <FontAwesomeIcon icon={faCopy} />
                                 이미지 복사
+                            </ActionButton>
+                            <ActionButton
+                                onClick={handleSendKakao}
+                                className="kakao"
+                                disabled={isSendingImage}
+                                title="카카오톡으로 보내기"
+                            >
+                                <FontAwesomeIcon icon={faPaperPlane} />
+                                {isSendingImage ? '준비 중' : '보내기'}
                             </ActionButton>
                         </ActionButtons>
                     </CardHeader>

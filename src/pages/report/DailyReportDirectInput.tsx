@@ -514,6 +514,8 @@ const DailyReportDirectInput: React.FC = () => {
                     siteName: site.name,
                     responsibleTeamId: site.responsibleTeamId,
                     responsibleTeamName: site.responsibleTeamName,
+                    siteManagerId: site.siteManagerId,
+                    siteManagerName: site.siteManagerName,
                     companyId: site.companyId,
                     companyName: site.companyName,
                     writerId: currentUser?.uid || 'unknown',

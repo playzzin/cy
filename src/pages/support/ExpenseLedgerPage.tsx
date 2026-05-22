@@ -31,6 +31,7 @@ const tableColumns: Array<{ key: keyof LedgerSummary | 'total'; label: string; c
   { key: 'vehicleOther', label: '차량기타' },
   { key: 'card', label: '카드값' },
   { key: 'otherClaim', label: '기타청구', className: 'text-amber-700' },
+  { key: 'officeExpense', label: '사무실경비', className: 'text-sky-700' },
   { key: 'receivable', label: '받을 후청구', className: 'text-emerald-700' },
   { key: 'payable', label: '내야 할 후청구', className: 'text-red-600' },
   { key: 'total', label: '합계', className: 'font-black text-slate-950' }
@@ -48,6 +49,7 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
     totals,
     selectedClaims,
     statusCounts,
+    allCategoryOptions,
     loadData,
     selectedRawDocs
   } = useExpenseLedgerData(yearMonth, selectedTeamId, billingScope);
@@ -161,12 +163,13 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
           })}
         </div>
 
-        <div className="relative z-0 mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+        <div className="relative z-0 mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-8">
           {[
             ['숙소', totals.accommodation + totals.utility],
             ['차량', totals.vehicle],
             ['카드', totals.card],
             ['기타청구', totals.otherClaim],
+            ['사무실경비', totals.officeExpense],
             ['받을 후청구', totals.receivable],
             ['내야 할 후청구', totals.payable],
             ['정산 반영 합계', totals.total]
@@ -220,6 +223,8 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
                                   ? { backgroundColor: hexToRgba('#dc2626', 0.08) }
                                   : column.key === 'otherClaim' && amount > 0
                                     ? { backgroundColor: hexToRgba('#d97706', 0.08) }
+                                    : column.key === 'officeExpense' && amount > 0
+                                      ? { backgroundColor: hexToRgba('#0284c7', 0.08) }
                                     : undefined
                             }
                           >
@@ -292,6 +297,8 @@ const ExpenseLedgerPage: React.FC<ExpenseLedgerPageProps> = ({ embedded = false 
                 receivableClaims={selectedClaims.receivable}
                 payableClaims={selectedClaims.payable}
                 otherClaims={selectedClaims.other}
+                officeClaims={selectedClaims.office}
+                categoryOptions={allCategoryOptions}
               />
             </section>
           </div>

@@ -1,9 +1,11 @@
 import { cardFirestoreService } from './cardFirestoreService';
-import {
+import type {
     Card,
     CardType,
     CardStatus,
     CardAssigneeType,
+    CardBillingTargetRecord,
+    CardBillingTargetType,
     CardTransaction,
     CardTransactionCategory,
     CardAssignmentRecord
@@ -14,6 +16,8 @@ export {
     type CardType,
     type CardStatus,
     type CardAssigneeType,
+    type CardBillingTargetRecord,
+    type CardBillingTargetType,
     type CardTransaction,
     type CardTransactionCategory,
     type CardAssignmentRecord
@@ -52,6 +56,46 @@ export const cardService = {
         return cardFirestoreService.listAllCardAssignments();
     },
 
+    updateCardAssignment: async (
+        data: Partial<CardAssignmentRecord> & { id: string; cardId: string }
+    ): Promise<void> => {
+        await cardFirestoreService.saveCardAssignment(data);
+        if (!data.endDate && data.assigneeId && data.assigneeType && data.assigneeName) {
+            await cardFirestoreService.updateCard(data.cardId, {
+                status: 'ASSIGNED',
+                currentAssigneeId: data.assigneeId,
+                currentAssigneeType: data.assigneeType,
+                currentAssigneeName: data.assigneeName
+            });
+        }
+    },
+
+    listAllCardBillingTargets: async (cardId?: string): Promise<CardBillingTargetRecord[]> => {
+        return cardFirestoreService.listCardBillingTargets(cardId);
+    },
+
+    saveCardBillingTarget: async (
+        data: Omit<CardBillingTargetRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }
+    ): Promise<string> => {
+        const id = data.id || `${data.cardId}_${data.targetId}_${data.startDate}_${Date.now()}`;
+        await cardFirestoreService.saveCardBillingTarget({ ...data, id });
+        return id;
+    },
+
+    deleteCardBillingTarget: async (id: string): Promise<void> => {
+        await cardFirestoreService.deleteCardBillingTarget(id);
+    },
+
+    applyCardBillingTargetChanges: async (params: {
+        cardId: string;
+        upserts?: Array<Omit<CardBillingTargetRecord, 'createdAt' | 'updatedAt'>>;
+        closeRecords?: Array<{ id: string; endDate: string }>;
+        deleteIds?: string[];
+        clearSnapshot?: boolean;
+    }): Promise<void> => {
+        await cardFirestoreService.applyCardBillingTargetChanges(params);
+    },
+
     assignCard: async (
         cardId: string,
         assigneeId: string,
@@ -60,7 +104,10 @@ export const cardService = {
         startDate: string
     ): Promise<void> => {
         const card = await cardFirestoreService.getCard(cardId);
-        const cardLabel = card ? `${card.name} (${card.last4})` : '카드 정보 없음';
+        if (!card) {
+            throw new Error('카드 정보를 찾을 수 없습니다.');
+        }
+        const cardLabel = `${card.name} (${card.last4})`;
 
         await cardFirestoreService.assignCard({
             cardId,

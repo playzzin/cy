@@ -10,6 +10,11 @@ export interface CardBillingCostItem {
     amount: number;
     type?: 'FIXED' | 'VARIABLE';
     category?: string;
+    sourceType?: 'card_ledger' | 'manual';
+    sourceLedgerRowId?: string;
+    sourceSegmentId?: string;
+    sourceStartDate?: string;
+    sourceEndDate?: string;
 }
 
 export interface CardBillingDocument {

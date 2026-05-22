@@ -10,6 +10,9 @@ import type { CardBillingLog } from '../types/cardBillingLog';
 import type { AccommodationBillingLog } from '../types/accommodationBillingLog';
 import type { LoginLog } from '../types/loginLog';
 import type { ErpMessagePriority } from '../types/erpMessage';
+import type { NoticeAuthor, NoticePriority, UpsertNoticeInput } from '../types/notice';
+import type { TeamSettlementDocument } from '../types/teamSettlement';
+import type { DispatchAssignment } from './dispatchService';
 import { messageService } from './messageService';
 import {
   createDefaultRecipientRule,
@@ -32,6 +35,11 @@ export const SYSTEM_MESSAGE_EVENT_LABELS: Record<SystemMessageEvent, string> = {
   'databaseLog.created': '통합 DB 저장 로그',
   'databaseLog.updated': '통합 DB 수정 로그',
   'databaseLog.deleted': '통합 DB 삭제 로그',
+  'scheduleBoard.confirmed': '현장 일정 확정',
+  'scheduleBoard.updated': '현장 일정 변경',
+  'scheduleBoard.deleted': '현장 일정 삭제',
+  'teamSettlement.confirmed': '팀정산 확정',
+  'teamSettlement.unconfirmed': '팀정산 확정 취소',
   'materialLog.created': '자재관리 저장 로그',
   'materialLog.updated': '자재관리 수정 로그',
   'materialLog.deleted': '자재관리 삭제 로그',
@@ -44,6 +52,7 @@ export const SYSTEM_MESSAGE_EVENT_LABELS: Record<SystemMessageEvent, string> = {
   'accommodationBillingLog.created': '숙소 청구 저장 로그',
   'accommodationBillingLog.updated': '숙소 청구 수정 로그',
   'accommodationBillingLog.deleted': '숙소 청구 삭제 로그',
+  'notice.created': '공지사항 등록',
   'loginLog.login_success': '로그인 성공',
   'loginLog.login_failed': '로그인 실패',
   'loginLog.logout': '로그아웃',
@@ -62,6 +71,18 @@ export const SYSTEM_MESSAGE_EVENT_GROUPS: SystemMessageEventGroup[] = [
     label: '통합 DB 로그',
     description: '작업자, 팀, 현장, 회사, 계좌 변경 이력',
     events: ['databaseLog.created', 'databaseLog.updated', 'databaseLog.deleted'],
+  },
+  {
+    id: 'scheduleBoard',
+    label: '현장 일정',
+    description: '현장 일정 확정, 변경, 삭제 알림',
+    events: ['scheduleBoard.confirmed', 'scheduleBoard.updated', 'scheduleBoard.deleted'],
+  },
+  {
+    id: 'teamSettlement',
+    label: '팀정산',
+    description: '팀정산 확정 및 확정 취소 알림',
+    events: ['teamSettlement.confirmed', 'teamSettlement.unconfirmed'],
   },
   {
     id: 'materialLog',
@@ -88,6 +109,12 @@ export const SYSTEM_MESSAGE_EVENT_GROUPS: SystemMessageEventGroup[] = [
     events: ['accommodationBillingLog.created', 'accommodationBillingLog.updated', 'accommodationBillingLog.deleted'],
   },
   {
+    id: 'notice',
+    label: '공지사항',
+    description: '공지사항 등록 시 대상 직책에게 메시지 발송',
+    events: ['notice.created'],
+  },
+  {
     id: 'loginLog',
     label: '로그인 접근 로그',
     description: '로그인, 로그아웃, 회원가입 접속 이력',
@@ -104,6 +131,11 @@ const DEFAULT_EVENT_SETTINGS: Record<SystemMessageEvent, SystemMessageEventConfi
   'databaseLog.created': { enabled: false },
   'databaseLog.updated': { enabled: false },
   'databaseLog.deleted': { enabled: false },
+  'scheduleBoard.confirmed': { enabled: false },
+  'scheduleBoard.updated': { enabled: false },
+  'scheduleBoard.deleted': { enabled: false },
+  'teamSettlement.confirmed': { enabled: false },
+  'teamSettlement.unconfirmed': { enabled: false },
   'materialLog.created': { enabled: false },
   'materialLog.updated': { enabled: false },
   'materialLog.deleted': { enabled: false },
@@ -116,6 +148,7 @@ const DEFAULT_EVENT_SETTINGS: Record<SystemMessageEvent, SystemMessageEventConfi
   'accommodationBillingLog.created': { enabled: false },
   'accommodationBillingLog.updated': { enabled: false },
   'accommodationBillingLog.deleted': { enabled: false },
+  'notice.created': { enabled: false, recipientRule: createDefaultRecipientRule('noticeTargetPositions') },
   'loginLog.login_success': { enabled: false },
   'loginLog.login_failed': { enabled: false },
   'loginLog.logout': { enabled: false },
@@ -427,6 +460,146 @@ const buildLoginLogBody = (log: LoginLog): string =>
     ],
   });
 
+const formatDateTime = (value?: unknown): string => {
+  if (value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    return (value as { toDate: () => Date }).toDate().toLocaleString('ko-KR');
+  }
+
+  const date = value ? new Date(String(value)) : new Date();
+  return Number.isNaN(date.getTime()) ? String(value || '-') : date.toLocaleString('ko-KR');
+};
+
+const uniqueText = (values: unknown[]): string[] =>
+  Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+
+type NoticeMessagePayload = UpsertNoticeInput & {
+  id: string;
+};
+
+const noticeToMessagePriority = (priority: NoticePriority): ErpMessagePriority => {
+  if (priority === 'urgent') return 'urgent';
+  if (priority === 'important') return 'high';
+  return 'normal';
+};
+
+const buildNoticeCreatedBody = (notice: NoticeMessagePayload): string => {
+  return [
+    '새 공지사항이 등록되었습니다.',
+    '',
+    '아래 버튼을 눌러 공지사항 게시판에서 전체 내용을 확인해 주세요.',
+    '',
+  ].filter((line) => line !== '').join('\n');
+};
+
+const countScheduleVehicles = (assignment: DispatchAssignment): number => {
+  if (Array.isArray(assignment.vehicleLabels) && assignment.vehicleLabels.length > 0) return assignment.vehicleLabels.length;
+  if (Array.isArray(assignment.vehicleIds) && assignment.vehicleIds.length > 0) return assignment.vehicleIds.length;
+  return assignment.vehicleId || assignment.vehicleLabel ? 1 : 0;
+};
+
+const buildScheduleAssignmentLines = (assignments: DispatchAssignment[], maxCount = 10): string[] => {
+  if (assignments.length === 0) return ['- 등록된 일정 없음'];
+
+  const lines = assignments.slice(0, maxCount).map((assignment) => {
+    const siteName = assignment.siteName || '현장 미지정';
+    const teamName = assignment.teamName || '팀 미지정';
+    const workerCount = Array.isArray(assignment.workerIds) ? assignment.workerIds.length : 0;
+    const vehicleCount = countScheduleVehicles(assignment);
+    const timeRange = [assignment.startTime, assignment.endTime].filter(Boolean).join('~');
+    return `- ${siteName} / ${teamName} / 작업자 ${workerCount}명 / 차량 ${vehicleCount}대${timeRange ? ` / ${timeRange}` : ''}`;
+  });
+
+  if (assignments.length > maxCount) lines.push(`- 외 ${assignments.length - maxCount}건`);
+  return lines;
+};
+
+const buildScheduleBoardBody = (
+  event: SystemMessageEvent,
+  payload: {
+    date: string;
+    assignments: DispatchAssignment[];
+    previousAssignments?: DispatchAssignment[];
+    occurredAt?: string;
+  }
+): string => {
+  const currentAssignments = payload.assignments || [];
+  const previousAssignments = payload.previousAssignments || [];
+  const teams = uniqueText(currentAssignments.map((assignment) => assignment.teamName));
+  const sites = uniqueText(currentAssignments.map((assignment) => assignment.siteName));
+  const workerCount = currentAssignments.reduce(
+    (sum, assignment) => sum + (Array.isArray(assignment.workerIds) ? assignment.workerIds.length : 0),
+    0
+  );
+  const vehicleCount = currentAssignments.reduce((sum, assignment) => sum + countScheduleVehicles(assignment), 0);
+  const headline = event === 'scheduleBoard.deleted'
+    ? '현장 일정이 삭제되었습니다.'
+    : event === 'scheduleBoard.updated'
+      ? '현장 일정이 변경되었습니다.'
+      : '현장 일정이 확정되었습니다.';
+
+  return [
+    headline,
+    `구분: ${SYSTEM_MESSAGE_EVENT_LABELS[event]}`,
+    `처리일시: ${formatDateTime(payload.occurredAt)}`,
+    `일정일자: ${payload.date}`,
+    '',
+    '요약',
+    `- 일정: ${currentAssignments.length.toLocaleString('ko-KR')}건`,
+    `- 현장: ${sites.length.toLocaleString('ko-KR')}곳`,
+    `- 팀: ${teams.length.toLocaleString('ko-KR')}개`,
+    `- 작업자: ${workerCount.toLocaleString('ko-KR')}명`,
+    `- 차량: ${vehicleCount.toLocaleString('ko-KR')}대`,
+    event === 'scheduleBoard.updated'
+      ? `- 이전 일정: ${previousAssignments.length.toLocaleString('ko-KR')}건`
+      : '',
+    '',
+    '일정 상세',
+    ...buildScheduleAssignmentLines(currentAssignments),
+  ].filter((line) => line !== '').join('\n');
+};
+
+const sumSettlementAmounts = (items: Array<{ amount?: unknown }> = []): number =>
+  items.reduce((sum, item) => {
+    const amount = typeof item.amount === 'number' ? item.amount : Number(String(item.amount ?? '').replace(/,/g, ''));
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+
+const formatCurrency = (value: number): string =>
+  `${Math.round(value).toLocaleString('ko-KR')}원`;
+
+const buildTeamSettlementBody = (event: SystemMessageEvent, doc: TeamSettlementDocument): string => {
+  const salesAmount = sumSettlementAmounts(doc.sales);
+  const purchaseAmount = sumSettlementAmounts(doc.purchases);
+  const deductionAmount = sumSettlementAmounts(doc.deductions);
+  const additionAmount = sumSettlementAmounts(doc.additions);
+  const headline = event === 'teamSettlement.unconfirmed'
+    ? '팀정산 확정이 취소되었습니다.'
+    : '팀정산이 확정되었습니다.';
+
+  return [
+    headline,
+    `구분: ${SYSTEM_MESSAGE_EVENT_LABELS[event]}`,
+    `처리일시: ${formatDateTime(doc.updatedAt)}`,
+    `정산월: ${doc.yearMonth}`,
+    `팀: ${doc.teamName || doc.teamId || '-'}`,
+    `확정일시: ${doc.confirmedAt ? formatDateTime(doc.confirmedAt) : '미확정'}`,
+    '',
+    '금액 요약',
+    `- 매출: ${formatCurrency(salesAmount)}`,
+    `- 매입: ${formatCurrency(purchaseAmount)}`,
+    `- 공제: ${formatCurrency(deductionAmount)}`,
+    `- 추가: ${formatCurrency(additionAmount)}`,
+    `- 전월이월: ${formatCurrency(doc.summary?.prevCarryover || 0)}`,
+    `- 입금: ${formatCurrency(doc.summary?.deposit || 0)}`,
+    '',
+    '항목 수',
+    `- 매출 ${doc.sales.length.toLocaleString('ko-KR')}건`,
+    `- 매입 ${doc.purchases.length.toLocaleString('ko-KR')}건`,
+    `- 공제 ${doc.deductions.length.toLocaleString('ko-KR')}건`,
+    `- 추가 ${doc.additions.length.toLocaleString('ko-KR')}건`,
+  ].join('\n');
+};
+
 let recipientDataCache: { data: MessageRecipientData; timestamp: number } | null = null;
 const RECIPIENT_DATA_TTL = 1000 * 60 * 3;
 
@@ -465,6 +638,8 @@ const notifyConfiguredEvent = async (
     title: string;
     body: string;
     priority?: ErpMessagePriority;
+    actionLabel?: string;
+    actionUrl?: string;
   },
   context?: MessageRecipientContext
 ): Promise<void> => {
@@ -499,6 +674,8 @@ const notifyConfiguredEvent = async (
     recipientScope: settings.recipientScope,
     recipientIds: settings.recipientScope === 'users' ? settings.recipientIds : [],
     recipientNames: settings.recipientScope === 'users' ? settings.recipientNames : ['전체 사용자'],
+    actionLabel: payload.actionLabel,
+    actionUrl: payload.actionUrl,
   });
 };
 
@@ -537,6 +714,49 @@ export const systemMessageService = {
       });
     } catch (error) {
       console.warn('[systemMessageService] database log notification failed:', error);
+    }
+  },
+
+  notifyScheduleBoardEvent: async (
+    event: 'scheduleBoard.confirmed' | 'scheduleBoard.updated' | 'scheduleBoard.deleted',
+    payload: {
+      date: string;
+      assignments: DispatchAssignment[];
+      previousAssignments?: DispatchAssignment[];
+      occurredAt?: string;
+    }
+  ): Promise<void> => {
+    try {
+      const teamIds = uniqueText(payload.assignments.map((assignment) => assignment.teamId));
+      const teamNames = uniqueText(payload.assignments.map((assignment) => assignment.teamName));
+      await notifyConfiguredEvent(event, {
+        title: `[현장 일정] ${SYSTEM_MESSAGE_EVENT_LABELS[event]}: ${payload.date}`,
+        body: buildScheduleBoardBody(event, payload),
+        priority: event === 'scheduleBoard.deleted' ? 'high' : 'normal',
+      }, teamIds.length === 1 || teamNames.length === 1 ? {
+        teamId: teamIds[0],
+        teamName: teamNames[0],
+      } : undefined);
+    } catch (error) {
+      console.warn('[systemMessageService] schedule board notification failed:', error);
+    }
+  },
+
+  notifyTeamSettlementEvent: async (
+    event: 'teamSettlement.confirmed' | 'teamSettlement.unconfirmed',
+    doc: TeamSettlementDocument
+  ): Promise<void> => {
+    try {
+      await notifyConfiguredEvent(event, {
+        title: `[팀정산] ${SYSTEM_MESSAGE_EVENT_LABELS[event]}: ${doc.teamName || doc.teamId || '-'} / ${doc.yearMonth}`,
+        body: buildTeamSettlementBody(event, doc),
+        priority: event === 'teamSettlement.confirmed' ? 'high' : 'normal',
+      }, {
+        teamId: doc.teamId,
+        teamName: doc.teamName,
+      });
+    } catch (error) {
+      console.warn('[systemMessageService] team settlement notification failed:', error);
     }
   },
 
@@ -598,6 +818,23 @@ export const systemMessageService = {
       });
     } catch (error) {
       console.warn('[systemMessageService] accommodation billing log notification failed:', error);
+    }
+  },
+
+  notifyNoticeCreatedEvent: async (notice: NoticeMessagePayload, actor: NoticeAuthor): Promise<void> => {
+    try {
+      const event: SystemMessageEvent = 'notice.created';
+      await notifyConfiguredEvent(event, {
+        title: `[공지사항] ${notice.title}`,
+        body: buildNoticeCreatedBody(notice),
+        priority: noticeToMessagePriority(notice.priority),
+        actionLabel: '공지사항 바로가기',
+        actionUrl: `/notices?noticeId=${encodeURIComponent(notice.id)}`,
+      }, {
+        targetPositions: notice.targetPositions || [],
+      });
+    } catch (error) {
+      console.warn('[systemMessageService] notice notification failed:', error);
     }
   },
 

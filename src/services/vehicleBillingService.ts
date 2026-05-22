@@ -7,10 +7,12 @@ import {
     listWorkers,
     updateVehicleBillingDocument
 } from './firestoreCrudCompat';
-import { Vehicle, VehicleAssignmentRecord, VehicleExpenseRecord } from '../types/vehicle';
+import { Vehicle, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleBillingTargetType, VehicleExpenseRecord } from '../types/vehicle';
 import { VehicleBillingDocument, VehicleBillingCostItem, VehicleBillingIssuedToType } from '../types/vehicleBilling';
 import { vehicleService } from './vehicleService';
 import { Timestamp } from 'firebase/firestore';
+
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
 const isUuidString = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
@@ -161,6 +163,63 @@ const getMonthRange = (yearMonth: string): { start: Date; end: Date; days: numbe
     return { start, end, days: inclusiveDays(start, end) };
 };
 
+const isBillingTargetActiveOnDate = (target: VehicleBillingTargetRecord, date: Date): boolean => {
+    const start = parseYmdDate(target.startDate);
+    if (!start || start.getTime() > date.getTime()) return false;
+
+    const end = target.endDate ? parseYmdDate(target.endDate) : null;
+    if (end && end.getTime() < date.getTime()) return false;
+    return true;
+};
+
+const findBillingTargetForDate = (targets: VehicleBillingTargetRecord[], date: Date): VehicleBillingTargetRecord | null => {
+    return targets
+        .filter((target) => isBillingTargetActiveOnDate(target, date))
+        .sort((a, b) => {
+            const startDiff = String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''));
+            if (startDiff !== 0) return startDiff;
+            return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+        })[0] ?? null;
+};
+
+const resolveVehicleBillingTargetForDate = (
+    vehicle: Vehicle,
+    date: Date,
+    targets: VehicleBillingTargetRecord[],
+    assignment?: VehicleAssignmentRecord | null
+): { targetType?: VehicleBillingTargetType | VehicleAssignmentRecord['assigneeType']; targetId?: string; targetName?: string } => {
+    const target = findBillingTargetForDate(targets, date);
+    if (target) {
+        return {
+            targetType: target.targetType,
+            targetId: normalizeKey(target.targetId),
+            targetName: normalizeKey(target.targetName)
+        };
+    }
+
+    if (vehicle.billingTargetType && (vehicle.billingTargetId || vehicle.billingTargetName)) {
+        return {
+            targetType: vehicle.billingTargetType,
+            targetId: normalizeKey(vehicle.billingTargetId) || normalizeKey(vehicle.billingTargetName),
+            targetName: normalizeKey(vehicle.billingTargetName)
+        };
+    }
+
+    if (assignment) {
+        return {
+            targetType: assignment.assigneeType,
+            targetId: normalizeKey(assignment.assigneeId),
+            targetName: normalizeKey(assignment.assigneeName)
+        };
+    }
+
+    return {
+        targetType: vehicle.currentAssigneeType,
+        targetId: normalizeKey(vehicle.currentAssigneeId),
+        targetName: normalizeKey(vehicle.currentAssigneeName)
+    };
+};
+
 const findWorkerInRows = (workers: any[], id?: string | null, name?: string | null): any | null => {
     const rawId = id ? String(id) : '';
     const rawName = name ? String(name) : '';
@@ -257,7 +316,10 @@ export const vehicleBillingService = {
     // Generate Billing for a specific vehicle and month
     generateBilling: async (vehicle: Vehicle, yearMonth: string): Promise<VehicleBillingDocument> => {
         // 1. Get Expenses for the month
-        const expenses = await vehicleService.getExpensesByVehicle(vehicle.id, yearMonth);
+        const [expenses, billingTargets] = await Promise.all([
+            vehicleService.getExpensesByVehicle(vehicle.id, yearMonth),
+            vehicleService.listAllVehicleBillingTargets(vehicle.id).catch(() => [] as VehicleBillingTargetRecord[])
+        ]);
 
         // 2. Calculate Costs
         const lineItems: VehicleBillingCostItem[] = [];
@@ -303,27 +365,27 @@ export const vehicleBillingService = {
             ? vehicle.currentAssigneeName
             : (assignedWorker?.teamName ? String(assignedWorker.teamName) : undefined);
 
-        const hasExplicitBillingTarget = Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
-        const targetType = hasExplicitBillingTarget ? vehicle.billingTargetType : vehicle.currentAssigneeType;
-        const targetId = hasExplicitBillingTarget ? vehicle.billingTargetId : vehicle.currentAssigneeId;
-        const targetName = hasExplicitBillingTarget ? vehicle.billingTargetName : vehicle.currentAssigneeName;
+        const monthStart = parseYmdDate(`${yearMonth}-01`) ?? new Date();
+        const resolvedTarget = resolveVehicleBillingTargetForDate(vehicle, monthStart, billingTargets);
+        const targetType = resolvedTarget.targetType;
+        const targetId = resolvedTarget.targetId;
+        const targetName = resolvedTarget.targetName;
         const targetWorker = targetType === 'WORKER'
             ? (targetId && String(targetId) === String(vehicle.currentAssigneeId) ? assignedWorker : await findWorkerRow(targetId))
             : null;
 
-        const issuedToType =
-            targetType === 'TEAM'
-                ? 'team'
-                : targetType === 'WORKER'
-                    ? 'worker'
-                    : undefined;
-
-        const billingTeamId = targetType === 'TEAM'
+        const billingTeamId = targetType === 'TEAM' || targetType === 'OFFICE'
             ? (targetId ?? undefined)
             : (targetWorker?.teamId ? String(targetWorker.teamId) : assignedTeamId);
-        const billingTeamName = targetType === 'TEAM'
+        const billingTeamName = targetType === 'TEAM' || targetType === 'OFFICE'
             ? (targetName ?? undefined)
             : (targetWorker?.teamName ? String(targetWorker.teamName) : assignedTeamName);
+        const issuedToType: VehicleBillingIssuedToType | undefined =
+            targetType === 'WORKER' || targetType === 'OFFICE_STAFF'
+                ? 'worker'
+                : billingTeamId
+                    ? 'team'
+                    : undefined;
 
         const billingDoc: VehicleBillingDocument = {
             id: billingId,
@@ -336,11 +398,9 @@ export const vehicleBillingService = {
             teamName: billingTeamName,
             issuedToType,
             issuedToWorkerId: issuedToType === 'worker' ? (targetId ?? undefined) : undefined,
-            issuedToWorkerName: issuedToType === 'team'
+            issuedToWorkerName: issuedToType === 'worker'
                 ? (targetName ?? undefined)
-                : issuedToType === 'worker'
-                    ? (targetName ?? undefined)
-                    : undefined,
+                : billingTeamName,
 
             fixedCost,
             variableCost,
@@ -358,9 +418,10 @@ export const vehicleBillingService = {
         const month = getMonthRange(yearMonth);
         if (!month) return [];
 
-        const [expenses, assignments, workerRes] = await Promise.all([
+        const [expenses, assignments, billingTargets, workerRes] = await Promise.all([
             vehicleService.getExpensesByVehicle(vehicle.id, yearMonth),
             vehicleService.getAssignmentHistory(vehicle.id).catch(() => [] as VehicleAssignmentRecord[]),
+            vehicleService.listAllVehicleBillingTargets(vehicle.id).catch(() => [] as VehicleBillingTargetRecord[]),
             listWorkers().catch(() => ({ data: { workers: [] } }))
         ]);
         const workers = (workerRes as any)?.data?.workers ?? [];
@@ -423,27 +484,27 @@ export const vehicleBillingService = {
 
         const grouped = new Map<string, VehicleBillingDocument>();
 
-        const addLineItemToGroup = (segment: typeof segments[number], lineItem: VehicleBillingCostItem) => {
-            const hasExplicitBillingTarget = Boolean(vehicle.billingTargetType && vehicle.billingTargetId);
-            const targetType = hasExplicitBillingTarget ? vehicle.billingTargetType : segment.assignment.assigneeType;
-            const targetId = (hasExplicitBillingTarget ? vehicle.billingTargetId : segment.assignment.assigneeId) ?? undefined;
-            const targetName = (hasExplicitBillingTarget ? vehicle.billingTargetName : segment.assignment.assigneeName) ?? undefined;
+        const addLineItemToGroup = (segment: typeof segments[number], lineItem: VehicleBillingCostItem, billingDate: Date) => {
+            const resolvedTarget = resolveVehicleBillingTargetForDate(vehicle, billingDate, billingTargets, segment.assignment);
+            const targetType = resolvedTarget.targetType;
+            const targetId = resolvedTarget.targetId;
+            const targetName = resolvedTarget.targetName;
             const targetWorker = targetType === 'WORKER'
                 ? findWorkerInRows(workers, targetId, targetName)
                 : null;
 
-            const issuedToType: VehicleBillingIssuedToType | undefined =
-                targetType === 'TEAM'
-                    ? 'team'
-                    : targetType === 'WORKER'
-                        ? 'worker'
-                        : undefined;
-            const billingTeamId = targetType === 'TEAM'
+            const billingTeamId = targetType === 'TEAM' || targetType === 'OFFICE'
                 ? targetId
                 : (getWorkerTeamId(targetWorker) || segment.assignedTeamId);
-            const billingTeamName = targetType === 'TEAM'
+            const billingTeamName = targetType === 'TEAM' || targetType === 'OFFICE'
                 ? targetName
                 : (getWorkerTeamName(targetWorker) || segment.assignedTeamName);
+            const issuedToType: VehicleBillingIssuedToType | undefined =
+                targetType === 'WORKER' || targetType === 'OFFICE_STAFF'
+                    ? 'worker'
+                    : billingTeamId
+                        ? 'team'
+                        : undefined;
             const issuedToWorkerId = issuedToType === 'worker'
                 ? ((targetWorker?.id ? String(targetWorker.id) : undefined) ?? targetId)
                 : undefined;
@@ -484,9 +545,9 @@ export const vehicleBillingService = {
                 teamName: billingTeamName,
                 issuedToType,
                 issuedToWorkerId,
-                issuedToWorkerName: issuedToType === 'team'
-                    ? billingTeamName
-                    : (targetName ?? getWorkerName(targetWorker)),
+                issuedToWorkerName: issuedToType === 'worker'
+                    ? (targetName ?? getWorkerName(targetWorker))
+                    : billingTeamName,
                 fixedCost,
                 variableCost,
                 totalAmount: fixedCost + variableCost,
@@ -531,7 +592,7 @@ export const vehicleBillingService = {
                     amount,
                     type: 'FIXED',
                     category: 'RENT'
-                });
+                }, parseYmdDate(entry.startDate) ?? entry.segment.start);
             });
         }
 
@@ -555,7 +616,7 @@ export const vehicleBillingService = {
                 amount,
                 type: 'VARIABLE',
                 category: expense.type
-            });
+            }, expenseDate);
         });
 
         return Array.from(grouped.values());

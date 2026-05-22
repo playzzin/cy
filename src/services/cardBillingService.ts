@@ -1,8 +1,10 @@
 import { cardFirestoreService } from './cardFirestoreService';
 import { CardBillingDocument, CardBillingIssuedToType } from '../types/cardBilling';
-import { Card, CardAssignmentRecord, CardTransaction, cardService } from './cardService';
+import { Card, CardAssignmentRecord, CardBillingTargetRecord, CardBillingTargetType, CardTransaction, cardService } from './cardService';
 import { Timestamp } from '../types/timestamp';
 import { manpowerService } from './manpowerService';
+
+const normalizeKey = (value: unknown): string => String(value ?? '').trim();
 
 const parseYmdDate = (value?: string): Date | null => {
     const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? '').trim());
@@ -31,6 +33,63 @@ const findAssignmentForDate = (assignments: CardAssignmentRecord[], date: Date):
         [0] ?? null;
 };
 
+const isBillingTargetActiveOnDate = (target: CardBillingTargetRecord, date: Date): boolean => {
+    const start = parseYmdDate(target.startDate);
+    if (!start || start.getTime() > date.getTime()) return false;
+
+    const end = target.endDate ? parseYmdDate(target.endDate) : null;
+    if (end && end.getTime() < date.getTime()) return false;
+    return true;
+};
+
+const findBillingTargetForDate = (targets: CardBillingTargetRecord[], date: Date): CardBillingTargetRecord | null => {
+    return targets
+        .filter((target) => isBillingTargetActiveOnDate(target, date))
+        .sort((a, b) => {
+            const startDiff = String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''));
+            if (startDiff !== 0) return startDiff;
+            return String(b.id ?? '').localeCompare(String(a.id ?? ''));
+        })[0] ?? null;
+};
+
+const resolveBillingTargetForDate = (
+    card: Card,
+    date: Date,
+    targets: CardBillingTargetRecord[],
+    assignment?: CardAssignmentRecord | null
+): { targetType?: CardBillingTargetType | CardAssignmentRecord['assigneeType']; targetId?: string; targetName?: string } => {
+    const target = findBillingTargetForDate(targets, date);
+    if (target) {
+        return {
+            targetType: target.targetType,
+            targetId: normalizeKey(target.targetId),
+            targetName: normalizeKey(target.targetName)
+        };
+    }
+
+    if (card.billingTargetType && (card.billingTargetId || card.billingTargetName)) {
+        return {
+            targetType: card.billingTargetType,
+            targetId: normalizeKey(card.billingTargetId) || normalizeKey(card.billingTargetName),
+            targetName: normalizeKey(card.billingTargetName)
+        };
+    }
+
+    if (assignment) {
+        return {
+            targetType: assignment.assigneeType,
+            targetId: normalizeKey(assignment.assigneeId),
+            targetName: normalizeKey(assignment.assigneeName)
+        };
+    }
+
+    return {
+        targetType: card.currentAssigneeType,
+        targetId: normalizeKey(card.currentAssigneeId),
+        targetName: normalizeKey(card.currentAssigneeName)
+    };
+};
+
 /**
  * CardBillingService - Firestore 통합 버전
  * 모든 요청을 cardFirestoreService로 위임하거나 Firestore 데이터를 기반으로 처리합니다.
@@ -48,7 +107,10 @@ export const cardBillingService = {
     },
 
     generateBilling: async (card: Card, yearMonth: string): Promise<CardBillingDocument> => {
-        const transactions = await cardService.getTransactionsByCard(card.id, yearMonth);
+        const [transactions, billingTargets] = await Promise.all([
+            cardService.getTransactionsByCard(card.id, yearMonth),
+            cardService.listAllCardBillingTargets(card.id).catch(() => [] as CardBillingTargetRecord[])
+        ]);
 
         const lineItems = transactions.map((tx) => ({
             id: tx.id,
@@ -88,24 +150,25 @@ export const cardBillingService = {
             }
         }
 
-        const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
-        const targetType = hasExplicitBillingTarget ? card.billingTargetType : card.currentAssigneeType;
-        const targetId = (hasExplicitBillingTarget ? card.billingTargetId : card.currentAssigneeId) ?? undefined;
-        const targetName = (hasExplicitBillingTarget ? card.billingTargetName : card.currentAssigneeName) ?? undefined;
+        const monthStart = parseYmdDate(`${yearMonth}-01`) ?? new Date();
+        const resolvedTarget = resolveBillingTargetForDate(card, monthStart, billingTargets);
+        const targetType = resolvedTarget.targetType;
+        const targetId = resolvedTarget.targetId;
+        const targetName = resolvedTarget.targetName;
         const targetWorker = targetType === 'WORKER' ? findWorker(targetId) : undefined;
 
-        const issuedToType: CardBillingIssuedToType | undefined =
-            targetType === 'TEAM'
-                ? 'team'
-                : targetType === 'WORKER'
-                    ? 'worker'
-                    : undefined;
-        const billingTeamId = targetType === 'TEAM'
+        const billingTeamId = targetType === 'TEAM' || targetType === 'OFFICE'
             ? (targetId ?? undefined)
             : (targetWorker?.teamId || assignedTeamId);
-        const billingTeamName = targetType === 'TEAM'
+        const billingTeamName = targetType === 'TEAM' || targetType === 'OFFICE'
             ? (targetName ?? undefined)
             : (targetWorker?.teamName || assignedTeamName);
+        const issuedToType: CardBillingIssuedToType | undefined =
+            targetType === 'WORKER' || targetType === 'OFFICE_STAFF'
+                ? 'worker'
+                : billingTeamId
+                    ? 'team'
+                    : undefined;
 
         const billingId = cardBillingService.buildBillingDocumentId({
             cardId: card.id,
@@ -125,12 +188,10 @@ export const cardBillingService = {
             teamId: billingTeamId,
             teamName: billingTeamName,
             issuedToType,
-            issuedToWorkerId: issuedToType === 'worker' ? (targetId ?? undefined) : undefined,
-            issuedToWorkerName: issuedToType === 'team'
-                ? (billingTeamName ?? undefined)
-                : issuedToType === 'worker'
-                    ? (targetName ?? targetWorker?.name ?? undefined)
-                    : undefined,
+            issuedToWorkerId: issuedToType === 'worker' ? targetId : undefined,
+            issuedToWorkerName: issuedToType === 'worker'
+                ? (targetName ?? targetWorker?.name ?? undefined)
+                : billingTeamName,
             variableCost,
             totalAmount: variableCost,
             status: 'DRAFT',
@@ -142,9 +203,10 @@ export const cardBillingService = {
     },
 
     generateAssignmentBillings: async (card: Card, yearMonth: string): Promise<CardBillingDocument[]> => {
-        const [transactions, assignments, workers] = await Promise.all([
+        const [transactions, assignments, billingTargets, workers] = await Promise.all([
             cardService.getTransactionsByCard(card.id, yearMonth),
             cardService.getAssignmentHistory(card.id).catch(() => [] as CardAssignmentRecord[]),
+            cardService.listAllCardBillingTargets(card.id).catch(() => [] as CardBillingTargetRecord[]),
             manpowerService.getWorkers().catch(() => [])
         ]);
 
@@ -171,24 +233,25 @@ export const cardBillingService = {
                 assignedTeamName = assignedWorker?.teamName;
             }
 
-            const hasExplicitBillingTarget = Boolean(card.billingTargetType && card.billingTargetId);
-            const targetType = hasExplicitBillingTarget ? card.billingTargetType : assignment.assigneeType;
-            const targetId = (hasExplicitBillingTarget ? card.billingTargetId : assignment.assigneeId) ?? undefined;
-            const targetName = (hasExplicitBillingTarget ? card.billingTargetName : assignment.assigneeName) ?? undefined;
+            const txDate = parseYmdDate(tx.date) ?? new Date();
+            const resolvedTarget = resolveBillingTargetForDate(card, txDate, billingTargets, assignment);
+            const targetType = resolvedTarget.targetType;
+            const targetId = resolvedTarget.targetId;
+            const targetName = resolvedTarget.targetName;
             const targetWorker = targetType === 'WORKER' ? findWorker(targetId) : undefined;
 
-            const issuedToType: CardBillingIssuedToType | undefined =
-                targetType === 'TEAM'
-                    ? 'team'
-                    : targetType === 'WORKER'
-                        ? 'worker'
-                        : undefined;
-            const billingTeamId = targetType === 'TEAM'
+            const billingTeamId = targetType === 'TEAM' || targetType === 'OFFICE'
                 ? targetId
                 : (targetWorker?.teamId || assignedTeamId);
-            const billingTeamName = targetType === 'TEAM'
+            const billingTeamName = targetType === 'TEAM' || targetType === 'OFFICE'
                 ? targetName
                 : (targetWorker?.teamName || assignedTeamName);
+            const issuedToType: CardBillingIssuedToType | undefined =
+                targetType === 'WORKER' || targetType === 'OFFICE_STAFF'
+                    ? 'worker'
+                    : billingTeamId
+                        ? 'team'
+                        : undefined;
 
             if (!issuedToType || !billingTeamId) return;
 
@@ -227,9 +290,9 @@ export const cardBillingService = {
                 teamName: billingTeamName,
                 issuedToType,
                 issuedToWorkerId: issuedToType === 'worker' ? targetId : undefined,
-                issuedToWorkerName: issuedToType === 'team'
-                    ? billingTeamName
-                    : (targetName ?? targetWorker?.name ?? undefined),
+                issuedToWorkerName: issuedToType === 'worker'
+                    ? (targetName ?? targetWorker?.name ?? undefined)
+                    : billingTeamName,
                 variableCost: tx.amount,
                 totalAmount: tx.amount,
                 status: 'DRAFT',

@@ -1,12 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import styled from 'styled-components';
 import { useDashboardData } from '../../hooks/useDashboardData';
-import { dailyReportService, DailyReport } from '../../services/dailyReportService';
-import { TodaySummaryWidget } from './widgets/TodaySummaryWidget';
 import { MyTeamStatusWidget } from './widgets/MyTeamStatusWidget';
 import { WeeklyTrendWidget } from './widgets/WeeklyTrendWidget';
 import { QuickActionsWidget } from './widgets/QuickActionsWidget';
-import { RecentReportsWidget } from './widgets/RecentReportsWidget';
 import { format, subDays } from 'date-fns';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSpinner } from '@fortawesome/free-solid-svg-icons';
@@ -57,44 +54,7 @@ export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConf
 
     const { data: dashboardData, loading: dashboardLoading } = useDashboardData(dateRange.start, dateRange.end);
 
-    // Separate state for Recent Reports as it's not in useDashboardData
-    const [recentReports, setRecentReports] = useState<DailyReport[]>([]);
-    const [reportsLoading, setReportsLoading] = useState(true);
-
-    useEffect(() => {
-        const fetchRecentReports = async () => {
-            try {
-                // Fetch all and slice locally for now (could be optimized later)
-                const reports = await dailyReportService.getAllReports();
-                // Sort by date desc
-                const sorted = reports.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                setRecentReports(sorted.slice(0, 5));
-            } catch (error) {
-                console.error("Failed to fetch recent reports", error);
-            } finally {
-                setReportsLoading(false);
-            }
-        };
-
-        fetchRecentReports();
-    }, []);
-
-    // Derived State for Today Summary
-    const todayStats = useMemo(() => {
-        if (!dashboardData?.dailyTrend) return null;
-
-        const todayStr = format(new Date(), 'yyyy-MM-dd');
-        const todayData = dashboardData.dailyTrend.find(d => d.date === todayStr);
-
-        return {
-            totalManDay: todayData?.totalManDay || 0,
-            totalAmount: todayData?.totalAmount || 0,
-            totalWorkers: todayData?.workerCount || 0
-        };
-    }, [dashboardData]);
-
-
-    if (dashboardLoading && reportsLoading) {
+    if (dashboardLoading) {
         return (
             <div className="flex justify-center items-center h-96">
                 <FontAwesomeIcon icon={faSpinner} spin className="text-4xl text-blue-500" />
@@ -104,17 +64,7 @@ export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConf
 
     return (
         <Container>
-            {/* Top Row: Today Summary - High Priority */}
-            <Grid>
-                <Col $span={12}>
-                    <TodaySummaryWidget
-                        stats={todayStats || { totalManDay: 0, totalAmount: 0, totalWorkers: 0 }}
-                        dailyTrend={dashboardData?.dailyTrend || []}
-                    />
-                </Col>
-            </Grid>
-
-            {/* Middle Row: Analytics & Team Status */}
+            {/* Analytics & Team Status */}
             {modeConfig.id !== 'worker' && (
                 <Grid>
                     <Col $span={6}>
@@ -135,13 +85,6 @@ export const DashboardFieldView: React.FC<DashboardFieldViewProps> = ({ modeConf
             <Grid>
                 <Col $span={12}>
                     <QuickActionsWidget modeConfig={modeConfig} />
-                </Col>
-            </Grid>
-
-            {/* Bottom: Recent Reports */}
-            <Grid>
-                <Col $span={12}>
-                    <RecentReportsWidget reports={recentReports} />
                 </Col>
             </Grid>
         </Container>

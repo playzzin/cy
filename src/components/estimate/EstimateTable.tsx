@@ -6,6 +6,19 @@ import {
     formatCurrency, formatDecimal, createItem
 } from '../../utils/estimateUtils';
 
+const parseFormattedNumber = (value: string): number => {
+    const parsed = Number(value.replace(/,/g, '').trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const formatEditableDecimal = (value: number | null | undefined): string => (
+    value ? formatDecimal(value) : ''
+);
+
+const formatEditableCurrency = (value: number | null | undefined): string => (
+    value ? formatCurrency(value) : ''
+);
+
 export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdit, updateItem, setDraft }: any) => {
     const inputStyle: React.CSSProperties = { width: '100%', border: 'none', outline: 'none', background: 'transparent', fontFamily: EXCEL_FONT, fontSize: '9pt', textAlign: 'center' };
     const installRatio = draft.installRatio || 50;
@@ -146,16 +159,25 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                                         ) : item.unit)}
                                                     </td>
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
-                                                        {item.isFiller ? '' : (isEdit ? <input type="number" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.quantity ? formatDecimal(item.quantity) : '-'))}
+                                                        {item.isFiller ? '' : (isEdit ? (
+                                                            <input
+                                                                type="text"
+                                                                inputMode="decimal"
+                                                                value={formatEditableDecimal(item.quantity)}
+                                                                onChange={e => updateItem(item.id, 'quantity', parseFormattedNumber(e.target.value))}
+                                                                style={{ ...inputStyle, textAlign: 'right' }}
+                                                            />
+                                                        ) : (item.quantity ? formatDecimal(item.quantity) : '-'))}
                                                     </td>
 
                                                     {/* 인건비 */}
                                                     <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
                                                         {item.isFiller ? '' : (isEdit ? (
                                                             <input 
-                                                                type="number" 
-                                                                value={isRental ? (item.laborUnitPrice || '') : (item.finalUnitPrice || '')} 
-                                                                onChange={e => updateItem(item.id, isRental ? 'laborUnitPrice' : 'finalUnitPrice', Number(e.target.value))} 
+                                                                type="text"
+                                                                inputMode="numeric"
+                                                                value={formatEditableCurrency(isRental ? item.laborUnitPrice : item.finalUnitPrice)}
+                                                                onChange={e => updateItem(item.id, isRental ? 'laborUnitPrice' : 'finalUnitPrice', parseFormattedNumber(e.target.value))}
                                                                 style={{ ...inputStyle, textAlign: 'right' }} 
                                                             />
                                                         ) : (isRental ? (item.laborUnitPrice ? formatCurrency(item.laborUnitPrice) : '-') : (item.finalUnitPrice ? formatCurrency(item.finalUnitPrice) : '-')))}
@@ -168,7 +190,15 @@ export const EstimateTable = React.memo(({ draft, itemsWithCalc, subtotal, isEdi
                                                         <>
                                                             {/* 임대료 방식 전용 컬럼 */}
                                                             <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px' }}>
-                                                                {item.isFiller ? '' : (isEdit ? <input type="number" value={item.rentalUnitPrice || ''} onChange={e => updateItem(item.id, 'rentalUnitPrice', Number(e.target.value))} style={{ ...inputStyle, textAlign: 'right' }} /> : (item.rentalUnitPrice ? formatCurrency(item.rentalUnitPrice) : '-'))}
+                                                                {item.isFiller ? '' : (isEdit ? (
+                                                                    <input
+                                                                        type="text"
+                                                                        inputMode="numeric"
+                                                                        value={formatEditableCurrency(item.rentalUnitPrice)}
+                                                                        onChange={e => updateItem(item.id, 'rentalUnitPrice', parseFormattedNumber(e.target.value))}
+                                                                        style={{ ...inputStyle, textAlign: 'right' }}
+                                                                    />
+                                                                ) : (item.rentalUnitPrice ? formatCurrency(item.rentalUnitPrice) : '-'))}
                                                             </td>
                                                             <td style={{ ...cellStyle(), border: BORDER_THIN, textAlign: 'right', paddingRight: '4px', fontWeight: 700 }}>
                                                                 {item.isFiller ? '' : (item.rentalAmount ? formatCurrency(item.rentalAmount) : '-')}

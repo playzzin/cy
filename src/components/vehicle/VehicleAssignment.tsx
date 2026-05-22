@@ -10,7 +10,7 @@ import { format } from 'date-fns';
 
 import { teamService, Team } from '../../services/teamService';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
-import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
 
 interface VehicleAssignmentProps {
     vehicle: Vehicle;
@@ -42,7 +42,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
     // Form State
     const [assigneeType, setAssigneeType] = useState<VehicleAssigneeType>('TEAM');
     const [selectedAssigneeId, setSelectedAssigneeId] = useState('');
-    const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [startDate, setStartDate] = useState(toShortYearDateInputValue(format(new Date(), 'yyyy-MM-dd')));
     const [saving, setSaving] = useState(false);
     const selectedTeam = React.useMemo(
         () => assigneeType === 'TEAM' ? teams.find(t => String(t.id) === String(selectedAssigneeId)) ?? null : null,
@@ -51,11 +51,11 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
     const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
 
     const handleStartDateChange = (value: string) => {
-        setStartDate(formatTypedDateInput(value));
+        setStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
     };
 
     const normalizeStartDate = () => {
-        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+        setStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
     };
 
     // Initial Load
@@ -89,6 +89,12 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
             toast.error("배정 대상을 선택해주세요.");
             return;
         }
+        const normalizedStartDate = normalizeTypedDateInput(startDate);
+        if (!normalizedStartDate) {
+            toast.error("배정 시작일을 올바른 날짜로 입력해주세요.");
+            return;
+        }
+        setStartDate(toShortYearDateInputValue(normalizedStartDate));
 
         const result = await showConfirmAlert(
             '차량 배정',
@@ -105,7 +111,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                 selectedAssigneeId,
                 assigneeType,
                 assigneeName,
-                startDate
+                normalizedStartDate
             );
             toast.success("차량이 성공적으로 배정되었습니다.");
             onUpdate(); // Refresh parent
@@ -235,7 +241,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                                         type="text"
                                         inputMode="numeric"
                                         maxLength={10}
-                                        placeholder="YYYY-MM-DD"
+                                        placeholder="YY-MM-DD"
                                         value={startDate}
                                         onChange={(e) => handleStartDateChange(e.target.value)}
                                         onBlur={normalizeStartDate}
@@ -308,7 +314,7 @@ export const VehicleAssignment: React.FC<VehicleAssignmentProps> = ({
                                                     <div className="text-xs text-gray-500">{record.assigneeType === 'TEAM' ? '팀' : '작업자'}</div>
                                                 </td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                                    {record.startDate}
+                                                    {toShortYearDateInputValue(record.startDate) || record.startDate}
                                                 </td>
                                                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                                                     {record.endDate || <span className="text-green-600 font-bold text-xs uppercase bg-green-50 px-2 py-0.5 rounded">운행 중</span>}

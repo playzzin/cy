@@ -30,6 +30,13 @@ import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typed
 const toYearMonth = (date: Date) =>
     `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
+const getPreviousYearMonth = (ym: string) => {
+    const [rawYear, rawMonth] = ym.split('-').map(Number);
+    const year = Number.isFinite(rawYear) ? rawYear : new Date().getFullYear();
+    const month = Number.isFinite(rawMonth) ? rawMonth : new Date().getMonth() + 1;
+    return toYearMonth(new Date(year, month - 2, 1));
+};
+
 const formatYearMonth = (ym: string) => {
     const [y, m] = ym.split('-');
     return `${y}년 ${Number(m)}월`;
@@ -73,6 +80,19 @@ const getIssueTypeLabel = (value: TaxInvoiceIssue['isNew'] | boolean | null | un
     if (typeof value === 'boolean') return value ? '입력' : '';
     return String(value ?? '');
 };
+
+const getCarryoverSourceId = (issue: TaxInvoiceIssue) =>
+    issue.id || [
+        issue.yearMonth,
+        issue.siteId,
+        issue.siteName,
+        issue.note,
+        issue.recipient,
+        issue.teamName,
+    ].map(value => String(value ?? '').trim()).join('|');
+
+const getCarryoverSourceKey = (issue: TaxInvoiceIssue) =>
+    `${issue.yearMonth}:${getCarryoverSourceId(issue)}`;
 
 // ─────────────────────────────────────────────
 // Sub-components
@@ -672,8 +692,10 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
     // Site import
     const [siteData, setSiteData] = useState<SiteWorkSummary[]>([]);
+    const [previousDeferredIssues, setPreviousDeferredIssues] = useState<TaxInvoiceIssue[]>([]);
     const [showImportModal, setShowImportModal] = useState(false);
     const [loadingSites, setLoadingSites] = useState(false);
+    const [loadingDeferredSites, setLoadingDeferredSites] = useState(false);
     const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
 
     // Column Filters State
@@ -697,6 +719,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
         return [...ISSUE_TYPE_OPTIONS, ...extraValues];
     }, [issues]);
+    const importedCarryoverKeys = useMemo(() => new Set(
+        issues
+            .map(issue => (
+                issue.carriedFromIssueId && issue.carriedFromYearMonth
+                    ? `${issue.carriedFromYearMonth}:${issue.carriedFromIssueId}`
+                    : ''
+            ))
+            .filter((key): key is string => Boolean(key))
+    ), [issues]);
 
     // Keyboard Navigation State
     const [activeCell, setActiveCell] = useState<{ r: number, c: number } | null>(null);
@@ -763,10 +794,26 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
     };
 
+    const loadPreviousDeferredSites = async () => {
+        setLoadingDeferredSites(true);
+        try {
+            const previousYearMonth = getPreviousYearMonth(yearMonth);
+            const data = await taxInvoiceListService.getDeferredIssuesByMonth(previousYearMonth);
+            setPreviousDeferredIssues(data);
+        } catch (e) {
+            console.error('전월 이월 현장 로드 실패:', e);
+            setPreviousDeferredIssues([]);
+        } finally {
+            setLoadingDeferredSites(false);
+        }
+    };
+
     useEffect(() => { 
         setIssues([]); // 월 변경 시 즉시 목록을 비워 순번 꼬임 방지
         setSiteData([]); 
+        setPreviousDeferredIssues([]);
         loadIssues(); 
+        loadPreviousDeferredSites();
     }, [yearMonth]);
 
     // ── Month navigation ──
@@ -927,6 +974,58 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         }
     };
 
+    const handleImportDeferredIssues = async (selected: TaxInvoiceIssue[]) => {
+        const importTargets = selected.filter(issue => !importedCarryoverKeys.has(getCarryoverSourceKey(issue)));
+        if (importTargets.length === 0) return;
+
+        setLoading(true);
+        const startNo = issues.length;
+        const monthEndDate = getMonthEndDate(yearMonth);
+        const added: TaxInvoiceIssue[] = [];
+
+        for (const [idx, source] of importTargets.entries()) {
+            const sourceId = getCarryoverSourceId(source);
+            const siteName = source.siteName || source.note || source.item || '';
+            const newIssue: Omit<TaxInvoiceIssue, 'id' | 'createdAt' | 'updatedAt'> = {
+                yearMonth,
+                no: startNo + idx + 1,
+                isNew: getIssueTypeLabel(source.isNew),
+                issueDate: monthEndDate,
+                recipient: source.recipient || '',
+                item: source.item || '',
+                supplyAmount: Number(source.supplyAmount) || 0,
+                note: source.note || siteName,
+                manDays: Number(source.manDays) || 0,
+                teamName: source.teamName || '',
+                remark: source.remark || '',
+                issueStatus: 'ready' as IssueStatus,
+                scanCompleted: false,
+                siteId: source.siteId || '',
+                siteName,
+                siteType: source.siteType || '',
+                paymentType: source.paymentType || '',
+                carriedFromIssueId: sourceId,
+                carriedFromYearMonth: source.yearMonth,
+            };
+
+            try {
+                const id = await taxInvoiceListService.addIssue(newIssue);
+                added.push({ ...newIssue, id });
+            } catch (e) {
+                console.error('이월 현장 가져오기 실패:', e);
+            }
+        }
+
+        try {
+            if (added.length > 0) {
+                const renumbered = await taxInvoiceListService.renumberIssuesByMonth(yearMonth);
+                setIssues(renumbered);
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // ── Derived stats ──
     const stats = {
         ready: issues.filter(i => i.issueStatus === 'ready').length,
@@ -969,15 +1068,17 @@ const TaxInvoiceIssueListPage: React.FC = () => {
         return true;
     });
 
-    // Deferred sites (status === 'deferred')
-    const deferredSites = issues
-        .filter(i => i.issueStatus === 'deferred')
+    // Deferred sites from the previous month.
+    const deferredSites = previousDeferredIssues
         .map(i => ({
-            siteName: i.note || i.item,
-            manDays: i.manDays,
-            teamName: '',
-            note: i.item,
+            source: i,
+            siteName: i.siteName || i.note || i.item || i.recipient || '-',
+            manDays: i.manDays || 0,
+            teamName: i.teamName || i.recipient || '',
+            note: i.item || i.note,
+            imported: importedCarryoverKeys.has(getCarryoverSourceKey(i)),
         }));
+    const importableDeferredCount = deferredSites.filter(site => !site.imported).length;
 
     // ─────────────────────────────────────────────
     return (
@@ -1064,12 +1165,15 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                     )}
 
                     <button
-                        onClick={loadIssues}
-                        disabled={loading}
+                        onClick={() => {
+                            loadIssues();
+                            loadPreviousDeferredSites();
+                        }}
+                        disabled={loading || loadingDeferredSites}
                         className="p-2.5 text-slate-400 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-200"
                         title="새로고침"
                     >
-                        <FontAwesomeIcon icon={faRotateRight} className={loading ? 'animate-spin' : ''} />
+                        <FontAwesomeIcon icon={faRotateRight} className={(loading || loadingDeferredSites) ? 'animate-spin' : ''} />
                     </button>
                 </div>
             </div>
@@ -1132,10 +1236,23 @@ const TaxInvoiceIssueListPage: React.FC = () => {
 
                     {/* Deferred Sites */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-                        <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3">
-                            이월 현장 ({deferredSites.length})
-                        </h3>
-                        {deferredSites.length === 0 ? (
+                        <div className="flex items-center justify-between gap-2 mb-3">
+                            <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                                전월 이월 현장 ({deferredSites.length})
+                            </h3>
+                            {deferredSites.length > 0 && (
+                                <button
+                                    onClick={() => handleImportDeferredIssues(previousDeferredIssues)}
+                                    disabled={loading || importableDeferredCount === 0}
+                                    className="text-[11px] font-bold text-blue-700 hover:text-blue-900 disabled:text-slate-300 disabled:cursor-not-allowed"
+                                >
+                                    전체 가져오기
+                                </button>
+                            )}
+                        </div>
+                        {loadingDeferredSites ? (
+                            <p className="text-xs text-slate-400 text-center py-3">이월 현장을 불러오는 중입니다</p>
+                        ) : deferredSites.length === 0 ? (
                             <p className="text-xs text-slate-400 text-center py-3">이월 현장이 없습니다</p>
                         ) : (
                             <div className="space-y-1.5 max-h-40 overflow-y-auto">
@@ -1145,7 +1262,21 @@ const TaxInvoiceIssueListPage: React.FC = () => {
                                             <p className="text-xs font-bold text-blue-800 truncate">{s.siteName}</p>
                                             {s.teamName && <p className="text-[10px] text-blue-500">{s.teamName}</p>}
                                         </div>
-                                        <span className="text-xs font-black text-blue-700 ml-2">{s.manDays}</span>
+                                        <div className="flex items-center gap-1.5 ml-2">
+                                            <span className="text-xs font-black text-blue-700">{s.manDays}</span>
+                                            {s.imported ? (
+                                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-slate-400">추가됨</span>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleImportDeferredIssues([s.source])}
+                                                    disabled={loading}
+                                                    className="w-6 h-6 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+                                                    title="현재 월 발행리스트에 추가"
+                                                >
+                                                    <FontAwesomeIcon icon={faPlus} className="text-[10px]" />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

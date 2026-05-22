@@ -43,6 +43,8 @@ export interface DailyReportWorkerRow {
     siteName: string | undefined;
     responsibleTeamId?: string | undefined;
     responsibleTeamName?: string | undefined;
+    siteManagerId?: string | undefined;
+    siteManagerName?: string | undefined;
     companyId?: string | undefined;
     companyName?: string | undefined;
     constructorCompanyId?: string | undefined;
@@ -429,6 +431,8 @@ export const dailyReportService = {
                     siteName: report.siteName,
                     responsibleTeamId: report.responsibleTeamId ?? report.teamId,
                     responsibleTeamName: report.responsibleTeamName ?? report.teamName,
+                    siteManagerId: toSnapshotText((report as any).siteManagerId),
+                    siteManagerName: toSnapshotText((report as any).siteManagerName),
                     companyId: toSnapshotText(report.companyId),
                     companyName: toSnapshotText(report.companyName),
                     constructorCompanyId: toSnapshotText(report.constructorCompanyId),
@@ -467,6 +471,8 @@ export const dailyReportService = {
                     siteName: report.siteName,
                     responsibleTeamId: report.responsibleTeamId ?? report.teamId,
                     responsibleTeamName: report.responsibleTeamName ?? report.teamName,
+                    siteManagerId: toSnapshotText((report as any).siteManagerId),
+                    siteManagerName: toSnapshotText((report as any).siteManagerName),
                     companyId: toSnapshotText(report.companyId),
                     companyName: toSnapshotText(report.companyName),
                     constructorCompanyId: toSnapshotText(report.constructorCompanyId),

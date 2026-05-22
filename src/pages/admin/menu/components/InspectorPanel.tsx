@@ -237,6 +237,22 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                                     </div>
                                 </div>
 
+                                {(localState.action || localState.id?.startsWith('header-')) && (
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-gray-400">상단 아이콘 동작 (Header Action)</label>
+                                        <div className="relative">
+                                            <FontAwesomeIcon icon={faLink} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-xs" />
+                                            <input
+                                                type="text"
+                                                value={localState.action || ''}
+                                                onChange={(e) => handleChange('action', e.target.value)}
+                                                className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-blue-400 font-mono focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all placeholder-gray-600"
+                                                placeholder="calculator / camera / messages"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="flex items-center justify-between p-3 bg-gray-800 rounded-lg border border-gray-700">
                                     <span className="text-sm text-gray-300">표시 여부 (Visibility)</span>
                                     <button

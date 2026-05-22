@@ -146,7 +146,7 @@ const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
 };
 
 const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
-  return teamExpenseCategoryLabels[category] ?? '기타';
+  return teamExpenseCategoryLabels[category] ?? String(category || '기타');
 };
 
 const isPostedTeamExpenseClaim = (claim: TeamExpenseClaim): boolean => {
@@ -267,6 +267,18 @@ const didUpdateSystemConfig = (value: unknown): boolean => {
   return data.systemConfig_update != null;
 };
 
+const notifyTeamSettlementSystemMessage = async (
+  event: 'teamSettlement.confirmed' | 'teamSettlement.unconfirmed',
+  doc: TeamSettlementDocument
+): Promise<void> => {
+  try {
+    const { systemMessageService } = await import('./systemMessageService');
+    await systemMessageService.notifyTeamSettlementEvent(event, doc);
+  } catch (error) {
+    console.warn('[teamSettlementService] system message notification failed:', error);
+  }
+};
+
 export const teamSettlementService = {
   async getTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<TeamSettlementDocument> {
     const team = await buildTeamIdVariants(params.teamId);
@@ -362,20 +374,25 @@ export const teamSettlementService = {
 
   async confirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
     const doc = await this.getTeamSettlement(params);
-    await this.saveTeamSettlement({
+    const now = new Date().toISOString();
+    const nextDoc: TeamSettlementDocument = {
       ...doc,
-      confirmedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
+      confirmedAt: now,
+      updatedAt: now
+    };
+    await this.saveTeamSettlement(nextDoc);
+    await notifyTeamSettlementSystemMessage('teamSettlement.confirmed', nextDoc);
   },
 
   async unconfirmTeamSettlement(params: { yearMonth: string; teamId: string }): Promise<void> {
     const doc = await this.getTeamSettlement(params);
-    await this.saveTeamSettlement({
+    const nextDoc: TeamSettlementDocument = {
       ...doc,
       confirmedAt: null,
       updatedAt: new Date().toISOString()
-    });
+    };
+    await this.saveTeamSettlement(nextDoc);
+    await notifyTeamSettlementSystemMessage('teamSettlement.unconfirmed', nextDoc);
   },
 
   async calculateAutoSettlement(params: {
@@ -1194,7 +1211,7 @@ export const teamSettlementService = {
         if (amount <= 0) return [];
 
         const isOtherExpense =
-          claim.claimType === 'otherExpense' ||
+          claim.claimType !== 'teamCharge' ||
           !String(claim.chargeToTeamId ?? '').trim();
         const payerTeamId = resolveTeamIdFromAny(claim.payerTeamId, claim.payerTeamName);
         const chargeToTeamId = resolveTeamIdFromAny(claim.chargeToTeamId, claim.chargeToTeamName);
@@ -1211,7 +1228,7 @@ export const teamSettlementService = {
           String(claim.date ?? '').trim(),
           String(claim.siteName ?? '').trim(),
           String(claim.cardLabel ?? '').trim(),
-          isOtherExpense ? '기타청구' : `후청구: ${counterpartyName || '사용팀 미지정'}`,
+          isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : `후청구: ${counterpartyName || '사용팀 미지정'}`,
           String(claim.memo ?? '').trim()
         ].filter(Boolean);
 
@@ -1227,7 +1244,7 @@ export const teamSettlementService = {
 
     const teamExpenseAdditions: TeamSettlementAdditionItem[] = postedTeamExpenseClaims
       .flatMap((claim): TeamSettlementAdditionItem[] => {
-        if (claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim()) return [];
+        if (claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim()) return [];
 
         const amount = Math.round(toFiniteNumberOrZero(claim.amount));
         if (amount <= 0) return [];

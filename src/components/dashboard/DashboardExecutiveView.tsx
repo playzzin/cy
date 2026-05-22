@@ -8,7 +8,6 @@ import { dailyReportService } from '../../services/dailyReportService';
 import { companyService } from '../../services/companyService';
 import { taskService } from '../../services/taskService';
 import { Task, STATUS_CONFIG } from '../../types/task';
-import WeatherWidget from '../widgets/WeatherWidget';
 import { DASHBOARD_MODES, DashboardModeConfig } from './roleDashboardConfig';
 import { QuickMenuSettingsModal } from './QuickMenuSettingsModal';
 import { useQuickMenuActionSettings } from './useQuickMenuActions';
@@ -417,11 +416,6 @@ const DashboardExecutiveViewContent: React.FC<{ stats: any; modeConfig: Dashboar
 
                 {/* Side Panel */}
                 <div className="space-y-6">
-                    {/* Weather Widget */}
-                    <div className="h-80">
-                        <WeatherWidget />
-                    </div>
-
                     {/* System Status */}
                     <div className="bg-slate-800 rounded-xl p-6 text-white shadow-lg">
                         <h3 className="font-bold text-lg mb-4">시스템 상태</h3>

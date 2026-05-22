@@ -1,17 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faArrowRightFromBracket, faCreditCard, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
-import { format, subDays } from 'date-fns';
+import { faArrowRightFromBracket, faCreditCard, faPen, faTimes, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
+import { format } from 'date-fns';
 import { useMasterData } from '../../contexts/MasterDataContext';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { cardService } from '../../services/cardService';
 import { teamService, Team } from '../../services/teamService';
-import { Card, CardAssigneeType } from '../../types/card';
+import { Card, CardAssigneeType, CardAssignmentRecord } from '../../types/card';
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
-import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { formatTypedDateInput, normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 
 type AssigneeMode = CardAssigneeType;
+
+interface AssignmentTargetSelection {
+    type: CardAssigneeType;
+    id: string;
+    name: string;
+}
+
+interface AssignmentPersonOption {
+    id: string;
+    name: string;
+    teamId?: string | null;
+    teamName?: string | null;
+    source?: 'worker' | 'office_staff';
+    detail?: string;
+}
 
 interface CardAssignmentManagerProps {
     cards: Card[];
@@ -24,11 +41,23 @@ interface CardAssignmentManagerProps {
 const toDateInputValue = (d: Date): string => {
     return format(d, 'yyyy-MM-dd');
 };
+const toShortDateInputValue = (d: Date): string => toShortYearDateInputValue(toDateInputValue(d));
+const displayDate = (value?: string | null): string => toShortYearDateInputValue(value) || '';
 
-const buildEndDateAsDayBefore = (startDate: string): string => {
-    const d = new Date(startDate);
-    if (Number.isNaN(d.getTime())) return toDateInputValue(new Date());
-    return toDateInputValue(subDays(d, 1));
+const hasActiveCardAssignment = (card: Card): boolean => (
+    Boolean(card.currentAssigneeType && (card.currentAssigneeId || card.currentAssigneeName))
+);
+
+const getEffectiveCardStatus = (card: Card): Card['status'] => {
+    if (card.status === 'SUSPENDED' || card.status === 'CLOSED') return card.status;
+    return hasActiveCardAssignment(card) ? 'ASSIGNED' : 'AVAILABLE';
+};
+
+const assignmentLabel = (card: Card): string => {
+    if (hasActiveCardAssignment(card)) {
+        return `${card.currentAssigneeType === 'TEAM' ? '팀' : '개인'} · ${card.currentAssigneeName || card.currentAssigneeId}`;
+    }
+    return '미배정';
 };
 
 export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
@@ -55,10 +84,11 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         });
     }, [allTeams, selectableTeams]);
 
-    const today = useMemo(() => toDateInputValue(new Date()), []);
+    const today = useMemo(() => toShortDateInputValue(new Date()), []);
 
     const [mode, setMode] = useState<AssigneeMode>('TEAM');
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
 
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
     const [selectedWorkerId, setSelectedWorkerId] = useState<string>('');
@@ -67,20 +97,27 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     const [autoUnassignExisting, setAutoUnassignExisting] = useState<boolean>(true);
 
     const [saving, setSaving] = useState<boolean>(false);
+    const [assignmentRecords, setAssignmentRecords] = useState<CardAssignmentRecord[]>([]);
+    const [assignmentRecordsLoading, setAssignmentRecordsLoading] = useState(false);
+    const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
 
     const handleStartDateChange = (value: string) => {
-        setStartDate(formatTypedDateInput(value));
+        setStartDate(formatTypedDateInput(value, { yearDigits: 2 }));
     };
 
     const normalizeStartDate = () => {
-        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
+        setStartDate((prev) => toShortYearDateInputValue(normalizeTypedDateInput(prev) ?? prev) || prev);
     };
 
     useEffect(() => {
         const loadWorkers = async () => {
             try {
-                const list = await manpowerService.getWorkers();
+                const [list, officeStaffList] = await Promise.all([
+                    manpowerService.getWorkers(),
+                    officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[])
+                ]);
                 setWorkers(list);
+                setOfficeStaffRows(officeStaffList);
             } catch (e) {
                 console.error(e);
                 toast.error('작업자 목록을 불러오지 못했습니다.');
@@ -95,17 +132,21 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         setSelectedTeamId(first?.id ?? '');
     }, [teams, selectedTeamId]);
 
-    const filteredWorkers = useMemo(() => {
-        if (!selectedTeamId) return workers;
-        return workers.filter((w) => w.teamId === selectedTeamId);
-    }, [workers, selectedTeamId]);
+    const loadAssignmentRecords = async () => {
+        setAssignmentRecordsLoading(true);
+        try {
+            setAssignmentRecords(await cardService.listAllCardAssignments());
+        } catch (error) {
+            console.error(error);
+            toast.error('카드 배정 이력을 불러오지 못했습니다.');
+        } finally {
+            setAssignmentRecordsLoading(false);
+        }
+    };
 
     useEffect(() => {
-        if (mode !== 'WORKER') return;
-        if (selectedWorkerId && filteredWorkers.some((w) => w.id === selectedWorkerId)) return;
-        const first = filteredWorkers.find((w) => Boolean(w.id));
-        setSelectedWorkerId(first?.id ?? '');
-    }, [mode, selectedWorkerId, filteredWorkers]);
+        loadAssignmentRecords();
+    }, []);
 
     const cardsById = useMemo(() => {
         const map = new Map<string, Card>();
@@ -114,11 +155,11 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
     }, [cards]);
 
     const availableCards = useMemo(() => {
-        return cards.filter((c) => (c.status ?? 'AVAILABLE') === 'AVAILABLE');
+        return cards.filter((c) => !hasActiveCardAssignment(c) && !['SUSPENDED', 'CLOSED'].includes(c.status ?? 'AVAILABLE'));
     }, [cards]);
 
     const assignedCards = useMemo(() => {
-        return cards.filter((c) => (c.status ?? 'AVAILABLE') === 'ASSIGNED');
+        return cards.filter(hasActiveCardAssignment);
     }, [cards]);
 
     const selectedCard = useMemo(() => {
@@ -126,15 +167,79 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
         return cardsById.get(String(selectedCardId)) ?? null;
     }, [cardsById, selectedCardId]);
 
+    const selectedCardAssignments = useMemo(
+        () => assignmentRecords
+            .filter((record) => String(record.cardId) === String(selectedCardId))
+            .slice()
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''))),
+        [assignmentRecords, selectedCardId]
+    );
+
+    const editingAssignment = useMemo(
+        () => assignmentRecords.find((record) => String(record.id) === String(editingAssignmentId)) ?? null,
+        [assignmentRecords, editingAssignmentId]
+    );
+
     const selectedTeam = useMemo(() => {
         return teams.find((t) => t.id === selectedTeamId) ?? null;
     }, [teams, selectedTeamId]);
     const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+    const selectedTeamIsOffice = isOfficeAssignmentTeam(selectedTeam);
 
-    const selectedWorker = useMemo(() => {
+    const officeStaffOptions = useMemo(
+        () => buildOfficeStaffAssignmentOptions(officeStaffRows),
+        [officeStaffRows]
+    );
+
+    const filteredWorkers = useMemo<AssignmentPersonOption[]>(() => {
+        if (selectedTeamIsOffice) return officeStaffOptions;
+        const workerOptions = workers
+            .map((worker) => ({
+                id: String(worker.id ?? ''),
+                name: String(worker.name ?? ''),
+                teamId: worker.teamId,
+                teamName: worker.teamName,
+                source: 'worker' as const
+            }))
+            .filter((worker) => Boolean(worker.id && worker.name));
+        if (!selectedTeamId) return workerOptions;
+        return workerOptions.filter((worker) => String(worker.teamId ?? '') === String(selectedTeamId));
+    }, [officeStaffOptions, selectedTeamId, selectedTeamIsOffice, workers]);
+
+    useEffect(() => {
+        if (mode !== 'WORKER') return;
+        if (selectedWorkerId && filteredWorkers.some((w) => w.id === selectedWorkerId)) return;
+        const first = filteredWorkers.find((w) => Boolean(w.id));
+        setSelectedWorkerId(first?.id ?? '');
+    }, [mode, selectedWorkerId, filteredWorkers]);
+
+    const selectedWorker = useMemo<AssignmentPersonOption | null>(() => {
         if (!selectedWorkerId) return null;
         return filteredWorkers.find((w) => w.id === selectedWorkerId) ?? null;
     }, [filteredWorkers, selectedWorkerId]);
+
+    const selectedTarget = useMemo<AssignmentTargetSelection | null>(() => {
+        if (mode === 'TEAM') {
+            return selectedTeam?.id ? { type: 'TEAM', id: selectedTeam.id, name: selectedTeam.name } : null;
+        }
+        return selectedWorker?.id ? { type: 'WORKER', id: selectedWorker.id, name: selectedWorker.name } : null;
+    }, [mode, selectedTeam, selectedWorker]);
+
+    const selectTargetFromAssignment = (assignment: CardAssignmentRecord) => {
+        if (assignment.assigneeType === 'TEAM') {
+            setMode('TEAM');
+            setSelectedTeamId(assignment.assigneeId);
+            return;
+        }
+
+        setMode('WORKER');
+        setSelectedWorkerId(assignment.assigneeId);
+        const assignedWorker = workers.find((worker) => String(worker.id) === String(assignment.assigneeId));
+        if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
+        if (!assignedWorker && officeStaffOptions.some((staff) => String(staff.id) === String(assignment.assigneeId))) {
+            setSelectedTeamId(officeStaffOptions[0]?.teamId ?? '');
+        }
+    };
 
     const getStatusBadge = (status: Card['status']) => {
         if (status === 'ASSIGNED') {
@@ -159,34 +264,47 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             toast.error('배정 시작일을 입력해주세요.');
             return;
         }
+        const normalizedStartDate = normalizeTypedDateInput(startDate);
+        if (!normalizedStartDate) {
+            toast.error('배정 시작일을 올바른 날짜로 입력해주세요.');
+            return;
+        }
+        setStartDate(toShortYearDateInputValue(normalizedStartDate));
 
-        const isAssigned = (selectedCard.status ?? 'AVAILABLE') === 'ASSIGNED';
-        if (isAssigned && !autoUnassignExisting) {
-            toast.error('이미 배정된 카드입니다. 먼저 해제해주세요.');
+        const isAssigned = hasActiveCardAssignment(selectedCard);
+        if (!editingAssignment && isAssigned && !autoUnassignExisting) {
+            toast.error('이미 배정된 카드입니다. 기존 배정 자동 해제를 선택해주세요.');
             return;
         }
 
-        const assigneeId = mode === 'TEAM' ? selectedTeam?.id : selectedWorker?.id;
-        const assigneeName = mode === 'TEAM' ? selectedTeam?.name : selectedWorker?.name;
-
-        if (!assigneeId || !assigneeName) {
+        if (!selectedTarget) {
             toast.error(mode === 'TEAM' ? '팀을 선택해주세요.' : '작업자를 선택해주세요.');
             return;
         }
 
-        const confirmMessage = `${selectedCard.name} 카드를 ${assigneeName}${mode === 'TEAM' ? '(팀)' : '(개인)'}에 배정할까요?`;
+        const confirmMessage = `${selectedCard.name} 카드를 ${selectedTarget.name}${selectedTarget.type === 'TEAM' ? '(팀)' : '(개인)'}에 ${displayDate(normalizedStartDate)}부터 배정할까요?`;
         const result = await showConfirmAlert('카드 배정', confirmMessage);
         if (!result.isConfirmed) return;
 
         setSaving(true);
         try {
-            if (isAssigned) {
-                const endDate = buildEndDateAsDayBefore(startDate);
-                await cardService.unassignCard(selectedCard.id, endDate);
+            if (editingAssignment) {
+                await cardService.updateCardAssignment({
+                    ...editingAssignment,
+                    cardId: selectedCard.id,
+                    cardLabel: `${selectedCard.name} (${selectedCard.last4})`,
+                    assigneeId: selectedTarget.id,
+                    assigneeType: selectedTarget.type,
+                    assigneeName: selectedTarget.name,
+                    startDate: normalizedStartDate
+                });
+                toast.success('카드 배정일이 수정되었습니다.');
+                setEditingAssignmentId(null);
+            } else {
+                await cardService.assignCard(selectedCard.id, selectedTarget.id, selectedTarget.type, selectedTarget.name, normalizedStartDate);
+                toast.success('카드 배정이 완료되었습니다.');
             }
-
-            await cardService.assignCard(selectedCard.id, assigneeId, mode, assigneeName, startDate);
-            toast.success('카드 배정이 완료되었습니다.');
+            await loadAssignmentRecords();
             onRefresh();
         } catch (e: unknown) {
             console.error(e);
@@ -206,6 +324,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             const endDate = toDateInputValue(new Date());
             await cardService.unassignCard(card.id, endDate);
             toast.success('배정 해제되었습니다.');
+            await loadAssignmentRecords();
             onRefresh();
         } catch (e: unknown) {
             console.error(e);
@@ -218,17 +337,27 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
 
     const handleQuickPick = (card: Card) => {
         setSelectedCardId(card.id);
-        if (card.currentAssigneeType === 'TEAM') {
-            setMode('TEAM');
-            if (card.currentAssigneeId) setSelectedTeamId(card.currentAssigneeId);
+        setEditingAssignmentId(null);
+        const latestAssignment = assignmentRecords
+            .filter((record) => String(record.cardId) === String(card.id))
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0];
+
+        if (latestAssignment) {
+            selectTargetFromAssignment(latestAssignment);
+            setStartDate(displayDate(latestAssignment.startDate) || today);
+            return;
         }
-        if (card.currentAssigneeType === 'WORKER') {
-            setMode('WORKER');
-            if (card.currentAssigneeId) {
-                setSelectedWorkerId(card.currentAssigneeId);
-                const assignedWorker = workers.find((worker) => String(worker.id) === String(card.currentAssigneeId));
-                if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
-            }
+
+        if (card.currentAssigneeType && card.currentAssigneeId && card.currentAssigneeName) {
+            selectTargetFromAssignment({
+                id: '',
+                cardId: card.id,
+                cardLabel: `${card.name} (${card.last4})`,
+                assigneeId: card.currentAssigneeId,
+                assigneeType: card.currentAssigneeType,
+                assigneeName: card.currentAssigneeName,
+                startDate: toDateInputValue(new Date())
+            });
         }
     };
 
@@ -249,7 +378,27 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
             return;
         }
         setSelectedCardId(String(initialCardId));
-    }, [initialCardId, cardsById, workers]);
+    }, [initialCardId, cardsById, workers, assignmentRecords]);
+
+    const handleEditAssignment = (assignment: CardAssignmentRecord) => {
+        setSelectedCardId(assignment.cardId);
+        setEditingAssignmentId(assignment.id);
+        selectTargetFromAssignment(assignment);
+        setStartDate(displayDate(assignment.startDate) || today);
+    };
+
+    const handleCancelEditAssignment = () => {
+        setEditingAssignmentId(null);
+        if (selectedCard) {
+            const latestAssignment = selectedCardAssignments[0];
+            if (latestAssignment) {
+                selectTargetFromAssignment(latestAssignment);
+                setStartDate(displayDate(latestAssignment.startDate) || today);
+            } else {
+                setStartDate(today);
+            }
+        }
+    };
 
     if (loading) {
         return (
@@ -272,7 +421,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                         </h2>
                         <p className="text-slate-500 mt-2 font-medium ml-12 text-sm">팀/개인 단위로 카드를 배정하거나, 배정을 해제할 수 있습니다.</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         <button
                             onClick={handleAssign}
                             disabled={saving}
@@ -280,13 +429,24 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                 }`}
                         >
                             <FontAwesomeIcon icon={faCreditCard} />
-                            {saving ? '처리 중...' : '배정 실행'}
+                            {saving ? '처리 중...' : editingAssignmentId ? '배정일 수정' : selectedCard && hasActiveCardAssignment(selectedCard) ? '배정 변경' : '카드 배정'}
                         </button>
+                        {editingAssignmentId && (
+                            <button
+                                type="button"
+                                onClick={handleCancelEditAssignment}
+                                disabled={saving}
+                                className="px-5 py-2.5 rounded-xl font-bold text-sm bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 disabled:text-slate-400 transition-all flex items-center gap-2"
+                            >
+                                <FontAwesomeIcon icon={faTimes} />
+                                수정 취소
+                            </button>
+                        )}
                     </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
-                    <div className="xl:col-span-4 space-y-3">
+                    <div className="xl:col-span-12 space-y-3">
                         <div className="flex bg-slate-100 p-1 rounded-xl">
                             <button
                                 onClick={() => setMode('TEAM')}
@@ -318,7 +478,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                         .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                         .map((c) => (
                                             <option key={c.id} value={c.id}>
-                                                {c.name} ({c.last4})
+                                                {c.name} ({c.last4}) · {assignmentLabel(c)}
                                             </option>
                                         ))}
                                 </select>
@@ -368,7 +528,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                             .map((w) => (
                                                 <option key={w.id} value={w.id}>
-                                                    {w.name}
+                                                    {w.name}{w.detail ? ` (${w.detail})` : w.teamName ? ` (${w.teamName})` : ''}
                                                 </option>
                                             ))}
                                     </select>
@@ -382,7 +542,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                         type="text"
                                         inputMode="numeric"
                                         maxLength={10}
-                                        placeholder="YYYY-MM-DD"
+                                        placeholder="YY-MM-DD"
                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                         value={startDate}
                                         onChange={(e) => handleStartDateChange(e.target.value)}
@@ -404,23 +564,69 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
 
                         {selectedCard && (
                             <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                                <div>
-                                    <div>
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
                                         <div className="text-xs text-slate-500 font-bold">선택 카드</div>
                                         <div className="text-lg font-extrabold text-slate-900">{selectedCard.name} ({selectedCard.last4})</div>
-                                        <div className="text-sm text-slate-500 font-medium mt-1">{selectedCard.issuer} · {selectedCard.maskedNumber}</div>
+                                        <div className="text-sm text-slate-500 font-medium mt-1">{selectedCard.issuer} · {selectedCard.maskedNumber} · {assignmentLabel(selectedCard)}</div>
                                     </div>
+                                    {hasActiveCardAssignment(selectedCard) && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleUnassign(selectedCard)}
+                                            disabled={saving}
+                                            className="shrink-0 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 inline-flex items-center gap-2"
+                                        >
+                                            <FontAwesomeIcon icon={faArrowRightFromBracket} />
+                                            배정 해제
+                                        </button>
+                                    )}
                                 </div>
+                            </div>
+                        )}
+
+                        {selectedCard && (
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                <h3 className="font-extrabold text-slate-800 mb-3">배정 이력</h3>
+                                {assignmentRecordsLoading ? (
+                                    <div className="text-sm text-slate-400">불러오는 중...</div>
+                                ) : selectedCardAssignments.length === 0 ? (
+                                    <div className="text-sm text-slate-400">등록된 배정 이력이 없습니다.</div>
+                                ) : (
+                                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                        {selectedCardAssignments.map((record) => (
+                                            <div key={record.id} className="rounded-xl border border-slate-100 p-3">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="font-extrabold text-slate-800 truncate">{record.assigneeName}</div>
+                                                        <div className="text-xs text-slate-500 mt-1">
+                                                            {record.assigneeType === 'TEAM' ? '팀' : '개인'} · {displayDate(record.startDate)} ~ {displayDate(record.endDate) || '계속'}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEditAssignment(record)}
+                                                        disabled={saving}
+                                                        className="shrink-0 w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:text-slate-300"
+                                                        title="배정일 수정"
+                                                    >
+                                                        <FontAwesomeIcon icon={faPen} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    <div className="xl:col-span-8 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="hidden">
                         <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                            <h3 className="font-extrabold text-slate-800 mb-3">대기 카드</h3>
+                            <h3 className="font-extrabold text-slate-800 mb-3">배정 가능 카드</h3>
                             <div className="space-y-2 max-h-[360px] overflow-y-auto">
                                 {availableCards.length === 0 ? (
-                                    <div className="text-sm text-slate-400">대기 카드가 없습니다.</div>
+                                    <div className="text-sm text-slate-400">배정 가능한 카드가 없습니다.</div>
                                 ) : (
                                     availableCards.map((c) => (
                                         <button
@@ -430,7 +636,7 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                         >
                                             <div className="flex items-center justify-between">
                                                 <div className="font-extrabold text-slate-800">{c.name} ({c.last4})</div>
-                                                {getStatusBadge(c.status)}
+                                                {getStatusBadge(getEffectiveCardStatus(c))}
                                             </div>
                                             <div className="text-xs text-slate-500 mt-1 font-mono">{c.maskedNumber}</div>
                                         </button>
@@ -440,10 +646,10 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                         </div>
 
                         <div className="bg-white p-4 rounded-2xl border border-slate-200">
-                            <h3 className="font-extrabold text-slate-800 mb-3">사용중 카드</h3>
+                            <h3 className="font-extrabold text-slate-800 mb-3">배정된 카드</h3>
                             <div className="space-y-2 max-h-[360px] overflow-y-auto">
                                 {assignedCards.length === 0 ? (
-                                    <div className="text-sm text-slate-400">사용중 카드가 없습니다.</div>
+                                    <div className="text-sm text-slate-400">배정된 카드가 없습니다.</div>
                                 ) : (
                                     assignedCards.map((c) => (
                                         <div
@@ -456,14 +662,14 @@ export const CardAssignmentManager: React.FC<CardAssignmentManagerProps> = ({
                                                     <div className="text-xs text-slate-500 mt-1">{c.currentAssigneeName || '-'}</div>
                                                 </button>
                                                 <div className="flex items-center gap-2">
-                                                    {getStatusBadge(c.status)}
+                                                    {getStatusBadge(getEffectiveCardStatus(c))}
                                                     <button
                                                         onClick={() => handleUnassign(c)}
                                                         disabled={saving}
                                                         className="px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 inline-flex items-center gap-2"
                                                     >
                                                         <FontAwesomeIcon icon={faArrowRightFromBracket} />
-                                                        해제
+                                                        배정 해제
                                                     </button>
                                                 </div>
                                             </div>

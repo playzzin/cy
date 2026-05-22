@@ -20,6 +20,7 @@ const DashboardExecutiveView = lazyNamed(() => import('./components/dashboard/ex
 const DailyReportPage = React.lazy(() => import('./pages/report/DailyReportPage'));
 const TestSettingsPage = React.lazy(() => import('./pages/settings/TestSettingsPage'));
 const DailyDispatchPage = React.lazy(() => import('./pages/assignment/DailyDispatchPage'));
+const FieldScheduleRequestPage = React.lazy(() => import('./pages/assignment/FieldScheduleRequestPage'));
 const FieldSchedulePlannerPage = React.lazy(() => import('./pages/assignment/FieldSchedulePlannerPage'));
 const ScheduleConfirmationBoardPage = React.lazy(() => import('./pages/assignment/ScheduleConfirmationBoardPage'));
 const TeamAssignmentPage = React.lazy(() => import('./pages/assignment/TeamAssignmentPage'));
@@ -61,6 +62,7 @@ const DailyWageStatementPage = React.lazy(() => import('./pages/payroll/DailyWag
 const DailyAdvanceWorkbookPage = React.lazy(() => import('./pages/payroll/DailyAdvanceWorkbookPage'));
 const MonthlyWageDraftPage = React.lazy(() => import('./pages/payroll/MonthlyWageDraftPage'));
 const SupportTeamPaymentPage = React.lazy(() => import('./pages/payroll/SupportTeamPaymentPage'));
+const SupportClientSitePage = React.lazy(() => import('./pages/payroll/SupportClientSitePage'));
 const SupportClaimPage = React.lazy(() => import('./pages/payroll/SupportClaimPage'));
 const PayrollRateManagementPage = React.lazy(() => import('./pages/payroll/PayrollRateManagementPage'));
 const AdvancePaymentPage = React.lazy(() => import('./pages/payroll/AdvancePaymentPage'));
@@ -95,6 +97,7 @@ const DatabaseLogPage = React.lazy(() => import('./pages/database/DatabaseLogPag
 const ManualPage = React.lazy(() => import('./pages/manual'));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage'));
 const MessageCenterPage = React.lazy(() => import('./pages/messages/MessageCenterPage'));
+const NoticeBoardPage = React.lazy(() => import('./pages/notices/NoticeBoardPage'));
 const MessageAutomationSettingsPage = React.lazy(() => import('./pages/messages/MessageAutomationSettingsPage'));
 const StorageManagerPage = React.lazy(() => import('./pages/storage/StorageManagerPage'));
 const GoogleDriveManagerPage = lazyNamed(() => import('./pages/storage/GoogleDriveManagerPage'), 'GoogleDriveManagerPage');
@@ -181,6 +184,7 @@ const TaxInvoiceIssueListPage = React.lazy(() => import('./pages/taxinvoice/TaxI
 const ReceivablesManagerPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesManagerPage'));
 const ReceivablesDashboardPage = React.lazy(() => import('./pages/taxinvoice/ReceivablesDashboardPage'));
 const WorkbookLedgerPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerPage'));
+const WorkbookLedgerLogPage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerLogPage'));
 const WorkbookLedgerUpgradePage = React.lazy(() => import('./pages/taxinvoice/WorkbookLedgerUpgradePage'));
 const PartnerTransactionLedgerPage = React.lazy(() => import('./pages/taxinvoice/PartnerTransactionLedgerPage'));
 const KakaoNotificationPage = React.lazy(() => import('./pages/taxinvoice/KakaoNotificationPage'));
@@ -310,6 +314,9 @@ const App: React.FC = () => {
               <Route path="monthly-wage" element={<MonthlyWageDraftPage />} />
               <Route path="statistics" element={<PayrollStatisticsPage />} />
               <Route path="support-team" element={<SupportTeamPaymentPage />} />
+              <Route path="support-client-site" element={<SupportClientSitePage />} />
+              <Route path="support-company-site" element={<SupportClientSitePage />} />
+              <Route path="support-site" element={<SupportClientSitePage />} />
               <Route path="support-claim" element={<SupportClaimPage />} />
               <Route path="rate-management" element={<PayrollRateManagementPage />} />
               <Route path="advance-payment" element={<AdvancePaymentPage />} />
@@ -326,9 +333,9 @@ const App: React.FC = () => {
               <Route path="taxinvoice/ledger" element={<TaxInvoiceLedgerPage />} />
               <Route path="taxinvoice/receivables" element={<ReceivablesManagerPage />} />
               <Route path="taxinvoice/issue-list" element={<TaxInvoiceIssueListPage />} />
-
               <Route path="taxinvoice/dashboard" element={<ReceivablesDashboardPage />} />
               <Route path="workbook-ledger" element={<WorkbookLedgerPage key="cheongyeon" tenantKey="cheongyeon" companyLabel="청연" />} />
+              <Route path="workbook-ledger/logs" element={<WorkbookLedgerLogPage />} />
               <Route path="workbook-ledger-upgrade" element={<WorkbookLedgerUpgradePage key="cheongyeon-upgrade" tenantKey="cheongyeon" companyLabel="청연" />} />
               <Route path="workbook-ledger-dawon" element={<WorkbookLedgerPage key="dawon" tenantKey="dawon" companyLabel="다원" />} />
               <Route path="partner-ledger" element={<PartnerTransactionLedgerPage />} />
@@ -378,6 +385,8 @@ const App: React.FC = () => {
 
             {/* Profile Settings */}
             <Route path="/profile" element={<ProfilePage />} />
+            <Route path="/notices" element={<NoticeBoardPage />} />
+            <Route path="/notice-board" element={<NoticeBoardPage />} />
             <Route path="/messages" element={<MessageCenterPage />} />
             <Route path="/messages/compose" element={<MessageCenterPage mode="compose" />} />
             <Route path="/messages/settings" element={<MessageAutomationSettingsPage />} />
@@ -394,6 +403,7 @@ const App: React.FC = () => {
 
             {/* Assignment Management */}
             <Route path="/assignment/daily-dispatch" element={<DailyDispatchPage />} />
+            <Route path="/assignment/field-request" element={<FieldScheduleRequestPage />} />
             <Route path="/assignment/field-schedule" element={<FieldSchedulePlannerPage />} />
             <Route path="/assignment/schedule-confirmation" element={<ScheduleConfirmationBoardPage />} />
             <Route path="/assignment/schedule-confirmation-board" element={<ScheduleConfirmationBoardPage />} />

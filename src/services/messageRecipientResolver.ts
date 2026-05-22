@@ -10,7 +10,8 @@ export type MessageRecipientMode =
   | 'allWorkers'
   | 'teamMembers'
   | 'teamLeaders'
-  | 'relatedTeamLeaders';
+  | 'relatedTeamLeaders'
+  | 'noticeTargetPositions';
 
 export interface MessageRecipientRule {
   mode: MessageRecipientMode;
@@ -23,6 +24,7 @@ export interface MessageRecipientRule {
 export interface MessageRecipientContext {
   teamId?: string | null;
   teamName?: string | null;
+  targetPositions?: string[] | null;
 }
 
 export interface MessageRecipientData {
@@ -55,6 +57,7 @@ const MESSAGE_RECIPIENT_MODES: MessageRecipientMode[] = [
   'teamMembers',
   'teamLeaders',
   'relatedTeamLeaders',
+  'noticeTargetPositions',
 ];
 
 export const createDefaultRecipientRule = (
@@ -72,6 +75,11 @@ const normalizeLower = (value: unknown): string => normalize(value).toLowerCase(
 
 const uniqueStrings = (values: unknown[] = []): string[] =>
   Array.from(new Set(values.map(normalize).filter(Boolean)));
+
+const normalizePositionKey = (value: unknown): string =>
+  normalizeLower(value).replace(/[\s_-]/g, '');
+
+const allPositionKeys = new Set(['all', '*', 'global', '전체', '전체직책', '전직책', '모든직책'].map(normalizePositionKey));
 
 const addToMapArray = <T>(map: Map<string, T[]>, key: string, value: T) => {
   map.set(key, [...(map.get(key) || []), value]);
@@ -245,6 +253,32 @@ const makeUsersResult = (users: UserData[], description: string): ResolvedMessag
   };
 };
 
+const makeAllUsersResult = (count: number, description = '전체 사용자'): ResolvedMessageRecipients => ({
+  recipientScope: 'all',
+  recipientIds: [],
+  recipientNames: ['전체 사용자'],
+  description,
+  count,
+});
+
+const isAllPositionTarget = (positions: string[]): boolean =>
+  positions.length === 0 || positions.some((position) => allPositionKeys.has(normalizePositionKey(position)));
+
+const getUserPositionKeys = (
+  user: UserData,
+  data: MessageRecipientData,
+  lookups: RecipientLookups
+): Set<string> => {
+  const values = [
+    user.role,
+    user.position,
+    ...(Array.isArray(user.additionalPositions) ? user.additionalPositions : []),
+    ...getLinkedWorkersForUser(user, data, lookups).map((worker) => worker.role),
+  ];
+
+  return new Set(values.map(normalizePositionKey).filter(Boolean));
+};
+
 export const resolveMessageRecipients = (
   rule: MessageRecipientRule,
   data: MessageRecipientData,
@@ -254,13 +288,7 @@ export const resolveMessageRecipients = (
   const lookups = buildRecipientLookups(data);
 
   if (normalizedRule.mode === 'allUsers') {
-    return {
-      recipientScope: 'all',
-      recipientIds: [],
-      recipientNames: ['전체 사용자'],
-      description: '전체 사용자',
-      count: data.users.length,
-    };
+    return makeAllUsersResult(data.users.length);
   }
 
   if (normalizedRule.mode === 'users' || normalizedRule.mode === 'global') {
@@ -286,6 +314,25 @@ export const resolveMessageRecipients = (
       getLinkedWorkersForUser(user, data, lookups).length > 0
     );
     return makeUsersResult(recipients, `전체 작업자 계정 ${recipients.length}명`);
+  }
+
+  if (normalizedRule.mode === 'noticeTargetPositions') {
+    if (!context || !Array.isArray(context.targetPositions)) {
+      return makeUsersResult([], '공지 대상 직책 0명');
+    }
+
+    const targetPositions = uniqueStrings(context.targetPositions);
+    if (isAllPositionTarget(targetPositions)) {
+      return makeAllUsersResult(data.users.length, '공지 대상 직책 · 전체 사용자');
+    }
+
+    const targetKeys = new Set(targetPositions.map(normalizePositionKey).filter(Boolean));
+    const recipients = data.users.filter((user) => {
+      const userPositionKeys = getUserPositionKeys(user, data, lookups);
+      return Array.from(targetKeys).some((key) => userPositionKeys.has(key));
+    });
+
+    return makeUsersResult(recipients, `공지 대상 직책 ${recipients.length}명`);
   }
 
   const useRelatedTeam = normalizedRule.mode === 'relatedTeamLeaders';

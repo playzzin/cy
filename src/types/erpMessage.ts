@@ -22,6 +22,8 @@ export interface ErpMessage {
   readBy: string[];
   readAtBy: Record<string, Timestamp>;
   pinned: boolean;
+  actionLabel?: string | null;
+  actionUrl?: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   expiresAt?: Timestamp | null;
@@ -40,6 +42,8 @@ export interface CreateErpMessageInput {
   recipientIds?: string[];
   recipientNames?: string[];
   pinned?: boolean;
+  actionLabel?: string | null;
+  actionUrl?: string | null;
   expiresAt?: Timestamp | null;
 }
 

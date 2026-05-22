@@ -2,6 +2,7 @@ export interface MenuItem {
     text: string;
     icon?: string;
     path?: string;
+    action?: string;
     sub?: (string | MenuItem)[];
     id?: string;
     roles?: string[]; // Added for dynamic role handling
@@ -17,6 +18,7 @@ export interface SiteData {
     menu: MenuItem[];
     order?: number;
     trash?: MenuItem[];
+    headerActions?: MenuItem[];
     deletedItems?: string[];
     positionConfig?: PositionItem[];
     delegationTemplatePath?: string;

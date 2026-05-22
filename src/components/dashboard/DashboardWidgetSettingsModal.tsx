@@ -10,6 +10,11 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import type { DashboardWidgetDefinition } from './useDashboardWidgetSettings';
 
+interface WeatherLocationOption {
+    key: string;
+    label: string;
+}
+
 interface DashboardWidgetSettingsModalProps {
     isOpen: boolean;
     modeLabel: string;
@@ -19,10 +24,18 @@ interface DashboardWidgetSettingsModalProps {
     hasPersonalSelection: boolean;
     saving: boolean;
     maxWidgets: number;
+    weatherLocationKey?: string;
+    weatherLocationOptions?: WeatherLocationOption[];
     onClose: () => void;
-    onSave: (keys: string[]) => Promise<void>;
+    onSave: (keys: string[], options?: { weatherLocationKey?: string }) => Promise<void>;
     onReset: () => Promise<void>;
 }
+
+const getWidgetKindLabel = (kind: DashboardWidgetDefinition['kind']): string => {
+    if (kind === 'weather') return '날씨 위젯';
+    if (kind === 'summary') return '요약 위젯';
+    return '순위 위젯';
+};
 
 const includesSearch = (widget: DashboardWidgetDefinition, searchTerm: string): boolean => {
     const keyword = searchTerm.trim().toLowerCase();
@@ -31,7 +44,8 @@ const includesSearch = (widget: DashboardWidgetDefinition, searchTerm: string): 
     return [
         widget.label,
         widget.desc,
-        widget.kind === 'summary' ? '요약' : '순위',
+        widget.scopeLabel,
+        getWidgetKindLabel(widget.kind),
     ].some((value) => String(value || '').toLowerCase().includes(keyword));
 };
 
@@ -44,20 +58,24 @@ export const DashboardWidgetSettingsModal: React.FC<DashboardWidgetSettingsModal
     hasPersonalSelection,
     saving,
     maxWidgets,
+    weatherLocationKey = 'seoul',
+    weatherLocationOptions = [],
     onClose,
     onSave,
     onReset,
 }) => {
     const [draftKeys, setDraftKeys] = useState<string[]>(selectedKeys);
+    const [draftWeatherLocationKey, setDraftWeatherLocationKey] = useState(weatherLocationKey);
     const [searchTerm, setSearchTerm] = useState('');
     const [message, setMessage] = useState<string | null>(null);
 
     useEffect(() => {
         if (!isOpen) return;
         setDraftKeys(selectedKeys.length > 0 ? selectedKeys : defaultSelectedKeys);
+        setDraftWeatherLocationKey(weatherLocationKey);
         setSearchTerm('');
         setMessage(null);
-    }, [defaultSelectedKeys, isOpen, selectedKeys]);
+    }, [defaultSelectedKeys, isOpen, selectedKeys, weatherLocationKey]);
 
     const filteredWidgets = useMemo(() => {
         return widgets.filter((widget) => includesSearch(widget, searchTerm));
@@ -66,6 +84,11 @@ export const DashboardWidgetSettingsModal: React.FC<DashboardWidgetSettingsModal
     const selectedOrder = useMemo(() => {
         return new Map(draftKeys.map((key, index) => [key, index + 1]));
     }, [draftKeys]);
+
+    const hasWeatherWidget = useMemo(() => (
+        widgets.some((widget) => widget.kind === 'weather')
+    ), [widgets]);
+    const isWeatherSelected = draftKeys.includes('weather-forecast');
 
     if (!isOpen) return null;
 
@@ -92,7 +115,7 @@ export const DashboardWidgetSettingsModal: React.FC<DashboardWidgetSettingsModal
         }
 
         try {
-            await onSave(draftKeys);
+            await onSave(draftKeys, { weatherLocationKey: draftWeatherLocationKey });
             onClose();
         } catch (error) {
             console.error('[DashboardWidgetSettingsModal] Save failed:', error);
@@ -168,6 +191,28 @@ export const DashboardWidgetSettingsModal: React.FC<DashboardWidgetSettingsModal
                             {message}
                         </div>
                     )}
+                    {hasWeatherWidget && weatherLocationOptions.length > 0 && (
+                        <div className="mt-4 flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <div className="text-sm font-bold text-slate-800">날씨 지역</div>
+                                <div className="text-xs text-slate-500">
+                                    날씨 위젯을 선택하면 이 지역의 현재 날씨와 예보가 표시됩니다.
+                                </div>
+                            </div>
+                            <select
+                                value={draftWeatherLocationKey}
+                                onChange={(event) => setDraftWeatherLocationKey(event.target.value)}
+                                disabled={!isWeatherSelected}
+                                className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                            >
+                                {weatherLocationOptions.map((option) => (
+                                    <option key={option.key} value={option.key}>
+                                        {option.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-5">
@@ -210,8 +255,13 @@ export const DashboardWidgetSettingsModal: React.FC<DashboardWidgetSettingsModal
                                                 )}
                                             </span>
                                             <span className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{widget.desc}</span>
-                                            <span className="mt-2 block text-[11px] font-medium text-slate-400">
-                                                {widget.kind === 'summary' ? '요약 위젯' : '순위 위젯'}
+                                            <span className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-400">
+                                                <span>{getWidgetKindLabel(widget.kind)}</span>
+                                                {widget.scopeLabel && (
+                                                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">
+                                                        {widget.scopeLabel}
+                                                    </span>
+                                                )}
                                             </span>
                                         </span>
                                     </button>

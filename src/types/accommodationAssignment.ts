@@ -2,7 +2,7 @@ import { FieldValue, Timestamp } from './timestamp';
 
 export type AccommodationAssignmentStatus = 'active' | 'ended';
 
-export type AccommodationAssignmentSource = 'team' | 'worker';
+export type AccommodationAssignmentSource = 'team' | 'worker' | 'office_staff';
 
 export interface AccommodationAssignment {
     id?: string;

@@ -54,6 +54,7 @@ interface SiteFormState {
     name: string;
     companyId: string;
     responsibleTeamId: string;
+    siteManagerId: string;
 }
 
 interface CompanyFormState {
@@ -394,7 +395,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
     const [siteForm, setSiteForm] = useState<SiteFormState>({
         name: '',
         companyId: '',
-        responsibleTeamId: ''
+        responsibleTeamId: '',
+        siteManagerId: ''
     });
 
     const [partnerCompanyForm, setPartnerCompanyForm] = useState<CompanyFormState>({
@@ -442,7 +444,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
     }, []);
 
     useEffect(() => {
-        if (selectedSection !== 'team') return;
+        if (selectedSection !== 'team' && selectedSection !== 'site') return;
         if (workers.length > 0) return;
 
         let cancelled = false;
@@ -734,7 +736,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
             .object({
                 name: z.string().trim().min(1, '현장명을 입력해주세요.'),
                 companyId: z.string(),
-                responsibleTeamId: z.string()
+                responsibleTeamId: z.string(),
+                siteManagerId: z.string()
             })
             .superRefine((value, ctx) => {
                 if (value.companyId.trim().length > 0 && !companies.some(c => c.id === value.companyId)) {
@@ -749,6 +752,22 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                         message: '선택한 담당팀이 유효하지 않습니다.'
                     });
                 }
+                if (value.siteManagerId.trim().length > 0) {
+                    const selectedWorker = workers.find(w => w.id === value.siteManagerId);
+                    const role = String(selectedWorker?.role ?? '').trim();
+                    if (!selectedWorker || (role !== '팀장' && role !== '반장')) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: '현장책임자는 담당팀의 팀장 또는 반장만 선택할 수 있습니다.'
+                        });
+                    }
+                    if (selectedWorker && value.responsibleTeamId.trim().length > 0 && selectedWorker.teamId !== value.responsibleTeamId) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: '현장책임자는 선택한 담당팀 소속이어야 합니다.'
+                        });
+                    }
+                }
                 if (value.companyId.trim().length > 0 && value.responsibleTeamId.trim().length > 0) {
                     const team = teams.find(t => t.id === value.responsibleTeamId) ?? null;
                     if (team?.companyId && team.companyId !== value.companyId) {
@@ -759,7 +778,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     }
                 }
             });
-    }, [companies, teams]);
+    }, [companies, teams, workers]);
 
     const siteCompanyOptions = useMemo(() => {
         return companies
@@ -776,6 +795,38 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
             }))
             .filter(opt => opt.value.length > 0);
     }, [teams]);
+
+    const siteManagerOptions = useMemo(() => {
+        const selectedTeam = teams.find(t => t.id === siteForm.responsibleTeamId) ?? null;
+        const teamIds = new Set(
+            [siteForm.responsibleTeamId, selectedTeam?.id, selectedTeam?.legacyId]
+                .map(value => String(value ?? '').trim())
+                .filter(Boolean)
+        );
+        const teamName = String(selectedTeam?.name ?? '').trim();
+        const roleRank: Record<string, number> = { '팀장': 0, '반장': 1 };
+
+        return workers
+            .filter((worker) => {
+                const role = String(worker.role ?? '').trim();
+                if (role !== '팀장' && role !== '반장') return false;
+
+                const workerTeamId = String(worker.teamId ?? '').trim();
+                const workerTeamName = String(worker.teamName ?? '').trim();
+                return (workerTeamId && teamIds.has(workerTeamId)) || (!!teamName && workerTeamName === teamName);
+            })
+            .sort((a, b) => {
+                const rankA = roleRank[String(a.role ?? '').trim()] ?? 99;
+                const rankB = roleRank[String(b.role ?? '').trim()] ?? 99;
+                if (rankA !== rankB) return rankA - rankB;
+                return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
+            })
+            .map(worker => ({
+                value: worker.id ?? '',
+                label: `${worker.name}${worker.role ? ` (${worker.role})` : ''}`
+            }))
+            .filter(opt => opt.value.length > 0);
+    }, [siteForm.responsibleTeamId, teams, workers]);
 
     const partnerCompanySchema = useMemo(() => {
         return z.object({
@@ -1057,7 +1108,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                 const validated = siteSchema.parse({
                     name: siteForm.name,
                     companyId: siteForm.companyId,
-                    responsibleTeamId: siteForm.responsibleTeamId
+                    responsibleTeamId: siteForm.responsibleTeamId,
+                    siteManagerId: siteForm.siteManagerId
                 });
 
                 const resolvedCompany =
@@ -1069,6 +1121,10 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     validated.responsibleTeamId.trim().length > 0
                         ? teams.find(t => t.id === validated.responsibleTeamId) ?? null
                         : null;
+                const resolvedSiteManager =
+                    validated.siteManagerId.trim().length > 0
+                        ? workers.find(w => w.id === validated.siteManagerId) ?? null
+                        : null;
 
                 await siteService.addSite({
                     name: validated.name,
@@ -1077,6 +1133,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                     status: 'active',
                     responsibleTeamId: resolvedResponsibleTeam?.id ?? '',
                     responsibleTeamName: resolvedResponsibleTeam?.name ?? '',
+                    siteManagerId: resolvedSiteManager?.id ?? '',
+                    siteManagerName: resolvedSiteManager?.name ?? '',
                     companyId: resolvedCompany?.id ?? '',
                     companyName: resolvedCompany?.name ?? '',
                     color: ''
@@ -1087,7 +1145,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                 setSiteForm({
                     name: '',
                     companyId: '',
-                    responsibleTeamId: ''
+                    responsibleTeamId: '',
+                    siteManagerId: ''
                 });
                 return;
             }
@@ -1894,7 +1953,7 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                         onChange={(v) =>
                                             setSiteForm(prev => {
                                                 if (v.trim().length === 0) {
-                                                    return { ...prev, responsibleTeamId: '', companyId: '' };
+                                                    return { ...prev, responsibleTeamId: '', companyId: '', siteManagerId: '' };
                                                 }
 
                                                 const team = teams.find(t => t.id === v) ?? null;
@@ -1903,7 +1962,8 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                                 return {
                                                     ...prev,
                                                     responsibleTeamId: v,
-                                                    companyId: nextCompanyId
+                                                    companyId: nextCompanyId,
+                                                    siteManagerId: ''
                                                 };
                                             })
                                         }
@@ -1923,6 +1983,23 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
                                         ]}
                                     />
                                 </div>
+                                <Select
+                                    label="현장책임자(팀장/반장)"
+                                    value={siteForm.siteManagerId}
+                                    onChange={(v) => setSiteForm(prev => ({ ...prev, siteManagerId: v }))}
+                                    disabled={!siteForm.responsibleTeamId}
+                                    options={[
+                                        {
+                                            value: '',
+                                            label: !siteForm.responsibleTeamId
+                                                ? '담당팀을 먼저 선택'
+                                                : siteManagerOptions.length === 0
+                                                    ? '담당팀의 팀장/반장 없음'
+                                                    : '선택안함'
+                                        },
+                                        ...siteManagerOptions
+                                    ]}
+                                />
                             </div>
                         )}
 

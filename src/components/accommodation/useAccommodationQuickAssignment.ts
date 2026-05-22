@@ -1,19 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Accommodation } from '../../types/accommodation';
-import { AccommodationAssignment } from '../../types/accommodationAssignment';
+import { AccommodationAssignment, AccommodationAssignmentSource } from '../../types/accommodationAssignment';
 import { accommodationAssignmentService } from '../../services/accommodationAssignmentService';
 import { accommodationBillingTargetService } from '../../services/accommodationBillingTargetService';
 import { companyService } from '../../services/companyService';
 import { manpowerService, Worker } from '../../services/manpowerService';
+import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { teamService, Team } from '../../services/teamService';
 import { AccommodationBillingTarget, AccommodationBillingTargetType } from '../../types/accommodationBillingTarget';
 import { toast } from '../../utils/swal';
+import { buildCheongyeonEngTeams } from '../../utils/cheongyeonTeams';
+import { appendOfficeAssignmentTeam, buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
+import { normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { BillingMode } from '../support/BillingModeSelector';
 
 interface UseAccommodationQuickAssignmentParams {
     accommodation: Accommodation;
     activeAssignments: AccommodationAssignment[];
     isOpen: boolean;
+    initialBillingSplitMode?: boolean;
     onSuccess: () => void;
 }
 
@@ -27,17 +33,63 @@ interface WorkerOption {
     workerId: string;
     workerName: string;
     teamName: string;
+    teamId?: string;
+    source?: 'worker' | 'office_staff';
+}
+
+interface BillingTargetOption {
+    key: string;
+    type: AccommodationBillingTargetType;
+    id: string;
+    name: string;
+    group: string;
+    detail?: string;
 }
 
 type AssignmentTargetType = 'team' | 'worker';
 
 const normalizeKey = (value: unknown): string => String(value ?? '').trim();
-const getToday = (): string => format(new Date(), 'yyyy-MM-dd');
+const getToday = (): string => toShortYearDateInputValue(format(new Date(), 'yyyy-MM-dd'));
+const DEFAULT_BILLING_START_DATE = '2026-01-01';
+const getDefaultBillingStartDate = (): string => toShortYearDateInputValue(DEFAULT_BILLING_START_DATE) || '26-01-01';
+const displayDate = (value?: string | null): string => toShortYearDateInputValue(value) || '';
+const toDateText = (date: Date): string => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+const buildEndDateAsDayBefore = (startDate: string): string => {
+    const parsed = normalizeTypedDateInput(startDate);
+    if (!parsed) return '';
+    const [year, month, day] = parsed.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
+    date.setDate(date.getDate() - 1);
+    return toDateText(date);
+};
+const OFFICE_TARGET_ID = '__office__';
+const OFFICE_TARGET_NAME = '사무실';
+
+const getBillingTargetOptionKey = (type?: AccommodationBillingTargetType | null, id?: string | null): string => {
+    const normalizedType = normalizeKey(type);
+    const normalizedId = normalizeKey(id);
+    return normalizedType && normalizedId ? `${normalizedType}:${normalizedId}` : '';
+};
+
+const getOfficeStaffTargetId = (staff: OfficeStaff): string => (
+    normalizeKey(staff.id) || normalizeKey(staff.legacyId) || normalizeKey(staff.uid) || normalizeKey(staff.name)
+);
+
+const includesCheongyeonKeyword = (...values: unknown[]): boolean => {
+    const text = values.map((value) => String(value ?? '').toLowerCase()).join(' ');
+    return ['청연이엔지', '청연엔지', '청연', 'cheongyeon'].some((keyword) => text.includes(keyword));
+};
 
 export const useAccommodationQuickAssignment = ({
     accommodation,
     activeAssignments,
     isOpen,
+    initialBillingSplitMode = false,
     onSuccess
 }: UseAccommodationQuickAssignmentParams) => {
     const [loadingData, setLoadingData] = useState(false);
@@ -46,6 +98,7 @@ export const useAccommodationQuickAssignment = ({
 
     const [teams, setTeams] = useState<Team[]>([]);
     const [workers, setWorkers] = useState<Worker[]>([]);
+    const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
     const [currentBillingTarget, setCurrentBillingTarget] = useState<AccommodationBillingTarget | null>(null);
 
     const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -58,7 +111,11 @@ export const useAccommodationQuickAssignment = ({
     const [billingTargetType, setBillingTargetType] = useState<AccommodationBillingTargetType>('team');
     const [billingTeamId, setBillingTeamId] = useState('');
     const [billingTargetWorkerId, setBillingTargetWorkerId] = useState('');
+    const [selectedBillingTargetKey, setSelectedBillingTargetKey] = useState('');
+    const [billingTargetStartDate, setBillingTargetStartDate] = useState(getDefaultBillingStartDate());
+    const [billingTargetEndDate, setBillingTargetEndDate] = useState('');
     const [billingSelectionInitialized, setBillingSelectionInitialized] = useState(false);
+    const [billingMode, setBillingModeState] = useState<BillingMode>(initialBillingSplitMode ? 'split' : 'same');
 
     const teamByAnyId = useMemo(() => {
         const map = new Map<string, Team>();
@@ -92,9 +149,30 @@ export const useAccommodationQuickAssignment = ({
         return map;
     }, [workers]);
 
+    const selectedAssignmentTeam = useMemo(() => {
+        if (!selectedTeamId) return undefined;
+        return teamByAnyId.get(normalizeKey(selectedTeamId));
+    }, [selectedTeamId, teamByAnyId]);
+    const selectedAssignmentTeamIsOffice = isOfficeAssignmentTeam(selectedAssignmentTeam);
+    const officeStaffAssignmentOptions = useMemo(
+        () => buildOfficeStaffAssignmentOptions(officeStaffRows),
+        [officeStaffRows]
+    );
+
     const assignmentWorkerOptions = useMemo<WorkerOption[]>(() => {
+        if (selectedAssignmentTeamIsOffice) {
+            return officeStaffAssignmentOptions.map((staff) => ({
+                key: staff.id,
+                workerId: staff.id,
+                workerName: staff.name,
+                teamId: staff.teamId,
+                teamName: staff.teamName,
+                source: 'office_staff' as const
+            }));
+        }
+
         return workers
-            .map((worker: any) => {
+            .map((worker: any): WorkerOption | null => {
                 const workerId = normalizeKey(worker?.id) || normalizeKey(worker?.legacyId);
                 const workerName = normalizeKey(worker?.name);
                 if (!workerId || !workerName) return null;
@@ -107,12 +185,14 @@ export const useAccommodationQuickAssignment = ({
                     key: workerId,
                     workerId,
                     workerName,
-                    teamName: normalizeKey(matchedTeam?.name ?? worker?.teamName) || '팀 미지정'
+                    teamId: normalizeKey(matchedTeam?.id ?? worker?.teamId),
+                    teamName: normalizeKey(matchedTeam?.name ?? worker?.teamName) || '팀 미지정',
+                    source: 'worker' as const
                 };
             })
             .filter((item): item is WorkerOption => item !== null)
             .sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko-KR'));
-    }, [teamByAnyId, workers]);
+    }, [officeStaffAssignmentOptions, selectedAssignmentTeamIsOffice, teamByAnyId, workers]);
 
     const selectedAssignmentWorkerId = selectedWorkerIds[0] ?? '';
 
@@ -241,6 +321,104 @@ export const useAccommodationQuickAssignment = ({
         return Array.from(map.values()).sort((a, b) => a.workerName.localeCompare(b.workerName, 'ko-KR'));
     }, [activeAssignmentsInScope, currentBillingTarget, getBillingWorkerKey, teamByAnyId, workerByAnyId, workers]);
 
+    const selectableTeamIds = useMemo(() => new Set(
+        teams
+            .flatMap((team) => [team.id, team.legacyId])
+            .map((value) => normalizeKey(value))
+            .filter(Boolean)
+    ), [teams]);
+
+    const selectableTeamNames = useMemo(() => new Set(
+        teams
+            .map((team) => normalizeKey(team.name))
+            .filter(Boolean)
+    ), [teams]);
+
+    const billingTargetOptions = useMemo<BillingTargetOption[]>(() => {
+        const teamOptions: BillingTargetOption[] = teams
+            .filter((team) => Boolean(team.id && team.name) && !isOfficeAssignmentTeam(team))
+            .slice()
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
+            .map((team) => ({
+                key: getBillingTargetOptionKey('team', String(team.id)),
+                type: 'team',
+                id: String(team.id),
+                name: String(team.name),
+                group: '청연이엔지 소속팀',
+                detail: normalizeKey(team.companyName)
+            }));
+
+        const workerOptions: BillingTargetOption[] = workers
+            .filter((worker) => {
+                const teamId = normalizeKey(worker.teamId);
+                const teamName = normalizeKey(worker.teamName);
+                return (
+                    selectableTeamIds.has(teamId) ||
+                    selectableTeamNames.has(teamName) ||
+                    includesCheongyeonKeyword(worker.companyName, worker.teamType, worker.teamName)
+                );
+            })
+            .map((worker): BillingTargetOption | null => {
+                const id = normalizeKey(worker.id) || normalizeKey(worker.legacyId) || normalizeKey(worker.name);
+                const name = normalizeKey(worker.name);
+                if (!id || !name) return null;
+                return {
+                    key: getBillingTargetOptionKey('worker', id),
+                    type: 'worker' as const,
+                    id,
+                    name,
+                    group: '작업자',
+                    detail: normalizeKey(worker.teamName) || normalizeKey(worker.companyName)
+                };
+            })
+            .filter((item): item is BillingTargetOption => item !== null)
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+
+        const officeStaffOptions: BillingTargetOption[] = officeStaffRows
+            .filter((staff) => staff.isActive !== false)
+            .map((staff): BillingTargetOption | null => {
+                const id = getOfficeStaffTargetId(staff);
+                const name = normalizeKey(staff.name);
+                if (!id || !name) return null;
+                return {
+                    key: getBillingTargetOptionKey('office_staff', id),
+                    type: 'office_staff' as const,
+                    id,
+                    name,
+                    group: '사무실직원',
+                    detail: normalizeKey(staff.department) || normalizeKey(staff.role)
+                };
+            })
+            .filter((item): item is BillingTargetOption => item !== null)
+            .sort((a, b) => a.name.localeCompare(b.name, 'ko-KR'));
+
+        return [
+            ...teamOptions,
+            ...workerOptions,
+            {
+                key: getBillingTargetOptionKey('office', OFFICE_TARGET_ID),
+                type: 'office',
+                id: OFFICE_TARGET_ID,
+                name: OFFICE_TARGET_NAME,
+                group: '사무실',
+                detail: '사무실 공통 청구'
+            },
+            ...officeStaffOptions
+        ];
+    }, [officeStaffRows, selectableTeamIds, selectableTeamNames, teams, workers]);
+
+    const billingTargetOptionByKey = useMemo(() => {
+        const map = new Map<string, BillingTargetOption>();
+        billingTargetOptions.forEach((option) => map.set(option.key, option));
+        return map;
+    }, [billingTargetOptions]);
+
+    const selectedBillingTarget = useMemo(
+        () => billingTargetOptionByKey.get(selectedBillingTargetKey) ?? null,
+        [billingTargetOptionByKey, selectedBillingTargetKey]
+    );
+    const showBillingDateFields = Boolean(selectedBillingTarget && billingMode === 'split');
+
     const filteredWorkers = useMemo(() => {
         if (!selectedTeamId) return [];
         let list = workers.filter((worker) => worker.teamId === selectedTeamId);
@@ -287,26 +465,21 @@ export const useAccommodationQuickAssignment = ({
     const loadDependencyData = useCallback(async () => {
         setLoadingData(true);
         try {
-            const [teamsData, workersData, companies] = await Promise.all([
+            const [teamsData, workersData, companies, officeStaffData] = await Promise.all([
                 teamService.getTeams(),
                 manpowerService.getWorkers(),
-                companyService.getCompanies()
+                companyService.getCompanies(),
+                officeStaffService.getOfficeStaff().catch(() => [] as OfficeStaff[])
             ]);
 
-            const cheongyeonCompanies = companies.filter((company: any) => company.name.includes('청연'));
-            const cheongyeonIdSet = new Set(cheongyeonCompanies.map((company: any) => company.id).filter(Boolean));
-            const cheongyeonNameSet = new Set(cheongyeonCompanies.map((company: any) => company.name));
-
-            const filteredTeams = teamsData
-                .filter((team: any) => {
-                    if (team.companyId && cheongyeonIdSet.has(team.companyId)) return true;
-                    if (team.companyName && cheongyeonNameSet.has(team.companyName)) return true;
-                    return false;
-                })
-                .sort((a: Team, b: Team) => (a.name || '').localeCompare(b.name || '', 'ko-KR'));
+            const filteredTeams = appendOfficeAssignmentTeam(
+                buildCheongyeonEngTeams(teamsData, companies),
+                teamsData
+            );
 
             setTeams(filteredTeams);
             setWorkers(workersData);
+            setOfficeStaffRows(officeStaffData);
         } catch (error) {
             console.error(error);
             toast.error('데이터를 불러오지 못했습니다.');
@@ -344,55 +517,44 @@ export const useAccommodationQuickAssignment = ({
         if (!isOpen || billingSelectionInitialized) return;
 
         if (currentBillingTarget) {
-            if (currentBillingTarget.targetType === 'worker') {
-                setBillingTargetType('worker');
-                const rawWorkerId = normalizeKey(currentBillingTarget.workerId);
-                const canonicalWorkerId = normalizeKey(workerByAnyId.get(rawWorkerId)?.id ?? rawWorkerId);
-                const fallbackWorkerName = normalizeKey(currentBillingTarget.workerName);
-                const nextWorkerKey = canonicalWorkerId || (fallbackWorkerName ? `name:${fallbackWorkerName}` : '');
-                const resolvedWorkerKey = billingWorkerOptions.some((option) => option.key === nextWorkerKey)
-                    ? nextWorkerKey
-                    : (billingWorkerOptions[0]?.key ?? nextWorkerKey);
-                setBillingTargetWorkerId(resolvedWorkerKey);
-                setBillingTeamId('');
-            } else {
-                setBillingTargetType('team');
-                const rawTeamId = normalizeKey(currentBillingTarget.teamId);
-                const canonicalTeamId = normalizeKey(teamByAnyId.get(rawTeamId)?.id ?? rawTeamId);
-                const fallbackTeamName = normalizeKey(currentBillingTarget.teamName);
-                const nextTeamId = canonicalTeamId || (fallbackTeamName ? `name:${fallbackTeamName}` : '');
-                const resolvedTeamId = billingTeamOptions.some((option) => option.id === nextTeamId)
-                    ? nextTeamId
-                    : (billingTeamOptions[0]?.id ?? nextTeamId);
-                setBillingTeamId(resolvedTeamId);
-                setBillingTargetWorkerId('');
-            }
+            const currentTargetId = currentBillingTarget.targetType === 'team' || currentBillingTarget.targetType === 'office'
+                ? normalizeKey(currentBillingTarget.teamId) || normalizeKey(currentBillingTarget.teamName)
+                : normalizeKey(currentBillingTarget.workerId) || normalizeKey(currentBillingTarget.workerName);
+            const nextKey = getBillingTargetOptionKey(currentBillingTarget.targetType, currentTargetId);
+            setSelectedBillingTargetKey(
+                billingTargetOptionByKey.has(nextKey)
+                    ? nextKey
+                    : (billingTargetOptions[0]?.key ?? nextKey)
+            );
+            setBillingTargetType(currentBillingTarget.targetType);
+            setBillingTeamId(normalizeKey(currentBillingTarget.teamId));
+            setBillingTargetWorkerId(normalizeKey(currentBillingTarget.workerId));
+            setBillingTargetStartDate(displayDate(currentBillingTarget.startDate) || getDefaultBillingStartDate());
+            setBillingTargetEndDate(displayDate(currentBillingTarget.endDate));
+            setBillingModeState(initialBillingSplitMode ? 'split' : 'custom');
             setBillingSelectionInitialized(true);
             return;
         }
 
-        if (billingTeamOptions.length > 0) {
-            setBillingTargetType('team');
-            setBillingTeamId(billingTeamOptions[0].id);
+        if (billingTargetOptions.length > 0) {
+            const first = billingTargetOptions[0];
+            setSelectedBillingTargetKey(first.key);
+            setBillingTargetType(first.type);
+            setBillingTeamId(first.type === 'team' ? first.id : '');
             setBillingTargetWorkerId('');
+            setBillingTargetStartDate(getDefaultBillingStartDate());
+            setBillingTargetEndDate('');
+            setBillingModeState(initialBillingSplitMode ? 'split' : 'same');
             setBillingSelectionInitialized(true);
             return;
-        }
-
-        if (billingWorkerOptions.length > 0) {
-            setBillingTargetType('worker');
-            setBillingTargetWorkerId(billingWorkerOptions[0].key);
-            setBillingTeamId('');
-            setBillingSelectionInitialized(true);
         }
     }, [
         billingSelectionInitialized,
-        billingTeamOptions,
-        billingWorkerOptions,
+        billingTargetOptionByKey,
+        billingTargetOptions,
         currentBillingTarget,
-        isOpen,
-        teamByAnyId,
-        workerByAnyId
+        initialBillingSplitMode,
+        isOpen
     ]);
 
     useEffect(() => {
@@ -418,6 +580,114 @@ export const useAccommodationQuickAssignment = ({
             setBillingTargetWorkerId(billingWorkerOptions[0].key);
         }
     }, [billingTargetWorkerId, billingWorkerOptions]);
+
+    const setBillingMode = useCallback((mode: BillingMode) => {
+        setBillingModeState(mode);
+        if (mode === 'split') {
+            setBillingTargetStartDate(getDefaultBillingStartDate());
+            setBillingTargetEndDate('');
+            return;
+        }
+
+        if (mode === 'custom') {
+            setBillingTargetStartDate(displayDate(currentBillingTarget?.startDate) || getDefaultBillingStartDate());
+            setBillingTargetEndDate(displayDate(currentBillingTarget?.endDate));
+            return;
+        }
+
+        setBillingTargetStartDate(getDefaultBillingStartDate());
+        setBillingTargetEndDate('');
+    }, [currentBillingTarget]);
+
+    const buildSelectedBillingTargetInput = useCallback((
+        target: BillingTargetOption,
+        startDate: string,
+        endDate: string,
+        id?: string
+    ) => ({
+        id,
+        accommodationId: accommodation.id,
+        accommodationName: accommodation.name,
+        targetType: target.type,
+        teamId: target.type === 'team' || target.type === 'office'
+            ? target.id
+            : undefined,
+        teamName: target.type === 'team' || target.type === 'office'
+            ? target.name
+            : undefined,
+        workerId: target.type === 'worker' || target.type === 'office_staff'
+            ? target.id
+            : undefined,
+        workerName: target.type === 'worker' || target.type === 'office_staff'
+            ? target.name
+            : undefined,
+        startDate,
+        endDate: endDate || undefined
+    }), [accommodation.id, accommodation.name]);
+
+    const buildActiveAssignmentBillingTargetInput = useCallback((startDate: string, endDate: string) => {
+        const assignment = activeAssignmentsInScope[0];
+        if (!assignment) return null;
+
+        const isTeamAssignment = assignment.source === 'team' ||
+            (!normalizeKey(assignment.workerId) && !normalizeKey(assignment.workerName));
+
+        if (isTeamAssignment) {
+            const teamId = normalizeKey(assignment.teamId) || normalizeKey(assignment.teamName);
+            const teamName = normalizeKey(assignment.teamName);
+            if (!teamId && !teamName) return null;
+
+            return {
+                accommodationId: accommodation.id,
+                accommodationName: accommodation.name,
+                targetType: 'team' as const,
+                teamId,
+                teamName,
+                startDate,
+                endDate,
+                memo: '분할 전 기본 입실자'
+            };
+        }
+
+        const workerId = normalizeKey(assignment.workerId) || normalizeKey(assignment.workerName);
+        const workerName = normalizeKey(assignment.workerName);
+        if (!workerId && !workerName) return null;
+
+        return {
+            accommodationId: accommodation.id,
+            accommodationName: accommodation.name,
+            targetType: assignment.source === 'office_staff' ? 'office_staff' as const : 'worker' as const,
+            workerId,
+            workerName,
+            startDate,
+            endDate,
+            memo: '분할 전 기본 입실자'
+        };
+    }, [accommodation.id, accommodation.name, activeAssignmentsInScope]);
+
+    const applySameBillingTarget = useCallback(async (effectiveDate: string = DEFAULT_BILLING_START_DATE) => {
+        const targets = await accommodationBillingTargetService.listTargetsByAccommodationId(accommodation.id);
+        const previousEndDate = buildEndDateAsDayBefore(effectiveDate);
+        const deleteIds = targets
+            .filter((target) => normalizeKey(target.startDate) >= effectiveDate)
+            .map((target) => target.id)
+            .filter(Boolean);
+        const closeRecords = targets
+            .filter((target) => {
+                const startDate = normalizeKey(target.startDate);
+                if (!startDate || startDate >= effectiveDate) return false;
+                const endDate = normalizeKey(target.endDate);
+                return !endDate || endDate >= effectiveDate;
+            })
+            .map((target) => ({ id: target.id, endDate: previousEndDate }))
+            .filter((target) => Boolean(target.id && target.endDate));
+
+        await accommodationBillingTargetService.applyTargetChanges({
+            accommodationId: accommodation.id,
+            closeRecords,
+            deleteIds
+        });
+    }, [accommodation.id]);
 
     const handleToggleWorker = useCallback((id: string) => {
         setSelectedWorkerIds((previous) => {
@@ -446,7 +716,7 @@ export const useAccommodationQuickAssignment = ({
             setSelectedWorkerIds([]);
         }
 
-        setStartDate(assignment.startDate);
+        setStartDate(displayDate(assignment.startDate) || getToday());
         setWorkerSearch('');
     }, [setSelectedAssignmentWorkerId, teamByAnyId, teamByName, workerByAnyId]);
 
@@ -464,9 +734,14 @@ export const useAccommodationQuickAssignment = ({
             toast.error('배정 시작일을 선택해주세요.');
             return;
         }
+        const normalizedStartDate = normalizeTypedDateInput(startDate);
+        if (!normalizedStartDate) {
+            toast.error('배정 시작일을 올바른 날짜로 입력해주세요.');
+            return;
+        }
 
         const selectedTeam = teams.find((team) => String(team.id) === String(selectedTeamId));
-        const selectedWorker = workers.find((item) => String(item.id) === String(selectedAssignmentWorkerId));
+        const selectedWorker = assignmentWorkerOptions.find((item) => String(item.key) === String(selectedAssignmentWorkerId));
 
         if (assignmentTargetType === 'team' && !selectedTeam) {
             toast.error('배정할 팀을 선택해주세요.');
@@ -478,16 +753,19 @@ export const useAccommodationQuickAssignment = ({
             return;
         }
 
-        const endDate = accommodationAssignmentService.buildEndDateAsDayBefore(startDate);
+        const endDate = accommodationAssignmentService.buildEndDateAsDayBefore(normalizedStartDate);
         const activeIdsToEnd = activeAssignmentsInScope
             .filter((assignment) => assignment.id && assignment.id !== editingAssignmentId)
             .map((assignment) => assignment.id)
             .filter((id): id is string => Boolean(id));
 
         const workerTeam = selectedWorker?.teamId ? teamByAnyId.get(String(selectedWorker.teamId)) : undefined;
+        const nextAssignmentSource: AccommodationAssignmentSource = assignmentTargetType === 'worker'
+            ? (selectedWorker?.source === 'office_staff' ? 'office_staff' : 'worker')
+            : 'team';
         const nextAssignment = {
-            workerId: assignmentTargetType === 'worker' ? String(selectedWorker?.id ?? '') : '',
-            workerName: assignmentTargetType === 'worker' ? selectedWorker?.name ?? '' : '',
+            workerId: assignmentTargetType === 'worker' ? String(selectedWorker?.workerId ?? '') : '',
+            workerName: assignmentTargetType === 'worker' ? selectedWorker?.workerName ?? '' : '',
             teamId: assignmentTargetType === 'team'
                 ? selectedTeam?.id
                 : (workerTeam?.id ?? selectedWorker?.teamId),
@@ -497,8 +775,8 @@ export const useAccommodationQuickAssignment = ({
             accommodationId: accommodation.id,
             accommodationName: accommodation.name,
             status: 'active' as const,
-            startDate,
-            source: assignmentTargetType
+            startDate: normalizedStartDate,
+            source: nextAssignmentSource
         };
 
         setSubmitting(true);
@@ -536,79 +814,150 @@ export const useAccommodationQuickAssignment = ({
         selectedTeamId,
         selectedWorkerIds,
         startDate,
+        assignmentWorkerOptions,
         teamByAnyId,
         teams,
-        workers
     ]);
 
     const handleApplyBillingTarget = useCallback(async () => {
-        if (billingTargetType === 'team') {
-            if (!billingTeamId) {
-                toast.error('청구 대상 팀을 선택해주세요.');
-                return;
-            }
-            const selectedOption = billingTeamOptions.find((option) => option.id === billingTeamId);
-            if (!selectedOption) {
-                toast.error('선택한 팀 정보를 확인할 수 없습니다.');
-                return;
-            }
+        if (billingMode === 'same') {
+            const ok = window.confirm(
+                currentBillingTarget
+                    ? '숙소의 26-01-01 이후 별도 청구를 종료하고 현재 입실자와 동일하게 청구할까요?'
+                    : '별도 청구대상 없이 현재 입실자를 기본 청구대상으로 둘까요?'
+            );
+            if (!ok) return;
 
             setBillingSubmitting(true);
             try {
-                await accommodationBillingTargetService.upsertTarget({
-                    accommodationId: accommodation.id,
-                    accommodationName: accommodation.name,
-                    targetType: 'team',
-                    teamId: selectedOption.id.startsWith('name:') ? undefined : selectedOption.id,
-                    teamName: selectedOption.name
-                });
-                toast.success('청구대상(팀) 저장 완료');
+                await applySameBillingTarget();
+                toast.success('기준일 이후 숙소 청구를 현재 입실자와 동일하게 변경했습니다.');
+                setCurrentBillingTarget(null);
+                setBillingTargetType('team');
+                setBillingTargetWorkerId('');
+                setBillingTeamId(billingTeamOptions[0]?.id ?? '');
+                setSelectedBillingTargetKey(billingTargetOptions[0]?.key ?? '');
+                setBillingTargetStartDate(getDefaultBillingStartDate());
+                setBillingTargetEndDate('');
                 onSuccess();
             } catch (error) {
                 console.error(error);
-                toast.error('청구대상 저장 실패');
+                toast.error('청구 처리에 실패했습니다.');
             } finally {
                 setBillingSubmitting(false);
             }
             return;
         }
 
-        if (!billingTargetWorkerId) {
-            toast.error('청구 대상 개인을 선택해주세요.');
+        if (!selectedBillingTarget) {
+            toast.error('청구대상을 선택해주세요.');
             return;
         }
-        const selectedWorkerOption = billingWorkerOptions.find((option) => option.key === billingTargetWorkerId);
-        if (!selectedWorkerOption) {
-            toast.error('선택한 개인 정보를 확인할 수 없습니다.');
+        if (showBillingDateFields && !billingTargetStartDate) {
+            toast.error('기간 시작일을 입력해주세요.');
+            return;
+        }
+        const normalizedBillingStartDate = normalizeTypedDateInput(billingTargetStartDate) ?? DEFAULT_BILLING_START_DATE;
+        if (!normalizedBillingStartDate) {
+            toast.error('기간 시작일을 올바른 날짜로 입력해주세요.');
+            return;
+        }
+        let normalizedBillingEndDate = '';
+        if (billingTargetEndDate) {
+            const parsedBillingEndDate = normalizeTypedDateInput(billingTargetEndDate);
+            if (!parsedBillingEndDate) {
+                toast.error('기간 종료일을 올바른 날짜로 입력해주세요.');
+                return;
+            }
+            normalizedBillingEndDate = parsedBillingEndDate;
+        }
+        setBillingTargetStartDate(displayDate(normalizedBillingStartDate));
+        setBillingTargetEndDate(displayDate(normalizedBillingEndDate));
+
+        if (normalizedBillingEndDate && normalizedBillingEndDate < normalizedBillingStartDate) {
+            toast.error('청구 종료일은 시작일보다 빠를 수 없습니다.');
+            return;
+        }
+        const shouldCreateSplitTarget = Boolean(billingMode === 'split' && currentBillingTarget);
+        if (shouldCreateSplitTarget && currentBillingTarget?.startDate && normalizedBillingStartDate <= currentBillingTarget.startDate) {
+            toast.error(`기간 시작일은 기존 최신 청구 시작일(${displayDate(currentBillingTarget.startDate)})보다 뒤여야 합니다.`);
+            return;
+        }
+        if (billingMode === 'split' && !currentBillingTarget && normalizedBillingStartDate <= DEFAULT_BILLING_START_DATE) {
+            toast.error('기간 시작일은 기본 청구 시작일(26-01-01)보다 뒤여야 합니다.');
             return;
         }
 
         setBillingSubmitting(true);
         try {
-            await accommodationBillingTargetService.upsertTarget({
+            const upserts = [];
+            const closeRecords: Array<{ id: string; endDate: string }> = [];
+
+            if (shouldCreateSplitTarget && currentBillingTarget) {
+                const previousEndDate = buildEndDateAsDayBefore(normalizedBillingStartDate);
+                if (previousEndDate && (!currentBillingTarget.endDate || currentBillingTarget.endDate >= normalizedBillingStartDate)) {
+                    closeRecords.push({ id: currentBillingTarget.id, endDate: previousEndDate });
+                }
+            } else if (billingMode === 'split' && !currentBillingTarget) {
+                const previousEndDate = buildEndDateAsDayBefore(normalizedBillingStartDate);
+                const defaultInput = buildActiveAssignmentBillingTargetInput(DEFAULT_BILLING_START_DATE, previousEndDate);
+                if (!defaultInput) {
+                    throw new Error('분할 전 기본 입실자가 없어 분할청구를 만들 수 없습니다.');
+                }
+                upserts.push(defaultInput);
+            }
+
+            const targetInput = buildSelectedBillingTargetInput(
+                selectedBillingTarget,
+                normalizedBillingStartDate,
+                normalizedBillingEndDate,
+                billingMode === 'split' ? undefined : currentBillingTarget?.id
+            );
+            upserts.push(targetInput);
+
+            const savedIds = billingMode === 'split'
+                ? await accommodationBillingTargetService.applyTargetChanges({
+                    accommodationId: accommodation.id,
+                    closeRecords,
+                    upserts
+                })
+                : [await accommodationBillingTargetService.upsertTarget(targetInput)];
+            const savedTargetId = savedIds[savedIds.length - 1] ?? currentBillingTarget?.id ?? '';
+            setCurrentBillingTarget({
+                id: savedTargetId,
                 accommodationId: accommodation.id,
                 accommodationName: accommodation.name,
-                targetType: 'worker',
-                workerId: selectedWorkerOption.workerId || undefined,
-                workerName: selectedWorkerOption.workerName
+                targetType: selectedBillingTarget.type,
+                teamId: selectedBillingTarget.type === 'team' || selectedBillingTarget.type === 'office' ? selectedBillingTarget.id : undefined,
+                teamName: selectedBillingTarget.type === 'team' || selectedBillingTarget.type === 'office' ? selectedBillingTarget.name : undefined,
+                workerId: selectedBillingTarget.type === 'worker' || selectedBillingTarget.type === 'office_staff' ? selectedBillingTarget.id : undefined,
+                workerName: selectedBillingTarget.type === 'worker' || selectedBillingTarget.type === 'office_staff' ? selectedBillingTarget.name : undefined,
+                startDate: normalizedBillingStartDate,
+                endDate: normalizedBillingEndDate || undefined
             });
-            toast.success('청구대상(개인) 저장 완료');
+            toast.success('숙소 청구대상이 설정되었습니다.');
             onSuccess();
         } catch (error) {
             console.error(error);
-            toast.error('청구대상 저장 실패');
+            toast.error(error instanceof Error ? error.message : '청구 처리에 실패했습니다.');
         } finally {
             setBillingSubmitting(false);
         }
     }, [
         accommodation.id,
         accommodation.name,
-        billingTargetType,
-        billingTeamId,
-        billingTargetWorkerId,
+        applySameBillingTarget,
+        buildActiveAssignmentBillingTargetInput,
+        buildSelectedBillingTargetInput,
+        billingMode,
         billingTeamOptions,
-        billingWorkerOptions,
-        onSuccess
+        billingTargetOptions,
+        billingTargetEndDate,
+        billingTargetStartDate,
+        currentBillingTarget,
+        onSuccess,
+        selectedBillingTarget,
+        showBillingDateFields
     ]);
 
     const handleDeleteBillingTarget = useCallback(async () => {
@@ -618,26 +967,32 @@ export const useAccommodationQuickAssignment = ({
         setBillingSubmitting(true);
         try {
             await accommodationBillingTargetService.deleteTarget(accommodation.id);
-            toast.success('청구대상 설정이 삭제되었습니다.');
+            toast.success('숙소 청구가 취소되었습니다.');
             setCurrentBillingTarget(null);
             setBillingTargetType('team');
             setBillingTargetWorkerId('');
             setBillingTeamId(billingTeamOptions[0]?.id ?? '');
+            setSelectedBillingTargetKey(billingTargetOptions[0]?.key ?? '');
+            setBillingTargetStartDate(getDefaultBillingStartDate());
+            setBillingTargetEndDate('');
             onSuccess();
         } catch (error) {
             console.error(error);
-            toast.error('청구대상 삭제 실패');
+            toast.error('미청구 처리 실패');
         } finally {
             setBillingSubmitting(false);
         }
-    }, [accommodation.id, billingTeamOptions, onSuccess]);
+    }, [accommodation.id, billingTargetOptions, billingTeamOptions, onSuccess]);
 
     const handleCheckout = useCallback(
         async (assignmentId: string, workerName: string) => {
             if (!window.confirm(`${workerName}님을 퇴실 처리하시겠습니까?`)) return;
 
             try {
-                await accommodationAssignmentService.endAssignment(assignmentId, getToday());
+                await accommodationAssignmentService.endAssignment(
+                    assignmentId,
+                    normalizeTypedDateInput(getToday()) ?? format(new Date(), 'yyyy-MM-dd')
+                );
                 toast.success('퇴실 처리되었습니다.');
                 onSuccess();
             } catch (error) {
@@ -649,14 +1004,21 @@ export const useAccommodationQuickAssignment = ({
 
     const currentBillingTargetDisplay = useMemo(() => {
         if (!currentBillingTarget) return '미설정';
-        if (currentBillingTarget.targetType === 'worker') {
+        const period = currentBillingTarget.startDate || currentBillingTarget.endDate
+            ? ` · ${displayDate(currentBillingTarget.startDate) || '?'}~${displayDate(currentBillingTarget.endDate) || '계속'}`
+            : '';
+        if (currentBillingTarget.targetType === 'worker' || currentBillingTarget.targetType === 'office_staff') {
             const workerName = normalizeKey(currentBillingTarget.workerName);
             const workerId = normalizeKey(currentBillingTarget.workerId);
-            return workerName || (workerId ? `ID:${workerId.slice(0, 8)}` : '개인(이름 없음)');
+            const label = currentBillingTarget.targetType === 'office_staff' ? '사무실직원' : '작업자';
+            return `${label} · ${workerName || (workerId ? `ID:${workerId.slice(0, 8)}` : '이름 없음')}${period}`;
+        }
+        if (currentBillingTarget.targetType === 'office') {
+            return `사무실 · ${normalizeKey(currentBillingTarget.teamName) || OFFICE_TARGET_NAME}${period}`;
         }
         const teamName = normalizeKey(currentBillingTarget.teamName);
         const teamId = normalizeKey(currentBillingTarget.teamId);
-        return teamName || (teamId ? `팀ID:${teamId.slice(0, 8)}` : '팀(이름 없음)');
+        return `팀 · ${teamName || (teamId ? `팀ID:${teamId.slice(0, 8)}` : '이름 없음')}${period}`;
     }, [currentBillingTarget]);
 
     return {
@@ -685,6 +1047,17 @@ export const useAccommodationQuickAssignment = ({
         setBillingTargetWorkerId,
         billingTeamOptions,
         billingWorkerOptions,
+        billingTargetOptions,
+        billingMode,
+        setBillingMode,
+        selectedBillingTargetKey,
+        setSelectedBillingTargetKey,
+        selectedBillingTarget,
+        showBillingDateFields,
+        billingTargetStartDate,
+        setBillingTargetStartDate,
+        billingTargetEndDate,
+        setBillingTargetEndDate,
         currentBillingTarget,
         currentBillingTargetDisplay,
         getBillingWorkerKey,

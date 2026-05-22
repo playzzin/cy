@@ -87,6 +87,7 @@ const SiteManagement: React.FC = () => {
         const data = sites.map(site => ({
             '현장명': site.name,
             '담당팀': site.responsibleTeamName || '',
+            '현장책임자': site.siteManagerName || '',
             '현장코드': site.code || '',
             '주소': site.address || '',
             '상태': site.status === 'active' ? '진행중' : site.status === 'completed' ? '완료' : '예정'
@@ -96,6 +97,7 @@ const SiteManagement: React.FC = () => {
             data.push({
                 '현장명': '예시현장',
                 '담당팀': '예시팀',
+                '현장책임자': '홍길동',
                 '현장코드': 'SITE-001',
                 '주소': '서울시 강남구',
                 '상태': '진행중'
@@ -277,7 +279,9 @@ const SiteManagement: React.FC = () => {
 
         let updates: Partial<Site> = {
             responsibleTeamId: teamId,
-            responsibleTeamName: team.name || ''
+            responsibleTeamName: team.name || '',
+            siteManagerId: '',
+            siteManagerName: ''
         };
 
         let typeLabel = '';
@@ -386,6 +390,7 @@ const SiteManagement: React.FC = () => {
                                 <tr>
                                     <th className="px-6 py-3 border-b border-slate-200">현장명</th>
                                     <th className="px-6 py-3 border-b border-slate-200">담당팀</th>
+                                    <th className="px-6 py-3 border-b border-slate-200">현장책임자</th>
                                     <th className="px-4 py-3 border-b border-slate-200">발주사</th>
                                     <th className="px-4 py-3 border-b border-slate-200">시공사</th>
                                     <th className="px-4 py-3 border-b border-slate-200">협력사</th>
@@ -399,9 +404,9 @@ const SiteManagement: React.FC = () => {
                             </thead>
                             <tbody className="divide-y divide-slate-100 text-sm">
                                 {isLoading ? (
-                                    <tr><td colSpan={10} className="text-center py-10">로딩중...</td></tr>
+                                    <tr><td colSpan={11} className="text-center py-10">로딩중...</td></tr>
                                 ) : sites.length === 0 ? (
-                                    <tr><td colSpan={10} className="text-center py-10 text-slate-400">등록된 현장이 없습니다.</td></tr>
+                                    <tr><td colSpan={11} className="text-center py-10 text-slate-400">등록된 현장이 없습니다.</td></tr>
                                 ) : (
                                     sites.map((site) => {
                                         const company = companies.find(c => c.id === site.companyId);
@@ -429,6 +434,9 @@ const SiteManagement: React.FC = () => {
                                                             <option key={t.id} value={t.id}>{t.name}</option>
                                                         ))}
                                                     </select>
+                                                </td>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {site.siteManagerName || <span className="text-slate-300">-</span>}
                                                 </td>
 
                                                 {/* Client (발주사) Editable */}

@@ -433,6 +433,12 @@ const SiteColumn = ({
                             {responsibleTeamCompanyName && (
                                 <span className="text-slate-500">{responsibleTeamCompanyName}</span>
                             )}
+                            {site.siteManagerName && (
+                                <>
+                                    <span className="text-slate-300 mx-1">|</span>
+                                    <span className="text-slate-500">책임자:{site.siteManagerName}</span>
+                                </>
+                            )}
                             {site.clientCompanyName && site.clientCompanyName.trim() !== '' && (
                                 <>
                                     <span className="text-slate-300 mx-1">|</span>
@@ -1477,6 +1483,8 @@ const DailyReportDragDropPage = () => {
                     siteName: site.name,
                     responsibleTeamId: site.responsibleTeamId || '',
                     responsibleTeamName: site.responsibleTeamName || '',
+                    siteManagerId: site.siteManagerId || '',
+                    siteManagerName: site.siteManagerName || '',
 
                     companyId: site.clientCompanyId || '',
                     companyName: site.clientCompanyName || '',

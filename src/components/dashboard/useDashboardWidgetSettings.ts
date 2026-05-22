@@ -3,6 +3,9 @@ import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
     faBuilding,
     faCalendarDay,
+    faChartLine,
+    faClipboardList,
+    faCloud,
     faHardHat,
     faListCheck,
     faUsers,
@@ -15,7 +18,8 @@ import {
     type DashboardWidgetPreferenceMap,
 } from '../../services/dashboardWidgetPreferenceService';
 
-export type DashboardWidgetKind = 'summary' | 'ranking';
+export type DashboardWidgetKind = 'summary' | 'ranking' | 'weather';
+export type DashboardWidgetValueFormat = 'manDay' | 'integer';
 
 export interface DashboardWidgetDefinition {
     key: string;
@@ -24,6 +28,9 @@ export interface DashboardWidgetDefinition {
     kind: DashboardWidgetKind;
     icon: IconDefinition;
     color: 'blue' | 'emerald' | 'amber' | 'violet' | 'cyan' | 'rose';
+    scopeLabel?: '전체' | '팀별' | '현장별' | '작업자별' | '날씨';
+    valueFormat?: DashboardWidgetValueFormat;
+    valueUnit?: string;
 }
 
 export interface DashboardWidgetSettings {
@@ -35,11 +42,13 @@ export interface DashboardWidgetSettings {
     loading: boolean;
     saving: boolean;
     maxWidgets: number;
-    saveSelection: (keys: string[]) => Promise<void>;
+    weatherLocationKey: string;
+    saveSelection: (keys: string[], options?: { weatherLocationKey?: string }) => Promise<void>;
     resetSelection: () => Promise<void>;
 }
 
-export const MAX_DASHBOARD_WIDGETS = 6;
+export const MAX_DASHBOARD_WIDGETS = 9;
+const DEFAULT_WEATHER_LOCATION_KEY = 'seoul';
 
 const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     {
@@ -49,6 +58,7 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'summary',
         icon: faCalendarDay,
         color: 'blue',
+        scopeLabel: '팀별',
     },
     {
         key: 'registered-workers',
@@ -57,6 +67,7 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'summary',
         icon: faUsers,
         color: 'emerald',
+        scopeLabel: '팀별',
     },
     {
         key: 'registered-sites',
@@ -65,6 +76,7 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'summary',
         icon: faBuilding,
         color: 'amber',
+        scopeLabel: '팀별',
     },
     {
         key: 'site-month-manday',
@@ -73,6 +85,9 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'ranking',
         icon: faBuilding,
         color: 'violet',
+        scopeLabel: '현장별',
+        valueFormat: 'manDay',
+        valueUnit: '공',
     },
     {
         key: 'worker-month-manday',
@@ -81,6 +96,9 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'ranking',
         icon: faHardHat,
         color: 'cyan',
+        scopeLabel: '작업자별',
+        valueFormat: 'manDay',
+        valueUnit: '공',
     },
     {
         key: 'team-month-manday',
@@ -89,33 +107,55 @@ const TEAM_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'summary',
         icon: faListCheck,
         color: 'rose',
+        scopeLabel: '팀별',
     },
 ];
 
 const OVERALL_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
     {
         key: 'recent-total-manday',
-        label: '최근 총공수',
+        label: '전체 최근 총공수',
         desc: '가장 최근 출력일 기준 총 공수',
         kind: 'summary',
         icon: faCalendarDay,
         color: 'blue',
+        scopeLabel: '전체',
     },
     {
         key: 'registered-workers',
-        label: '총 등록 작업자',
+        label: '전체 등록 작업자',
         desc: '등록된 작업자와 재직 인원',
         kind: 'summary',
         icon: faUsers,
         color: 'emerald',
+        scopeLabel: '전체',
     },
     {
         key: 'registered-sites',
-        label: '총 등록 현장',
+        label: '전체 등록 현장',
         desc: '등록된 현장과 진행 현장',
         kind: 'summary',
         icon: faBuilding,
         color: 'amber',
+        scopeLabel: '전체',
+    },
+    {
+        key: 'registered-teams',
+        label: '전체 등록 팀',
+        desc: '운영 중인 팀과 시스템 등록 팀',
+        kind: 'summary',
+        icon: faHardHat,
+        color: 'cyan',
+        scopeLabel: '전체',
+    },
+    {
+        key: 'today-total-manday',
+        label: '오늘 총공수',
+        desc: '오늘 입력된 일보 기준 전체 공수',
+        kind: 'summary',
+        icon: faCalendarDay,
+        color: 'rose',
+        scopeLabel: '전체',
     },
     {
         key: 'site-month-manday',
@@ -124,6 +164,9 @@ const OVERALL_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'ranking',
         icon: faBuilding,
         color: 'violet',
+        scopeLabel: '현장별',
+        valueFormat: 'manDay',
+        valueUnit: '공',
     },
     {
         key: 'worker-month-manday',
@@ -132,14 +175,80 @@ const OVERALL_DASHBOARD_WIDGET_DEFINITIONS: DashboardWidgetDefinition[] = [
         kind: 'ranking',
         icon: faHardHat,
         color: 'cyan',
+        scopeLabel: '작업자별',
+        valueFormat: 'manDay',
+        valueUnit: '공',
     },
     {
         key: 'team-month-manday',
-        label: '이달 총공수',
+        label: '전체 이달 총공수',
         desc: '이번 달 전체 누적 공수',
         kind: 'summary',
         icon: faListCheck,
         color: 'rose',
+        scopeLabel: '전체',
+    },
+    {
+        key: 'team-month-manday-ranking',
+        label: '팀별 이달 총공수',
+        desc: '이번 달 팀별 공수 상위 목록',
+        kind: 'ranking',
+        icon: faChartLine,
+        color: 'blue',
+        scopeLabel: '팀별',
+        valueFormat: 'manDay',
+        valueUnit: '공',
+    },
+    {
+        key: 'team-active-workers',
+        label: '팀별 재직 작업자',
+        desc: '팀별 현재 재직 작업자 상위 목록',
+        kind: 'ranking',
+        icon: faUsers,
+        color: 'emerald',
+        scopeLabel: '팀별',
+        valueFormat: 'integer',
+        valueUnit: '명',
+    },
+    {
+        key: 'site-worker-count',
+        label: '현장별 투입 인원',
+        desc: '이번 달 현장별 실제 투입 작업자 수',
+        kind: 'ranking',
+        icon: faBuilding,
+        color: 'amber',
+        scopeLabel: '현장별',
+        valueFormat: 'integer',
+        valueUnit: '명',
+    },
+    {
+        key: 'site-report-count',
+        label: '현장별 일보 건수',
+        desc: '이번 달 현장별 저장된 일보 건수',
+        kind: 'ranking',
+        icon: faClipboardList,
+        color: 'violet',
+        scopeLabel: '현장별',
+        valueFormat: 'integer',
+        valueUnit: '건',
+    },
+    {
+        key: 'month-report-count',
+        label: '이달 일보 건수',
+        desc: '이번 달 전체 저장 일보 수',
+        kind: 'summary',
+        icon: faClipboardList,
+        color: 'blue',
+        scopeLabel: '전체',
+    },
+    {
+        key: 'weather-forecast',
+        label: '날씨 위젯',
+        desc: '선택한 지역의 현재 날씨와 5일 예보',
+        kind: 'weather',
+        icon: faCloud,
+        color: 'cyan',
+        scopeLabel: '날씨',
     },
 ];
 
@@ -153,7 +262,17 @@ export const isOverallDashboardWidgetScope = (modeConfig: DashboardModeConfig): 
         .some((keyword) => label.includes(keyword.toLowerCase()));
 };
 
-const DEFAULT_DASHBOARD_WIDGET_KEYS = TEAM_DASHBOARD_WIDGET_DEFINITIONS.map((widget) => widget.key);
+const DEFAULT_TEAM_DASHBOARD_WIDGET_KEYS = TEAM_DASHBOARD_WIDGET_DEFINITIONS.map((widget) => widget.key);
+const DEFAULT_OVERALL_DASHBOARD_WIDGET_KEYS = [
+    'recent-total-manday',
+    'registered-workers',
+    'registered-sites',
+    'team-month-manday',
+    'team-month-manday-ranking',
+    'site-month-manday',
+    'site-worker-count',
+    'weather-forecast',
+];
 
 const LEGACY_WIDGET_KEY_MAP: Record<string, string> = {
     'operating-teams': 'registered-sites',
@@ -196,13 +315,17 @@ export const useDashboardWidgetSettings = (modeConfig: DashboardModeConfig): Das
     const savedKeys = Array.from(new Set((preferences[positionKey]?.selectedKeys || []).map(normalizeWidgetKey)));
     const validSavedKeys = savedKeys.filter((key) => widgetByKey.has(key));
     const hasPersonalSelection = validSavedKeys.length > 0;
-    const defaultSelectedKeys = DEFAULT_DASHBOARD_WIDGET_KEYS.slice(0, MAX_DASHBOARD_WIDGETS);
+    const defaultSelectedKeys = (isOverallDashboardWidgetScope(modeConfig)
+        ? DEFAULT_OVERALL_DASHBOARD_WIDGET_KEYS
+        : DEFAULT_TEAM_DASHBOARD_WIDGET_KEYS
+    ).slice(0, MAX_DASHBOARD_WIDGETS);
     const selectedKeys = hasPersonalSelection ? validSavedKeys : defaultSelectedKeys;
+    const weatherLocationKey = preferences[positionKey]?.weatherLocationKey || DEFAULT_WEATHER_LOCATION_KEY;
     const widgets = selectedKeys
         .map((key) => widgetByKey.get(key))
         .filter((widget): widget is DashboardWidgetDefinition => Boolean(widget));
 
-    const saveSelection = useCallback(async (keys: string[]) => {
+    const saveSelection = useCallback(async (keys: string[], options: { weatherLocationKey?: string } = {}) => {
         const uid = currentUser?.uid;
         if (!uid) throw new Error('missing-user');
 
@@ -214,11 +337,13 @@ export const useDashboardWidgetSettings = (modeConfig: DashboardModeConfig): Das
 
         setSaving(true);
         try {
-            await dashboardWidgetPreferenceService.savePositionSelection(uid, positionId, cleanedKeys);
+            await dashboardWidgetPreferenceService.savePositionSelection(uid, positionId, cleanedKeys, {
+                weatherLocationKey: options.weatherLocationKey || weatherLocationKey,
+            });
         } finally {
             setSaving(false);
         }
-    }, [currentUser?.uid, positionId, widgetByKey]);
+    }, [currentUser?.uid, positionId, weatherLocationKey, widgetByKey]);
 
     const resetSelection = useCallback(async () => {
         const uid = currentUser?.uid;
@@ -241,6 +366,7 @@ export const useDashboardWidgetSettings = (modeConfig: DashboardModeConfig): Das
         loading,
         saving,
         maxWidgets: MAX_DASHBOARD_WIDGETS,
+        weatherLocationKey,
         saveSelection,
         resetSelection,
     };

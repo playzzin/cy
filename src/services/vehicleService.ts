@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { vehicleFirestoreService } from './vehicleFirestoreService';
-import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleExpenseRecord } from '../types/vehicle';
+import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord, VehicleBillingTargetRecord, VehicleExpenseRecord } from '../types/vehicle';
 
 const VEHICLE_ASSIGNMENT_COLLECTION = 'vehicleAssignments';
 const VEHICLE_EXPENSE_COLLECTION = 'vehicleExpenses';
@@ -73,6 +73,45 @@ export const vehicleService = {
 
     getAssignmentHistory: async (vehicleId: string): Promise<VehicleAssignmentRecord[]> => {
         return vehicleFirestoreService.listVehicleAssignments(vehicleId);
+    },
+
+    updateVehicleAssignment: async (
+        data: Partial<VehicleAssignmentRecord> & { id: string; vehicleId: string }
+    ): Promise<void> => {
+        await vehicleFirestoreService.saveVehicleAssignment(data);
+        if (!data.endDate && data.assigneeId && data.assigneeType && data.assigneeName) {
+            await vehicleFirestoreService.saveVehicle({
+                id: data.vehicleId,
+                status: 'ASSIGNED',
+                currentAssigneeId: data.assigneeId,
+                currentAssigneeType: data.assigneeType,
+                currentAssigneeName: data.assigneeName
+            } as Partial<Vehicle> & { id: string });
+        }
+    },
+
+    listAllVehicleBillingTargets: async (vehicleId?: string): Promise<VehicleBillingTargetRecord[]> => {
+        return vehicleFirestoreService.listVehicleBillingTargets(vehicleId);
+    },
+
+    saveVehicleBillingTarget: async (data: Omit<VehicleBillingTargetRecord, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<string> => {
+        const id = data.id ? String(data.id) : makeId('vehicle_billing_target');
+        await vehicleFirestoreService.saveVehicleBillingTarget({ ...data, id });
+        return id;
+    },
+
+    deleteVehicleBillingTarget: async (id: string): Promise<void> => {
+        await vehicleFirestoreService.deleteVehicleBillingTarget(id);
+    },
+
+    applyVehicleBillingTargetChanges: async (params: {
+        vehicleId: string;
+        upserts?: Array<Omit<VehicleBillingTargetRecord, 'createdAt' | 'updatedAt'>>;
+        closeRecords?: Array<{ id: string; endDate: string }>;
+        deleteIds?: string[];
+        clearSnapshot?: boolean;
+    }): Promise<void> => {
+        await vehicleFirestoreService.applyVehicleBillingTargetChanges(params);
     },
 
     assignVehicle: async (

@@ -29,6 +29,8 @@ export const DailyReportSchema = z.object({
     siteName: z.string().optional().nullable(),
     responsibleTeamId: z.string().optional().nullable(),
     responsibleTeamName: z.string().optional().nullable(),
+    siteManagerId: z.string().optional().nullable(),
+    siteManagerName: z.string().optional().nullable(),
     companyId: z.string().optional().nullable(),
     companyName: z.string().optional().nullable(),
     constructorCompanyId: z.string().optional().nullable(),

@@ -1,17 +1,18 @@
-export type TeamExpenseClaimCategory =
-  | 'meal'
-  | 'parking'
-  | 'fuel'
-  | 'toll'
-  | 'material'
-  | 'tool'
-  | 'deposit'
-  | 'marking'
-  | 'fieldGoods'
-  | 'equipment'
-  | 'etc';
+export type TeamExpenseClaimCategory = string;
 export type TeamExpenseClaimStatus = 'draft' | 'charged' | 'settled';
-export type TeamExpenseClaimType = 'teamCharge' | 'otherExpense';
+export type TeamExpenseClaimType = 'teamCharge' | 'otherExpense' | 'officeExpense';
+export type TeamExpenseCategoryScope = TeamExpenseClaimType | 'both';
+
+export interface TeamExpenseCategory {
+  id: string;
+  label: string;
+  scope: TeamExpenseCategoryScope;
+  order: number;
+  isActive: boolean;
+  isDefault?: boolean;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+}
 
 export interface TeamExpenseClaim {
   id: string;

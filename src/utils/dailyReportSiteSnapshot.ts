@@ -21,6 +21,8 @@ export interface DailyReportSiteSnapshot {
     paymentType: string;
     responsibleTeamId: string;
     responsibleTeamName: string;
+    siteManagerId: string;
+    siteManagerName: string;
 }
 
 export interface DailyReportSiteSnapshotFallback {
@@ -39,6 +41,8 @@ export interface DailyReportSiteSnapshotFallback {
     paymentType?: unknown;
     responsibleTeamId?: unknown;
     responsibleTeamName?: unknown;
+    siteManagerId?: unknown;
+    siteManagerName?: unknown;
 }
 
 export const toDailyReportSnapshotText = (value: unknown): string =>
@@ -142,6 +146,12 @@ export const buildDailyReportSiteSnapshot = (params: {
         ? siteValue(site?.responsibleTeamName) || toDailyReportSnapshotText(fallback?.responsibleTeamName)
         : fallbackValue(fallback?.responsibleTeamName);
     const responsibleTeam = findDailyReportTeam(teams, responsibleTeamSeedId, responsibleTeamSeedName);
+    const siteManagerId = hasSite
+        ? siteValue((site as any)?.siteManagerId) || toDailyReportSnapshotText(fallback?.siteManagerId)
+        : fallbackValue(fallback?.siteManagerId);
+    const siteManagerName = hasSite
+        ? siteValue((site as any)?.siteManagerName) || toDailyReportSnapshotText(fallback?.siteManagerName)
+        : fallbackValue(fallback?.siteManagerName);
 
     const clientCompanyId = hasSite
         ? siteValue(site?.clientCompanyId) || toDailyReportSnapshotText(fallback?.clientCompanyId) || toDailyReportSnapshotText(fallback?.companyId)
@@ -185,6 +195,8 @@ export const buildDailyReportSiteSnapshot = (params: {
             : fallbackValue(fallback?.paymentType) || fallbackValue(fallback?.paymentMethod),
         responsibleTeamId: toDailyReportSnapshotText(responsibleTeam?.id) || responsibleTeamSeedId,
         responsibleTeamName: toDailyReportSnapshotText(responsibleTeam?.name) || responsibleTeamSeedName,
+        siteManagerId,
+        siteManagerName,
     };
 };
 
@@ -213,6 +225,8 @@ export const applyDailyReportSiteSnapshotToReport = <T extends {
         paymentType: snapshot.paymentType,
         responsibleTeamId: snapshot.responsibleTeamId,
         responsibleTeamName: snapshot.responsibleTeamName,
+        siteManagerId: snapshot.siteManagerId,
+        siteManagerName: snapshot.siteManagerName,
         ...(Array.isArray(workers) ? { workers } : {}),
     } as T;
 };

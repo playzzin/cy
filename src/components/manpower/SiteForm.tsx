@@ -8,6 +8,7 @@ import {
 import { siteService, Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company, companyService } from '../../services/companyService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 
 interface SiteFormProps {
     initialData?: Partial<Site>;
@@ -17,9 +18,19 @@ interface SiteFormProps {
     onCancel: () => void;
 }
 
+const EXTERNAL_TEAM_COMPANY_NAME = '외부팀';
+
+const isExternalTeam = (team: Team): boolean => {
+    const teamCompanyId = String(team.companyId ?? '').trim();
+    const teamCompanyName = String(team.companyName ?? '').trim();
+    const teamType = String(team.type ?? '').trim();
+    return teamCompanyId.length === 0 && (teamCompanyName === EXTERNAL_TEAM_COMPANY_NAME || teamType === '지원팀');
+};
+
 const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSave, onCancel }) => {
     const [currentSite, setCurrentSite] = useState<Partial<Site>>(initialData || { status: 'active' });
     const [companyOptions, setCompanyOptions] = useState<Company[]>(companies);
+    const [workers, setWorkers] = useState<Worker[]>([]);
 
     const [isCompanyTouched, setIsCompanyTouched] = useState(false);
     const [isPartnerTouched, setIsPartnerTouched] = useState(false);
@@ -42,6 +53,22 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
         setCompanyOptions(companies);
     }, [companies]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        manpowerService.getWorkers()
+            .then((rows) => {
+                if (!cancelled) setWorkers(rows);
+            })
+            .catch((error) => {
+                console.error('Failed to load workers for site manager selection', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
     const companyUuidByAnyId = useMemo(() => {
         const map = new Map<string, string>();
         companyOptions.forEach(c => {
@@ -51,39 +78,68 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
         return map;
     }, [companyOptions]);
 
+    const selectedResponsibleTeam = useMemo(() => {
+        const teamId = String(currentSite.responsibleTeamId ?? '').trim();
+        const teamName = String(currentSite.responsibleTeamName ?? '').trim();
+        return teams.find(t => String(t.id ?? '').trim() === teamId)
+            || teams.find(t => String(t.legacyId ?? '').trim() === teamId)
+            || teams.find(t => String(t.name ?? '').trim() === teamName);
+    }, [currentSite.responsibleTeamId, currentSite.responsibleTeamName, teams]);
+
     const filteredTeams = useMemo(() => {
         const rawPartnerId = currentSite.partnerId ? String(currentSite.partnerId).trim() : '';
         const rawCompanyId = currentSite.companyId ? String(currentSite.companyId).trim() : '';
 
         const targetCompanyIdRaw = rawPartnerId || rawCompanyId;
         const targetCompanyId = targetCompanyIdRaw ? (companyUuidByAnyId.get(targetCompanyIdRaw) ?? targetCompanyIdRaw) : '';
-        if (!targetCompanyId) return teams;
+        const targetCompany = targetCompanyId
+            ? companyOptions.find(c => c.id === targetCompanyId || c.legacyId === targetCompanyId)
+            : undefined;
+        const targetCompanyType = String((targetCompany as any)?.type ?? '').trim();
+        const targetCompanyName = String((targetCompany as any)?.name ?? '').trim();
+        const shouldFilterByCompany = !!targetCompanyId && targetCompanyType !== '미지정' && targetCompanyName !== EXTERNAL_TEAM_COMPANY_NAME;
 
-        return teams.filter(t => {
-            const teamCompanyIdRaw = t.companyId ? String(t.companyId).trim() : '';
-            if (!teamCompanyIdRaw) return false;
-            const teamCompanyId = companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw;
-            return teamCompanyId === targetCompanyId;
+        const getTeamCompanyId = (team: Team) => {
+            const teamCompanyIdRaw = team.companyId ? String(team.companyId).trim() : '';
+            return teamCompanyIdRaw ? (companyUuidByAnyId.get(teamCompanyIdRaw) ?? teamCompanyIdRaw) : '';
+        };
+
+        const baseTeams = !shouldFilterByCompany
+            ? teams
+            : teams.filter(t => {
+                const teamCompanyId = getTeamCompanyId(t);
+                return teamCompanyId.length > 0 && teamCompanyId === targetCompanyId;
+            });
+
+        const externalTeams = teams.filter(isExternalTeam);
+        const mergedTeams = selectedResponsibleTeam
+            ? [selectedResponsibleTeam, ...baseTeams, ...externalTeams]
+            : [...baseTeams, ...externalTeams];
+
+        const seen = new Set<string>();
+        return mergedTeams.filter(t => {
+            const key = String(t.id || t.legacyId || t.name || '').trim();
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
         });
-    }, [teams, currentSite.partnerId, currentSite.companyId, companyUuidByAnyId]);
+    }, [teams, currentSite.partnerId, currentSite.companyId, companyUuidByAnyId, companyOptions, selectedResponsibleTeam]);
 
     useEffect(() => {
         const teamId = currentSite.responsibleTeamId ? String(currentSite.responsibleTeamId).trim() : '';
-        if (!teamId) return;
-
-        const rawPartnerId = currentSite.partnerId ? String(currentSite.partnerId).trim() : '';
-        const rawCompanyId = currentSite.companyId ? String(currentSite.companyId).trim() : '';
-        const hasCompanyConstraint = rawPartnerId.length > 0 || rawCompanyId.length > 0;
-        if (!hasCompanyConstraint) return;
-
-        const isValid = filteredTeams.some(t => t.id === teamId);
-        if (isValid) return;
+        const teamName = currentSite.responsibleTeamName ? String(currentSite.responsibleTeamName).trim() : '';
+        if (!teamId && !teamName) return;
+        if (teams.length === 0) return;
+        if (selectedResponsibleTeam) return;
 
         setCurrentSite(prev => ({
             ...prev,
-            responsibleTeamId: ''
+            responsibleTeamId: '',
+            responsibleTeamName: '',
+            siteManagerId: '',
+            siteManagerName: ''
         }));
-    }, [currentSite.responsibleTeamId, currentSite.partnerId, currentSite.companyId, filteredTeams]);
+    }, [currentSite.responsibleTeamId, currentSite.responsibleTeamName, teams.length, selectedResponsibleTeam]);
 
     useEffect(() => {
         if (!companyOptions || companyOptions.length === 0) return;
@@ -305,6 +361,55 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
         return base.filter(c => c.name.toLowerCase().includes(lower));
     }, [companyOptions, clientSearch, currentSite.clientCompanyId]);
 
+    const siteManagerCandidates = useMemo(() => {
+        const teamIds = new Set(
+            [
+                currentSite.responsibleTeamId,
+                selectedResponsibleTeam?.id,
+                selectedResponsibleTeam?.legacyId,
+            ]
+                .map(v => String(v ?? '').trim())
+                .filter(Boolean)
+        );
+        const teamName = String(selectedResponsibleTeam?.name ?? currentSite.responsibleTeamName ?? '').trim();
+        const roleRank: Record<string, number> = { '팀장': 0, '반장': 1 };
+
+        return workers
+            .filter((worker) => {
+                const role = String(worker.role ?? '').trim();
+                if (role !== '팀장' && role !== '반장') return false;
+
+                const workerTeamId = String(worker.teamId ?? '').trim();
+                const workerTeamName = String(worker.teamName ?? '').trim();
+                return (workerTeamId && teamIds.has(workerTeamId)) || (!!teamName && workerTeamName === teamName);
+            })
+            .sort((a, b) => {
+                const rankA = roleRank[String(a.role ?? '').trim()] ?? 99;
+                const rankB = roleRank[String(b.role ?? '').trim()] ?? 99;
+                if (rankA !== rankB) return rankA - rankB;
+                return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
+            });
+    }, [currentSite.responsibleTeamId, currentSite.responsibleTeamName, selectedResponsibleTeam, workers]);
+
+    const selectedSiteManager = useMemo(() => {
+        const managerId = String((currentSite as any).siteManagerId ?? '').trim();
+        if (!managerId) return undefined;
+        return siteManagerCandidates.find(worker =>
+            String(worker.id ?? '').trim() === managerId ||
+            String(worker.legacyId ?? '').trim() === managerId
+        );
+    }, [currentSite, siteManagerCandidates]);
+
+    const selectResponsibleTeam = (team: Team) => {
+        setCurrentSite(prev => ({
+            ...prev,
+            responsibleTeamId: team.id,
+            responsibleTeamName: team.name,
+            siteManagerId: '',
+            siteManagerName: ''
+        }));
+    };
+
     const handleSave = async () => {
         try {
             if (!currentSite.name) {
@@ -319,7 +424,17 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
             }
 
             // Find team name
-            const team = teams.find(t => t.id === currentSite.responsibleTeamId);
+            const team = selectedResponsibleTeam;
+            const managerId = String((currentSite as any).siteManagerId ?? '').trim();
+            const siteManager = managerId ? siteManagerCandidates.find(worker =>
+                String(worker.id ?? '').trim() === managerId ||
+                String(worker.legacyId ?? '').trim() === managerId
+            ) : undefined;
+
+            if (managerId && !siteManager) {
+                alert('현장책임자는 담당팀 작업자 중 팀장 또는 반장만 선택할 수 있습니다.');
+                return;
+            }
 
             const normalizedCompanyId = currentSite.companyId ? String(currentSite.companyId) : null;
             const normalizedClientCompanyId = (currentSite as any).clientCompanyId ? String((currentSite as any).clientCompanyId) : null;
@@ -337,7 +452,10 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                 partnerId: normalizedPartnerId as any,
                 code: currentSite.code || '',
                 address: currentSite.address || '',
-                responsibleTeamName: team ? team.name : null,
+                responsibleTeamId: team?.id ?? currentSite.responsibleTeamId ?? null,
+                responsibleTeamName: team?.name ?? currentSite.responsibleTeamName ?? null,
+                siteManagerId: siteManager?.id ?? null,
+                siteManagerName: siteManager?.name ?? null,
                 companyName: constructor ? constructor.name : null, // 시공사 (Constructor)
                 clientCompanyName: client ? client.name : null, // 발주사 (Client)
                 partnerName: partner ? partner.name : null, // 협력사 (Partner)
@@ -522,9 +640,9 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                         onClick={() => setIsTeamMenuOpen(!isTeamMenuOpen)}
                                     >
                                         <div className="flex items-center gap-2 overflow-hidden">
-                                            <FontAwesomeIcon icon={faHardHat} className={currentSite.responsibleTeamId ? 'text-indigo-500' : 'text-slate-300'} />
-                                            <span className={`font-bold truncate ${currentSite.responsibleTeamId ? 'text-slate-800' : 'text-slate-400'}`}>
-                                                {teams.find(t => t.id === currentSite.responsibleTeamId)?.name || '팀 이름을 입력하거나 선택하세요...'}
+                                            <FontAwesomeIcon icon={faHardHat} className={currentSite.responsibleTeamId || currentSite.responsibleTeamName ? 'text-indigo-500' : 'text-slate-300'} />
+                                            <span className={`font-bold truncate ${currentSite.responsibleTeamId || currentSite.responsibleTeamName ? 'text-slate-800' : 'text-slate-400'}`}>
+                                                {selectedResponsibleTeam?.name || currentSite.responsibleTeamName || '팀 이름을 입력하거나 선택하세요...'}
                                             </span>
                                         </div>
                                         <FontAwesomeIcon icon={isTeamMenuOpen ? faChevronDown : faChevronRight} className={`text-xs transition-transform duration-300 ${isTeamMenuOpen ? 'rotate-180 text-indigo-500' : 'text-slate-300'}`} />
@@ -549,7 +667,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                                             onKeyDown={(e) => {
                                                                 if (e.key === 'Enter' && searchedTeams.length > 0) {
                                                                     const t = searchedTeams[0];
-                                                                    setCurrentSite({...currentSite, responsibleTeamId: t.id});
+                                                                    selectResponsibleTeam(t);
                                                                     setIsTeamMenuOpen(false);
                                                                     setTeamSearch('');
                                                                 }
@@ -564,7 +682,7 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                                         <div 
                                                             key={t.id}
                                                             onClick={() => {
-                                                                setCurrentSite({...currentSite, responsibleTeamId: t.id});
+                                                                selectResponsibleTeam(t);
                                                                 setIsTeamMenuOpen(false);
                                                                 setTeamSearch('');
                                                             }}
@@ -591,8 +709,8 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
 
                                 {/* Current Context Helpers */}
                                 {currentSite.responsibleTeamId && (() => {
-                                    const team = teams.find(t => t.id === currentSite.responsibleTeamId);
-                                    const company = team?.companyId ? companyOptions.find(c => c.id === team.companyId) : null;
+                                    const team = selectedResponsibleTeam;
+                                    const company = team?.companyId ? companyOptions.find(c => c.id === team.companyId || c.legacyId === team.companyId) : null;
                                     if (company) {
                                         return (
                                             <div className="mt-2 flex items-center gap-2 text-[11px] text-indigo-700 bg-indigo-50/50 px-3 py-1.5 rounded-lg border border-indigo-100 animate-in fade-in slide-in-from-top-1">
@@ -603,6 +721,52 @@ const SiteForm: React.FC<SiteFormProps> = ({ initialData, teams, companies, onSa
                                     }
                                     return null;
                                 })()}
+                            </div>
+                        </div>
+
+                        <div className="col-span-12 grid grid-cols-12">
+                            <div className="col-span-3 md:col-span-2 bg-slate-50 flex items-center px-4 py-3 font-semibold text-slate-700 border-r border-slate-200">
+                                현장책임자
+                            </div>
+                            <div className="col-span-9 md:col-span-10 p-2">
+                                <div className="relative">
+                                    <FontAwesomeIcon icon={faUser} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
+                                    <select
+                                        value={String((currentSite as any).siteManagerId ?? '')}
+                                        disabled={!currentSite.responsibleTeamId}
+                                        onChange={(e) => {
+                                            const managerId = e.target.value;
+                                            const manager = siteManagerCandidates.find(worker => String(worker.id ?? '') === managerId);
+                                            setCurrentSite(prev => ({
+                                                ...prev,
+                                                siteManagerId: managerId,
+                                                siteManagerName: manager?.name ?? ''
+                                            }));
+                                        }}
+                                        className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-bold text-slate-700 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                                    >
+                                        <option value="">
+                                            {!currentSite.responsibleTeamId
+                                                ? '담당팀을 먼저 선택하세요'
+                                                : siteManagerCandidates.length === 0
+                                                    ? '담당팀의 팀장/반장이 없습니다'
+                                                    : '선택 안함'}
+                                        </option>
+                                        {selectedSiteManager && !siteManagerCandidates.some(worker => String(worker.id ?? '') === String(selectedSiteManager.id ?? '')) && (
+                                            <option value={String(selectedSiteManager.id ?? '')}>
+                                                {selectedSiteManager.name} ({selectedSiteManager.role || '기존 선택'})
+                                            </option>
+                                        )}
+                                        {siteManagerCandidates.map(worker => (
+                                            <option key={worker.id || worker.legacyId || worker.name} value={String(worker.id ?? '')}>
+                                                {worker.name} ({worker.role || '-'})
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {currentSite.responsibleTeamId && siteManagerCandidates.length === 0 && (
+                                    <p className="mt-1 text-[11px] text-slate-400">담당팀 작업자 중 역할이 팀장 또는 반장인 작업자만 선택할 수 있습니다.</p>
+                                )}
                             </div>
                         </div>
 

@@ -169,11 +169,7 @@ export const fieldGoodsService = {
     },
 
     async deleteItem(id: string): Promise<void> {
-        await updateDoc(doc(db, ITEMS_COLLECTION, id), {
-            active: false,
-            deletedAt: nowIso(),
-            updatedAt: nowIso(),
-        });
+        await deleteDoc(doc(db, ITEMS_COLLECTION, id));
     },
 
     async restoreItem(id: string): Promise<void> {

@@ -41,6 +41,7 @@ import {
     type LedgerSummary,
     getBillingStatusLabel,
     getCategoryLabel,
+    getEffectiveClaimType,
     getStatusLabel,
     getSummaryTotal,
     summarizeVehicleBillingCosts,
@@ -168,6 +169,7 @@ const buildEmptySummary = (team: Team | null): LedgerSummary => ({
     vehicleOther: 0,
     card: 0,
     otherClaim: 0,
+    officeExpense: 0,
     receivable: 0,
     payable: 0,
 });
@@ -185,8 +187,9 @@ const getVehicleTotal = (summary: LedgerSummary) =>
     summary.vehicleRent + summary.vehicleFine + summary.vehicleRepair + summary.vehicleOther;
 
 const getExpenseDirection = (claim: TeamExpenseClaim, selectedTeam: Team | null) => {
-    const isOther = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
-    if (isOther) return '기타경비';
+    const claimType = getEffectiveClaimType(claim);
+    if (claimType === 'officeExpense') return '사무실경비';
+    if (claimType === 'otherExpense') return '기타경비';
     if (valueMatchesTeam(selectedTeam, claim.chargeToTeamId, claim.chargeToTeamName)) return '내야 할 후청구';
     return '받을 후청구';
 };
@@ -230,9 +233,14 @@ const buildSummaryFromDocs = (
 
     docs.claims.forEach(claim => {
         const amount = asNumber(claim.amount);
-        const isOther = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+        const claimType = getEffectiveClaimType(claim);
 
-        if (isOther) {
+        if (claimType === 'officeExpense') {
+            summary.officeExpense += amount;
+            return;
+        }
+
+        if (claimType === 'otherExpense') {
             summary.otherClaim += amount;
             return;
         }
@@ -301,6 +309,7 @@ const TeamResourceDetailPage: React.FC = () => {
         summaries,
         rawDocs,
         resolveTeam,
+        allCategoryOptions,
         loadData,
     } = useExpenseLedgerData(selectedMonth, 'all', billingScope);
     const accessScope = useWorkerAccessScope(workers, teamOptions);
@@ -686,7 +695,7 @@ const TeamResourceDetailPage: React.FC = () => {
             source: '경비' as const,
             date: claim.date,
             resourceName: claim.cardLabel || '현찰',
-            detail: claim.description || getCategoryLabel(claim.category),
+            detail: claim.description || getCategoryLabel(claim.category, allCategoryOptions),
             status: getStatusLabel(claim.status),
             amount: asNumber(claim.amount),
             memo: getExpenseDirection(claim, selectedTeam),
@@ -694,7 +703,7 @@ const TeamResourceDetailPage: React.FC = () => {
 
         return [...accommodationLines, ...vehicleLines, ...cardLines, ...claimLines]
             .sort((left, right) => String(left.source).localeCompare(String(right.source), 'ko-KR') || String(left.date ?? '').localeCompare(String(right.date ?? ''), 'ko-KR'));
-    }, [selectedAccommodationDocs, selectedCardDocs, selectedClaims, selectedTeam, selectedVehicleDocs]);
+    }, [allCategoryOptions, selectedAccommodationDocs, selectedCardDocs, selectedClaims, selectedTeam, selectedVehicleDocs]);
 
     const teamRows = useMemo<TeamResourceRow[]>(() => {
         return visibleTeamOptions.map(team => {
@@ -844,7 +853,7 @@ const TeamResourceDetailPage: React.FC = () => {
             accommodationTotal,
             vehicleTotal,
             cardTotal,
-            expenseTotal: selectedSummary.otherClaim + selectedSummary.payable - selectedSummary.receivable,
+            expenseTotal: selectedSummary.otherClaim + selectedSummary.officeExpense + selectedSummary.payable - selectedSummary.receivable,
             total,
             accommodationRentTotal,
             vehicleFixedTotal,
@@ -1534,7 +1543,9 @@ const TeamResourceDetailPage: React.FC = () => {
                                                             ? claim.payerTeamName
                                                             : direction === '받을 후청구'
                                                                 ? claim.chargeToTeamName
-                                                                : '청구대상 없음';
+                                                                : direction === '사무실경비'
+                                                                    ? '사무실'
+                                                                    : '청구대상 없음';
                                                         return (
                                                             <tr key={claim.id}>
                                                                 <td data-label="날짜">{claim.date}</td>
@@ -1542,7 +1553,7 @@ const TeamResourceDetailPage: React.FC = () => {
                                                                 <td data-label="상대팀">{counterparty || EMPTY_TEXT}</td>
                                                                 <td data-label="현장" className="tw-truncate" title={claim.siteName || ''}>{claim.siteName || EMPTY_TEXT}</td>
                                                                 <td data-label="결제">{claim.cardLabel || '현찰'}</td>
-                                                                <td data-label="항목">{getCategoryLabel(claim.category)}</td>
+                                                                <td data-label="항목">{getCategoryLabel(claim.category, allCategoryOptions)}</td>
                                                                 <td data-label="내용" className="tw-truncate" title={claim.description}>{claim.description}</td>
                                                                 <td data-label="상태">{getStatusLabel(claim.status)}</td>
                                                                 <td data-label="금액" className="tw-number">{formatCurrency(claim.amount)}</td>

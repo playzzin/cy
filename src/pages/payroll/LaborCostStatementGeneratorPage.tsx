@@ -24,6 +24,7 @@ type RowState = {
   id: number;
   workerId: string | null;
   workerName: string;
+  isRetired: boolean;
   workerSsn: string;
   workerPhone: string;
   workerAddress: string;
@@ -83,6 +84,7 @@ const createEmptyRow = (id: number): RowState => ({
   id,
   workerId: null,
   workerName: '',
+  isRetired: false,
   workerSsn: '',
   workerPhone: '',
   workerAddress: '',
@@ -131,8 +133,26 @@ const extractDayOfMonth = (dateValue: unknown): number | null => {
   return d.getDate();
 };
 
+const isRetiredWorker = (worker?: Pick<Worker, 'status' | 'isActive'> | null): boolean => {
+  const normalizedStatus = String(worker?.status ?? '').trim().toLowerCase();
+  return (
+    worker?.isActive === false ||
+    normalizedStatus === 'inactive' ||
+    normalizedStatus === 'resigned' ||
+    normalizedStatus === '퇴사' ||
+    normalizedStatus === '퇴사자' ||
+    normalizedStatus.includes('퇴사')
+  );
+};
+
+const formatRetiredWorkerName = (name: string, isRetired: boolean): string => {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  return isRetired ? `${trimmed} (퇴사)` : trimmed;
+};
+
 const formatWorkerNameCell = (row: RowState, includeTeam: boolean): string => {
-  const parts = [row.workerName.trim()];
+  const parts = [formatRetiredWorkerName(row.workerName, row.isRetired)];
   if (includeTeam && row.teamName.trim()) {
     parts.push(row.teamName.trim());
   }
@@ -547,6 +567,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
       ...r,
       workerId: w?.id ?? (workerKey ? String(workerKey) : null),
       workerName: w?.name ?? (workerKey ? String(workerKey) : ''),
+      isRetired: isRetiredWorker(w),
       workerSsn: w?.idNumber ?? '',
       workerPhone: w?.contact ?? '',
       workerAddress: w?.address ?? '',
@@ -601,6 +622,7 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
 
         r.workerId = w.workerId ?? null;
         r.workerName = w.name;
+        r.isRetired = isRetiredWorker(masterWorker);
         if (masterWorker) {
           r.workerSsn = masterWorker.idNumber ?? '';
           r.workerPhone = masterWorker.contact ?? '';
@@ -1309,7 +1331,11 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                   className="pl-10 pr-4 py-2.5 text-sm font-bold bg-slate-50 border border-slate-200 rounded-lg w-full focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-all hover:border-blue-300 cursor-pointer"
                 >
                   <option value="">작업자를 선택하세요 ({reportWorkers.length}명)</option>
-                  {reportWorkers.map(w => <option key={w.key} value={w.key}>{w.name} {w.siteName ? `- ${w.siteName}` : ''}</option>)}
+                  {reportWorkers.map(w => {
+                    const masterWorker = w.workerId ? workerById.get(w.workerId) : workerByName.get(w.name);
+                    const retiredSuffix = isRetiredWorker(masterWorker) ? ' (퇴사)' : '';
+                    return <option key={w.key} value={w.key}>{w.name}{retiredSuffix} {w.siteName ? `- ${w.siteName}` : ''}</option>;
+                  })}
                 </select>
               </div>
               <button onClick={loadWorkerToNextEmptyRow} disabled={!selectedWorkerId}
@@ -1406,9 +1432,14 @@ const LaborCostStatementGeneratorPage: React.FC = () => {
                     <tr className="border-b border-black bg-white text-slate-800">
                       <td className="border-r border-black text-center text-xs font-bold text-black bg-[#fffacd]" rowSpan={isSplitView ? 2 : 1}>{idx + 1}</td>
                       <td className="border-r border-black p-0" rowSpan={isSplitView ? 2 : 1}>
-                        <div className={`flex flex-col h-full justify-center ${spanningCellHeightClass} ${showTeamUnderName ? 'divide-y divide-black' : ''}`}>
+                        <div className={`relative flex flex-col h-full justify-center ${spanningCellHeightClass} ${showTeamUnderName ? 'divide-y divide-black' : ''}`}>
+                          {row.isRetired && (
+                            <span className="pointer-events-none absolute right-1 top-1 z-[1] rounded-sm border border-red-200 bg-red-50 px-1 py-0.5 text-[9px] font-black leading-none text-red-700">
+                              퇴사
+                            </span>
+                          )}
                           <input type="text" value={row.workerName} onChange={e => updateRow(row.id, { workerName: e.target.value })}
-                            className={`w-full px-2 text-center text-[10px] font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${showTeamUnderName ? splitRowSectionClass : namePrimaryCellHeightClass}`} placeholder="이름"
+                            className={`w-full px-2 text-center text-[10px] font-bold bg-transparent outline-none focus:bg-indigo-50 placeholder-slate-300 leading-tight ${showTeamUnderName ? splitRowSectionClass : namePrimaryCellHeightClass} ${row.isRetired ? 'pr-8 text-red-700' : ''}`} placeholder="이름"
                           />
                           {showTeamUnderName && (
                             <input type="text" value={row.teamName} onChange={e => updateRow(row.id, { teamName: e.target.value })}

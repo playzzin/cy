@@ -20,7 +20,7 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({ children }) => {
 
     if (!currentUser) {
         const from = `${location.pathname}${location.search}${location.hash}`;
-        return <Navigate to="/login" replace state={{ from, skipIntro: true }} />;
+        return <Navigate to="/login" replace state={{ from }} />;
     }
 
     return <>{children}</>;

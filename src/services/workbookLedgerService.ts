@@ -1,6 +1,7 @@
 import {
     collection,
     doc,
+    getDoc,
     getDocs,
     limit as firestoreLimit,
     orderBy,
@@ -11,6 +12,7 @@ import {
     writeBatch
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { workbookLedgerLogService } from './workbookLedgerLogService';
 
 export type WorkbookTransactionType = '매출' | '매입';
 export type WorkbookLedgerTenant = 'cheongyeon' | 'dawon';
@@ -188,6 +190,34 @@ const sanitizeUpdate = (entry: WorkbookLedgerEntryUpdate, timestamp: string) => 
     return payload;
 };
 
+const normalizeStoredEntry = (id: string, data: Record<string, unknown>): WorkbookLedgerEntry => ({
+    id,
+    transactionType: normalizeTransactionType(data.transactionType),
+    date: normalizeText(data.date),
+    partnerName: normalizeText(data.partnerName),
+    siteName: normalizeText(data.siteName),
+    description: normalizeText(data.description),
+    manDays: data.manDays === null || data.manDays === undefined ? null : normalizeNumber(data.manDays),
+    supplyAmount: normalizeNumber(data.supplyAmount),
+    taxAmount: normalizeNumber(data.taxAmount),
+    totalAmount: normalizeNumber(data.totalAmount),
+    paymentAmount: normalizeNumber(data.paymentAmount),
+    appliedYear: normalizeInteger(data.appliedYear),
+    appliedMonth: normalizeInteger(data.appliedMonth),
+    matchedEntryId: normalizeText(data.matchedEntryId),
+    sourceType: normalizeText(data.sourceType),
+    sourceId: normalizeText(data.sourceId),
+    sourceMonth: normalizeText(data.sourceMonth),
+    note: normalizeFirstText(data.note, data.memo, data.remark, data.remarks, data.notes),
+    teamName: normalizeText(data.teamName),
+    createdAt: normalizeText(data.createdAt),
+    updatedAt: normalizeText(data.updatedAt),
+    createdBy: normalizeText(data.createdBy),
+    updatedBy: normalizeText(data.updatedBy),
+    deletedAt: normalizeText(data.deletedAt),
+    deletedBy: normalizeText(data.deletedBy)
+});
+
 export interface WorkbookLedgerService {
     getEntries(options?: GetEntriesOptions): Promise<WorkbookLedgerEntry[]>;
     addEntries(entries: WorkbookLedgerEntryInput[]): Promise<WorkbookLedgerEntry[]>;
@@ -237,6 +267,12 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
         return constraints.length > 0 ? query(entriesCollection, ...constraints) : entriesCollection;
     };
 
+    const getEntrySnapshot = async (id: string): Promise<WorkbookLedgerEntry | null> => {
+        const entrySnapshot = await getDoc(doc(collection(db, collectionName), id));
+        if (!entrySnapshot.exists()) return null;
+        return normalizeStoredEntry(entrySnapshot.id, entrySnapshot.data() as Record<string, unknown>);
+    };
+
     const service: WorkbookLedgerService = {
         async getEntries(options: GetEntriesOptions = {}): Promise<WorkbookLedgerEntry[]> {
             const cacheKey = buildCacheKey(options);
@@ -256,33 +292,7 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
                 if (deletedAt) return null;
 
-                return {
-                    id: entryDoc.id,
-                    transactionType: normalizeTransactionType(data.transactionType),
-                    date: normalizeText(data.date),
-                    partnerName: normalizeText(data.partnerName),
-                    siteName: normalizeText(data.siteName),
-                    description: normalizeText(data.description),
-                    manDays: data.manDays === null || data.manDays === undefined ? null : normalizeNumber(data.manDays),
-                    supplyAmount: normalizeNumber(data.supplyAmount),
-                    taxAmount: normalizeNumber(data.taxAmount),
-                    totalAmount: normalizeNumber(data.totalAmount),
-                    paymentAmount: normalizeNumber(data.paymentAmount),
-                    appliedYear: normalizeInteger(data.appliedYear),
-                    appliedMonth: normalizeInteger(data.appliedMonth),
-                    matchedEntryId: normalizeText(data.matchedEntryId),
-                    sourceType: normalizeText(data.sourceType),
-                    sourceId: normalizeText(data.sourceId),
-                    sourceMonth: normalizeText(data.sourceMonth),
-                    note: normalizeFirstText(data.note, data.memo, data.remark, data.remarks, data.notes),
-                    teamName: normalizeText(data.teamName),
-                    createdAt: normalizeText(data.createdAt),
-                    updatedAt: normalizeText(data.updatedAt),
-                    createdBy: normalizeText(data.createdBy),
-                    updatedBy: normalizeText(data.updatedBy),
-                    deletedAt,
-                    deletedBy: normalizeText(data.deletedBy)
-                } as WorkbookLedgerEntry;
+                return normalizeStoredEntry(entryDoc.id, data);
             }).filter((entry): entry is WorkbookLedgerEntry => entry !== null);
 
             setCachedEntries(cacheKey, entries);
@@ -316,26 +326,64 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
             clearCachedEntries();
 
+            await Promise.all(
+                createdEntries.map((entry) =>
+                    workbookLedgerLogService.safeCreateLog({
+                        action: 'created',
+                        tenantKey,
+                        after: entry,
+                        source: 'workbookLedgerService.addEntries'
+                    })
+                )
+            );
+
             return cloneEntries(createdEntries);
         },
 
         async updateEntry(id: string, updates: WorkbookLedgerEntryUpdate): Promise<void> {
             const now = new Date().toISOString();
             const payload = sanitizeUpdate(updates, now);
-            await updateDoc(doc(collection(db, collectionName), id), payload);
+            const entryRef = doc(collection(db, collectionName), id);
+            const before = await getEntrySnapshot(id);
+            await updateDoc(entryRef, payload);
+            const after = await getEntrySnapshot(id);
 
             clearCachedEntries();
+
+            await workbookLedgerLogService.safeCreateLog({
+                action: 'updated',
+                tenantKey,
+                before,
+                after,
+                source: 'workbookLedgerService.updateEntry'
+            });
         },
 
         async softDeleteEntry(id: string, deletedBy?: string): Promise<void> {
             const now = new Date().toISOString();
-            await updateDoc(doc(collection(db, collectionName), id), {
+            const entryRef = doc(collection(db, collectionName), id);
+            const before = await getEntrySnapshot(id);
+            const deletePayload = {
                 deletedAt: now,
                 deletedBy: normalizeText(deletedBy) || null,
                 updatedAt: now
-            });
+            };
+            await updateDoc(entryRef, deletePayload);
 
             clearCachedEntries();
+
+            await workbookLedgerLogService.safeCreateLog({
+                action: 'deleted',
+                tenantKey,
+                before,
+                after: before ? {
+                    ...before,
+                    deletedAt: now,
+                    deletedBy: normalizeText(deletedBy),
+                    updatedAt: now
+                } : null,
+                source: 'workbookLedgerService.softDeleteEntry'
+            });
         },
 
         async softDeleteEntries(ids: string[], deletedBy?: string): Promise<number> {
@@ -347,23 +395,47 @@ export const createWorkbookLedgerService = (tenantKey: WorkbookLedgerTenant | st
 
             if (normalizedIds.length === 0) return 0;
 
+            const beforeEntries = new Map(
+                await Promise.all(
+                    normalizedIds.map(async (id) => [id, await getEntrySnapshot(id)] as const)
+                )
+            );
             const now = new Date().toISOString();
+            const deletePayload = {
+                deletedAt: now,
+                deletedBy: normalizeText(deletedBy) || null,
+                updatedAt: now
+            };
             for (let index = 0; index < normalizedIds.length; index += BATCH_SIZE) {
                 const batch = writeBatch(db);
                 const chunk = normalizedIds.slice(index, index + BATCH_SIZE);
 
                 chunk.forEach((id) => {
-                    batch.update(doc(collection(db, collectionName), id), {
-                        deletedAt: now,
-                        deletedBy: normalizeText(deletedBy) || null,
-                        updatedAt: now
-                    });
+                    batch.update(doc(collection(db, collectionName), id), deletePayload);
                 });
 
                 await batch.commit();
             }
 
             clearCachedEntries();
+
+            await Promise.all(
+                normalizedIds.map((id) => {
+                    const before = beforeEntries.get(id);
+                    return workbookLedgerLogService.safeCreateLog({
+                        action: 'deleted',
+                        tenantKey,
+                        before,
+                        after: before ? {
+                            ...before,
+                            deletedAt: now,
+                            deletedBy: normalizeText(deletedBy),
+                            updatedAt: now
+                        } : null,
+                        source: 'workbookLedgerService.softDeleteEntries'
+                    });
+                })
+            );
 
             return normalizedIds.length;
         },

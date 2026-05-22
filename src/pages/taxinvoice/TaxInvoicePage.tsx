@@ -428,7 +428,7 @@ const TaxInvoicePage: React.FC = () => {
                 </div>
 
                 {/* 탭 */}
-                <div className="flex gap-2 mb-6">
+                <div className="flex flex-wrap gap-2 mb-6">
                     <button
                         onClick={() => setActiveTab('issue')}
                         className={`px-6 py-3 rounded-lg font-medium transition-all ${activeTab === 'issue'

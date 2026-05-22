@@ -3,6 +3,8 @@ import { FieldValue, Timestamp } from 'firebase/firestore';
 export type VehicleType = 'RENT' | 'LEASE' | 'OWNED';
 export type VehicleStatus = 'AVAILABLE' | 'ASSIGNED' | 'MAINTENANCE' | 'DISPOSED';
 export type VehicleAssigneeType = 'TEAM' | 'WORKER';
+export type VehicleBillingTargetType = VehicleAssigneeType | 'OFFICE' | 'OFFICE_STAFF';
+export type VehicleFineChargeTarget = 'BILLING_TARGET' | 'DRIVER';
 
 export interface VehicleContract {
     type: VehicleType;
@@ -47,9 +49,9 @@ export interface Vehicle {
 
     // Billing target can differ from physical assignment.
     billingTargetId?: string | null;
-    billingTargetType?: VehicleAssigneeType | null;
+    billingTargetType?: VehicleBillingTargetType | null;
     billingTargetName?: string | null;
-
+    fineChargeTarget?: VehicleFineChargeTarget;
     memo?: string;
 
     createdAt?: Timestamp | FieldValue | null;
@@ -74,6 +76,24 @@ export interface VehicleAssignmentRecord {
     updatedAt?: Timestamp | FieldValue;
 }
 
+// Billing target history. This drives monthly billing periods and can differ from physical assignment history.
+export interface VehicleBillingTargetRecord {
+    id: string;
+    vehicleId: string;
+    vehiclePlate: string;
+
+    targetId: string;
+    targetType: VehicleBillingTargetType;
+    targetName: string;
+
+    startDate: string;
+    endDate?: string;
+
+    note?: string;
+    createdAt?: Timestamp | FieldValue;
+    updatedAt?: Timestamp | FieldValue;
+}
+
 // Expense (Variable Cost) Record
 export type VehicleExpenseType = 'FUEL' | 'REPAIR' | 'TOLL' | 'FINE' | 'OTHER';
 export type VehicleExpensePayer = 'COMPANY' | 'DRIVER';
@@ -87,6 +107,7 @@ export interface VehicleExpenseRecord {
     type: VehicleExpenseType;
     amount: number;
     payer: VehicleExpensePayer;
+    fineChargeTarget?: VehicleFineChargeTarget;
 
     note?: string;
     evidenceUrl?: string; // Receipt Image

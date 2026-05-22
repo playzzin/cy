@@ -11,6 +11,7 @@ import {
   hexToRgba,
   summarizeVehicleBillingCosts
 } from '../hooks/useExpenseLedgerData';
+import type { ExpenseCategoryOption } from '../hooks/useExpenseLedgerData';
 
 interface Props {
   teamName: string;
@@ -21,6 +22,7 @@ interface Props {
   receivableClaims: TeamExpenseClaim[];
   payableClaims: TeamExpenseClaim[];
   otherClaims: TeamExpenseClaim[];
+  categoryOptions?: ExpenseCategoryOption[];
 }
 
 export const ExpenseDetailBoard: React.FC<Props> = ({
@@ -31,7 +33,8 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
   cardDocs,
   receivableClaims,
   payableClaims,
-  otherClaims
+  otherClaims,
+  categoryOptions = []
 }) => {
   const accommRows = useMemo(() => {
     return accommodationDocs.map((doc) => {
@@ -350,7 +353,7 @@ export const ExpenseDetailBoard: React.FC<Props> = ({
                           <td className="border border-slate-200 px-2 py-1.5 text-center">{claim.siteName || '-'}</td>
                           <td className="border border-slate-200 px-2 py-1.5">
                             <div className="font-bold text-slate-800">{claim.description}</div>
-                            <div className="mt-0.5 text-[10px] text-slate-500">{getCategoryLabel(claim.category)}{claim.cardLabel ? ` · ${claim.cardLabel}` : ''}</div>
+                            <div className="mt-0.5 text-[10px] text-slate-500">{getCategoryLabel(claim.category, categoryOptions)}{claim.cardLabel ? ` · ${claim.cardLabel}` : ''}</div>
                           </td>
                           <td className="border border-slate-200 px-2 py-1.5 text-right font-black tabular-nums">{formatCurrency(claim.amount)}</td>
                           <td className="border border-slate-200 px-2 py-1.5 text-center font-bold text-slate-500">{getStatusLabel(claim.status)}</td>

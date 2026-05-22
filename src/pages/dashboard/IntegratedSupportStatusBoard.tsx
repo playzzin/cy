@@ -159,8 +159,26 @@ const IntegratedSupportStatusBoard: React.FC = () => {
             let total = 0;
 
             // Helper Maps for fast lookup
-            const siteMap = new Map(sites.map(s => [s.id, s]));
-            const teamMap = new Map(teams.map(t => [t.id, t]));
+            const siteMap = new Map<string, Site>();
+            sites.forEach(site => {
+                const id = String(site.id ?? '').trim();
+                const legacyId = String(site.legacyId ?? '').trim();
+                if (id) siteMap.set(id, site);
+                if (legacyId) siteMap.set(legacyId, site);
+            });
+
+            const teamMap = new Map<string, Team>();
+            const teamByNameMap = new Map<string, Team>();
+            teams.forEach(team => {
+                const id = String(team.id ?? '').trim();
+                const legacyId = String(team.legacyId ?? '').trim();
+                const nameKey = normalizeTeamNameKey(team.name);
+                if (id) teamMap.set(id, team);
+                if (legacyId) teamMap.set(legacyId, team);
+                if (nameKey && !teamByNameMap.has(nameKey)) {
+                    teamByNameMap.set(nameKey, team);
+                }
+            });
             const companyMap = new Map(companies.map(c => [c.id, c]));
             const teamNameMap = new Map<string, string>();
             teams.forEach(team => {
@@ -175,55 +193,63 @@ const IntegratedSupportStatusBoard: React.FC = () => {
 
             reports.forEach(report => {
                 const site = siteMap.get(report.siteId);
-                const team = teamMap.get(report.teamId);
 
-                if (!site || !team) return;
+                if (!site) return;
 
-                let isTarget = false;
+                const reportResponsibleTeamName = String(report.responsibleTeamName ?? '').trim();
+                const inferredResponsibleTeamName = resolveTeamNameFromSiteName(site.name, teamNameMap);
+                const siteResponsibleTeamName = String(site.responsibleTeamName ?? '').trim();
+                const responsibleTeamName = reportResponsibleTeamName || inferredResponsibleTeamName || siteResponsibleTeamName || undefined;
+                const responsibleTeamPriority = reportResponsibleTeamName ? 2 : inferredResponsibleTeamName ? 1 : siteResponsibleTeamName ? 0 : -1;
+                const siteStatsKey = String(site.id ?? report.siteId ?? '').trim() || report.siteId;
 
-                if (viewMode === 'inbound') {
-                    // 지원온 현황: (우리 회사 현장) AND (타 회사 팀 투입)
-                    if (site.companyId === myCompanyId && team.companyId !== myCompanyId) {
-                        isTarget = true;
-                    }
-                } else {
-                    // 지원간 현황: (타 회사 현장) AND (우리 회사 팀 투입)
-                    if (site.companyId !== myCompanyId && team.companyId === myCompanyId) {
-                        isTarget = true;
-                    }
-                }
+                report.workers.forEach(rw => {
+                    const workerManDay = Number(rw.manDay ?? 0);
+                    if (!Number.isFinite(workerManDay) || workerManDay <= 0) return;
 
-                if (isTarget) {
-                    const reportResponsibleTeamName = String(report.responsibleTeamName ?? '').trim();
-                    const inferredResponsibleTeamName = resolveTeamNameFromSiteName(site.name, teamNameMap);
-                    const siteResponsibleTeamName = String(site.responsibleTeamName ?? '').trim();
-                    const responsibleTeamName = reportResponsibleTeamName || inferredResponsibleTeamName || siteResponsibleTeamName || undefined;
-                    const responsibleTeamPriority = reportResponsibleTeamName ? 2 : inferredResponsibleTeamName ? 1 : siteResponsibleTeamName ? 0 : -1;
+                    const workerTeamId = String(rw.teamId ?? '').trim();
+                    const workerTeamNameKey = normalizeTeamNameKey(rw.workerTeamName);
+                    const reportTeamId = String(report.teamId ?? '').trim();
+                    const reportTeamNameKey = normalizeTeamNameKey(report.teamName);
+                    const team =
+                        (workerTeamId ? teamMap.get(workerTeamId) : undefined) ??
+                        (workerTeamNameKey ? teamByNameMap.get(workerTeamNameKey) : undefined) ??
+                        (reportTeamId ? teamMap.get(reportTeamId) : undefined) ??
+                        (reportTeamNameKey ? teamByNameMap.get(reportTeamNameKey) : undefined);
 
-                    // 1. Get or Create Site Stats
-                    let siteStat = siteStatsMap.get(report.siteId);
+                    if (!team) return;
+
+                    const teamCompanyId = String(team.companyId ?? '').trim();
+                    const siteCompanyId = String(site.companyId ?? '').trim();
+                    const isTarget = viewMode === 'inbound'
+                        ? siteCompanyId === myCompanyId && teamCompanyId !== myCompanyId
+                        : siteCompanyId !== myCompanyId && teamCompanyId === myCompanyId;
+
+                    if (!isTarget) return;
+
+                    let siteStat = siteStatsMap.get(siteStatsKey);
                     if (!siteStat) {
                         siteStat = {
-                            siteId: report.siteId,
+                            siteId: siteStatsKey,
                             name: site.name,
-                            siteCompanyId: site.companyId, // 현장 소속 회사
+                            siteCompanyId: site.companyId,
                             responsibleTeamName,
                             manDay: 0,
                             teams: []
                         };
-                        siteStatsMap.set(report.siteId, siteStat);
-                        siteResponsibleTeamPriorities.set(report.siteId, responsibleTeamPriority);
-                    } else if (responsibleTeamName && responsibleTeamPriority > (siteResponsibleTeamPriorities.get(report.siteId) ?? -1)) {
+                        siteStatsMap.set(siteStatsKey, siteStat);
+                        siteResponsibleTeamPriorities.set(siteStatsKey, responsibleTeamPriority);
+                    } else if (responsibleTeamName && responsibleTeamPriority > (siteResponsibleTeamPriorities.get(siteStatsKey) ?? -1)) {
                         siteStat.responsibleTeamName = responsibleTeamName;
-                        siteResponsibleTeamPriorities.set(report.siteId, responsibleTeamPriority);
+                        siteResponsibleTeamPriorities.set(siteStatsKey, responsibleTeamPriority);
                     }
 
-                    // 2. Get or Create Team Stats within Site
-                    let teamStat = siteStat.teams.find(t => t.teamId === report.teamId);
+                    const providerTeamId = String(team.id ?? team.legacyId ?? workerTeamId ?? reportTeamId).trim();
+                    let teamStat = siteStat.teams.find(t => t.teamId === providerTeamId);
                     if (!teamStat) {
                         const company = companyMap.get(team.companyId);
                         teamStat = {
-                            teamId: report.teamId,
+                            teamId: providerTeamId,
                             name: team.name,
                             companyName: company?.name || 'Unknown',
                             companyId: team.companyId || undefined,
@@ -233,28 +259,21 @@ const IntegratedSupportStatusBoard: React.FC = () => {
                         siteStat.teams.push(teamStat);
                     }
 
-                    // 3. Process Workers
-                    report.workers.forEach(rw => {
-                        if (rw.manDay > 0) {
-                            // Update Totals
-                            total += rw.manDay;
-                            siteStat!.manDay += rw.manDay;
-                            teamStat!.manDay += rw.manDay;
+                    total += workerManDay;
+                    siteStat.manDay += workerManDay;
+                    teamStat.manDay += workerManDay;
 
-                            // Update Worker Stats
-                            let workerStat = teamStat!.workers.find(w => w.workerId === rw.workerId);
-                            if (!workerStat) {
-                                workerStat = {
-                                    workerId: rw.workerId,
-                                    name: rw.name,
-                                    manDay: 0
-                                };
-                                teamStat!.workers.push(workerStat);
-                            }
-                            workerStat.manDay += rw.manDay;
-                        }
-                    });
-                }
+                    let workerStat = teamStat.workers.find(w => w.workerId === rw.workerId);
+                    if (!workerStat) {
+                        workerStat = {
+                            workerId: rw.workerId,
+                            name: rw.name,
+                            manDay: 0
+                        };
+                        teamStat.workers.push(workerStat);
+                    }
+                    workerStat.manDay += workerManDay;
+                });
             });
 
             // Convert Map to Array and Sort

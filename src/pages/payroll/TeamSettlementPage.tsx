@@ -105,7 +105,7 @@ const teamExpenseCategoryLabels: Record<TeamExpenseClaimCategory, string> = {
 };
 
 const getTeamExpenseCategoryLabel = (category: TeamExpenseClaimCategory): string => {
-  return teamExpenseCategoryLabels[category] ?? '기타';
+  return teamExpenseCategoryLabels[category] ?? String(category || '기타');
 };
 
 const parseYmdDate = (value: string): Date | null => {
@@ -1480,12 +1480,12 @@ export const TeamSettlementPage: React.FC = () => {
           .filter((claim) => claim.status === 'charged' || claim.status === 'settled')
           .filter((claim) => !targetClaimId || String(claim.id ?? '') === targetClaimId)
           .filter((claim) => {
-            const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
             if (isOtherExpense) return matchesTeamByIdOrName(claim.payerTeamId, claim.payerTeamName);
             return matchesTeamByIdOrName(claim.chargeToTeamId, claim.chargeToTeamName);
           })
           .map((claim) => {
-            const isOtherExpense = claim.claimType === 'otherExpense' || !String(claim.chargeToTeamId ?? '').trim();
+            const isOtherExpense = claim.claimType !== 'teamCharge' || !String(claim.chargeToTeamId ?? '').trim();
             const subject = isOtherExpense
               ? (claim.payerTeamName || selectedTeamName || '-')
               : (claim.payerTeamName || '-');
@@ -1496,7 +1496,7 @@ export const TeamSettlementPage: React.FC = () => {
               label: `${getTeamExpenseCategoryLabel(claim.category)}${description ? ` - ${description}` : ''}`,
               amount: safeNumber(claim.amount),
               note: [
-                isOtherExpense ? '기타청구' : '내야 할 후청구',
+                isOtherExpense ? (claim.claimType === 'officeExpense' ? '사무실경비' : '기타청구') : '내야 할 후청구',
                 String(claim.siteName ?? '').trim(),
                 String(claim.cardLabel ?? '').trim()
               ].filter(Boolean).join(' / ')

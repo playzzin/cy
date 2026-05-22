@@ -8,6 +8,7 @@ import {
 import { siteService, Site } from '../../services/siteService';
 import { Team } from '../../services/teamService';
 import { Company } from '../../services/companyService';
+import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService } from '../../services/dailyReportService';
 import { statisticsService } from '../../services/statisticsService';
 import SiteForm from '../../components/manpower/SiteForm';
@@ -24,6 +25,7 @@ const SITE_COLUMNS = [
     { key: 'name', label: '현장명' },
     { key: 'address', label: '주소' },
     { key: 'responsibleTeamName', label: '담당팀' },
+    { key: 'siteManagerName', label: '현장책임자' },
     { key: 'clientCompanyName', label: '발주사' },
     { key: 'companyName', label: '시공사' },
     { key: 'partnerName', label: '협력사' },
@@ -48,6 +50,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     const { companies, teams, sites, refreshTeams, refreshSites } = useMasterData();
     const { currentUser } = useAuth();
     const navigate = useNavigate();
+    const [workers, setWorkers] = useState<Worker[]>([]);
 
     // Permission State
     const [isRestricted, setIsRestricted] = useState<boolean | null>(null);
@@ -140,6 +143,85 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         });
     };
 
+    const getSiteManagerCandidates = (site: Site): Worker[] => {
+        const responsibleTeam = resolveResponsibleTeam(site);
+        const teamIds = new Set(
+            [
+                site.responsibleTeamId,
+                responsibleTeam?.id,
+                responsibleTeam?.legacyId,
+            ]
+                .map(value => String(value ?? '').trim())
+                .filter(Boolean)
+        );
+        const teamName = String(responsibleTeam?.name ?? site.responsibleTeamName ?? '').trim();
+        const roleRank: Record<string, number> = { '팀장': 0, '반장': 1 };
+
+        return workers
+            .filter((worker) => {
+                const role = String(worker.role ?? '').trim();
+                if (role !== '팀장' && role !== '반장') return false;
+
+                const workerTeamId = String(worker.teamId ?? '').trim();
+                const workerTeamName = String(worker.teamName ?? '').trim();
+                return (workerTeamId && teamIds.has(workerTeamId)) || (!!teamName && workerTeamName === teamName);
+            })
+            .sort((a, b) => {
+                const rankA = roleRank[String(a.role ?? '').trim()] ?? 99;
+                const rankB = roleRank[String(b.role ?? '').trim()] ?? 99;
+                if (rankA !== rankB) return rankA - rankB;
+                return String(a.name ?? '').localeCompare(String(b.name ?? ''), 'ko');
+            });
+    };
+
+    const getSiteManagerOptions = (site: Site) => {
+        const candidates = getSiteManagerCandidates(site);
+        const currentManagerId = String(site.siteManagerId ?? '').trim();
+        const currentManagerName = String(site.siteManagerName ?? '').trim();
+        const currentManager = currentManagerId
+            ? workers.find(worker => String(worker.id ?? '') === currentManagerId)
+            : undefined;
+
+        const options = candidates.map(worker => ({
+            id: String(worker.id ?? ''),
+            name: `${worker.name} (${worker.role || '-'})`,
+            icon: <FontAwesomeIcon icon={faUserTie} className="text-slate-400" />
+        }));
+
+        if (
+            currentManagerId
+            && !options.some(option => option.id === currentManagerId)
+            && (currentManager || currentManagerName)
+        ) {
+            options.unshift({
+                id: currentManagerId,
+                name: `${currentManager?.name || currentManagerName} (${currentManager?.role || '기존 책임자'})`,
+                icon: <FontAwesomeIcon icon={faUserTie} className="text-amber-500" />
+            });
+        }
+
+        return options;
+    };
+
+    const resolveSiteManagerSelection = (site: Site, selectedId: string): Partial<Site> => {
+        const managerId = String(selectedId ?? '').trim();
+        if (!managerId) {
+            return {
+                siteManagerId: '',
+                siteManagerName: '',
+            };
+        }
+
+        const manager = workers.find(worker => String(worker.id ?? '') === managerId);
+        const option = getSiteManagerOptions(site).find(item => item.id === managerId);
+        const fallbackName = option?.name.replace(/\s*\([^)]*\)\s*$/, '') || '';
+
+        return {
+            siteManagerId: managerId,
+            siteManagerName: manager?.name || fallbackName,
+        };
+    };
+
     const [siteStats, setSiteStats] = useState<{ [id: string]: number }>({});
     const [loading, setLoading] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -167,7 +249,7 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
         toggleColumn,
         showColumnSettings,
         setShowColumnSettings
-    } = useColumnSettings('site_db_v5', SITE_COLUMNS);
+    } = useColumnSettings('site_db_v6', SITE_COLUMNS);
 
     useEffect(() => {
         const checkPermission = async () => {
@@ -213,6 +295,21 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
     useEffect(() => {
         refreshTeams();
     }, [refreshTeams]);
+
+    useEffect(() => {
+        let cancelled = false;
+        manpowerService.getWorkers()
+            .then((rows) => {
+                if (!cancelled) setWorkers(rows);
+            })
+            .catch((error) => {
+                console.error('Failed to load workers for site manager column', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     if (isRestricted === true) {
         return (
@@ -647,11 +744,25 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             handleSiteSelectChange(site.id!, {
                                                                                 responsibleTeamId: id,
                                                                                 responsibleTeamName: team?.name || '',
+                                                                                siteManagerId: '',
+                                                                                siteManagerName: '',
                                                                                 color: team?.color || ''
                                                                             });
                                                                         }}
                                                                         placeholder="담당팀 선택"
                                                                     />
+                                                                ) : col.key === 'siteManagerName' ? (
+                                                                    <div className="min-w-[104px]">
+                                                                        <SingleSelectPopover
+                                                                            options={getSiteManagerOptions(site)}
+                                                                            selectedId={site.siteManagerId || null}
+                                                                            onSelect={(id) => {
+                                                                                handleSiteSelectChange(site.id!, resolveSiteManagerSelection(site, id));
+                                                                            }}
+                                                                            placeholder={site.responsibleTeamId ? '책임자 선택' : '담당팀 먼저 선택'}
+                                                                            disabled={!site.responsibleTeamId && !site.siteManagerId}
+                                                                        />
+                                                                    </div>
                                                                 ) : col.key === 'clientCompanyName' ? (
                                                                     <select
                                                                         value={site.clientCompanyId || ''}
@@ -804,6 +915,8 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             handleSiteSelectChange(site.id!, {
                                                                                 responsibleTeamId: id,
                                                                                 responsibleTeamName: team?.name || '',
+                                                                                siteManagerId: '',
+                                                                                siteManagerName: '',
                                                                                 color: team?.color || ''
                                                                             });
                                                                         }}
@@ -827,6 +940,29 @@ const SiteDatabase: React.FC<SiteDatabaseProps> = ({ hideHeader = false, highlig
                                                                             );
                                                                         }}
                                                                     />
+                                                                ) : col.key === 'siteManagerName' ? (
+                                                                    <div className="min-w-[104px]">
+                                                                        <SingleSelectPopover
+                                                                            options={getSiteManagerOptions(site)}
+                                                                            selectedId={site.siteManagerId || null}
+                                                                            onSelect={(id) => {
+                                                                                handleSiteSelectChange(site.id!, resolveSiteManagerSelection(site, id));
+                                                                            }}
+                                                                            placeholder={site.responsibleTeamId ? '-' : '담당팀 먼저 선택'}
+                                                                            minimal={true}
+                                                                            disabled={!site.responsibleTeamId && !site.siteManagerId}
+                                                                            renderSelected={(opt) => (
+                                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-slate-200 bg-slate-50 flex-shrink-0">
+                                                                                        <FontAwesomeIcon icon={faUserTie} className="text-slate-500 text-xs" />
+                                                                                    </span>
+                                                                                    <span className="font-semibold text-slate-800 truncate">
+                                                                                        {opt.name.replace(/\s*\([^)]*\)\s*$/, '')}
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+                                                                        />
+                                                                    </div>
                                                                 ) : col.key === 'clientCompanyName' ? (
                                                                     <SingleSelectPopover
                                                                         options={companies

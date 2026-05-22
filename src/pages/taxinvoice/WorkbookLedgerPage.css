@@ -369,6 +369,50 @@
     color: #0f172a;
 }
 
+.workbook-db-mapping-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.workbook-db-mapping-summary > div:first-child {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.workbook-db-mapping-summary strong {
+    color: #0f172a;
+    font-size: 13px;
+}
+
+.workbook-db-mapping-summary span {
+    color: #1e40af;
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.workbook-db-mapping-summary small {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.workbook-db-mapping-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .query-sheet-table th,
 .query-sheet-table td {
     padding: 5px 8px;
@@ -871,6 +915,10 @@
     background: #f8fbff;
 }
 
+.workbook-unmapped-payment-row td {
+    background: #fffdf2;
+}
+
 .workbook-linked-badge,
 .workbook-linked-cell {
     display: inline-flex;
@@ -882,6 +930,51 @@
     color: #0f172a;
     font-size: 12px;
     font-weight: 600;
+}
+
+.workbook-mapping-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.workbook-mapping-status-badge.auto {
+    border-color: #86efac;
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.workbook-mapping-status-badge.ambiguous {
+    border-color: #fde68a;
+    background: #fffbeb;
+    color: #92400e;
+}
+
+.workbook-mapping-status-badge.none {
+    border-color: #fecaca;
+    background: #fff1f2;
+    color: #991b1b;
+}
+
+.workbook-mapping-status-badge.linked {
+    border-color: #bae6fd;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.workbook-map-button {
+    border-color: #86efac;
+    background: #f0fdf4;
+    color: #166534;
 }
 
 .workbook-inline-cell-input,
@@ -952,6 +1045,95 @@
     border-radius: 8px;
     background: #f8fafc;
     text-align: right;
+}
+
+.workbook-match-modal {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    color: #0f172a;
+    text-align: left;
+}
+
+.workbook-match-payment-card {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px;
+    border: 1px solid #d7dde7;
+    border-radius: 8px;
+    background: #f8fafc;
+    font-size: 13px;
+}
+
+.workbook-match-candidate-list {
+    max-height: 360px;
+    overflow: auto;
+    border: 1px solid #d7dde7;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.workbook-match-candidate-row {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-bottom: 1px solid #eef2f7;
+    cursor: pointer;
+}
+
+.workbook-match-candidate-row:last-child {
+    border-bottom: none;
+}
+
+.workbook-match-candidate-row:hover {
+    background: #f8fafc;
+}
+
+.workbook-match-candidate-row input {
+    margin-top: 3px;
+}
+
+.workbook-match-candidate-row span {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.workbook-match-candidate-row strong {
+    font-size: 13px;
+    color: #0f172a;
+}
+
+.workbook-match-candidate-row small {
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.workbook-match-empty {
+    padding: 18px 12px;
+    color: #64748b;
+    font-size: 13px;
+    text-align: center;
+}
+
+.workbook-match-manual-input {
+    display: grid;
+    grid-template-columns: 110px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.workbook-match-manual-input .swal2-input {
+    height: 38px;
+    font-size: 13px;
 }
 
 /* 테이블 테마: 청연(보라) */
@@ -1051,6 +1233,19 @@
 
     .workbook-modal-summary,
     .workbook-editor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .workbook-db-mapping-summary {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .workbook-db-mapping-actions {
+        justify-content: flex-start;
+    }
+
+    .workbook-match-manual-input {
         grid-template-columns: 1fr;
     }
 }

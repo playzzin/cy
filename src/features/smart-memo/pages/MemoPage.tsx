@@ -34,10 +34,27 @@ const CATEGORY_COLLECTION = 'smart_memo_categories';
 const CATEGORY_COLORS = ['#dc2626', '#f97316', '#facc15', '#2563eb', '#1e3a8a', '#7c3aed'];
 const BATCH_WRITE_SIZE = 450;
 
+type MemoType = 'text' | 'checklist';
+
+type ChecklistCommentRecord = {
+    id: string;
+    text: string;
+    createdAt: number;
+};
+
+type ChecklistItemRecord = {
+    id: string;
+    text: string;
+    isChecked: boolean;
+    comments?: ChecklistCommentRecord[];
+};
+
 type MemoRecord = {
     id: string;
+    type: MemoType;
     title: string;
     content: string;
+    checklistItems: ChecklistItemRecord[];
     categoryId: string | null;
     order: number;
     createdAt?: unknown;
@@ -107,17 +124,123 @@ const formatDate = (value: unknown) => {
     }).format(new Date(millis));
 };
 
+const generateChecklistItemId = () => {
+    const cryptoApi = typeof globalThis !== 'undefined'
+        ? (globalThis.crypto as { randomUUID?: () => string } | undefined)
+        : undefined;
+
+    if (typeof cryptoApi?.randomUUID === 'function') {
+        return cryptoApi.randomUUID();
+    }
+
+    return `item_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+};
+
+const createChecklistItem = (text = '', isChecked = false): ChecklistItemRecord => ({
+    id: generateChecklistItemId(),
+    text,
+    isChecked
+});
+
+const normalizeChecklistComments = (value: unknown): ChecklistCommentRecord[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+
+    const comments = value
+        .map(comment => {
+            if (!comment || typeof comment !== 'object') return null;
+            const record = comment as Record<string, unknown>;
+            const text = typeof record.text === 'string' ? record.text : '';
+            if (!text.trim()) return null;
+
+            return {
+                id: typeof record.id === 'string' && record.id ? record.id : generateChecklistItemId(),
+                text,
+                createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now()
+            };
+        })
+        .filter((comment): comment is ChecklistCommentRecord => Boolean(comment));
+
+    return comments.length > 0 ? comments : undefined;
+};
+
+const normalizeChecklistItems = (value: unknown): ChecklistItemRecord[] => {
+    if (!Array.isArray(value)) return [];
+
+    return value.map(item => {
+        const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+
+        return {
+            id: typeof record.id === 'string' && record.id ? record.id : generateChecklistItemId(),
+            text: typeof record.text === 'string' ? record.text : '',
+            isChecked: record.isChecked === true,
+            comments: normalizeChecklistComments(record.comments)
+        };
+    });
+};
+
+const parseChecklistLine = (line: string): ChecklistItemRecord => {
+    const checkedMatch = line.match(/^\s*(?:[-*]\s*)?\[(x|X| )\]\s*(.*)$/);
+    if (checkedMatch) {
+        return createChecklistItem(checkedMatch[2].trim(), checkedMatch[1].toLowerCase() === 'x');
+    }
+
+    return createChecklistItem(line.trim(), false);
+};
+
+const checklistItemsFromText = (content: string): ChecklistItemRecord[] => {
+    return content
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(parseChecklistLine);
+};
+
+const checklistItemsToText = (items: ChecklistItemRecord[]) => {
+    return items
+        .map(item => item.isChecked ? `[x] ${item.text}` : item.text)
+        .join('\n');
+};
+
+const prepareChecklistItemsForSave = (items: ChecklistItemRecord[]) => {
+    return items
+        .map(item => {
+            const next: ChecklistItemRecord = {
+                id: item.id,
+                text: item.text.trim(),
+                isChecked: item.isChecked
+            };
+
+            if (item.comments && item.comments.length > 0) {
+                next.comments = item.comments;
+            }
+
+            return next;
+        })
+        .filter(item => item.text || item.isChecked);
+};
+
+const checklistItemsEqual = (a: ChecklistItemRecord[], b: ChecklistItemRecord[]) => {
+    return JSON.stringify(prepareChecklistItemsForSave(a)) === JSON.stringify(prepareChecklistItemsForSave(b));
+};
+
 const normalizeMemo = (id: string, data: Record<string, unknown>): MemoRecord => {
     const rawTitle = typeof data.title === 'string' ? data.title.trim() : '';
     const rawContent = typeof data.content === 'string' ? data.content : '';
+    const type: MemoType = data.type === 'checklist' ? 'checklist' : 'text';
+    const rawChecklistItems = normalizeChecklistItems(data.checklistItems);
+    const checklistItems = rawChecklistItems.length > 0 || type !== 'checklist'
+        ? rawChecklistItems
+        : checklistItemsFromText(rawContent);
     const rawCategoryId = typeof data.categoryId === 'string' ? data.categoryId : null;
     const categoryId = rawCategoryId && rawCategoryId !== 'public' ? rawCategoryId : null;
     const rawOrder = typeof data.order === 'number' && Number.isFinite(data.order) ? data.order : 0;
 
     return {
         id,
+        type,
         title: rawTitle || '제목 없음',
         content: rawContent,
+        checklistItems,
         categoryId,
         order: rawOrder,
         createdAt: data.createdAt,
@@ -148,12 +271,14 @@ const composeMemoText = (title: string, content: string) => {
     return content ? `${title}\n${content}` : title;
 };
 
+const normalizeMemoTitle = (value: string) => value.trim() || '제목 없음';
+
 const parseMemoText = (value: string) => {
     const lines = value.replace(/\r\n/g, '\n').split('\n');
     const rawTitle = lines.shift() ?? '';
 
     return {
-        title: rawTitle.trim() || '제목 없음',
+        title: normalizeMemoTitle(rawTitle),
         content: lines.join('\n')
     };
 };
@@ -189,6 +314,9 @@ export function MemoPage() {
     const [searchQuery, setSearchQuery] = useState('');
     const [moveTargetCategoryId, setMoveTargetCategoryId] = useState('uncategorized');
     const [draftText, setDraftText] = useState('');
+    const [draftMemoType, setDraftMemoType] = useState<MemoType>('text');
+    const [draftTitle, setDraftTitle] = useState('');
+    const [draftChecklistItems, setDraftChecklistItems] = useState<ChecklistItemRecord[]>([]);
     const [draftCategoryId, setDraftCategoryId] = useState('');
     const [newCategoryName, setNewCategoryName] = useState('');
     const [newCategoryColor, setNewCategoryColor] = useState(CATEGORY_COLORS[0]);
@@ -310,9 +438,12 @@ export function MemoPage() {
             if (!matchesCategory) return false;
             if (!queryText) return true;
 
+            const checklistText = memo.checklistItems.map(item => item.text).join(' ').toLowerCase();
+
             return (
                 memo.title.toLowerCase().includes(queryText) ||
                 memo.content.toLowerCase().includes(queryText) ||
+                checklistText.includes(queryText) ||
                 (memo.categoryId ? categoryNameById[memo.categoryId]?.toLowerCase().includes(queryText) : false)
             );
         });
@@ -355,11 +486,17 @@ export function MemoPage() {
     useEffect(() => {
         if (!selectedMemo) {
             setDraftText('');
+            setDraftMemoType('text');
+            setDraftTitle('');
+            setDraftChecklistItems([]);
             setDraftCategoryId('');
             return;
         }
 
         setDraftText(composeMemoText(selectedMemo.title, selectedMemo.content));
+        setDraftMemoType(selectedMemo.type);
+        setDraftTitle(selectedMemo.title);
+        setDraftChecklistItems(selectedMemo.checklistItems);
         setDraftCategoryId(selectedMemo.categoryId ?? '');
     }, [selectedMemo]);
 
@@ -367,9 +504,12 @@ export function MemoPage() {
 
     const hasDraftChanges = Boolean(
         selectedMemo &&
-        (parsedDraft.title !== selectedMemo.title ||
-            parsedDraft.content !== selectedMemo.content ||
-            draftCategoryId !== (selectedMemo.categoryId ?? ''))
+        (draftMemoType !== selectedMemo.type ||
+            draftCategoryId !== (selectedMemo.categoryId ?? '') ||
+            (draftMemoType === 'text'
+                ? parsedDraft.title !== selectedMemo.title || parsedDraft.content !== selectedMemo.content
+                : normalizeMemoTitle(draftTitle) !== selectedMemo.title ||
+                    !checklistItemsEqual(draftChecklistItems, selectedMemo.checklistItems)))
     );
 
     const showStatus = useCallback((message: string) => {
@@ -463,7 +603,7 @@ export function MemoPage() {
         }
     };
 
-    const createMemo = async () => {
+    const createMemo = async (type: MemoType = 'text') => {
         if (!currentUser?.uid) return;
 
         setIsSaving(true);
@@ -474,12 +614,16 @@ export function MemoPage() {
                 selectedCategoryId !== 'all' && selectedCategoryId !== 'uncategorized'
                     ? selectedCategoryId
                     : null;
+            const title = type === 'checklist' ? '새 체크리스트' : '새 메모';
+            const checklistItems = type === 'checklist' ? [createChecklistItem('')] : [];
+
             const memoRef = await addDoc(collection(db, MEMO_COLLECTION), {
                 userId: currentUser.uid,
                 scope: 'private',
-                type: 'text',
-                title: '새 메모',
+                type,
+                title,
                 content: '',
+                checklistItems,
                 categoryId,
                 color: 'white',
                 isPinned: false,
@@ -489,9 +633,12 @@ export function MemoPage() {
             });
 
             setSelectedMemoId(memoRef.id);
-            setDraftText('새 메모');
+            setDraftText(title);
+            setDraftMemoType(type);
+            setDraftTitle(title);
+            setDraftChecklistItems(checklistItems);
             setDraftCategoryId(categoryId ?? '');
-            showStatus('새 메모를 만들었습니다.');
+            showStatus(type === 'checklist' ? '새 체크리스트를 만들었습니다.' : '새 메모를 만들었습니다.');
         } catch (error) {
             console.error('Failed to create memo:', error);
             setErrorMessage('메모를 만들지 못했습니다.');
@@ -507,20 +654,84 @@ export function MemoPage() {
         setErrorMessage('');
 
         try {
+            const checklistItems = prepareChecklistItemsForSave(draftChecklistItems);
+            const nextTitle = draftMemoType === 'checklist'
+                ? normalizeMemoTitle(draftTitle)
+                : parsedDraft.title;
+            const nextContent = draftMemoType === 'checklist' ? '' : parsedDraft.content;
+
             await updateDoc(doc(db, MEMO_COLLECTION, selectedMemo.id), {
-                title: parsedDraft.title,
-                content: parsedDraft.content,
+                type: draftMemoType,
+                title: nextTitle,
+                content: nextContent,
+                checklistItems: draftMemoType === 'checklist' ? checklistItems : [],
                 categoryId: draftCategoryId || null,
                 updatedAt: serverTimestamp()
             });
 
-            setDraftText(composeMemoText(parsedDraft.title, parsedDraft.content));
+            setDraftText(composeMemoText(nextTitle, nextContent));
+            setDraftTitle(nextTitle);
+            setDraftChecklistItems(checklistItems);
             showStatus('저장했습니다.');
         } catch (error) {
             console.error('Failed to save memo:', error);
             setErrorMessage('메모를 저장하지 못했습니다.');
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const switchDraftType = (type: MemoType) => {
+        if (draftMemoType === type) return;
+
+        if (type === 'checklist') {
+            const currentDraft = parseMemoText(draftText);
+            const items = checklistItemsFromText(currentDraft.content);
+
+            setDraftMemoType('checklist');
+            setDraftTitle(currentDraft.title);
+            setDraftChecklistItems(items.length > 0 ? items : [createChecklistItem('')]);
+            return;
+        }
+
+        setDraftMemoType('text');
+        setDraftText(composeMemoText(
+            normalizeMemoTitle(draftTitle),
+            checklistItemsToText(draftChecklistItems)
+        ));
+    };
+
+    const addDraftChecklistItem = (index?: number) => {
+        setDraftChecklistItems(previous => {
+            const next = [...previous];
+            const nextIndex = typeof index === 'number' ? index : next.length;
+            next.splice(nextIndex, 0, createChecklistItem(''));
+            return next;
+        });
+    };
+
+    const updateDraftChecklistItem = (
+        itemId: string,
+        updates: Partial<Pick<ChecklistItemRecord, 'text' | 'isChecked'>>
+    ) => {
+        setDraftChecklistItems(previous =>
+            previous.map(item => item.id === itemId ? { ...item, ...updates } : item)
+        );
+    };
+
+    const deleteDraftChecklistItem = (itemId: string) => {
+        setDraftChecklistItems(previous => previous.filter(item => item.id !== itemId));
+    };
+
+    const handleChecklistItemKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, index: number, item: ChecklistItemRecord) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            addDraftChecklistItem(index + 1);
+        }
+
+        if (event.key === 'Backspace' && item.text === '' && draftChecklistItems.length > 1) {
+            event.preventDefault();
+            deleteDraftChecklistItem(item.id);
         }
     };
 
@@ -926,7 +1137,7 @@ export function MemoPage() {
                             </p>
                         </div>
 
-                        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-end">
+                        <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center xl:justify-end">
                             <label className="relative block min-w-0 sm:w-80 xl:w-96">
                                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                                 <input
@@ -955,15 +1166,26 @@ export function MemoPage() {
                                     <FolderPlus className="h-4 w-4" />
                                 </button>
                             </div>
-                            <button
-                                type="button"
-                                onClick={() => void createMemo()}
-                                disabled={isSaving}
-                                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                <Plus className="h-4 w-4" />
-                                새 메모
-                            </button>
+                            <div className="grid min-w-[300px] grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => void createMemo()}
+                                    disabled={isSaving}
+                                    className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <Plus className="h-4 w-4" />
+                                    새 메모
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => void createMemo('checklist')}
+                                    disabled={isSaving}
+                                    className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <CheckSquare className="h-4 w-4" />
+                                    체크리스트
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </header>
@@ -1040,15 +1262,26 @@ export function MemoPage() {
                                 <div className="p-10 text-center">
                                     <FileText className="mx-auto h-8 w-8 text-slate-300" />
                                     <p className="mt-3 text-sm font-bold text-slate-700">표시할 메모가 없습니다.</p>
-                                    <button
-                                        type="button"
-                                        onClick={() => void createMemo()}
-                                        disabled={isSaving}
-                                        className="mt-4 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <Plus className="h-4 w-4" />
-                                        새 메모
-                                    </button>
+                                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void createMemo()}
+                                            disabled={isSaving}
+                                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <Plus className="h-4 w-4" />
+                                            새 메모
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void createMemo('checklist')}
+                                            disabled={isSaving}
+                                            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <CheckSquare className="h-4 w-4" />
+                                            체크리스트
+                                        </button>
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="space-y-2 p-2">
@@ -1066,6 +1299,8 @@ export function MemoPage() {
                                         const isChecked = checkedMemoIdSet.has(memo.id);
                                         const isSelected = selectedMemoId === memo.id;
                                         const categoryColor = getCategoryColor(memo.categoryId);
+                                        const checklistTotal = memo.checklistItems.length;
+                                        const checklistDone = memo.checklistItems.filter(item => item.isChecked).length;
 
                                         return (
                                             <article
@@ -1096,11 +1331,21 @@ export function MemoPage() {
                                                                 backgroundColor: hexToRgba(categoryColor, isSelected ? 0.16 : 0.08)
                                                             }}
                                                         >
+                                                            {memo.type === 'checklist' ? (
+                                                                <CheckSquare className="h-4 w-4 shrink-0 text-slate-700" />
+                                                            ) : (
+                                                                <FileText className="h-4 w-4 shrink-0 text-slate-500" />
+                                                            )}
                                                             <h3 className="truncate text-sm font-bold text-slate-950">{memo.title}</h3>
                                                             <span className="inline-flex max-w-[130px] shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 shadow-sm">
                                                                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: categoryColor }} />
                                                                 <span className="truncate">{getCategoryLabel(memo.categoryId)}</span>
                                                             </span>
+                                                            {memo.type === 'checklist' && (
+                                                                <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-emerald-700 shadow-sm">
+                                                                    {checklistDone}/{checklistTotal}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </button>
                                                     <button
@@ -1162,6 +1407,32 @@ export function MemoPage() {
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                                             {memoCategoryPicker}
+                                            <div className="inline-flex h-9 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => switchDraftType('text')}
+                                                    className={`inline-flex items-center gap-1.5 rounded-md px-2 text-xs font-bold transition ${
+                                                        draftMemoType === 'text'
+                                                            ? 'bg-slate-900 text-white'
+                                                            : 'text-slate-600 hover:bg-slate-100'
+                                                    }`}
+                                                >
+                                                    <FileText className="h-3.5 w-3.5" />
+                                                    본문
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => switchDraftType('checklist')}
+                                                    className={`inline-flex items-center gap-1.5 rounded-md px-2 text-xs font-bold transition ${
+                                                        draftMemoType === 'checklist'
+                                                            ? 'bg-slate-900 text-white'
+                                                            : 'text-slate-600 hover:bg-slate-100'
+                                                    }`}
+                                                >
+                                                    <CheckSquare className="h-3.5 w-3.5" />
+                                                    체크
+                                                </button>
+                                            </div>
                                             <button
                                                 type="button"
                                                 onClick={() => void saveMemo()}
@@ -1188,36 +1459,110 @@ export function MemoPage() {
                                     className="min-h-0 flex-1 overflow-y-auto p-4"
                                     style={{ backgroundColor: draftAccentTheme.surface }}
                                 >
-                                    <label className="flex min-h-[520px] flex-col lg:min-h-[calc(100vh-210px)]">
-                                        <span
-                                            className="mb-2 block rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"
-                                            style={{ borderColor: draftAccentTheme.border }}
-                                        >
-                                            첫 줄은 제목, 다음 줄부터 내용
-                                        </span>
-                                        <textarea
-                                            value={draftText}
-                                            onChange={event => setDraftText(event.target.value)}
-                                            className="min-h-[520px] flex-1 resize-none rounded-lg border border-emerald-200 bg-white p-4 text-base leading-7 text-slate-800 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-100"
-                                            style={{ borderColor: draftAccentTheme.border }}
-                                            placeholder={'제목을 첫 줄에 입력하세요.\n다음 줄부터 본문을 입력하세요.'}
-                                        />
-                                    </label>
+                                    {draftMemoType === 'text' ? (
+                                        <label className="flex min-h-[520px] flex-col lg:min-h-[calc(100vh-210px)]">
+                                            <span
+                                                className="mb-2 block rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                                                style={{ borderColor: draftAccentTheme.border }}
+                                            >
+                                                첫 줄은 제목, 다음 줄부터 내용
+                                            </span>
+                                            <textarea
+                                                value={draftText}
+                                                onChange={event => setDraftText(event.target.value)}
+                                                className="min-h-[520px] flex-1 resize-none rounded-lg border border-emerald-200 bg-white p-4 text-base leading-7 text-slate-800 outline-none transition focus:border-emerald-600 focus:bg-white focus:ring-2 focus:ring-emerald-100"
+                                                style={{ borderColor: draftAccentTheme.border }}
+                                                placeholder={'제목을 첫 줄에 입력하세요.\n다음 줄부터 본문을 입력하세요.'}
+                                            />
+                                        </label>
+                                    ) : (
+                                        <div className="flex min-h-[520px] flex-col gap-3 lg:min-h-[calc(100vh-210px)]">
+                                            <label className="block">
+                                                <span
+                                                    className="mb-2 block rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"
+                                                    style={{ borderColor: draftAccentTheme.border }}
+                                                >
+                                                    체크리스트 제목
+                                                </span>
+                                                <input
+                                                    value={draftTitle}
+                                                    onChange={event => setDraftTitle(event.target.value)}
+                                                    className="h-12 w-full rounded-lg border bg-white px-4 text-base font-bold text-slate-900 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+                                                    style={{ borderColor: draftAccentTheme.border }}
+                                                    placeholder="체크리스트 제목"
+                                                />
+                                            </label>
+                                            <div
+                                                className="flex-1 rounded-lg border bg-white p-3"
+                                                style={{ borderColor: draftAccentTheme.border }}
+                                            >
+                                                <div className="space-y-2">
+                                                    {draftChecklistItems.map((item, index) => (
+                                                        <div key={item.id} className="group flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={item.isChecked}
+                                                                onChange={event => updateDraftChecklistItem(item.id, { isChecked: event.target.checked })}
+                                                                className="h-4 w-4 shrink-0 rounded border-slate-300 text-emerald-700 focus:ring-emerald-600"
+                                                                title="완료"
+                                                            />
+                                                            <input
+                                                                value={item.text}
+                                                                onChange={event => updateDraftChecklistItem(item.id, { text: event.target.value })}
+                                                                onKeyDown={event => handleChecklistItemKeyDown(event, index, item)}
+                                                                className={`h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400 ${
+                                                                    item.isChecked ? 'text-slate-400 line-through' : 'text-slate-800'
+                                                                }`}
+                                                                placeholder="할 일을 입력하세요"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => deleteDraftChecklistItem(item.id)}
+                                                                className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                                                title="항목 삭제"
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => addDraftChecklistItem()}
+                                                    className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+                                                >
+                                                    <Plus className="h-4 w-4" />
+                                                    항목 추가
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         ) : (
                             <div className="flex h-full min-h-[520px] flex-col items-center justify-center gap-3 p-6 text-center text-slate-500">
                                 <FileText className="h-8 w-8" />
                                 <p className="text-sm font-semibold">좌측 목록에서 메모를 선택하세요.</p>
-                                <button
-                                    type="button"
-                                    onClick={() => void createMemo()}
-                                    disabled={isSaving}
-                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    새 메모
-                                </button>
+                                <div className="flex flex-wrap justify-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => void createMemo()}
+                                        disabled={isSaving}
+                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                        새 메모
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => void createMemo('checklist')}
+                                        disabled={isSaving}
+                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-800 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <CheckSquare className="h-4 w-4" />
+                                        체크리스트
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </section>

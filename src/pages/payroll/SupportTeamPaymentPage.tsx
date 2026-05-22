@@ -6,6 +6,10 @@ import {
     faCircleExclamation,
     faExclamationTriangle,
     faFileExcel,
+    faFileInvoiceDollar,
+    faCopy,
+    faShareNodes,
+    faReceipt,
     faSearch,
     faSpinner,
     faUsers,
@@ -28,8 +32,13 @@ import { Site, siteService } from '../../services/siteService';
 import { manpowerService, Worker } from '../../services/manpowerService';
 import { dailyReportService, DailyReport, DailyReportWorker } from '../../services/dailyReportService';
 import { SupportRate, supportRateService } from '../../services/supportRateService';
+import { teamExpenseLedgerService } from '../../services/teamExpenseLedgerService';
+import type { TeamExpenseClaim } from '../../types/teamExpenseLedger';
 import { BANK_CODES } from './team-payment/types';
 import html2canvas from 'html2canvas';
+import { db, storage } from '../../config/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { getDownloadURL, ref } from 'firebase/storage';
 
 interface SupportLaborExcelRow {
     aggregateId: string;
@@ -105,6 +114,9 @@ interface SupportSiteRow {
     settlementRule: string;
     totalManDay: number;
     totalAmount: number;
+    expenseClaimAmount: number;
+    expenseClaimCount: number;
+    expenseClaims: TeamExpenseClaim[];
     unitPriceSamples: number[];
     displayContent: string;
     workers: SupportWorkerBreakdown[];
@@ -367,11 +379,12 @@ const getMonthRange = (yearMonth: string): { start: string; end: string } => {
     return { start: toISO(startDate), end: toISO(endDate) };
 };
 
-const maskIdNumber = (value: string): string => {
-    if (!value) return '';
-    const digits = value.replace(/[^0-9]/g, '');
-    if (digits.length < 7) return value;
-    return `${digits.slice(0, 6)}-${digits.slice(6, 7)}******`;
+const formatFullIdNumber = (value?: string | null): string => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length === 13) return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+    return raw;
 };
 
 const SUPPORT_DIRECTION_ORDER: SupportDirection[] = ['외부지원간곳', '외부지원온곳', '내부지원간곳', '내부지원온곳'];
@@ -425,6 +438,24 @@ const summarizeNames = (names: Array<string | undefined | null>, fallback = '팀
 
 const isSameIdentity = (a?: string | null, b?: string | null): boolean =>
     !!normalize(a) && normalize(a) === normalize(b);
+
+const matchesTeamReference = (
+    leftId?: string | null,
+    leftName?: string | null,
+    rightId?: string | null,
+    rightName?: string | null
+): boolean => (
+    isSameIdentity(leftId, rightId) ||
+    (!!normalizeName(leftName) && normalizeName(leftName) === normalizeName(rightName))
+);
+
+const matchesSiteReference = (
+    claim: Pick<TeamExpenseClaim, 'siteId' | 'siteName'>,
+    site: Pick<SupportSiteRow, 'siteId' | 'siteName'>
+): boolean => (
+    isSameIdentity(claim.siteId, site.siteId) ||
+    (!!normalizeName(claim.siteName) && normalizeName(claim.siteName) === normalizeName(site.siteName))
+);
 
 const matchesViewTeamIdentity = (aggregate: SupportCompanyAggregate, teamIdOrName: string): boolean =>
     isSameIdentity(aggregate.viewTeamId, teamIdOrName) ||
@@ -510,6 +541,9 @@ const mergeSitesByIdentity = (sites: SupportSiteRow[]): SupportSiteRow[] => {
                 ...site,
                 sourceTeamIds: [...site.sourceTeamIds],
                 sourceTeamNames: [...site.sourceTeamNames],
+                expenseClaimAmount: site.expenseClaimAmount ?? 0,
+                expenseClaimCount: site.expenseClaimCount ?? 0,
+                expenseClaims: dedupeExpenseClaims(site.expenseClaims ?? []),
                 unitPriceSamples: [...site.unitPriceSamples],
                 workers: [...site.workers]
             });
@@ -517,6 +551,9 @@ const mergeSitesByIdentity = (sites: SupportSiteRow[]): SupportSiteRow[] => {
         }
 
         existing.workers = [...existing.workers, ...site.workers];
+        existing.expenseClaims = dedupeExpenseClaims([...(existing.expenseClaims ?? []), ...(site.expenseClaims ?? [])]);
+        existing.expenseClaimAmount = getExpenseClaimsTotal(existing.expenseClaims);
+        existing.expenseClaimCount = existing.expenseClaims.length;
         existing.unitPriceSamples = [...existing.unitPriceSamples, ...site.unitPriceSamples];
         existing.sourceTeamIds = uniqueValues([...existing.sourceTeamIds, ...site.sourceTeamIds]);
         existing.sourceTeamNames = uniqueValues([...existing.sourceTeamNames, ...site.sourceTeamNames]);
@@ -668,11 +705,106 @@ const applyMonthlyRateOverrides = (
     return recalcAggregateFromSites(nextAggregate, nextSites);
 });
 
+const isPostedTeamChargeClaim = (claim: TeamExpenseClaim): boolean =>
+    claim.claimType === 'teamCharge' &&
+    (claim.status === 'charged' || claim.status === 'settled') &&
+    Number(claim.amount || 0) > 0;
+
+const getExpenseClaimAmount = (claim: TeamExpenseClaim): number =>
+    Math.max(0, Math.round(Number(claim.amount || 0)));
+
+const getExpenseClaimStatusLabel = (status: TeamExpenseClaim['status']): string => {
+    if (status === 'charged') return '청구완료';
+    if (status === 'settled') return '정산완료';
+    return '작성중';
+};
+
+const getExpenseClaimKey = (claim: TeamExpenseClaim): string =>
+    claim.id || [
+        claim.yearMonth,
+        claim.date,
+        claim.payerTeamId,
+        claim.payerTeamName,
+        claim.chargeToTeamId,
+        claim.chargeToTeamName,
+        claim.siteId,
+        claim.siteName,
+        claim.category,
+        claim.description,
+        claim.amount
+    ].map(value => String(value ?? '').trim()).join('::');
+
+const sortExpenseClaims = (claims: TeamExpenseClaim[]): TeamExpenseClaim[] =>
+    [...claims].sort((a, b) =>
+        (a.date || '').localeCompare(b.date || '') ||
+        (a.siteName || '').localeCompare(b.siteName || '', 'ko-KR') ||
+        (a.description || '').localeCompare(b.description || '', 'ko-KR')
+    );
+
+const dedupeExpenseClaims = (claims: TeamExpenseClaim[]): TeamExpenseClaim[] => {
+    const claimMap = new Map<string, TeamExpenseClaim>();
+    claims.forEach((claim) => {
+        claimMap.set(getExpenseClaimKey(claim), claim);
+    });
+    return sortExpenseClaims(Array.from(claimMap.values()));
+};
+
+const getExpenseClaimsTotal = (claims: TeamExpenseClaim[]): number =>
+    claims.reduce((sum, claim) => sum + getExpenseClaimAmount(claim), 0);
+
+const claimMatchesAggregateSettlement = (claim: TeamExpenseClaim, aggregate: SupportCompanyAggregate): boolean => {
+    const aggregateTeamId = aggregate.settlementTeamId || aggregate.companyId;
+    const aggregateTeamName = aggregate.settlementTeamName || aggregate.companyName;
+    if (aggregate.settlementRole === 'charge') {
+        return matchesTeamReference(claim.chargeToTeamId, claim.chargeToTeamName, aggregateTeamId, aggregateTeamName);
+    }
+    return matchesTeamReference(claim.payerTeamId, claim.payerTeamName, aggregateTeamId, aggregateTeamName);
+};
+
+const applyExpenseClaimsToAggregates = (
+    rows: SupportCompanyAggregate[],
+    claims: TeamExpenseClaim[]
+): SupportCompanyAggregate[] => {
+    const postedClaims = claims.filter(isPostedTeamChargeClaim);
+
+    return rows.map((aggregate) => {
+        const nextSites = aggregate.sites.map((site) => {
+            const matchedClaims = postedClaims.filter((claim) =>
+                matchesSiteReference(claim, site) &&
+                claimMatchesAggregateSettlement(claim, aggregate)
+            );
+            const expenseClaims = dedupeExpenseClaims(matchedClaims);
+            const expenseClaimAmount = getExpenseClaimsTotal(expenseClaims);
+
+            return {
+                ...site,
+                expenseClaimAmount,
+                expenseClaimCount: expenseClaims.length,
+                expenseClaims
+            };
+        });
+
+        return recalcAggregateFromSites(aggregate, nextSites);
+    });
+};
+
 const getAdjustment = (adjustments: SupportManualAdjustments, aggregateId: string): SupportManualAdjustment =>
     normalizeManualAdjustment(adjustments[aggregateId]);
 
+const getSiteExpenseClaimAmount = (site: SupportSiteRow): number =>
+    Math.max(0, Math.round(site.expenseClaimAmount ?? 0));
+
+const getSiteExpenseClaims = (site: SupportSiteRow): TeamExpenseClaim[] =>
+    dedupeExpenseClaims(site.expenseClaims ?? []);
+
+const getAggregateExpenseClaimAmount = (aggregate: SupportCompanyAggregate): number =>
+    aggregate.sites.reduce((sum, site) => sum + getSiteExpenseClaimAmount(site), 0);
+
+const getAggregateExpenseClaims = (aggregate: SupportCompanyAggregate): TeamExpenseClaim[] =>
+    dedupeExpenseClaims(aggregate.sites.flatMap(site => getSiteExpenseClaims(site)));
+
 const getAggregateAdditionalAmount = (aggregate: SupportCompanyAggregate, adjustments: SupportManualAdjustments): number =>
-    getAdjustment(adjustments, aggregate.aggregateId).additionalAmount;
+    getAdjustment(adjustments, aggregate.aggregateId).additionalAmount + getAggregateExpenseClaimAmount(aggregate);
 
 const getAggregateTotalWithAdditional = (aggregate: SupportCompanyAggregate, adjustments: SupportManualAdjustments): number =>
     aggregate.totalAmount + getAggregateAdditionalAmount(aggregate, adjustments);
@@ -744,6 +876,712 @@ const getSupportDetailImageFileName = (
     aggregate.companyName
 ].map(sanitizeFileNamePart).join('_') + '.png';
 
+const formatCurrencyText = (value: number): string => `${formatNumber(Math.round(value || 0))}원`;
+
+const formatManDayText = (value: number): string => `${formatDayValue(value) || '0'}공수`;
+
+const formatYearMonthLabel = (yearMonth: string): string => {
+    const [year, month] = yearMonth.split('-');
+    const monthNumber = parseInt(month ?? '', 10);
+    return `${year || ''}년 ${Number.isFinite(monthNumber) && monthNumber > 0 ? monthNumber : ''}월`.trim();
+};
+
+const buildWorkerStatementLine = (row: SupportLaborExcelRow): string => {
+    const workedDays = row.days
+        .map((value, index) => value > 0 ? `${index + 1}일 ${formatDayValue(value)}` : '')
+        .filter(Boolean)
+        .join(', ');
+    const dayPart = workedDays ? ` (${workedDays})` : '';
+    return `  - ${row.workerName}: ${formatManDayText(row.totalManDay)} x ${formatCurrencyText(row.unitPrice)} = ${formatCurrencyText(row.totalAmount)}${dayPart}`;
+};
+
+const buildSupportLaborStatementText = (
+    aggregate: SupportCompanyAggregate,
+    previews: SitePreviewBlock[],
+    yearMonth: string,
+    adjustment: SupportManualAdjustment
+): string => {
+    const expenseClaimAmount = getAggregateExpenseClaimAmount(aggregate);
+    const totalAmount = aggregate.totalAmount + adjustment.additionalAmount + expenseClaimAmount;
+    const remark = adjustment.remark || getAggregateRemarkFallback(aggregate);
+    const etc = adjustment.etc || getAggregateEtcFallback(aggregate);
+    const siteBlocks = previews.length > 0
+        ? previews
+        : aggregate.sites.map(site => ({ aggregate, site, rows: [] as SupportLaborExcelRow[] }));
+
+    const lines = [
+        `[노임명세서] ${formatYearMonthLabel(yearMonth)}`,
+        `정산주체: ${aggregate.companyName}`,
+        `구분: ${aggregate.direction}`,
+        `기준팀: ${aggregate.viewTeamName || '-'}`,
+        `작업팀: ${aggregate.sourceTeamName || '-'}`,
+        `현장수: ${aggregate.sites.length}개`,
+        `총공수: ${formatManDayText(aggregate.totalManDay)}`,
+        `노임합계: ${formatCurrencyText(aggregate.totalAmount)}`
+    ];
+
+    if (adjustment.additionalAmount > 0) lines.push(`추가금액: ${formatCurrencyText(adjustment.additionalAmount)}`);
+    if (expenseClaimAmount > 0) lines.push(`청구추가: ${formatCurrencyText(expenseClaimAmount)}`);
+    lines.push(`지급합계: ${formatCurrencyText(totalAmount)}`);
+
+    if (aggregate.bankName || aggregate.accountNumber || aggregate.accountHolder) {
+        lines.push(`계좌: ${[aggregate.bankName, aggregate.accountNumber, aggregate.accountHolder].filter(Boolean).join(' ')}`);
+    }
+    if (remark) lines.push(`비고: ${remark}`);
+    if (etc) lines.push(`기타: ${etc}`);
+
+    const siteLines = siteBlocks.map((preview, index) => {
+        const rows = preview.rows;
+        const siteManDay = rows.reduce((sum, row) => sum + row.totalManDay, 0) || preview.site.totalManDay;
+        const siteAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0) || preview.site.totalAmount;
+        const workerLines = rows.map(buildWorkerStatementLine);
+
+        return [
+            `${index + 1}. ${preview.site.siteName}`,
+            `   공수 ${formatManDayText(siteManDay)} / 노임 ${formatCurrencyText(siteAmount)}`,
+            ...workerLines
+        ].join('\n');
+    });
+
+    return [...lines, '', '[현장별 내역]', ...siteLines].join('\n');
+};
+
+const wrapCanvasText = (
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    maxWidth: number,
+    maxLines = 2
+): string[] => {
+    const source = String(text || '-');
+    const chars = Array.from(source);
+    const lines: string[] = [];
+    let current = '';
+
+    chars.forEach((char) => {
+        const next = current + char;
+        if (ctx.measureText(next).width <= maxWidth || !current) {
+            current = next;
+            return;
+        }
+        lines.push(current);
+        current = char;
+    });
+
+    if (current) lines.push(current);
+    if (lines.length > maxLines) {
+        const kept = lines.slice(0, maxLines);
+        let last = kept[kept.length - 1] || '';
+        while (last.length > 0 && ctx.measureText(`${last}...`).width > maxWidth) {
+            last = last.slice(0, -1);
+        }
+        kept[kept.length - 1] = `${last}...`;
+        return kept;
+    }
+    return lines;
+};
+
+const drawCanvasCell = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    text: React.ReactNode,
+    options: {
+        fill?: string;
+        stroke?: string;
+        color?: string;
+        font?: string;
+        align?: CanvasTextAlign;
+        baseline?: CanvasTextBaseline;
+        padding?: number;
+        wrap?: boolean;
+        maxLines?: number;
+    } = {}
+) => {
+    const {
+        fill = '#ffffff',
+        stroke = '#111827',
+        color = '#111827',
+        font = '22px "Malgun Gothic", "Pretendard", sans-serif',
+        align = 'center',
+        baseline = 'middle',
+        padding = 8,
+        wrap = false,
+        maxLines = 2
+    } = options;
+
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, width, height);
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, width, height);
+
+    const value = String(text ?? '');
+    if (!value) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + 1, y + 1, Math.max(width - 2, 0), Math.max(height - 2, 0));
+    ctx.clip();
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = baseline;
+
+    const textX = align === 'left' ? x + padding : align === 'right' ? x + width - padding : x + width / 2;
+    if (wrap) {
+        const lines = wrapCanvasText(ctx, value, Math.max(width - padding * 2, 10), maxLines);
+        const lineHeight = 19;
+        const startY = y + height / 2 - ((lines.length - 1) * lineHeight) / 2;
+        lines.forEach((line, index) => {
+            ctx.fillText(line, textX, startY + index * lineHeight);
+        });
+    } else {
+        ctx.fillText(value, textX, y + height / 2);
+    }
+    ctx.restore();
+};
+
+const loadCanvasImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+        const image = new Image();
+        if (/^https?:\/\//i.test(src) && !src.startsWith(window.location.origin)) {
+            image.crossOrigin = 'anonymous';
+        }
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error(`Image load failed: ${src}`));
+        image.src = src;
+    });
+
+const DEFAULT_STATEMENT_LOGO_URL = '/icons/icon-192.png';
+const ERP_LOGO_STORAGE_PATH = 'settings/erp_logo';
+
+const resolveStatementLogoUrl = (logoUrl?: string | null): string => {
+    const trimmed = typeof logoUrl === 'string' ? logoUrl.trim() : '';
+    return trimmed || DEFAULT_STATEMENT_LOGO_URL;
+};
+
+const createLaborStatementImageBlob = async (
+    preview: SitePreviewBlock,
+    yearMonth: string,
+    logoUrl?: string | null
+): Promise<Blob> => {
+    await waitForDocumentFonts();
+
+    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+    const rows = preview.rows;
+    const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
+    rows.forEach(row => row.days.forEach((value, index) => {
+        dayTotals[index] += value;
+    }));
+
+    const totalManDay = rows.reduce((sum, row) => sum + row.totalManDay, 0);
+    const totalAmount = rows.reduce((sum, row) => sum + row.totalAmount, 0);
+    const avgPrice = totalManDay > 0 ? Math.round(totalAmount / totalManDay) : 0;
+
+    const margin = 48;
+    const tableTop = 250;
+    const headerRowHeight = 36;
+    const bodyRowHeight = 30;
+    const footerRowHeight = 36;
+    const workerBlockHeight = bodyRowHeight * 2;
+
+    const columns = {
+        no: 54,
+        name: 104,
+        id: 150,
+        address: 390,
+        day: 27,
+        total: 76,
+        amount: 132
+    };
+    const fixedInfoWidth = columns.no + columns.name + columns.id + columns.address;
+    const dayAreaWidth = Math.max(DAY_LABELS_SECOND.length, DAY_LABELS_FIRST.length + 1) * columns.day;
+    const tableWidth = fixedInfoWidth + dayAreaWidth + columns.total + columns.amount;
+    const width = tableWidth + margin * 2;
+    const tableHeight = headerRowHeight * 2 + rows.length * workerBlockHeight + footerRowHeight * 2;
+    const height = tableTop + tableHeight + 54;
+    const outputScale = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width * outputScale);
+    canvas.height = Math.ceil(height * outputScale);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+    ctx.scale(outputScale, outputScale);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#111827';
+    ctx.font = '900 40px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`노 무 비 지 급 명 세 서 (${month}월분)`, width / 2, 92);
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(width / 2 - 270, 122);
+    ctx.lineTo(width / 2 + 270, 122);
+    ctx.stroke();
+
+    ctx.font = '700 22px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#111827';
+    ctx.fillText(`현장명: ${preview.site.siteName}`, margin, 166);
+    ctx.fillText(`정산 주체: ${preview.aggregate.companyName}`, margin, 202);
+    const logoSize = 46;
+    const logoX = width - margin - 248;
+    const logoY = 154;
+    try {
+        const logoImage = await loadCanvasImage(resolveStatementLogoUrl(logoUrl));
+        ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
+    } catch (error) {
+        console.warn('[SupportTeamPaymentPage] labor statement logo image failed:', error);
+        ctx.fillStyle = '#0f766e';
+        ctx.fillRect(logoX, logoY, logoSize, logoSize);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 18px "Malgun Gothic", "Pretendard", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('CY', logoX + logoSize / 2, logoY + logoSize / 2);
+    }
+    ctx.fillStyle = '#111827';
+    ctx.font = '900 24px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('(주) 청연이엔지', logoX + logoSize + 12, logoY + logoSize / 2);
+
+    let x = margin;
+    let y = tableTop;
+    const headerFill = '#f1f5f9';
+    const firstDayFill = '#e0f2fe';
+    const secondDayFill = '#fff1f2';
+    const bodyDayFill = '#f8fafc';
+    const totalFill = '#e2e8f0';
+    const smallFont = '18px "Malgun Gothic", "Pretendard", sans-serif';
+    const bodyFont = '19px "Malgun Gothic", "Pretendard", sans-serif';
+    const boldFont = '700 19px "Malgun Gothic", "Pretendard", sans-serif';
+    const tinyFont = '16px "Malgun Gothic", "Pretendard", sans-serif';
+
+    drawCanvasCell(ctx, x, y, columns.no, headerRowHeight * 2, 'NO', { fill: headerFill, font: boldFont });
+    x += columns.no;
+    drawCanvasCell(ctx, x, y, columns.name, headerRowHeight * 2, '성명', { fill: headerFill, font: boldFont });
+    x += columns.name;
+    drawCanvasCell(ctx, x, y, columns.id, headerRowHeight, '주민번호', { fill: headerFill, font: smallFont });
+    drawCanvasCell(ctx, x, y + headerRowHeight, columns.id, headerRowHeight, '전화번호', { fill: headerFill, font: smallFont });
+    x += columns.id;
+    drawCanvasCell(ctx, x, y, columns.address, headerRowHeight * 2, '주소', { fill: headerFill, font: boldFont });
+    x += columns.address;
+
+    DAY_LABELS_FIRST.forEach(day => {
+        drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, String(day).padStart(2, '0'), { fill: firstDayFill, color: '#0369a1', font: tinyFont });
+        x += columns.day;
+    });
+    drawCanvasCell(ctx, x, y, columns.day, headerRowHeight, 'X', { fill: headerFill, font: tinyFont });
+    x += columns.day;
+    drawCanvasCell(ctx, x, y, columns.total, headerRowHeight * 2, '출역', { fill: headerFill, font: boldFont });
+    x += columns.total;
+    drawCanvasCell(ctx, x, y, columns.amount, headerRowHeight, '단가', { fill: headerFill, font: smallFont });
+    drawCanvasCell(ctx, x, y + headerRowHeight, columns.amount, headerRowHeight, '총액', { fill: headerFill, font: smallFont });
+
+    x = margin + columns.no + columns.name + columns.id + columns.address;
+    DAY_LABELS_SECOND.forEach(day => {
+        drawCanvasCell(ctx, x, y + headerRowHeight, columns.day, headerRowHeight, String(day), { fill: secondDayFill, color: '#be123c', font: tinyFont });
+        x += columns.day;
+    });
+
+    y += headerRowHeight * 2;
+    rows.forEach((row, index) => {
+        x = margin;
+        drawCanvasCell(ctx, x, y, columns.no, workerBlockHeight, String(index + 1), { fill: '#f8fafc', font: bodyFont });
+        x += columns.no;
+        drawCanvasCell(ctx, x, y, columns.name, workerBlockHeight, row.workerName, { font: boldFont, wrap: true, maxLines: 2 });
+        x += columns.name;
+        drawCanvasCell(ctx, x, y, columns.id, bodyRowHeight, formatFullIdNumber(row.idNumber), { font: tinyFont });
+        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.id, bodyRowHeight, row.contact || '-', { font: tinyFont, color: '#475569' });
+        x += columns.id;
+        drawCanvasCell(ctx, x, y, columns.address, workerBlockHeight, row.address || '-', { font: tinyFont, align: 'left', wrap: true, maxLines: 3 });
+        x += columns.address;
+
+        DAY_LABELS_FIRST.forEach(day => {
+            drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, formatDayValue(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
+            x += columns.day;
+        });
+        drawCanvasCell(ctx, x, y, columns.day, bodyRowHeight, '', { fill: bodyDayFill });
+        x += columns.day;
+        drawCanvasCell(ctx, x, y, columns.total, workerBlockHeight, formatDayValue(row.totalManDay), { fill: '#f8fafc', font: bodyFont });
+        x += columns.total;
+        drawCanvasCell(ctx, x, y, columns.amount, bodyRowHeight, formatNumber(row.unitPrice), { font: tinyFont, align: 'right' });
+        drawCanvasCell(ctx, x, y + bodyRowHeight, columns.amount, bodyRowHeight, formatNumber(row.totalAmount), { fill: '#ecfdf5', color: '#3730a3', font: '700 17px "Malgun Gothic", "Pretendard", sans-serif', align: 'right' });
+
+        x = margin + columns.no + columns.name + columns.id + columns.address;
+        DAY_LABELS_SECOND.forEach(day => {
+            drawCanvasCell(ctx, x, y + bodyRowHeight, columns.day, bodyRowHeight, formatDayValue(row.days[day - 1]), { fill: bodyDayFill, font: tinyFont });
+            x += columns.day;
+        });
+        y += workerBlockHeight;
+    });
+
+    x = margin;
+    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '합 계', { fill: totalFill, font: boldFont });
+    x += columns.no + columns.name + columns.id + columns.address;
+    DAY_LABELS_FIRST.forEach(day => {
+        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatDayValue(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
+        x += columns.day;
+    });
+    drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, '', { fill: totalFill });
+    x += columns.day;
+    drawCanvasCell(ctx, x, y, columns.total, footerRowHeight * 2, formatDayValue(totalManDay), { fill: totalFill, font: boldFont });
+    x += columns.total;
+    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(avgPrice), { fill: totalFill, font: boldFont, align: 'right' });
+
+    y += footerRowHeight;
+    x = margin;
+    drawCanvasCell(ctx, x, y, columns.no + columns.name + columns.id + columns.address, footerRowHeight, '총 액', { fill: totalFill, font: boldFont });
+    x += columns.no + columns.name + columns.id + columns.address;
+    DAY_LABELS_SECOND.forEach(day => {
+        drawCanvasCell(ctx, x, y, columns.day, footerRowHeight, formatDayValue(dayTotals[day - 1]), { fill: totalFill, font: tinyFont });
+        x += columns.day;
+    });
+    x += columns.total;
+    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(totalAmount), { fill: '#dcfce7', color: '#3730a3', font: boldFont, align: 'right' });
+
+    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('PNG blob generation failed');
+    return blob;
+};
+
+const buildExpenseClaimStatementText = (
+    aggregate: SupportCompanyAggregate,
+    claims: TeamExpenseClaim[],
+    yearMonth: string
+): string => {
+    const rows = sortExpenseClaims(claims);
+    const totalAmount = getExpenseClaimsTotal(rows);
+    const lines = [
+        `[후청구 경비내역] ${formatYearMonthLabel(yearMonth)}`,
+        `정산주체: ${aggregate.companyName}`,
+        `구분: ${aggregate.direction}`,
+        `총건수: ${rows.length}건`,
+        `후청구 합계: ${formatCurrencyText(totalAmount)}`,
+        '',
+        '[상세내역]'
+    ];
+
+    if (rows.length === 0) {
+        lines.push('등록된 후청구 경비내역이 없습니다.');
+        return lines.join('\n');
+    }
+
+    rows.forEach((claim, index) => {
+        lines.push(
+            `${index + 1}. ${claim.date || '-'} / ${claim.siteName || '-'} / ${claim.category || '기타'} / ${formatCurrencyText(getExpenseClaimAmount(claim))}`,
+            `   사용팀: ${claim.payerTeamName || '-'} / 청구대상: ${claim.chargeToTeamName || '-'}`,
+            `   내용: ${claim.description || '-'}`,
+            `   상태: ${getExpenseClaimStatusLabel(claim.status)}${claim.memo ? ` / 메모: ${claim.memo}` : ''}`
+        );
+    });
+
+    return lines.join('\n');
+};
+
+const createExpenseClaimStatementImageBlob = async (
+    aggregate: SupportCompanyAggregate,
+    claims: TeamExpenseClaim[],
+    yearMonth: string,
+    logoUrl?: string | null
+): Promise<Blob> => {
+    await waitForDocumentFonts();
+
+    const rows = sortExpenseClaims(claims);
+    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+    const totalAmount = getExpenseClaimsTotal(rows);
+    const margin = 48;
+    const tableTop = 250;
+    const headerRowHeight = 42;
+    const bodyRowHeight = 54;
+    const footerRowHeight = 44;
+    const columns = {
+        no: 54,
+        date: 104,
+        site: 220,
+        payer: 150,
+        chargeTo: 150,
+        category: 122,
+        description: 300,
+        status: 94,
+        amount: 136,
+        memo: 210
+    };
+    const tableWidth = Object.values(columns).reduce((sum, width) => sum + width, 0);
+    const width = tableWidth + margin * 2;
+    const tableHeight = headerRowHeight + Math.max(rows.length, 1) * bodyRowHeight + footerRowHeight;
+    const height = tableTop + tableHeight + 54;
+    const outputScale = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(width * outputScale);
+    canvas.height = Math.ceil(height * outputScale);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas context unavailable');
+    ctx.scale(outputScale, outputScale);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = '#111827';
+    ctx.font = '900 40px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`후 청 구 경 비 내 역 서 (${month}월분)`, width / 2, 92);
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(width / 2 - 285, 122);
+    ctx.lineTo(width / 2 + 285, 122);
+    ctx.stroke();
+
+    ctx.font = '700 22px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#111827';
+    ctx.fillText(`정산 주체: ${aggregate.companyName}`, margin, 166);
+    ctx.fillText(`후청구 합계: ${formatCurrencyText(totalAmount)} / ${rows.length}건`, margin, 202);
+    const logoSize = 46;
+    const logoX = width - margin - 248;
+    const logoY = 154;
+    try {
+        const logoImage = await loadCanvasImage(resolveStatementLogoUrl(logoUrl));
+        ctx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
+    } catch (error) {
+        console.warn('[SupportTeamPaymentPage] expense statement logo image failed:', error);
+        ctx.fillStyle = '#0f766e';
+        ctx.fillRect(logoX, logoY, logoSize, logoSize);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 18px "Malgun Gothic", "Pretendard", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('CY', logoX + logoSize / 2, logoY + logoSize / 2);
+    }
+    ctx.fillStyle = '#111827';
+    ctx.font = '900 24px "Malgun Gothic", "Pretendard", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('(주) 청연이엔지', logoX + logoSize + 12, logoY + logoSize / 2);
+
+    let x = margin;
+    let y = tableTop;
+    const headerFill = '#ecfdf5';
+    const totalFill = '#d1fae5';
+    const bodyFill = '#ffffff';
+    const mutedFill = '#f8fafc';
+    const headerFont = '700 18px "Malgun Gothic", "Pretendard", sans-serif';
+    const bodyFont = '17px "Malgun Gothic", "Pretendard", sans-serif';
+    const boldFont = '700 18px "Malgun Gothic", "Pretendard", sans-serif';
+
+    [
+        ['NO', columns.no],
+        ['일자', columns.date],
+        ['현장명', columns.site],
+        ['사용팀', columns.payer],
+        ['청구대상', columns.chargeTo],
+        ['구분', columns.category],
+        ['상세내용', columns.description],
+        ['상태', columns.status],
+        ['금액', columns.amount],
+        ['메모', columns.memo]
+    ].forEach(([label, columnWidth]) => {
+        drawCanvasCell(ctx, x, y, Number(columnWidth), headerRowHeight, label, { fill: headerFill, font: headerFont });
+        x += Number(columnWidth);
+    });
+
+    y += headerRowHeight;
+    if (rows.length === 0) {
+        drawCanvasCell(ctx, margin, y, tableWidth, bodyRowHeight, '등록된 후청구 경비내역이 없습니다.', { fill: bodyFill, font: bodyFont });
+        y += bodyRowHeight;
+    } else {
+        rows.forEach((claim, index) => {
+            x = margin;
+            drawCanvasCell(ctx, x, y, columns.no, bodyRowHeight, String(index + 1), { fill: mutedFill, font: bodyFont });
+            x += columns.no;
+            drawCanvasCell(ctx, x, y, columns.date, bodyRowHeight, claim.date || '-', { fill: bodyFill, font: bodyFont });
+            x += columns.date;
+            drawCanvasCell(ctx, x, y, columns.site, bodyRowHeight, claim.siteName || '-', { fill: bodyFill, font: bodyFont, align: 'left', wrap: true, maxLines: 2 });
+            x += columns.site;
+            drawCanvasCell(ctx, x, y, columns.payer, bodyRowHeight, claim.payerTeamName || '-', { fill: bodyFill, font: bodyFont, wrap: true, maxLines: 2 });
+            x += columns.payer;
+            drawCanvasCell(ctx, x, y, columns.chargeTo, bodyRowHeight, claim.chargeToTeamName || '-', { fill: bodyFill, font: bodyFont, wrap: true, maxLines: 2 });
+            x += columns.chargeTo;
+            drawCanvasCell(ctx, x, y, columns.category, bodyRowHeight, claim.category || '기타', { fill: bodyFill, font: bodyFont, wrap: true, maxLines: 2 });
+            x += columns.category;
+            drawCanvasCell(ctx, x, y, columns.description, bodyRowHeight, claim.description || '-', { fill: bodyFill, font: bodyFont, align: 'left', wrap: true, maxLines: 2 });
+            x += columns.description;
+            drawCanvasCell(ctx, x, y, columns.status, bodyRowHeight, getExpenseClaimStatusLabel(claim.status), { fill: mutedFill, font: bodyFont });
+            x += columns.status;
+            drawCanvasCell(ctx, x, y, columns.amount, bodyRowHeight, formatNumber(getExpenseClaimAmount(claim)), { fill: '#ecfdf5', color: '#047857', font: boldFont, align: 'right' });
+            x += columns.amount;
+            drawCanvasCell(ctx, x, y, columns.memo, bodyRowHeight, claim.memo || '-', { fill: bodyFill, font: bodyFont, align: 'left', wrap: true, maxLines: 2 });
+            y += bodyRowHeight;
+        });
+    }
+
+    x = margin;
+    drawCanvasCell(ctx, x, y, tableWidth - columns.amount - columns.memo, footerRowHeight, '합 계', { fill: totalFill, font: boldFont });
+    x += tableWidth - columns.amount - columns.memo;
+    drawCanvasCell(ctx, x, y, columns.amount, footerRowHeight, formatNumber(totalAmount), { fill: '#dcfce7', color: '#047857', font: '900 19px "Malgun Gothic", "Pretendard", sans-serif', align: 'right' });
+    x += columns.amount;
+    drawCanvasCell(ctx, x, y, columns.memo, footerRowHeight, `${rows.length}건`, { fill: totalFill, font: boldFont });
+
+    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('PNG blob generation failed');
+    return blob;
+};
+
+const copyTextToClipboard = async (text: string): Promise<void> => {
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (error) {
+            console.warn('Clipboard API copy failed, trying fallback copy:', error);
+        }
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+
+    if (!copied) throw new Error('Clipboard copy failed');
+};
+
+const captureElementToPngBlob = async (node: HTMLElement): Promise<Blob> => {
+    await waitForDocumentFonts();
+    const rect = node.getBoundingClientRect();
+    const width = Math.ceil(node.scrollWidth || rect.width);
+    const height = Math.ceil(node.scrollHeight || rect.height);
+
+    if (width <= 0 || height <= 0) {
+        throw new Error('Capture target has no size');
+    }
+
+    const canvas = await html2canvas(node, {
+        backgroundColor: '#ffffff',
+        scale: getCaptureScale(width, height),
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        width,
+        height,
+        windowWidth: Math.max(document.documentElement.clientWidth, width),
+        windowHeight: Math.max(document.documentElement.clientHeight, height),
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        onclone: (clonedDocument: Document) => {
+            const target = clonedDocument.querySelector('[data-statement-capture="true"]') as HTMLElement | null;
+            if (!target) return;
+
+            target.style.width = `${width}px`;
+            target.style.height = `${height}px`;
+            target.style.overflow = 'visible';
+            target.style.maxHeight = 'none';
+
+            let parent = target.parentElement;
+            while (parent) {
+                parent.style.overflow = 'visible';
+                parent.style.maxHeight = 'none';
+                parent = parent.parentElement;
+            }
+        }
+    } as any);
+
+    const blob: Blob | null = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('PNG blob generation failed');
+    return blob;
+};
+
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error ?? new Error('Blob read failed'));
+        reader.readAsDataURL(blob);
+    });
+
+const copyPngBlobToClipboard = async (blob: Blob): Promise<void> => {
+    const ClipboardItemCtor = (window as unknown as {
+        ClipboardItem?: new (items: Record<string, Blob>) => ClipboardItem;
+    }).ClipboardItem;
+    const clipboard = navigator.clipboard as Clipboard & {
+        write?: (data: ClipboardItem[]) => Promise<void>;
+    };
+
+    let clipboardError: unknown = null;
+    if (ClipboardItemCtor && clipboard?.write) {
+        try {
+            await clipboard.write([
+                new ClipboardItemCtor({
+                    'image/png': blob
+                })
+            ]);
+            return;
+        } catch (error) {
+            clipboardError = error;
+            console.warn('Image clipboard write failed, trying selection copy:', error);
+        }
+    }
+
+    const dataUrl = await blobToDataUrl(blob);
+    const fallbackFile = new File([blob], 'statement.png', { type: 'image/png' });
+    const wrapper = document.createElement('div');
+    wrapper.contentEditable = 'true';
+    wrapper.style.position = 'fixed';
+    wrapper.style.left = '0';
+    wrapper.style.top = '0';
+    wrapper.style.zIndex = '-1';
+    wrapper.style.opacity = '0';
+    wrapper.style.pointerEvents = 'none';
+    wrapper.style.overflow = 'visible';
+    wrapper.innerHTML = `<img src="${dataUrl}" alt="노무비 지급 명세서" />`;
+    document.body.appendChild(wrapper);
+
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(wrapper);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    wrapper.focus();
+
+    const handleFallbackCopy = (event: ClipboardEvent) => {
+        event.preventDefault();
+        try {
+            event.clipboardData?.items.add(fallbackFile);
+        } catch (error) {
+            console.warn('Clipboard file fallback failed:', error);
+        }
+        event.clipboardData?.setData('text/html', `<img src="${dataUrl}" alt="노무비 지급 명세서" />`);
+        event.clipboardData?.setData('text/plain', dataUrl);
+    };
+
+    document.addEventListener('copy', handleFallbackCopy);
+    const copied = document.execCommand('copy');
+    document.removeEventListener('copy', handleFallbackCopy);
+    selection?.removeAllRanges();
+    wrapper.remove();
+
+    if (!copied) {
+        throw (clipboardError instanceof Error ? clipboardError : new Error('Image clipboard is not supported'));
+    }
+};
+
 const waitForDocumentFonts = async (): Promise<void> => {
     try {
         const fontSet = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
@@ -761,9 +1599,80 @@ const getCaptureScale = (width: number, height: number): number => {
     return Math.max(1, Math.sqrt(maxCanvasArea / area));
 };
 
+const useErpStatementLogoUrl = (): string => {
+    const [logoUrl, setLogoUrl] = useState<string>(DEFAULT_STATEMENT_LOGO_URL);
+
+    useEffect(() => {
+        let active = true;
+
+        const loadStorageFallback = async () => {
+            try {
+                const storageLogoUrl = await getDownloadURL(ref(storage, ERP_LOGO_STORAGE_PATH));
+                if (active) setLogoUrl(resolveStatementLogoUrl(storageLogoUrl));
+            } catch {
+                if (active) setLogoUrl(DEFAULT_STATEMENT_LOGO_URL);
+            }
+        };
+
+        const unsubscribe = onSnapshot(
+            doc(db, 'settings', 'system_config'),
+            (snapshot) => {
+                const data = snapshot.exists() ? snapshot.data() : null;
+                const configuredLogoUrl = resolveStatementLogoUrl(
+                    (data?.erpLogoUrl as string | undefined) || (data?.logoUrl as string | undefined)
+                );
+
+                if (configuredLogoUrl !== DEFAULT_STATEMENT_LOGO_URL) {
+                    if (active) setLogoUrl(configuredLogoUrl);
+                    return;
+                }
+
+                void loadStorageFallback();
+            },
+            (error) => {
+                console.warn('[SupportTeamPaymentPage] ERP logo listener failed:', error);
+                void loadStorageFallback();
+            }
+        );
+
+        return () => {
+            active = false;
+            unsubscribe();
+        };
+    }, []);
+
+    return logoUrl;
+};
+
+const StatementBrand: React.FC<{ logoUrl?: string | null }> = ({ logoUrl }) => {
+    const resolvedLogoUrl = resolveStatementLogoUrl(logoUrl);
+    const [imageSrc, setImageSrc] = useState(resolvedLogoUrl);
+
+    useEffect(() => {
+        setImageSrc(resolvedLogoUrl);
+    }, [resolvedLogoUrl]);
+
+    return (
+        <div className="flex items-center gap-2 text-slate-900">
+            <img
+                src={imageSrc}
+                alt="ERP logo"
+                className="h-9 w-9 rounded-md object-contain"
+                onError={() => {
+                    if (imageSrc !== DEFAULT_STATEMENT_LOGO_URL) {
+                        setImageSrc(DEFAULT_STATEMENT_LOGO_URL);
+                    }
+                }}
+            />
+            <span className="text-sm font-black">(주) 청연이엔지</span>
+        </div>
+    );
+};
+
 const SupportTeamPaymentPage: React.FC = () => {
     const today = new Date();
     const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const statementLogoUrl = useErpStatementLogoUrl();
 
     const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth);
     const [selectedDirection, setSelectedDirection] = useState<'all' | SupportDirection>('all');
@@ -781,6 +1690,8 @@ const SupportTeamPaymentPage: React.FC = () => {
     const [detailTarget, setDetailTarget] = useState<DetailTarget>(null);
     const [showLaborPreview, setShowLaborPreview] = useState<boolean>(false);
     const [showKBPreview, setShowKBPreview] = useState<boolean>(false);
+    const [laborStatementTargetId, setLaborStatementTargetId] = useState<string | null>(null);
+    const [expenseStatementTargetId, setExpenseStatementTargetId] = useState<string | null>(null);
     const [capturingKey, setCapturingKey] = useState<string | null>(null);
     const [manualAdjustmentState, setManualAdjustmentState] = useState<{ month: string; data: SupportManualAdjustments }>(() => ({
         month: defaultMonth,
@@ -1309,6 +2220,9 @@ const SupportTeamPaymentPage: React.FC = () => {
                                 settlementRule: entry.settlementRule,
                                 totalManDay: manDay,
                                 totalAmount: amount,
+                                expenseClaimAmount: 0,
+                                expenseClaimCount: 0,
+                                expenseClaims: [],
                                 unitPriceSamples: unitPrice > 0 ? [unitPrice] : [],
                                 displayContent: `${siteName} ${entry.direction}`,
                                 workers: [workerRecord]
@@ -1340,9 +2254,16 @@ const SupportTeamPaymentPage: React.FC = () => {
         setLoading(true);
         try {
             const { start, end } = getMonthRange(selectedMonth);
-            const reports = await dailyReportService.getReportsByRange(start, end);
+            const [reports, teamExpenseClaims] = await Promise.all([
+                dailyReportService.getReportsByRange(start, end),
+                teamExpenseLedgerService.getClaimsByMonth(selectedMonth).catch((error) => {
+                    console.error('후청구 데이터를 불러오지 못했습니다.', error);
+                    return [] as TeamExpenseClaim[];
+                })
+            ]);
             const { aggregates: nextAggregates, errorMessages } = aggregateReports(reports);
-            setAggregates(applyMonthlyRateOverrides(nextAggregates, loadRateOverrides(selectedMonth)));
+            const withRateOverrides = applyMonthlyRateOverrides(nextAggregates, loadRateOverrides(selectedMonth));
+            setAggregates(applyExpenseClaimsToAggregates(withRateOverrides, teamExpenseClaims));
             setErrors(errorMessages);
         } catch (error) {
             console.error('지원팀 데이터를 불러오는 중 오류가 발생했습니다.', error);
@@ -1731,6 +2652,32 @@ const SupportTeamPaymentPage: React.FC = () => {
             rows: supportExcelRows.filter(r => r.aggregateId === agg.aggregateId && (r.siteId === s.siteId || r.siteName === s.siteName))
         }))), [displayAggregates, supportExcelRows]);
 
+    const laborStatementTarget = useMemo(
+        () => laborStatementTargetId
+            ? displayAggregates.find(aggregate => aggregate.aggregateId === laborStatementTargetId) ?? null
+            : null,
+        [displayAggregates, laborStatementTargetId]
+    );
+
+    const laborStatementTargetPreviews = useMemo(
+        () => laborStatementTarget
+            ? sitePreviews.filter(preview => preview.aggregate.aggregateId === laborStatementTarget.aggregateId)
+            : [],
+        [laborStatementTarget, sitePreviews]
+    );
+
+    const expenseStatementTarget = useMemo(
+        () => expenseStatementTargetId
+            ? displayAggregates.find(aggregate => aggregate.aggregateId === expenseStatementTargetId) ?? null
+            : null,
+        [displayAggregates, expenseStatementTargetId]
+    );
+
+    const expenseStatementClaims = useMemo(
+        () => expenseStatementTarget ? getAggregateExpenseClaims(expenseStatementTarget) : [],
+        [expenseStatementTarget]
+    );
+
     if (loading && aggregates.length === 0) {
         return (
             <div className="support-team-font flex flex-col items-center justify-center min-h-[400px] gap-4 font-['Pretendard']">
@@ -1956,7 +2903,8 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                         const aggKey = agg.aggregateId;
                                                         const isExpanded = expandedAggregates.has(aggKey);
                                                         const manualAdjustment = getAdjustment(manualAdjustments, aggKey);
-                                                        const additionalAmount = manualAdjustment.additionalAmount;
+                                                        const manualAdditionalAmount = manualAdjustment.additionalAmount;
+                                                        const expenseClaimAmount = getAggregateExpenseClaimAmount(agg);
                                                         const aggregateTotal = getAggregateTotalWithAdditional(agg, manualAdjustments);
                                                         const progressOption = getSupportProgressOption(manualAdjustment.progressStatus);
                                                         const remarkPlaceholder = getAggregateRemarkFallback(agg) || '비고 입력';
@@ -2003,16 +2951,23 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(agg.totalAmount)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-right font-mono" onClick={(event) => event.stopPropagation()}>
-                                                                        <input
-                                                                            type="text"
-                                                                            inputMode="numeric"
-                                                                            aria-label={`${agg.companyName} 추가 금액`}
-                                                                            value={formatOptionalMoney(additionalAmount)}
-                                                                            onChange={(event) => updateManualAdjustment(aggKey, { additionalAmount: parseMoneyInput(event.target.value) })}
-                                                                            onFocus={(event) => event.currentTarget.select()}
-                                                                            className="h-7 w-full bg-transparent px-1 text-right font-mono text-blue-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
-                                                                            placeholder="0"
-                                                                        />
+                                                                        <div className="space-y-0.5">
+                                                                            <input
+                                                                                type="text"
+                                                                                inputMode="numeric"
+                                                                                aria-label={`${agg.companyName} 추가 금액`}
+                                                                                value={formatOptionalMoney(manualAdditionalAmount)}
+                                                                                onChange={(event) => updateManualAdjustment(aggKey, { additionalAmount: parseMoneyInput(event.target.value) })}
+                                                                                onFocus={(event) => event.currentTarget.select()}
+                                                                                className="h-7 w-full bg-transparent px-1 text-right font-mono text-blue-700 outline-none transition focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                                placeholder="0"
+                                                                            />
+                                                                            {expenseClaimAmount > 0 && (
+                                                                                <div className="text-right text-[10px] font-black leading-none text-emerald-700">
+                                                                                    후청구 +{formatNumber(expenseClaimAmount)}
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </td>
                                                                     <td className="border border-slate-900 px-2 py-1.5 text-right font-mono">{formatNumber(aggregateTotal)}</td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
@@ -2046,17 +3001,46 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                         />
                                                                     </td>
                                                                     <td className="border border-slate-900 px-1 py-1 text-center font-medium text-slate-900" onClick={(event) => event.stopPropagation()}>
-                                                                        <input
-                                                                            type="text"
-                                                                            aria-label={`${agg.companyName} 기타`}
-                                                                            value={manualAdjustment.etc}
-                                                                            onChange={(event) => updateManualAdjustment(aggKey, { etc: event.target.value })}
-                                                                            className="h-7 w-full bg-transparent px-1 text-center text-[12px] font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
-                                                                            placeholder={etcPlaceholder}
-                                                                        />
+                                                                        <div className="flex flex-col gap-1">
+                                                                            <input
+                                                                                type="text"
+                                                                                aria-label={`${agg.companyName} 기타`}
+                                                                                value={manualAdjustment.etc}
+                                                                                onChange={(event) => updateManualAdjustment(aggKey, { etc: event.target.value })}
+                                                                                className="h-7 w-full bg-transparent px-1 text-center text-[12px] font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-amber-50 focus:ring-1 focus:ring-amber-400"
+                                                                                placeholder={etcPlaceholder}
+                                                                            />
+                                                                            <div className={`grid gap-1 ${expenseClaimAmount > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    aria-label={`${agg.companyName} 노임명세서`}
+                                                                                    title="노임명세서"
+                                                                                    onClick={() => setLaborStatementTargetId(agg.aggregateId)}
+                                                                                    className="inline-flex h-7 items-center justify-center gap-1 rounded bg-emerald-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                                                                                >
+                                                                                    <FontAwesomeIcon icon={faFileInvoiceDollar} />
+                                                                                    <span>노임명세</span>
+                                                                                </button>
+                                                                                {expenseClaimAmount > 0 && (
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        aria-label={`${agg.companyName} 경비내역서`}
+                                                                                        title="경비내역서"
+                                                                                        onClick={() => setExpenseStatementTargetId(agg.aggregateId)}
+                                                                                        className="inline-flex h-7 items-center justify-center gap-1 rounded bg-teal-600 px-2 text-[10px] font-black text-white shadow-sm transition hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                                                                                    >
+                                                                                        <FontAwesomeIcon icon={faReceipt} />
+                                                                                        <span>경비내역</span>
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
-                                                                {isExpanded && agg.sites.map(site => (
+                                                                {isExpanded && agg.sites.map(site => {
+                                                                    const siteExpenseClaimAmount = getSiteExpenseClaimAmount(site);
+                                                                    const siteTotalAmount = site.totalAmount + siteExpenseClaimAmount;
+                                                                    return (
                                                                     <tr key={`${aggKey}-${site.siteId}`} className="bg-slate-50">
                                                                         <td className="border border-slate-900 px-3 py-1 text-left text-[12px] font-bold text-slate-600">
                                                                             ㄴ {site.siteName}
@@ -2075,8 +3059,10 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                             />
                                                                         </td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
-                                                                        <td className="border border-slate-900 px-2 py-1"></td>
-                                                                        <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(site.totalAmount)}</td>
+                                                                        <td className="border border-slate-900 px-2 py-1 text-right font-mono font-black text-emerald-700">
+                                                                            {siteExpenseClaimAmount > 0 ? formatNumber(siteExpenseClaimAmount) : ''}
+                                                                        </td>
+                                                                        <td className="border border-slate-900 px-2 py-1 text-right font-mono text-slate-600">{formatNumber(siteTotalAmount)}</td>
                                                                         <td className="border border-slate-900 px-2 py-1"></td>
                                                                         <td className="border border-slate-900 px-2 py-1 text-center text-[12px] text-slate-500">
                                                                             현장담당팀: {summarizeNames(site.workers.map(worker => worker.siteResponsibleTeamName ?? worker.targetTeamName), '미지정')}
@@ -2091,7 +3077,8 @@ const SupportTeamPaymentPage: React.FC = () => {
                                                                             </button>
                                                                         </td>
                                                                     </tr>
-                                                                ))}
+                                                                    );
+                                                                })}
                                                             </React.Fragment>
                                                         );
                                                     })}
@@ -2150,6 +3137,27 @@ const SupportTeamPaymentPage: React.FC = () => {
                 />
             )}
 
+            {laborStatementTarget && (
+                <LaborStatementShareModal
+                    aggregate={laborStatementTarget}
+                    previews={laborStatementTargetPreviews}
+                    yearMonth={selectedMonth}
+                    adjustment={getAdjustment(manualAdjustments, laborStatementTarget.aggregateId)}
+                    logoUrl={statementLogoUrl}
+                    onClose={() => setLaborStatementTargetId(null)}
+                />
+            )}
+
+            {expenseStatementTarget && (
+                <ExpenseClaimShareModal
+                    aggregate={expenseStatementTarget}
+                    claims={expenseStatementClaims}
+                    yearMonth={selectedMonth}
+                    logoUrl={statementLogoUrl}
+                    onClose={() => setExpenseStatementTargetId(null)}
+                />
+            )}
+
             {showLaborPreview && (
                 <Modal title="노무내역서 미리보기" onClose={() => setShowLaborPreview(false)} widthClass="max-w-7xl">
                     <div className="sticky top-0 bg-white z-10 px-6 py-4 border-b flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -2191,7 +3199,7 @@ const SupportTeamPaymentPage: React.FC = () => {
                                         </div>
                                     </div>
                                     <div ref={el => { if (el) previewRefs.current[key] = el; else delete previewRefs.current[key]; }}>
-                                        <LaborStatementPreview aggregate={p.aggregate} site={p.site} rows={p.rows} yearMonth={selectedMonth} />
+                                        <LaborStatementPreview aggregate={p.aggregate} site={p.site} rows={p.rows} yearMonth={selectedMonth} logoUrl={statementLogoUrl} />
                                     </div>
                                 </div>
                             );
@@ -2245,6 +3253,330 @@ const SupportTeamPaymentPage: React.FC = () => {
 
 // --- Sub Components ---
 
+const LaborStatementShareModal: React.FC<{
+    aggregate: SupportCompanyAggregate;
+    previews: SitePreviewBlock[];
+    yearMonth: string;
+    adjustment: SupportManualAdjustment;
+    logoUrl?: string | null;
+    onClose: () => void;
+}> = ({ aggregate, previews, yearMonth, adjustment, logoUrl, onClose }) => {
+    const [statusMessage, setStatusMessage] = useState('');
+    const [busyAction, setBusyAction] = useState<'copy' | 'send' | null>(null);
+    const [activePreviewIndex, setActivePreviewIndex] = useState(0);
+    const statementSheetRef = useRef<HTMLDivElement | null>(null);
+    const statementText = useMemo(
+        () => buildSupportLaborStatementText(aggregate, previews, yearMonth, adjustment),
+        [aggregate, previews, yearMonth, adjustment]
+    );
+    const shareTitle = `노무비 지급 명세서_${yearMonth}_${aggregate.companyName}`;
+    const imageFileName = `${sanitizeFileNamePart(shareTitle)}.png`;
+    const activePreview = previews[activePreviewIndex] ?? previews[0] ?? null;
+
+    useEffect(() => {
+        setActivePreviewIndex(0);
+    }, [aggregate.aggregateId, previews.length]);
+
+    const captureStatementImage = async (): Promise<Blob> => {
+        if (!activePreview) {
+            throw new Error('노무비 지급 명세서 표 영역을 찾지 못했습니다.');
+        }
+        return createLaborStatementImageBlob(activePreview, yearMonth, logoUrl);
+    };
+
+    const handleCopy = async () => {
+        try {
+            setBusyAction('copy');
+            const blob = await captureStatementImage();
+            await copyPngBlobToClipboard(blob);
+            setStatusMessage('노무비 지급 명세서 표 이미지를 복사했습니다.');
+        } catch (error) {
+            console.error('노무비 지급 명세서 이미지 복사 실패:', error);
+            setStatusMessage('이 브라우저에서 이미지 복사를 지원하지 않습니다. 공유 버튼을 사용해 주세요.');
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleSend = async () => {
+        const shareNavigator = navigator as Navigator & {
+            canShare?: (data: { files?: File[] }) => boolean;
+            share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>;
+        };
+
+        try {
+            setBusyAction('send');
+            const blob = await captureStatementImage();
+            const file = new File([blob], imageFileName, { type: 'image/png' });
+
+            if (!shareNavigator.share || (shareNavigator.canShare && !shareNavigator.canShare({ files: [file] }))) {
+                saveAs(blob, imageFileName);
+                setStatusMessage('이미지 공유를 지원하지 않아 PNG 파일로 저장했습니다.');
+                return;
+            }
+
+            await shareNavigator.share({
+                title: shareTitle,
+                text: '노무비 지급 명세서',
+                files: [file]
+            });
+            setStatusMessage('노무비 지급 명세서 이미지를 보낼 수 있도록 공유를 열었습니다.');
+        } catch (error) {
+            if ((error as DOMException)?.name !== 'AbortError') {
+                console.error('노무비 지급 명세서 이미지 공유 실패:', error);
+                setStatusMessage('이미지 공유를 열지 못했습니다.');
+            }
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    return (
+        <Modal title="노임명세서" onClose={onClose} widthClass="max-w-7xl">
+            <div className="space-y-5 p-6">
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">정산주체</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{aggregate.companyName}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">총공수</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{formatManDayText(aggregate.totalManDay)}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-emerald-50 p-4">
+                        <div className="text-[11px] font-black text-emerald-700">지급합계</div>
+                        <div className="mt-1 text-sm font-black text-emerald-800">
+                            {formatCurrencyText(aggregate.totalAmount + adjustment.additionalAmount + getAggregateExpenseClaimAmount(aggregate))}
+                        </div>
+                    </div>
+                </div>
+
+                {previews.length > 1 && (
+                    <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                        {previews.map((preview, index) => (
+                            <button
+                                key={`${preview.aggregate.aggregateId}-${preview.site.siteId}-tab`}
+                                type="button"
+                                onClick={() => setActivePreviewIndex(index)}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-black transition ${activePreviewIndex === index
+                                    ? 'bg-emerald-600 text-white shadow-sm'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                    }`}
+                            >
+                                {preview.site.siteName}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                <div className="max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                    {activePreview ? (
+                        <div ref={statementSheetRef} data-statement-capture="true" className="inline-block min-w-[1180px] bg-white">
+                            <LaborStatementPreview
+                                aggregate={activePreview.aggregate}
+                                site={activePreview.site}
+                                rows={activePreview.rows}
+                                yearMonth={yearMonth}
+                                logoUrl={logoUrl}
+                            />
+                        </div>
+                    ) : (
+                        <div ref={statementSheetRef} data-statement-capture="true" className="rounded-xl border border-slate-200 bg-white p-10 text-center text-sm font-bold text-slate-500">
+                            표시할 노임명세 표가 없습니다.
+                        </div>
+                    )}
+                </div>
+
+                <details className="rounded-xl border border-slate-200 bg-white">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-700">
+                        텍스트 보조본 보기
+                    </summary>
+                    <div className="border-t border-slate-100 p-4">
+                        <textarea
+                            readOnly
+                            value={statementText}
+                            onFocus={(event) => event.currentTarget.select()}
+                            className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 bg-white p-4 font-mono text-[13px] leading-6 text-slate-800 outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                    </div>
+                </details>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-h-[20px] text-sm font-bold text-emerald-700">{statusMessage}</div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                            type="button"
+                            aria-label="노무비 지급 명세서 표 복사"
+                            title="노무비 지급 명세서 표 복사"
+                            onClick={handleCopy}
+                            disabled={busyAction !== null}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={busyAction === 'copy' ? faSpinner : faCopy} spin={busyAction === 'copy'} />
+                            복사
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="노무비 지급 명세서 표 보내기"
+                            title="노무비 지급 명세서 표 보내기"
+                            onClick={handleSend}
+                            disabled={busyAction !== null}
+                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={busyAction === 'send' ? faSpinner : faShareNodes} spin={busyAction === 'send'} />
+                            보내기
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
+const ExpenseClaimShareModal: React.FC<{
+    aggregate: SupportCompanyAggregate;
+    claims: TeamExpenseClaim[];
+    yearMonth: string;
+    logoUrl?: string | null;
+    onClose: () => void;
+}> = ({ aggregate, claims, yearMonth, logoUrl, onClose }) => {
+    const [statusMessage, setStatusMessage] = useState('');
+    const [busyAction, setBusyAction] = useState<'copy' | 'send' | null>(null);
+    const statementSheetRef = useRef<HTMLDivElement | null>(null);
+    const sortedClaims = useMemo(() => sortExpenseClaims(claims), [claims]);
+    const totalAmount = getExpenseClaimsTotal(sortedClaims);
+    const statementText = useMemo(
+        () => buildExpenseClaimStatementText(aggregate, sortedClaims, yearMonth),
+        [aggregate, sortedClaims, yearMonth]
+    );
+    const shareTitle = `후청구 경비내역_${yearMonth}_${aggregate.companyName}`;
+    const imageFileName = `${sanitizeFileNamePart(shareTitle)}.png`;
+
+    const captureStatementImage = async (): Promise<Blob> =>
+        createExpenseClaimStatementImageBlob(aggregate, sortedClaims, yearMonth, logoUrl);
+
+    const handleCopy = async () => {
+        try {
+            setBusyAction('copy');
+            const blob = await captureStatementImage();
+            await copyPngBlobToClipboard(blob);
+            setStatusMessage('후청구 경비내역 표 이미지를 복사했습니다.');
+        } catch (error) {
+            console.error('후청구 경비내역 이미지 복사 실패:', error);
+            setStatusMessage('이 브라우저에서 이미지 복사를 지원하지 않습니다. 공유 버튼을 사용해 주세요.');
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    const handleSend = async () => {
+        const shareNavigator = navigator as Navigator & {
+            canShare?: (data: { files?: File[] }) => boolean;
+            share?: (data: { title?: string; text?: string; files?: File[] }) => Promise<void>;
+        };
+
+        try {
+            setBusyAction('send');
+            const blob = await captureStatementImage();
+            const file = new File([blob], imageFileName, { type: 'image/png' });
+
+            if (!shareNavigator.share || (shareNavigator.canShare && !shareNavigator.canShare({ files: [file] }))) {
+                saveAs(blob, imageFileName);
+                setStatusMessage('이미지 공유를 지원하지 않아 PNG 파일로 저장했습니다.');
+                return;
+            }
+
+            await shareNavigator.share({
+                title: shareTitle,
+                text: '후청구 경비내역',
+                files: [file]
+            });
+            setStatusMessage('후청구 경비내역 이미지를 보낼 수 있도록 공유를 열었습니다.');
+        } catch (error) {
+            if ((error as DOMException)?.name !== 'AbortError') {
+                console.error('후청구 경비내역 이미지 공유 실패:', error);
+                setStatusMessage('이미지 공유를 열지 못했습니다.');
+            }
+        } finally {
+            setBusyAction(null);
+        }
+    };
+
+    return (
+        <Modal title="경비내역서" onClose={onClose} widthClass="max-w-7xl">
+            <div className="space-y-5 p-6">
+                <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">정산주체</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{aggregate.companyName}</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-[11px] font-black text-slate-500">후청구 건수</div>
+                        <div className="mt-1 text-sm font-black text-slate-900">{formatNumber(sortedClaims.length)}건</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-emerald-50 p-4">
+                        <div className="text-[11px] font-black text-emerald-700">후청구 합계</div>
+                        <div className="mt-1 text-sm font-black text-emerald-800">{formatCurrencyText(totalAmount)}</div>
+                    </div>
+                </div>
+
+                <div className="max-h-[58vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                    <div ref={statementSheetRef} data-statement-capture="true" className="inline-block min-w-[1180px] bg-white">
+                        <ExpenseClaimStatementPreview
+                            aggregate={aggregate}
+                            claims={sortedClaims}
+                            yearMonth={yearMonth}
+                            logoUrl={logoUrl}
+                        />
+                    </div>
+                </div>
+
+                <details className="rounded-xl border border-slate-200 bg-white">
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-black text-slate-700">
+                        텍스트 보조본 보기
+                    </summary>
+                    <div className="border-t border-slate-100 p-4">
+                        <textarea
+                            readOnly
+                            value={statementText}
+                            onFocus={(event) => event.currentTarget.select()}
+                            className="min-h-[220px] w-full resize-y rounded-xl border border-slate-200 bg-white p-4 font-mono text-[13px] leading-6 text-slate-800 outline-none focus:ring-2 focus:ring-emerald-400"
+                        />
+                    </div>
+                </details>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-h-[20px] text-sm font-bold text-emerald-700">{statusMessage}</div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <button
+                            type="button"
+                            aria-label="후청구 경비내역 표 복사"
+                            title="후청구 경비내역 표 복사"
+                            onClick={handleCopy}
+                            disabled={busyAction !== null}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={busyAction === 'copy' ? faSpinner : faCopy} spin={busyAction === 'copy'} />
+                            복사
+                        </button>
+                        <button
+                            type="button"
+                            aria-label="후청구 경비내역 표 보내기"
+                            title="후청구 경비내역 표 보내기"
+                            onClick={handleSend}
+                            disabled={busyAction !== null}
+                            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            <FontAwesomeIcon icon={busyAction === 'send' ? faSpinner : faShareNodes} spin={busyAction === 'send'} />
+                            보내기
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+};
+
 const DetailModal: React.FC<{
     aggregate: SupportCompanyAggregate;
     site: SupportSiteRow;
@@ -2256,6 +3588,8 @@ const DetailModal: React.FC<{
 }> = ({ aggregate, site, onClose, yearMonth, capturePreview, capturingKey, previewRefs }) => {
     const key = `${aggregate.aggregateId}-${site.siteId}`;
     const detailCaptureKey = `${key}-detail`;
+    const siteExpenseClaimAmount = getSiteExpenseClaimAmount(site);
+    const siteTotalAmount = site.totalAmount + siteExpenseClaimAmount;
     return (
         <Modal title={`${site.siteName} 상세 내역 및 미리보기`} onClose={onClose} widthClass="max-w-6xl">
             <div className="flex-1 overflow-auto bg-slate-50">
@@ -2263,7 +3597,7 @@ const DetailModal: React.FC<{
                     className="p-6 space-y-6"
                     ref={el => { if (el) previewRefs.current[detailCaptureKey] = el; else delete previewRefs.current[detailCaptureKey]; }}
                 >
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4">
                         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">분류</div>
                             <div className="text-sm font-black text-indigo-600">{aggregate.direction}</div>
@@ -2281,8 +3615,16 @@ const DetailModal: React.FC<{
                             <div className="text-sm font-black text-slate-800">{aggregate.companyName}</div>
                         </div>
                         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">총액</div>
+                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">노무금액</div>
                             <div className="text-sm font-black text-amber-600">{formatNumber(site.totalAmount)}원</div>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">후청구 추가</div>
+                            <div className="text-sm font-black text-emerald-600">{formatNumber(siteExpenseClaimAmount)}원</div>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">합계</div>
+                            <div className="text-sm font-black text-slate-900">{formatNumber(siteTotalAmount)}원</div>
                         </div>
                     </div>
 
@@ -2341,12 +3683,82 @@ const DetailModal: React.FC<{
     );
 };
 
+const ExpenseClaimStatementPreview: React.FC<{
+    aggregate: SupportCompanyAggregate;
+    claims: TeamExpenseClaim[];
+    yearMonth: string;
+    logoUrl?: string | null;
+}> = ({ aggregate, claims, yearMonth, logoUrl }) => {
+    const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
+    const rows = sortExpenseClaims(claims);
+    const totalAmount = getExpenseClaimsTotal(rows);
+
+    return (
+        <div className="inline-block min-w-full border border-slate-200 bg-white p-10 shadow-2xl">
+            <h2 className="mb-8 text-center text-3xl font-black tracking-widest text-slate-800 underline decoration-4 underline-offset-8 decoration-emerald-500">
+                후 청 구 경 비 내 역 서 ({month}월분)
+            </h2>
+            <div className="mb-4 flex items-end justify-between px-2">
+                <div className="space-y-1">
+                    <p className="text-sm font-bold text-slate-600">정산 주체: <span className="border-b-2 border-slate-300 px-2 text-slate-900">{aggregate.companyName}</span></p>
+                    <p className="text-sm font-bold text-slate-600">후청구 합계: <span className="border-b-2 border-slate-300 px-2 text-emerald-700">{formatCurrencyText(totalAmount)} / {formatNumber(rows.length)}건</span></p>
+                </div>
+                <StatementBrand logoUrl={logoUrl} />
+            </div>
+            <table className="w-full border-collapse border-2 border-slate-800 text-[10px]">
+                <thead>
+                    <tr className="bg-emerald-50 text-slate-800">
+                        <th className="w-10 border-2 border-slate-800 p-2 font-black">NO</th>
+                        <th className="w-24 border-2 border-slate-800 p-2 font-black">일자</th>
+                        <th className="min-w-[150px] border-2 border-slate-800 p-2 font-black">현장명</th>
+                        <th className="w-28 border-2 border-slate-800 p-2 font-black">사용팀</th>
+                        <th className="w-28 border-2 border-slate-800 p-2 font-black">청구대상</th>
+                        <th className="w-24 border-2 border-slate-800 p-2 font-black">구분</th>
+                        <th className="min-w-[220px] border-2 border-slate-800 p-2 font-black">상세내용</th>
+                        <th className="w-20 border-2 border-slate-800 p-2 font-black">상태</th>
+                        <th className="w-28 border-2 border-slate-800 p-2 font-black">금액</th>
+                        <th className="min-w-[160px] border-2 border-slate-800 p-2 font-black">메모</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.length === 0 ? (
+                        <tr>
+                            <td colSpan={10} className="border-2 border-slate-800 p-8 text-center text-sm font-bold text-slate-500">
+                                등록된 후청구 경비내역이 없습니다.
+                            </td>
+                        </tr>
+                    ) : rows.map((claim, index) => (
+                        <tr key={getExpenseClaimKey(claim)} className="font-bold">
+                            <td className="border-2 border-slate-800 bg-slate-50 p-2 text-center font-mono">{index + 1}</td>
+                            <td className="border-2 border-slate-800 p-2 text-center font-mono">{claim.date || '-'}</td>
+                            <td className="border-2 border-slate-800 p-2 text-left">{claim.siteName || '-'}</td>
+                            <td className="border-2 border-slate-800 p-2 text-center">{claim.payerTeamName || '-'}</td>
+                            <td className="border-2 border-slate-800 p-2 text-center">{claim.chargeToTeamName || '-'}</td>
+                            <td className="border-2 border-slate-800 p-2 text-center">{claim.category || '기타'}</td>
+                            <td className="border-2 border-slate-800 p-2 text-left">{claim.description || '-'}</td>
+                            <td className="border-2 border-slate-800 bg-slate-50 p-2 text-center">{getExpenseClaimStatusLabel(claim.status)}</td>
+                            <td className="border-2 border-slate-800 bg-emerald-50 p-2 text-right font-mono text-emerald-700">{formatNumber(getExpenseClaimAmount(claim))}</td>
+                            <td className="border-2 border-slate-800 p-2 text-left">{claim.memo || '-'}</td>
+                        </tr>
+                    ))}
+                    <tr className="bg-emerald-100 text-xs font-black">
+                        <td colSpan={8} className="border-2 border-slate-800 p-2 text-center">합 계</td>
+                        <td className="border-2 border-slate-800 p-2 text-right font-mono text-emerald-800">{formatNumber(totalAmount)}</td>
+                        <td className="border-2 border-slate-800 p-2 text-center">{formatNumber(rows.length)}건</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+};
+
 const LaborStatementPreview: React.FC<{ 
     aggregate: SupportCompanyAggregate; 
     site: SupportSiteRow; 
     rows: SupportLaborExcelRow[];
     yearMonth: string;
-}> = ({ aggregate, site, rows, yearMonth }) => {
+    logoUrl?: string | null;
+}> = ({ aggregate, site, rows, yearMonth, logoUrl }) => {
     const month = parseInt(yearMonth.split('-')[1] ?? '0', 10);
     const dayTotals = Array.from({ length: MAX_DAY_COLUMNS }, () => 0);
     rows.forEach(r => r.days.forEach((v, i) => { dayTotals[i] += v; }));
@@ -2364,7 +3776,7 @@ const LaborStatementPreview: React.FC<{
                     <p className="text-sm font-bold text-slate-600">현장명: <span className="text-slate-900 border-b-2 border-slate-300 px-2">{site.siteName}</span></p>
                     <p className="text-sm font-bold text-slate-600">정산 주체: <span className="text-slate-900 border-b-2 border-slate-300 px-2">{aggregate.companyName}</span></p>
                 </div>
-                <p className="text-sm font-black text-amber-600">※ {aggregate.direction} 기준 집계</p>
+                <StatementBrand logoUrl={logoUrl} />
             </div>
             <table className="w-full border-collapse border-2 border-slate-800 text-[10px]">
                 <thead>
@@ -2390,7 +3802,7 @@ const LaborStatementPreview: React.FC<{
                             <tr className="font-bold">
                                 <td rowSpan={2} className="border-2 border-slate-800 text-center bg-slate-50">{i + 1}</td>
                                 <td rowSpan={2} className="border-2 border-slate-800 text-center text-xs">{r.workerName}</td>
-                                <td className="border-2 border-slate-800 text-center font-mono">{maskIdNumber(r.idNumber)}</td>
+                                <td className="border-2 border-slate-800 text-center font-mono">{formatFullIdNumber(r.idNumber)}</td>
                                 <td rowSpan={2} className="border-2 border-slate-800 px-2 text-[9px] leading-tight">{r.address || '-'}</td>
                                 {DAY_LABELS_FIRST.map(d => <td key={d} className="border-2 border-slate-800 text-center bg-sky-50/30">{formatDayValue(r.days[d - 1])}</td>)}
                                 <td className="border-2 border-slate-800 bg-slate-50"></td>

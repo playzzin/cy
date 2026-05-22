@@ -2,13 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faArrowRightFromBracket, faCar, faUser, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { format, subDays } from 'date-fns';
-import { Vehicle, VehicleAssigneeType } from '../../types/vehicle';
+import { Vehicle, VehicleAssigneeType, VehicleAssignmentRecord } from '../../types/vehicle';
 import { Worker } from '../../services/manpowerService';
+import { OfficeStaff, officeStaffService } from '../../services/officeStaffService';
 import { vehicleService } from '../../services/vehicleService';
 import { Team } from '../../services/teamService';
 import { toast, showConfirmAlert } from '../../utils/swal';
 import { hexToRgba, normalizeHexColor } from '../../utils/color';
-import { formatTypedDateInput, normalizeTypedDateInput } from '../../utils/typedDateInput';
+import { normalizeTypedDateInput, toShortYearDateInputValue } from '../../utils/typedDateInput';
+import { buildOfficeStaffAssignmentOptions, isOfficeAssignmentTeam } from '../../utils/supportAssignmentTargets';
 
 type AssigneeMode = VehicleAssigneeType;
 
@@ -16,6 +18,15 @@ interface AssignmentTargetSelection {
     type: VehicleAssigneeType;
     id: string;
     name: string;
+}
+
+interface AssignmentPersonOption {
+    id: string;
+    name: string;
+    teamId?: string | null;
+    teamName?: string | null;
+    source?: 'worker' | 'office_staff';
+    detail?: string;
 }
 
 interface VehicleAssignmentManagerProps {
@@ -28,6 +39,7 @@ interface VehicleAssignmentManagerProps {
 }
 
 const toDateInputValue = (d: Date): string => format(d, 'yyyy-MM-dd');
+const toShortDateInputValue = (d: Date): string => toShortYearDateInputValue(toDateInputValue(d));
 
 const buildEndDateAsDayBefore = (startDate: string): string => {
     const d = new Date(startDate);
@@ -37,7 +49,7 @@ const buildEndDateAsDayBefore = (startDate: string): string => {
 
 const assignmentLabel = (vehicle: Vehicle): string => {
     if (vehicle.currentAssigneeName) {
-        return `${vehicle.currentAssigneeType === 'TEAM' ? '팀' : '개인'} · ${vehicle.currentAssigneeName}`;
+        return `${vehicle.currentAssigneeType === 'TEAM' ? '팀' : '운전자'} · ${vehicle.currentAssigneeName}`;
     }
     return '미배정';
 };
@@ -50,7 +62,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     selectableTeams = [],
     onRefresh
 }) => {
-    const today = useMemo(() => toDateInputValue(new Date()), []);
+    const today = useMemo(() => toShortDateInputValue(new Date()), []);
 
     const [mode, setMode] = useState<AssigneeMode>('TEAM');
     const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -59,19 +71,30 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     const [startDate, setStartDate] = useState(today);
     const [autoUnassignExisting, setAutoUnassignExisting] = useState(true);
     const [saving, setSaving] = useState(false);
-
-    const handleStartDateChange = (value: string) => {
-        setStartDate(formatTypedDateInput(value));
-    };
-
-    const normalizeStartDate = () => {
-        setStartDate((prev) => normalizeTypedDateInput(prev) ?? prev);
-    };
+    const [officeStaffRows, setOfficeStaffRows] = useState<OfficeStaff[]>([]);
+    const [assignmentRecords, setAssignmentRecords] = useState<VehicleAssignmentRecord[]>([]);
+    const [assignmentRecordsLoading, setAssignmentRecordsLoading] = useState(false);
 
     useEffect(() => {
         if (selectedTeamId || selectableTeams.length === 0) return;
         setSelectedTeamId(selectableTeams.find((team) => Boolean(team.id))?.id ?? '');
     }, [selectableTeams, selectedTeamId]);
+
+    const loadAssignmentRecords = async () => {
+        setAssignmentRecordsLoading(true);
+        try {
+            setAssignmentRecords(await vehicleService.listAllVehicleAssignments());
+        } catch (error) {
+            console.error(error);
+            toast.error('차량 배정 이력을 불러오지 못했습니다.');
+        } finally {
+            setAssignmentRecordsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadAssignmentRecords();
+    }, []);
 
     const vehiclesById = useMemo(() => {
         const map = new Map<string, Vehicle>();
@@ -83,6 +106,14 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         if (!selectedVehicleId) return null;
         return vehiclesById.get(String(selectedVehicleId)) ?? null;
     }, [vehiclesById, selectedVehicleId]);
+
+    const selectedVehicleAssignments = useMemo(
+        () => assignmentRecords
+            .filter((record) => String(record.vehicleId) === String(selectedVehicleId))
+            .slice()
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? ''))),
+        [assignmentRecords, selectedVehicleId]
+    );
 
     const availableVehicles = useMemo(
         () => vehicles.filter((vehicle) => !vehicle.currentAssigneeId && (vehicle.status ?? 'AVAILABLE') !== 'ASSIGNED'),
@@ -99,11 +130,38 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         [selectableTeams, selectedTeamId]
     );
     const selectedTeamColor = selectedTeam ? normalizeHexColor(selectedTeam.color) : '#64748b';
+    const selectedTeamIsOffice = isOfficeAssignmentTeam(selectedTeam);
 
-    const filteredWorkers = useMemo(() => {
-        if (!selectedTeamId) return workers;
-        return workers.filter((worker) => String(worker.teamId ?? '') === String(selectedTeamId));
-    }, [selectedTeamId, workers]);
+    useEffect(() => {
+        const loadOfficeStaff = async () => {
+            try {
+                const rows = await officeStaffService.getOfficeStaff();
+                setOfficeStaffRows(rows);
+            } catch (error) {
+                console.error(error);
+                toast.error('사무실 직원 목록을 불러오지 못했습니다.');
+            }
+        };
+        loadOfficeStaff();
+    }, []);
+
+    const officeStaffOptions = useMemo(
+        () => buildOfficeStaffAssignmentOptions(officeStaffRows),
+        [officeStaffRows]
+    );
+
+    const filteredWorkers = useMemo<AssignmentPersonOption[]>(() => {
+        if (selectedTeamIsOffice) return officeStaffOptions;
+        const workerOptions = workers.map((worker) => ({
+            id: String(worker.id ?? ''),
+            name: String(worker.name ?? ''),
+            teamId: worker.teamId,
+            teamName: worker.teamName,
+            source: 'worker' as const
+        })).filter((worker) => Boolean(worker.id && worker.name));
+        if (!selectedTeamId) return workerOptions;
+        return workerOptions.filter((worker) => String(worker.teamId ?? '') === String(selectedTeamId));
+    }, [officeStaffOptions, selectedTeamId, selectedTeamIsOffice, workers]);
 
     useEffect(() => {
         if (mode !== 'WORKER') return;
@@ -111,29 +169,57 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         setSelectedWorkerId(filteredWorkers.find((worker) => Boolean(worker.id))?.id ?? '');
     }, [filteredWorkers, mode, selectedWorkerId]);
 
-    const selectedWorker = useMemo(
-        () => workers.find((worker) => String(worker.id) === String(selectedWorkerId)) ?? null,
-        [workers, selectedWorkerId]
+    const selectedPerson = useMemo(
+        () => filteredWorkers.find((worker) => String(worker.id) === String(selectedWorkerId)) ?? null,
+        [filteredWorkers, selectedWorkerId]
     );
 
     const selectedTarget = useMemo<AssignmentTargetSelection | null>(() => {
         if (mode === 'TEAM') {
             return selectedTeam?.id ? { type: 'TEAM', id: selectedTeam.id, name: selectedTeam.name } : null;
         }
-        return selectedWorker?.id ? { type: 'WORKER', id: selectedWorker.id, name: selectedWorker.name } : null;
-    }, [mode, selectedTeam, selectedWorker]);
+        return selectedPerson?.id ? { type: 'WORKER', id: selectedPerson.id, name: selectedPerson.name } : null;
+    }, [mode, selectedPerson, selectedTeam]);
+
+    const selectTargetFromAssignment = (assignment: VehicleAssignmentRecord) => {
+        if (assignment.assigneeType === 'TEAM') {
+            setMode('TEAM');
+            setSelectedTeamId(assignment.assigneeId);
+            return;
+        }
+
+        setMode('WORKER');
+        setSelectedWorkerId(assignment.assigneeId);
+        const assignedWorker = workers.find((worker) => String(worker.id) === String(assignment.assigneeId));
+        if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
+        if (!assignedWorker && officeStaffOptions.some((staff) => String(staff.id) === String(assignment.assigneeId))) {
+            setSelectedTeamId(officeStaffOptions[0]?.teamId ?? '');
+        }
+    };
 
     const pickVehicle = (vehicle: Vehicle) => {
         setSelectedVehicleId(vehicle.id);
-        if (vehicle.currentAssigneeType === 'TEAM' && vehicle.currentAssigneeId) {
-            setMode('TEAM');
-            setSelectedTeamId(vehicle.currentAssigneeId);
+        const latestAssignment = assignmentRecords
+            .filter((record) => String(record.vehicleId) === String(vehicle.id))
+            .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0];
+
+        if (latestAssignment) {
+            selectTargetFromAssignment(latestAssignment);
+            setStartDate(today);
+            return;
         }
-        if (vehicle.currentAssigneeType === 'WORKER' && vehicle.currentAssigneeId) {
-            setMode('WORKER');
-            setSelectedWorkerId(vehicle.currentAssigneeId);
-            const assignedWorker = workers.find((worker) => String(worker.id) === String(vehicle.currentAssigneeId));
-            if (assignedWorker?.teamId) setSelectedTeamId(assignedWorker.teamId);
+
+        if (vehicle.currentAssigneeType && vehicle.currentAssigneeId && vehicle.currentAssigneeName) {
+            const snapshotAssignment: VehicleAssignmentRecord = {
+                id: '',
+                vehicleId: vehicle.id,
+                vehiclePlate: vehicle.licensePlate,
+                assigneeId: vehicle.currentAssigneeId,
+                assigneeType: vehicle.currentAssigneeType,
+                assigneeName: vehicle.currentAssigneeName,
+                startDate: toDateInputValue(new Date())
+            };
+            selectTargetFromAssignment(snapshotAssignment);
         }
     };
 
@@ -149,7 +235,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
     useEffect(() => {
         if (!initialVehicleId) return;
         pickVehicleById(String(initialVehicleId));
-    }, [initialVehicleId, vehiclesById, workers]);
+    }, [initialVehicleId, vehiclesById, workers, assignmentRecords]);
 
     const handleAssign = async () => {
         if (!selectedVehicle) {
@@ -157,11 +243,18 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
             return;
         }
         if (!startDate) {
-            toast.error('배정 시작일을 입력해주세요.');
+            toast.error('배정 정보를 확인해주세요.');
             return;
         }
+        const normalizedStartDate = normalizeTypedDateInput(startDate);
+        if (!normalizedStartDate) {
+            toast.error('배정 정보를 확인해주세요.');
+            return;
+        }
+        setStartDate(toShortYearDateInputValue(normalizedStartDate));
+
         if (!selectedTarget) {
-            toast.error(mode === 'TEAM' ? '팀을 선택해주세요.' : '작업자를 선택해주세요.');
+            toast.error(mode === 'TEAM' ? '팀을 선택해주세요.' : '운전자를 선택해주세요.');
             return;
         }
 
@@ -173,23 +266,24 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
 
         const result = await showConfirmAlert(
             '차량 배정',
-            `${selectedVehicle.licensePlate} 차량을 ${selectedTarget.name}${selectedTarget.type === 'TEAM' ? '(팀)' : '(개인)'}에게 배정할까요?`
+            `${selectedVehicle.licensePlate} 차량을 ${selectedTarget.name}${selectedTarget.type === 'TEAM' ? '(팀)' : '(운전자)'}에게 배정할까요?`
         );
         if (!result.isConfirmed) return;
 
         setSaving(true);
         try {
             if (isAssigned) {
-                await vehicleService.unassignVehicle(selectedVehicle.id, buildEndDateAsDayBefore(startDate));
+                await vehicleService.unassignVehicle(selectedVehicle.id, buildEndDateAsDayBefore(normalizedStartDate));
             }
             await vehicleService.assignVehicle(
                 selectedVehicle.id,
                 selectedTarget.id,
                 selectedTarget.type,
                 selectedTarget.name,
-                startDate
+                normalizedStartDate
             );
             toast.success('차량 배정이 완료되었습니다.');
+            await loadAssignmentRecords();
             onRefresh();
         } catch (error: unknown) {
             console.error(error);
@@ -208,6 +302,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
         try {
             await vehicleService.unassignVehicle(vehicle.id, toDateInputValue(new Date()));
             toast.success('차량 배정을 해제했습니다.');
+            await loadAssignmentRecords();
             onRefresh();
         } catch (error: unknown) {
             console.error(error);
@@ -238,23 +333,25 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                             차량 배정
                         </h2>
                         <p className="text-slate-500 mt-2 font-medium ml-12 text-sm">
-                            청구대상 배정과 같은 방식으로 차량을 팀/개인에게 배정하거나 기존 배정을 변경합니다.
+                            청구대상 배정과 같은 방식으로 차량을 팀/운전자에게 배정하거나 기존 배정을 변경합니다.
                         </p>
                     </div>
-                    <button
-                        onClick={handleAssign}
-                        disabled={saving}
-                        className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 ${
-                            saving ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'
-                        }`}
-                    >
-                        <FontAwesomeIcon icon={faCar} />
-                        {saving ? '처리 중...' : selectedVehicle?.currentAssigneeId ? '배정 변경' : '차량 배정'}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={handleAssign}
+                            disabled={saving}
+                            className={`px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg shadow-indigo-200 transition-all active:scale-95 flex items-center gap-2 ${
+                                saving ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'
+                            }`}
+                        >
+                            <FontAwesomeIcon icon={faCar} />
+                            {saving ? '처리 중...' : selectedVehicle?.currentAssigneeId ? '배정 변경' : '차량 배정'}
+                        </button>
+                    </div>
                 </div>
 
                 <div className="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-4">
-                    <div className="xl:col-span-4 space-y-3">
+                    <div className="xl:col-span-12 space-y-3">
                         <div className="flex bg-slate-100 p-1 rounded-xl">
                             <button
                                 onClick={() => setMode('TEAM')}
@@ -270,7 +367,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                     mode === 'WORKER' ? 'bg-white shadow text-indigo-700' : 'text-slate-500 hover:text-slate-700'
                                 }`}
                             >
-                                <FontAwesomeIcon icon={faUser} className="mr-2" /> 개인
+                                <FontAwesomeIcon icon={faUser} className="mr-2" /> 운전자
                             </button>
                         </div>
 
@@ -333,7 +430,7 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
 
                             {mode === 'WORKER' && (
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-600 mb-1">배정 개인 선택</label>
+                                    <label className="block text-xs font-bold text-slate-600 mb-1">운전자 선택</label>
                                     <select
                                         className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
                                         value={selectedWorkerId}
@@ -344,52 +441,74 @@ export const VehicleAssignmentManager: React.FC<VehicleAssignmentManagerProps> =
                                             .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko-KR'))
                                             .map((worker) => (
                                                 <option key={worker.id} value={worker.id}>
-                                                    {worker.name}{worker.teamName ? ` (${worker.teamName})` : ''}
+                                                    {worker.name}{worker.detail ? ` (${worker.detail})` : worker.teamName ? ` (${worker.teamName})` : ''}
                                                 </option>
                                             ))}
                                     </select>
                                 </div>
                             )}
 
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-600 mb-1">배정 시작일</label>
-                                    <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        maxLength={10}
-                                        placeholder="YYYY-MM-DD"
-                                        className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700"
-                                        value={startDate}
-                                        onChange={(event) => handleStartDateChange(event.target.value)}
-                                        onBlur={normalizeStartDate}
-                                    />
-                                </div>
-                                <div className="flex items-end">
-                                    <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={autoUnassignExisting}
-                                            onChange={(event) => setAutoUnassignExisting(event.target.checked)}
-                                        />
-                                        기존 배정 자동 해제
-                                    </label>
-                                </div>
-                            </div>
+                            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-bold text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={autoUnassignExisting}
+                                    onChange={(event) => setAutoUnassignExisting(event.target.checked)}
+                                />
+                                기존 배정 자동 해제
+                            </label>
                         </div>
 
                         {selectedVehicle && (
                             <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                     <div className="text-xs text-slate-500 font-bold">선택 차량</div>
                                     <div className="text-lg font-extrabold text-slate-900 truncate">{selectedVehicle.licensePlate}</div>
                                     <div className="text-sm text-slate-500 font-medium mt-1">{selectedVehicle.model} · {assignmentLabel(selectedVehicle)}</div>
                                 </div>
+                                {(selectedVehicle.currentAssigneeId || (selectedVehicle.status ?? 'AVAILABLE') === 'ASSIGNED') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleUnassign(selectedVehicle)}
+                                        disabled={saving}
+                                        className="shrink-0 px-3 py-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:bg-slate-100 disabled:text-slate-400 inline-flex items-center gap-2"
+                                    >
+                                        <FontAwesomeIcon icon={faArrowRightFromBracket} />
+                                        배정 해제
+                                    </button>
+                                )}
+                                </div>
+                            </div>
+                        )}
+
+                        {selectedVehicle && (
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200">
+                                <h3 className="font-extrabold text-slate-800 mb-3">배정 이력</h3>
+                                {assignmentRecordsLoading ? (
+                                    <div className="text-sm text-slate-400">불러오는 중...</div>
+                                ) : selectedVehicleAssignments.length === 0 ? (
+                                    <div className="text-sm text-slate-400">등록된 배정 이력이 없습니다.</div>
+                                ) : (
+                                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                                        {selectedVehicleAssignments.map((record) => (
+                                            <div key={record.id} className="rounded-xl border border-slate-100 p-3">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="font-extrabold text-slate-800 truncate">{record.assigneeName}</div>
+                                                        <div className="text-xs text-slate-500 mt-1">
+                                                            {record.assigneeType === 'TEAM' ? '팀' : '운전자'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    <div className="xl:col-span-8 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="hidden">
                         <div className="bg-white p-4 rounded-2xl border border-slate-200">
                             <h3 className="font-extrabold text-slate-800 mb-3">배정 가능한 차량</h3>
                             <div className="space-y-2 max-h-[390px] overflow-y-auto">

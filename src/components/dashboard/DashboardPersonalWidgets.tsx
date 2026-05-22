@@ -5,9 +5,11 @@ import { faCog, faExclamationTriangle, faSpinner } from '@fortawesome/free-solid
 import { dailyReportService, type DailyReport } from '../../services/dailyReportService';
 import { manpowerService } from '../../services/manpowerService';
 import { siteService } from '../../services/siteService';
+import { teamService } from '../../services/teamService';
 import { useAuth } from '../../contexts/AuthContext';
 import { DASHBOARD_MODES, type DashboardModeConfig } from './roleDashboardConfig';
 import { DashboardWidgetSettingsModal } from './DashboardWidgetSettingsModal';
+import WeatherWidget, { DASHBOARD_WEATHER_LOCATIONS } from '../widgets/WeatherWidget';
 import {
     isOverallDashboardWidgetScope,
     useDashboardWidgetSettings,
@@ -36,9 +38,16 @@ interface DashboardWidgetData {
     recentTotalManDay: SummaryWidgetData;
     registeredWorkers: SummaryWidgetData;
     registeredSites: SummaryWidgetData;
+    registeredTeams: SummaryWidgetData;
+    todayTotalManDay: SummaryWidgetData;
     teamMonthManDay: SummaryWidgetData;
+    monthReportCount: SummaryWidgetData;
     siteMonthRows: RankingRow[];
     workerMonthRows: RankingRow[];
+    teamMonthRows: RankingRow[];
+    teamWorkerRows: RankingRow[];
+    siteWorkerRows: RankingRow[];
+    siteReportRows: RankingRow[];
 }
 
 interface TeamContext {
@@ -49,6 +58,8 @@ interface TeamContext {
 interface TeamReportAggregate {
     reportId: string;
     date: string;
+    teamId: string;
+    teamName: string;
     siteId: string;
     siteName: string;
     manDay: number;
@@ -184,6 +195,8 @@ const getTeamAggregates = (
         return [{
             reportId: normalizeText(report.id) || `${report.date}:${report.siteId}:${report.teamId}`,
             date: normalizeText(report.date),
+            teamId: normalizeText(report.teamId) || normalizeText(report.teamName) || 'unknown-team',
+            teamName: normalizeText(report.teamName) || '미지정 팀',
             siteId: normalizeText(report.siteId) || normalizeText(report.siteName) || 'unknown-site',
             siteName: normalizeText(report.siteName) || '미지정 현장',
             manDay,
@@ -212,6 +225,8 @@ const getOverallAggregates = (reports: DailyReport[]): TeamReportAggregate[] => 
         return [{
             reportId: normalizeText(report.id) || `${report.date}:${report.siteId}:${report.teamId}`,
             date: normalizeText(report.date),
+            teamId: normalizeText(report.teamId) || normalizeText(report.teamName) || 'unknown-team',
+            teamName: normalizeText(report.teamName) || '미지정 팀',
             siteId: normalizeText(report.siteId) || normalizeText(report.siteName) || 'unknown-site',
             siteName: normalizeText(report.siteName) || '미지정 현장',
             manDay,
@@ -310,6 +325,144 @@ const buildWorkerRows = (aggregates: TeamReportAggregate[]): RankingRow[] => {
         .slice(0, 5);
 };
 
+const buildTeamRows = (aggregates: TeamReportAggregate[]): RankingRow[] => {
+    const teamMap = new Map<string, {
+        teamName: string;
+        totalManDay: number;
+        sites: Set<string>;
+        dates: Set<string>;
+    }>();
+
+    aggregates.forEach((report) => {
+        if (!teamMap.has(report.teamId)) {
+            teamMap.set(report.teamId, {
+                teamName: report.teamName,
+                totalManDay: 0,
+                sites: new Set(),
+                dates: new Set(),
+            });
+        }
+
+        const team = teamMap.get(report.teamId)!;
+        team.totalManDay += report.manDay;
+        if (report.siteName) team.sites.add(report.siteName);
+        if (report.date) team.dates.add(report.date);
+    });
+
+    return Array.from(teamMap.entries())
+        .map(([teamId, team]) => ({
+            id: teamId,
+            label: team.teamName,
+            value: team.totalManDay,
+            meta: `${team.sites.size.toLocaleString('ko-KR')}개 현장 · ${team.dates.size.toLocaleString('ko-KR')}일`,
+        }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
+};
+
+const buildTeamWorkerRows = (workers: any[], teams: any[]): RankingRow[] => {
+    const teamNameById = new Map(teams.map((team) => [normalizeText(team.id), normalizeText(team.name)]));
+    const teamMap = new Map<string, {
+        teamName: string;
+        activeWorkers: number;
+        totalWorkers: number;
+    }>();
+
+    workers.forEach((worker) => {
+        const teamId = normalizeText(worker.teamId) || normalizeText(worker.teamName) || 'unknown-team';
+        const teamName = normalizeText(worker.teamName) || teamNameById.get(teamId) || '미지정 팀';
+        if (!teamMap.has(teamId)) {
+            teamMap.set(teamId, {
+                teamName,
+                activeWorkers: 0,
+                totalWorkers: 0,
+            });
+        }
+
+        const entry = teamMap.get(teamId)!;
+        entry.totalWorkers += 1;
+        if (isActiveWorker(worker.status)) entry.activeWorkers += 1;
+    });
+
+    return Array.from(teamMap.entries())
+        .map(([teamId, team]) => ({
+            id: teamId,
+            label: team.teamName,
+            value: team.activeWorkers,
+            meta: `등록 ${team.totalWorkers.toLocaleString('ko-KR')}명`,
+        }))
+        .filter((row) => row.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
+};
+
+const buildSiteWorkerRows = (aggregates: TeamReportAggregate[]): RankingRow[] => {
+    const siteMap = new Map<string, {
+        siteName: string;
+        workerIds: Set<string>;
+        totalManDay: number;
+    }>();
+
+    aggregates.forEach((report) => {
+        if (!siteMap.has(report.siteId)) {
+            siteMap.set(report.siteId, {
+                siteName: report.siteName,
+                workerIds: new Set(),
+                totalManDay: 0,
+            });
+        }
+
+        const site = siteMap.get(report.siteId)!;
+        site.totalManDay += report.manDay;
+        report.workerRows.forEach((worker) => {
+            if (worker.workerId) site.workerIds.add(worker.workerId);
+        });
+    });
+
+    return Array.from(siteMap.entries())
+        .map(([siteId, site]) => ({
+            id: siteId,
+            label: site.siteName,
+            value: site.workerIds.size,
+            meta: `${formatManDay(site.totalManDay)}공`,
+        }))
+        .filter((row) => row.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
+};
+
+const buildSiteReportRows = (aggregates: TeamReportAggregate[]): RankingRow[] => {
+    const siteMap = new Map<string, {
+        siteName: string;
+        reportIds: Set<string>;
+        dates: Set<string>;
+    }>();
+
+    aggregates.forEach((report) => {
+        if (!siteMap.has(report.siteId)) {
+            siteMap.set(report.siteId, {
+                siteName: report.siteName,
+                reportIds: new Set(),
+                dates: new Set(),
+            });
+        }
+
+        const site = siteMap.get(report.siteId)!;
+        site.reportIds.add(report.reportId);
+        if (report.date) site.dates.add(report.date);
+    });
+
+    return Array.from(siteMap.entries())
+        .map(([siteId, site]) => ({
+            id: siteId,
+            label: site.siteName,
+            value: site.reportIds.size,
+            meta: `${site.dates.size.toLocaleString('ko-KR')}일 입력`,
+        }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5);
+};
+
 const buildEmptyData = (): DashboardWidgetData => ({
     recentTotalManDay: {
         value: '0.0',
@@ -329,14 +482,36 @@ const buildEmptyData = (): DashboardWidgetData => ({
         metaLabel: '진행',
         metaValue: '0개소',
     },
+    registeredTeams: {
+        value: '0',
+        unit: '팀',
+        metaLabel: '운영',
+        metaValue: '0팀',
+    },
+    todayTotalManDay: {
+        value: '0.0',
+        unit: '공수',
+        metaLabel: '오늘 일보',
+        metaValue: '0건',
+    },
     teamMonthManDay: {
         value: '0.0',
         unit: '공수',
         metaLabel: '출력일',
         metaValue: '0일',
     },
+    monthReportCount: {
+        value: '0',
+        unit: '건',
+        metaLabel: '출력일',
+        metaValue: '0일',
+    },
     siteMonthRows: [],
     workerMonthRows: [],
+    teamMonthRows: [],
+    teamWorkerRows: [],
+    siteWorkerRows: [],
+    siteReportRows: [],
 });
 
 const SummaryCard: React.FC<{
@@ -374,6 +549,12 @@ const RankingCard: React.FC<{
 }> = ({ widget, rows }) => {
     const theme = themeMap[widget.color];
     const maxValue = Math.max(...rows.map((row) => row.value), 1);
+    const formatValue = (value: number): string => (
+        widget.valueFormat === 'integer'
+            ? Math.round(Number(value || 0)).toLocaleString('ko-KR')
+            : formatManDay(value)
+    );
+    const valueUnit = widget.valueUnit || '공';
 
     return (
         <article className="min-h-[278px] rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -398,7 +579,7 @@ const RankingCard: React.FC<{
                                     </span>
                                     <span className="truncate font-semibold text-slate-800">{row.label}</span>
                                 </div>
-                                <span className="shrink-0 font-bold text-slate-900">{formatManDay(row.value)}공</span>
+                                <span className="shrink-0 font-bold text-slate-900">{formatValue(row.value)}{valueUnit}</span>
                             </div>
                             <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                                 <div
@@ -471,11 +652,13 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                 const [
                     workers,
                     sites,
+                    teams,
                     monthReports,
                     allReports,
                 ] = await Promise.all([
                     manpowerService.getWorkers(),
                     siteService.getSites(),
+                    teamService.getTeams(),
                     dailyReportService.getReports({ startDate: monthRange.start, endDate: monthRange.end }),
                     dailyReportService.getAllReports(),
                 ]);
@@ -514,8 +697,12 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                 const recent = getRecentTotal(allAggregates);
                 const activeWorkers = scopedWorkers.filter((worker) => isActiveWorker(worker.status)).length;
                 const activeSites = scopedSites.filter((site) => normalizeText(site.status) === 'active').length;
+                const activeTeams = teams.filter((team) => normalizeText(team.status) === 'active').length;
                 const monthTotalManDay = monthAggregates.reduce((sum, report) => sum + report.manDay, 0);
                 const monthWorkDays = new Set(monthAggregates.map((report) => report.date).filter(Boolean));
+                const today = format(new Date(), 'yyyy-MM-dd');
+                const todayReports = allAggregates.filter((report) => report.date === today);
+                const todayTotalManDay = todayReports.reduce((sum, report) => sum + report.manDay, 0);
 
                 setTeamLabel(nextScopeLabel);
 
@@ -540,14 +727,36 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                         metaLabel: '진행',
                         metaValue: `${activeSites.toLocaleString('ko-KR')}개소`,
                     },
+                    registeredTeams: {
+                        value: teams.length.toLocaleString('ko-KR'),
+                        unit: '팀',
+                        metaLabel: '운영',
+                        metaValue: `${activeTeams.toLocaleString('ko-KR')}팀`,
+                    },
+                    todayTotalManDay: {
+                        value: formatManDay(todayTotalManDay),
+                        unit: '공수',
+                        metaLabel: '오늘 일보',
+                        metaValue: `${todayReports.length.toLocaleString('ko-KR')}건`,
+                    },
                     teamMonthManDay: {
                         value: formatManDay(monthTotalManDay),
                         unit: '공수',
                         metaLabel: '출력일',
                         metaValue: `${monthWorkDays.size.toLocaleString('ko-KR')}일`,
                     },
+                    monthReportCount: {
+                        value: monthAggregates.length.toLocaleString('ko-KR'),
+                        unit: '건',
+                        metaLabel: '출력일',
+                        metaValue: `${monthWorkDays.size.toLocaleString('ko-KR')}일`,
+                    },
                     siteMonthRows: buildSiteRows(monthAggregates),
                     workerMonthRows: buildWorkerRows(monthAggregates),
+                    teamMonthRows: buildTeamRows(monthAggregates),
+                    teamWorkerRows: buildTeamWorkerRows(workers, teams),
+                    siteWorkerRows: buildSiteWorkerRows(monthAggregates),
+                    siteReportRows: buildSiteReportRows(monthAggregates),
                 });
             } catch (fetchError: any) {
                 console.error('[DashboardPersonalWidgets] Failed to load widget data:', fetchError);
@@ -567,6 +776,17 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
     }, [currentUser?.uid, isOverallScope, monthRange.end, monthRange.start]);
 
     const renderWidget = (widget: DashboardWidgetDefinition) => {
+        if (widget.key === 'weather-forecast') {
+            return (
+                <div key={widget.key} className="min-h-[278px]">
+                    <WeatherWidget
+                        locationKey={widgetSettings.weatherLocationKey}
+                        className="min-h-[278px]"
+                    />
+                </div>
+            );
+        }
+
         if (loading) return <SkeletonCard key={widget.key} kind={widget.kind} />;
 
         switch (widget.key) {
@@ -576,12 +796,26 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                 return <SummaryCard key={widget.key} widget={widget} data={data.registeredWorkers} />;
             case 'registered-sites':
                 return <SummaryCard key={widget.key} widget={widget} data={data.registeredSites} />;
+            case 'registered-teams':
+                return <SummaryCard key={widget.key} widget={widget} data={data.registeredTeams} />;
+            case 'today-total-manday':
+                return <SummaryCard key={widget.key} widget={widget} data={data.todayTotalManDay} />;
             case 'site-month-manday':
                 return <RankingCard key={widget.key} widget={widget} rows={data.siteMonthRows} />;
             case 'worker-month-manday':
                 return <RankingCard key={widget.key} widget={widget} rows={data.workerMonthRows} />;
             case 'team-month-manday':
                 return <SummaryCard key={widget.key} widget={widget} data={data.teamMonthManDay} />;
+            case 'team-month-manday-ranking':
+                return <RankingCard key={widget.key} widget={widget} rows={data.teamMonthRows} />;
+            case 'team-active-workers':
+                return <RankingCard key={widget.key} widget={widget} rows={data.teamWorkerRows} />;
+            case 'site-worker-count':
+                return <RankingCard key={widget.key} widget={widget} rows={data.siteWorkerRows} />;
+            case 'site-report-count':
+                return <RankingCard key={widget.key} widget={widget} rows={data.siteReportRows} />;
+            case 'month-report-count':
+                return <SummaryCard key={widget.key} widget={widget} data={data.monthReportCount} />;
             default:
                 return null;
         }
@@ -592,11 +826,11 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-extrabold text-slate-900">내 대시보드 위젯</h2>
+                        <h2 className="text-xl font-extrabold text-slate-900">{modeConfig.shortLabel} 위젯 보드</h2>
                         {loading && <FontAwesomeIcon icon={faSpinner} spin className="text-sm text-slate-400" />}
                     </div>
                     <p className="mt-1 text-sm text-slate-500">
-                        {monthRange.label} · {teamLabel || (isOverallScope ? '전체' : '소속 팀')} 기준 공수와 운영 현황을 표시합니다.
+                        {monthRange.label} · {teamLabel || (isOverallScope ? '전체' : '소속 팀')} 기준 전체·팀별·현장별 지표를 선택해 표시합니다.
                     </p>
                 </div>
                 <button
@@ -630,6 +864,8 @@ export const DashboardPersonalWidgets: React.FC<DashboardPersonalWidgetsProps> =
                 hasPersonalSelection={widgetSettings.hasPersonalSelection}
                 saving={widgetSettings.saving}
                 maxWidgets={widgetSettings.maxWidgets}
+                weatherLocationKey={widgetSettings.weatherLocationKey}
+                weatherLocationOptions={DASHBOARD_WEATHER_LOCATIONS}
                 onClose={() => setIsSettingsOpen(false)}
                 onSave={widgetSettings.saveSelection}
                 onReset={widgetSettings.resetSelection}

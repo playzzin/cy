@@ -6,7 +6,6 @@ import {
     faCar,
     faCreditCard,
     faCircleExclamation,
-    faFileInvoiceDollar,
     faMagnifyingGlass,
     faPlus,
     faRotateRight,
@@ -325,14 +324,12 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
 
     const vehicleViewTabs: Array<{ id: VehicleViewTab; label: string; icon: IconDefinition }> = [
         { id: 'ledger', label: '월별 비용대장', icon: faTableCellsLarge },
-        { id: 'sheet', label: '차량 대장', icon: faTableList },
-        { id: 'billing', label: '청구관리', icon: faFileInvoiceDollar }
+        { id: 'sheet', label: '차량 대장', icon: faTableList }
     ];
 
     const cardViewTabs: Array<{ id: CardViewTab; label: string; icon: IconDefinition }> = [
         { id: 'monthly', label: '월별 카드대장', icon: faTableCellsLarge },
-        { id: 'sheet', label: '카드 대장', icon: faTableList },
-        { id: 'billing', label: '청구관리', icon: faFileInvoiceDollar }
+        { id: 'sheet', label: '카드 대장', icon: faTableList }
     ];
 
     return (
@@ -532,7 +529,7 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                     />
                 )}
 
-                {activeAssetTab === 'vehicle' && vehicleViewTab === 'billing' && (
+                {false && activeAssetTab === 'vehicle' && vehicleViewTab === 'billing' && (
                     <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div>
                             <h2 className="text-lg font-extrabold text-slate-900">차량 청구관리</h2>
@@ -566,7 +563,7 @@ const VehicleCardIntegratedPageComponent: React.FC = () => {
                     />
                 )}
 
-                {activeAssetTab === 'card' && cardViewTab === 'billing' && (
+                {false && activeAssetTab === 'card' && cardViewTab === 'billing' && (
                     <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div>
                             <h2 className="text-lg font-extrabold text-slate-900">카드 청구관리</h2>
