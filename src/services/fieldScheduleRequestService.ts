@@ -6,6 +6,7 @@ import {
     getDocs,
     orderBy,
     query,
+    runTransaction,
     setDoc,
     Timestamp,
     where,
@@ -40,6 +41,11 @@ export interface FieldScheduleRequest {
     updatedAt?: unknown;
 }
 
+export interface FieldOffDutyWorkerInput {
+    id: string;
+    name: string;
+}
+
 const COLLECTION_NAME = 'field_schedule_requests';
 export const FIELD_REQUEST_OFF_DUTY_SITE_ID = '__date_off_duty__';
 
@@ -55,6 +61,28 @@ const makeRequestId = (date: string, siteId: string) =>
 
 export const isOffDutyOnlyFieldScheduleRequest = (request: Pick<FieldScheduleRequest, 'siteId'>) =>
     normalizeText(request.siteId) === FIELD_REQUEST_OFF_DUTY_SITE_ID;
+
+const buildOffDutyMemo = (existingMemo: unknown, workers: FieldOffDutyWorkerInput[], memo?: string) => {
+    const memoText = normalizeText(memo);
+    if (!memoText) return normalizeText(existingMemo);
+
+    const workerNames = cleanStringList(workers.map((worker) => worker.name));
+    const line = `${workerNames.join(', ') || '휴무자'}: ${memoText}`;
+    return Array.from(new Set([
+        ...normalizeText(existingMemo).split('\n').map(normalizeText).filter(Boolean),
+        line,
+    ])).join('\n');
+};
+
+const removeWorkerMemo = (existingMemo: unknown, workerName?: string) => {
+    const name = normalizeText(workerName);
+    if (!name) return normalizeText(existingMemo);
+    return normalizeText(existingMemo)
+        .split('\n')
+        .map(normalizeText)
+        .filter((line) => line && !line.startsWith(`${name}:`))
+        .join('\n');
+};
 
 const mapRequest = (id: string, data: Record<string, unknown>): FieldScheduleRequest => ({
     id,
@@ -132,6 +160,116 @@ export const fieldScheduleRequestService = {
 
         await setDoc(ref, payload, { merge: true });
         return id;
+    },
+
+    addOffDutyWorkers: async (input: {
+        date: string;
+        workers: FieldOffDutyWorkerInput[];
+        requestedById?: string;
+        requestedByName?: string;
+        memo?: string;
+    }): Promise<string> => {
+        const date = normalizeText(input.date);
+        const workers = input.workers
+            .map((worker) => ({
+                id: normalizeText(worker.id),
+                name: normalizeText(worker.name),
+            }))
+            .filter((worker) => worker.id);
+
+        if (!date || workers.length === 0) {
+            throw new Error('date-and-workers-required');
+        }
+
+        const id = makeRequestId(date, FIELD_REQUEST_OFF_DUTY_SITE_ID);
+        const ref = doc(db, COLLECTION_NAME, id);
+        const now = Timestamp.now();
+
+        await runTransaction(db, async (transaction) => {
+            const existing = await transaction.get(ref);
+            const existingData = existing.exists() ? existing.data() as Record<string, unknown> : {};
+            const existingIds = cleanStringList(existingData.offDutyWorkerIds);
+            const existingNames = cleanStringList(existingData.offDutyWorkerNames);
+            const workerNameById = new Map<string, string>();
+
+            existingIds.forEach((workerId, index) => {
+                workerNameById.set(workerId, existingNames[index] || workerId);
+            });
+            workers.forEach((worker) => {
+                if (!workerNameById.has(worker.id)) {
+                    workerNameById.set(worker.id, worker.name || worker.id);
+                }
+            });
+
+            const offDutyWorkerIds = Array.from(workerNameById.keys());
+            const offDutyWorkerNames = offDutyWorkerIds.map((workerId) => workerNameById.get(workerId) || workerId);
+            const payload = stripUndefinedFields({
+                date,
+                siteId: FIELD_REQUEST_OFF_DUTY_SITE_ID,
+                siteName: '날짜별 휴무자',
+                siteAddress: '',
+                siteColor: '#e11d48',
+                responsibleTeamId: '',
+                responsibleTeamName: '',
+                siteManagerId: '',
+                siteManagerName: '',
+                requestedHeadcount: 0,
+                requestedRoles: [],
+                offDutyWorkerIds,
+                offDutyWorkerNames,
+                memo: buildOffDutyMemo(existingData.memo, workers, input.memo),
+                priority: 'normal',
+                requestedById: normalizeText(input.requestedById),
+                requestedByName: normalizeText(input.requestedByName),
+                status: 'requested',
+                updatedAt: now,
+                createdAt: existing.exists() ? existingData.createdAt : now,
+            } as Record<string, unknown>);
+
+            transaction.set(ref, payload, { merge: true });
+        });
+
+        return id;
+    },
+
+    removeOffDutyWorker: async (input: {
+        date: string;
+        workerId: string;
+        workerName?: string;
+    }): Promise<void> => {
+        const date = normalizeText(input.date);
+        const workerId = normalizeText(input.workerId);
+        if (!date || !workerId) return;
+
+        const id = makeRequestId(date, FIELD_REQUEST_OFF_DUTY_SITE_ID);
+        const ref = doc(db, COLLECTION_NAME, id);
+
+        await runTransaction(db, async (transaction) => {
+            const existing = await transaction.get(ref);
+            if (!existing.exists()) return;
+
+            const existingData = existing.data() as Record<string, unknown>;
+            const existingIds = cleanStringList(existingData.offDutyWorkerIds);
+            const existingNames = cleanStringList(existingData.offDutyWorkerNames);
+            const nextPairs = existingIds
+                .map((idValue, index) => ({
+                    id: idValue,
+                    name: existingNames[index] || idValue,
+                }))
+                .filter((entry) => entry.id !== workerId);
+
+            if (nextPairs.length === 0) {
+                transaction.delete(ref);
+                return;
+            }
+
+            transaction.set(ref, stripUndefinedFields({
+                offDutyWorkerIds: nextPairs.map((entry) => entry.id),
+                offDutyWorkerNames: nextPairs.map((entry) => entry.name),
+                memo: removeWorkerMemo(existingData.memo, input.workerName),
+                updatedAt: Timestamp.now(),
+            } as Record<string, unknown>), { merge: true });
+        });
     },
 
     deleteRequest: async (id: string): Promise<void> => {
