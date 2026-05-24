@@ -3,37 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBoxesStacked, faPlus, faEdit, faTrash, faSave, faTimes } from '@fortawesome/free-solid-svg-icons';
 import materialService, { buildMaterialBusinessKey } from '../../services/materialService';
 import { Material } from '../../types/materials';
-
-type MaterialGroupKey = 'dongbari' | 'scaffolding' | 'other';
-
-const sortMaterialRows = (rows: Material[]): Material[] =>
-    [...rows].sort((a, b) => {
-        const categoryCompare = (a.category || '').localeCompare(b.category || '', 'ko');
-        if (categoryCompare !== 0) return categoryCompare;
-
-        const itemCompare = (a.itemName || '').localeCompare(b.itemName || '', 'ko');
-        if (itemCompare !== 0) return itemCompare;
-
-        return (a.spec || '').localeCompare(b.spec || '', 'ko', { numeric: true });
-    });
-
-const getMaterialGroupKey = (material: Material): MaterialGroupKey => {
-    const category = String(material.category || '').trim();
-    const itemName = String(material.itemName || '').trim();
-
-    if (category.includes('비계') || itemName.includes('비계')) return 'scaffolding';
-    if (
-        category.includes('동바리') ||
-        category.includes('서포트') ||
-        itemName.includes('동바리') ||
-        itemName.includes('서포트') ||
-        category.includes('시스템')
-    ) {
-        return 'dongbari';
-    }
-
-    return 'other';
-};
+import { getMaterialGroupKey, sortMaterialDisplayRows, MaterialGroupKey } from '../../utils/materialOrdering';
 
 const MaterialMasterPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -199,9 +169,9 @@ const MaterialMasterPage: React.FC = () => {
         });
 
         return {
-            dongbari: sortMaterialRows(groups.dongbari),
-            scaffolding: sortMaterialRows(groups.scaffolding),
-            other: sortMaterialRows(groups.other),
+            dongbari: sortMaterialDisplayRows(groups.dongbari),
+            scaffolding: sortMaterialDisplayRows(groups.scaffolding),
+            other: sortMaterialDisplayRows(groups.other),
         };
     }, [filteredMaterials]);
 

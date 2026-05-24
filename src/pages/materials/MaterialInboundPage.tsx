@@ -9,6 +9,13 @@ import { Material, InboundTransaction } from '../../types/materials';
 import { useAuth } from '../../contexts/AuthContext';
 import { filterCheongyeonMaterialSites } from './materialSiteFilters';
 import { handleMaterialQuantityInputKeyDown } from './materialKeyboardNavigation';
+import { getMaterialGroupKey, sortMaterialDisplayRows } from '../../utils/materialOrdering';
+import MaterialPhotoPicker, {
+    MaterialPhotoAttachment,
+    revokeMaterialPhotoAttachments,
+    uploadMaterialPhotoAttachments,
+} from './MaterialPhotoPicker';
+import MaterialSelectionActionBar, { SelectedMaterial } from './MaterialSelectionActionBar';
 
 // 임시저장 데이터 타입
 type InboundTempData = {
@@ -71,6 +78,8 @@ const MaterialInboundPage: React.FC = () => {
     const [hasTempData, setHasTempData] = useState(false);
     const [mobileMaterialGroup, setMobileMaterialGroup] = useState<MobileMaterialGroup>('scaffolding');
     const [mobileSelectedItemName, setMobileSelectedItemName] = useState('');
+    const [photoAttachments, setPhotoAttachments] = useState<MaterialPhotoAttachment[]>([]);
+    const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(null);
 
     // 임시저장 데이터 로드
     const loadTempData = () => {
@@ -299,7 +308,22 @@ const MaterialInboundPage: React.FC = () => {
 
         setLoading(true);
         try {
-            await materialService.addInboundTransactionsBatch(transactions);
+            setPhotoUploadProgress(photoAttachments.length > 0 ? 0 : null);
+            const photoUrls = await uploadMaterialPhotoAttachments({
+                photos: photoAttachments,
+                transactionType: 'inbound',
+                transactionDate,
+                siteId,
+                onProgress: setPhotoUploadProgress,
+            });
+            const sharedPhotoUrls = photoUrls.length > 0 ? photoUrls : undefined;
+
+            const payload = transactions.map((transaction) => ({
+                ...transaction,
+                ...(sharedPhotoUrls ? { photoUrls: sharedPhotoUrls } : {}),
+            }));
+
+            await materialService.addInboundTransactionsBatch(payload);
             alert(`${transactions.length}건의 입고가 등록되었습니다.`);
             // 저장 성공 후 임시저장 데이터 삭제
             clearTempData();
@@ -316,6 +340,9 @@ const MaterialInboundPage: React.FC = () => {
         setQuantities({});
         setVehicleNumber('');
         setSupplier('');
+        revokeMaterialPhotoAttachments(photoAttachments);
+        setPhotoAttachments([]);
+        setPhotoUploadProgress(null);
         // 리셋 시 임시저장 데이터도 삭제
         clearTempData();
     };
@@ -342,12 +369,14 @@ const MaterialInboundPage: React.FC = () => {
 
         if (!hasQty && !matchesSearch) return;
 
+        const groupKey = getMaterialGroupKey(m);
+
         // 1. Right Column: SCAFFOLDING (비계)
-        if (cat.includes('비계') || (m.itemName || '').includes('비계')) {
+        if (groupKey === 'scaffolding') {
             scaffoldingList.push(m);
         }
         // 2. Left Column: Dongbari (동바리) OR Support (서포트) OR System (시스템 - excluding Scaffolding)
-        else if (cat.includes('동바리') || cat.includes('서포트') || (m.itemName || '').includes('동바리') || (m.itemName || '').includes('서포트') || cat.includes('시스템')) {
+        else if (groupKey === 'dongbari') {
             dongbariList.push(m);
         }
         // 3. Others
@@ -361,6 +390,20 @@ const MaterialInboundPage: React.FC = () => {
         (sum, quantity) => sum + (quantity > 0 ? quantity : 0),
         0
     );
+    const selectedMaterials: SelectedMaterial[] = sortMaterialDisplayRows(
+        materials
+            .map((material) => ({
+                ...material,
+                quantity: quantities[material.id] || 0,
+            }))
+            .filter((material) => material.quantity > 0)
+    );
+    const selectionActionDetails = [
+        { label: '입고일자', value: transactionDate },
+        { label: '현장', value: siteName },
+        { label: '차량번호', value: vehicleNumber },
+        { label: '공급업체', value: supplier },
+    ];
     const mobileGroupOptions = [
         { key: 'scaffolding' as const, title: '시스템 비계', items: scaffoldingList, colorClass: 'blue' },
         { key: 'dongbari' as const, title: '시스템 동바리', items: dongbariList, colorClass: 'blue' },
@@ -373,57 +416,12 @@ const MaterialInboundPage: React.FC = () => {
     const renderSection = (title: string, items: Material[], colorClass = 'blue', sectionIndex = 0) => {
         if (items.length === 0) return null;
 
-        // 1. Sort items by Category > Name > Spec (Numeric Aware)
-        items.sort((a, b) => {
-            // [NEW] Special Sort for System Scaffolding (시스템 비계)
-            if (title === '시스템 비계') {
-                // 1. Priority: Vertical (수직재) > Horizontal (수평재) > Others
-                const getPriority = (name: string) => {
-                    if (name.includes('수직재')) return 1;
-                    if (name.includes('수평재')) return 2;
-                    return 3;
-                };
-
-                const priA = getPriority(a.itemName);
-                const priB = getPriority(b.itemName);
-
-                if (priA !== priB) return priA - priB;
-
-                // 2. Spec Descending (Numeric Aware)
-                // e.g., H18 -> H03, 4018 -> 4006
-                // Using localeCompare with numeric: true in reverse order
-                return (b.spec || '').localeCompare(a.spec || '', undefined, { numeric: true });
-            }
-
-            // [Original] Standard Sort for other sections
-            const catCompare = (a.category || '').localeCompare(b.category || '');
-            if (catCompare !== 0) return catCompare;
-
-            const nameCompare = a.itemName.localeCompare(b.itemName);
-            if (nameCompare !== 0) return nameCompare;
-
-            // Helper to extract numeric value from spec (e.g., "2.5m" -> 2.5)
-            const getSpecValue = (spec: string) => {
-                const match = spec.match(/([\d.]+)/);
-                return match ? parseFloat(match[1]) : 0;
-            };
-
-            const valA = getSpecValue(a.spec || '');
-            const valB = getSpecValue(b.spec || '');
-
-            // If both extracted values are valid numbers and different, sort by value
-            if (valA !== valB && valA > 0 && valB > 0) {
-                return valA - valB;
-            }
-
-            // Fallback to natural sort
-            return (a.spec || '').localeCompare(b.spec || '', undefined, { numeric: true });
-        });
+        const sortedItems = sortMaterialDisplayRows(items);
 
         // 10 rows per chunk lets 70 items render as 7 compact columns on one line.
         const chunks: Material[][] = [];
-        for (let i = 0; i < items.length; i += ITEMS_PER_COLUMN) {
-            chunks.push(items.slice(i, i + ITEMS_PER_COLUMN));
+        for (let i = 0; i < sortedItems.length; i += ITEMS_PER_COLUMN) {
+            chunks.push(sortedItems.slice(i, i + ITEMS_PER_COLUMN));
         }
         const accentClasses = getQuantityAccentClasses(colorClass);
 
@@ -445,7 +443,7 @@ const MaterialInboundPage: React.FC = () => {
 
                 <div className="space-y-2 p-2 md:hidden">
                     {(() => {
-                        const groupedItems = items.reduce<Array<{ itemName: string; materials: Material[] }>>((groups, material) => {
+                        const groupedItems = sortedItems.reduce<Array<{ itemName: string; materials: Material[] }>>((groups, material) => {
                             const group = groups.find((candidate) => candidate.itemName === material.itemName);
                             if (group) {
                                 group.materials.push(material);
@@ -634,6 +632,21 @@ const MaterialInboundPage: React.FC = () => {
                     선택 {selectedItemCount}개 · 총 {selectedQuantityTotal}
                 </div>
             </div>
+            <div className="grid grid-cols-3 gap-2 sm:hidden">
+                <button
+                    onClick={() => navigate('/materials/transactions')}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+                >
+                    <FontAwesomeIcon icon={faEdit} />
+                    수정
+                </button>
+                <MaterialSelectionActionBar
+                    materials={selectedMaterials}
+                    tone="blue"
+                    title="입고 등록 품목"
+                    details={selectionActionDetails}
+                />
+            </div>
             <div className="hidden gap-4 sm:flex sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
@@ -650,6 +663,12 @@ const MaterialInboundPage: React.FC = () => {
                         <FontAwesomeIcon icon={faEdit} />
                         수정
                     </button>
+                    <MaterialSelectionActionBar
+                        materials={selectedMaterials}
+                        tone="blue"
+                        title="입고 등록 품목"
+                        details={selectionActionDetails}
+                    />
                     <button
                         onClick={handleReset}
                         disabled={loading}
@@ -716,97 +735,104 @@ const MaterialInboundPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
-                    <div className="relative flex-1">
-                        <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="search"
-                            value={searchFilter}
-                            onChange={(e) => setSearchFilter(e.target.value)}
-                            placeholder="품명, 규격, 분류 검색"
-                            className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                        />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
-                        <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
-                            <div className="text-[11px] font-bold text-slate-400">선택 품목</div>
-                            <div className="text-sm font-bold text-blue-700">{selectedItemCount}개</div>
-                        </div>
-                        <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
-                            <div className="text-[11px] font-bold text-slate-400">총 수량</div>
-                            <div className="text-sm font-bold text-blue-700">{selectedQuantityTotal}</div>
-                        </div>
-                    </div>
-                </div>
+                <MaterialPhotoPicker
+                    photos={photoAttachments}
+                    onPhotosChange={setPhotoAttachments}
+                    tone="blue"
+                    disabled={loading}
+                    uploadProgress={photoUploadProgress}
+                />
 
-                <div className="mb-4 space-y-3 md:hidden">
-                    <div className="relative">
-                        <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                            type="search"
-                            value={searchFilter}
-                            onChange={(e) => setSearchFilter(e.target.value)}
-                            placeholder="품명, 규격 검색"
-                            className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                        />
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
-                        <div className="mb-2 text-[11px] font-bold text-slate-500">1단계: 분류 선택</div>
-                        <div className="grid grid-cols-2 gap-2">
-                            {mobileGroupOptions.map((option) => {
-                                const active = activeMobileGroup?.key === option.key;
-                                return (
-                                    <button
-                                        key={option.key}
-                                        type="button"
-                                        onClick={() => setMobileMaterialGroup(option.key)}
-                                        className={`rounded-lg border px-3 py-2 text-left transition ${active
-                                            ? 'border-blue-500 bg-white text-blue-700 shadow-sm'
-                                            : 'border-slate-200 bg-white text-slate-600'
-                                            }`}
-                                    >
-                                        <div className="text-sm font-bold">{option.title}</div>
-                                        <div className="mt-0.5 text-xs text-slate-500">{option.items.length} 품목</div>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    <div className="text-[11px] font-bold text-slate-500">
-                        2단계: 품목 선택 후 규격별 수량 입력
-                    </div>
-                </div>
-
-                {/* 2. Side-by-Side Layout: Scaffolding (Left) | Dongbari (Right) */}
-                {/* 2. Vertical Layout: Scaffolding (Row 1) -> Dongbari (Row 2) */}
-                <div className="mb-6 md:hidden">
-                    {activeMobileGroup
-                        ? renderSection(activeMobileGroup.title, activeMobileGroup.items, activeMobileGroup.colorClass, mobileGroupOptions.findIndex((option) => option.key === activeMobileGroup.key))
-                        : (
-                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
-                                표시할 자재가 없습니다.
+                        <div className="mb-5 hidden flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between md:flex">
+                            <div className="relative flex-1">
+                                <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="search"
+                                    value={searchFilter}
+                                    onChange={(e) => setSearchFilter(e.target.value)}
+                                    placeholder="품명, 규격, 분류 검색"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
                             </div>
-                        )}
-                </div>
-                <div className="mb-6 hidden flex-col gap-6 md:flex">
-                    {/* Row 1: System Scaffolding */}
-                    <div className="w-full">
-                        {renderSection('시스템 비계', scaffoldingList, 'blue', 0)}
-                    </div>
-
-                    {/* Row 2: System Dongbari */}
-                    <div className="w-full">
-                        {renderSection('시스템 동바리', dongbariList, 'blue', 1)}
-                    </div>
-
-                    {/* Others */}
-                    {otherList.length > 0 && (
-                        <div className="w-full">
-                            {renderSection('기타 및 소모품', otherList, 'slate', 2)}
+                            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+                                <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
+                                    <div className="text-[11px] font-bold text-slate-400">선택 품목</div>
+                                    <div className="text-sm font-bold text-blue-700">{selectedItemCount}개</div>
+                                </div>
+                                <div className="rounded-lg border border-blue-100 bg-white px-3 py-2 text-center">
+                                    <div className="text-[11px] font-bold text-slate-400">총 수량</div>
+                                    <div className="text-sm font-bold text-blue-700">{selectedQuantityTotal}</div>
+                                </div>
+                            </div>
                         </div>
-                    )}
-                </div>
 
+                        <div className="mb-4 space-y-3 md:hidden">
+                            <div className="relative">
+                                <FontAwesomeIcon icon={faSearch} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <input
+                                    type="search"
+                                    value={searchFilter}
+                                    onChange={(e) => setSearchFilter(e.target.value)}
+                                    placeholder="품명, 규격 검색"
+                                    className="w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                <div className="mb-2 text-[11px] font-bold text-slate-500">1단계: 분류 선택</div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {mobileGroupOptions.map((option) => {
+                                        const active = activeMobileGroup?.key === option.key;
+                                        return (
+                                            <button
+                                                key={option.key}
+                                                type="button"
+                                                onClick={() => setMobileMaterialGroup(option.key)}
+                                                className={`rounded-lg border px-3 py-2 text-left transition ${active
+                                                    ? 'border-blue-500 bg-white text-blue-700 shadow-sm'
+                                                    : 'border-slate-200 bg-white text-slate-600'
+                                                    }`}
+                                            >
+                                                <div className="text-sm font-bold">{option.title}</div>
+                                                <div className="mt-0.5 text-xs text-slate-500">{option.items.length} 품목</div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <div className="text-[11px] font-bold text-slate-500">
+                                2단계: 품목 선택 후 규격별 수량 입력
+                            </div>
+                        </div>
+
+                        {/* 2. Side-by-Side Layout: Scaffolding (Left) | Dongbari (Right) */}
+                        {/* 2. Vertical Layout: Scaffolding (Row 1) -> Dongbari (Row 2) */}
+                        <div className="mb-6 md:hidden">
+                            {activeMobileGroup
+                                ? renderSection(activeMobileGroup.title, activeMobileGroup.items, activeMobileGroup.colorClass, mobileGroupOptions.findIndex((option) => option.key === activeMobileGroup.key))
+                                : (
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                                        표시할 자재가 없습니다.
+                                    </div>
+                                )}
+                        </div>
+                        <div className="mb-6 hidden flex-col gap-6 md:flex">
+                            {/* Row 1: System Scaffolding */}
+                            <div className="w-full">
+                                {renderSection('시스템 비계', scaffoldingList, 'blue', 0)}
+                            </div>
+
+                            {/* Row 2: System Dongbari */}
+                            <div className="w-full">
+                                {renderSection('시스템 동바리', dongbariList, 'blue', 1)}
+                            </div>
+
+                            {/* Others */}
+                            {otherList.length > 0 && (
+                                <div className="w-full">
+                                    {renderSection('기타 및 소모품', otherList, 'slate', 2)}
+                                </div>
+                            )}
+                        </div>
                 {/* 임시저장 안내 */}
                 {hasTempData && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">

@@ -14,6 +14,7 @@ import {
 } from '../types/zod/materialSchema';
 import type { MaterialLogAction, MaterialLogEntityType } from '../types/materialLog';
 import { EXCEL_MATERIAL_CATALOG } from '../constants/materialCatalog';
+import { sortMaterialDisplayRows } from '../utils/materialOrdering';
 
 // Helper to generate IDs
 const generateId = (prefix: string = 'mat'): string => {
@@ -107,15 +108,7 @@ const compareMaterialPreference = (candidate: Material, current: Material): numb
 };
 
 const sortMaterialsForSelection = (rows: Material[]): Material[] => {
-    return [...rows].sort((a, b) => {
-        const categoryCompare = trimText(a.category).localeCompare(trimText(b.category), 'ko');
-        if (categoryCompare !== 0) return categoryCompare;
-
-        const itemCompare = trimText(a.itemName).localeCompare(trimText(b.itemName), 'ko');
-        if (itemCompare !== 0) return itemCompare;
-
-        return trimText(a.spec).localeCompare(trimText(b.spec), 'ko');
-    });
+    return sortMaterialDisplayRows(rows);
 };
 
 const createCatalogMaterials = (): Material[] => {
@@ -776,6 +769,5 @@ const materialService = {
 };
 
 export default materialService;
-
 
 

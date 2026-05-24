@@ -12,6 +12,7 @@ import {
     getSiteStatusLabel,
     MaterialSiteStatusFilter
 } from './materialSiteFilters';
+import { compareMaterialDisplayRows } from '../../utils/materialOrdering';
 
 const MaterialInventoryPage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -91,11 +92,7 @@ const MaterialInventoryPage: React.FC = () => {
     const sortedInventories = [...filteredInventories].sort((a, b) => {
         const siteCompare = String(a.siteName || '').localeCompare(String(b.siteName || ''), 'ko');
         if (siteCompare !== 0) return siteCompare;
-        const categoryCompare = String(a.category || '').localeCompare(String(b.category || ''), 'ko');
-        if (categoryCompare !== 0) return categoryCompare;
-        const itemCompare = String(a.itemName || '').localeCompare(String(b.itemName || ''), 'ko');
-        if (itemCompare !== 0) return itemCompare;
-        return String(a.spec || '').localeCompare(String(b.spec || ''), 'ko', { numeric: true });
+        return compareMaterialDisplayRows(a, b);
     });
 
     const groupedInventoriesBySite = useMemo(() => {
@@ -118,7 +115,8 @@ const MaterialInventoryPage: React.FC = () => {
     }, {} as Record<string, number>);
 
     //  카테고리 목록
-    const categories = Array.from(new Set(inventories.map(inv => inv.category)));
+    const categories = Array.from(new Set(inventories.map(inv => inv.category)))
+        .sort((a, b) => compareMaterialDisplayRows({ category: a }, { category: b }));
 
     return (
         <div className="flex-1 min-h-0 flex flex-col p-6 max-w-[2200px] w-full mx-auto bg-slate-50 overflow-hidden">

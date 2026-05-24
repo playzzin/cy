@@ -10,6 +10,7 @@ import {
     getSiteStatusLabel,
     MaterialSiteStatusFilter
 } from './materialSiteFilters';
+import { compareMaterialDisplayRows } from '../../utils/materialOrdering';
 
 const MaterialInventoryBySitePage: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -54,7 +55,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
         setLoading(true);
         try {
             const data = await materialService.getInventoryBySite(siteId);
-            setInventories(data);
+            setInventories([...data].sort(compareMaterialDisplayRows));
         } catch (error) {
             console.error('Failed to load inventory:', error);
             alert('재고 현황을 불러오지 못했습니다.');
@@ -71,6 +72,8 @@ const MaterialInventoryBySitePage: React.FC = () => {
         acc[inv.category].push(inv);
         return acc;
     }, {} as Record<string, Inventory[]>);
+    const groupedInventoryEntries = Object.entries(groupedInventories)
+        .sort(([categoryA], [categoryB]) => compareMaterialDisplayRows({ category: categoryA }, { category: categoryB }));
 
     return (
         <div className="p-6 max-w-[2200px] mx-auto bg-slate-50 min-h-screen">
@@ -172,7 +175,7 @@ const MaterialInventoryBySitePage: React.FC = () => {
                     </div>
                 ) : (
                     <div>
-                        {Object.entries(groupedInventories).map(([category, categoryInventories]) => (
+                        {groupedInventoryEntries.map(([category, categoryInventories]) => (
                             <div key={category} className="mb-8">
                                 <h3 className="text-lg font-bold text-slate-800 mb-3 bg-indigo-50 px-4 py-2 rounded-lg">
                                     🏗️ {category}
